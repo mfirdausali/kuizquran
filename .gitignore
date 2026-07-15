@@ -1,0 +1,35 @@
+# dependencies
+node_modules/
+vendor/
+
+# builds / caches
+dist/
+.vite/
+.wrangler/
+coverage/
+*.log
+.DS_Store
+
+# SECRETS — never commit
+.dev.vars
+.env
+.env.*
+!.env.example
+!.dev.vars.example
+
+# preserved v1 git history backup (not part of this repo)
+v1/.git.bak/
+
+# synced build artifacts (canonical sources live elsewhere)
+**/apps/web/public/iman-ui.css
+**/apps/web/public/corpus.json
+
+# Laravel (v2/api, when scaffolded)
+v2/api/vendor/
+v2/api/.env
+v2/api/storage/*.key
+v2/api/storage/logs/
+v2/api/storage/framework/cache/
+v2/api/storage/framework/sessions/
+v2/api/storage/framework/views/
+v2/api/bootstrap/cache/

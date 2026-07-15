@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+.dev.vars
+.wrangler/
+coverage/
+.vite/
+
+# synced build artifacts (canonical sources: styles/iman-ui.css, public/corpus.json)
+apps/web/public/iman-ui.css
+apps/web/public/corpus.json

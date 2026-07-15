@@ -1,0 +1,15 @@
+{
+  "name": "corpus-compiler",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "FR1 — compiles Surah Yusuf fused inputs + QAC morphology into public/corpus.json",
+  "scripts": {
+    "compile": "node --experimental-strip-types src/compile.ts",
+    "validate": "node --experimental-strip-types src/validate.ts",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
+  }
+}

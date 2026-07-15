@@ -1,0 +1,12 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "iman-quiz",
+  "pages_build_output_dir": "./dist",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Same-site API: /api/* is proxied by public/_worker.js to the standalone API
+  // worker via this Service Binding, so the browser only ever talks to
+  // iman-quiz.pages.dev (SameSite=Lax session cookie works — PRD FR7).
+  "services": [{ "binding": "WORKER", "service": "iman-worker-staging" }]
+}

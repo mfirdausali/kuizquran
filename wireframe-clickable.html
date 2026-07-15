@@ -1,0 +1,569 @@
+<title>Kuiz Quran — Clickable Wireframe</title>
+<style>
+  :root{
+    --ink:#0B0E1A; --panel:#141a2e; --panel2:#0e1424; --line:#232c45;
+    --parch:#F5F0E4; --dim:#cfc9ba; --mute:#9aa0b0;
+    --gold:#C9A24B; --gold2:#e0c079; --dusk:#5B7B9A;
+    --ret:#7BA86F; --dec:#C77B5B; --wrong:#b8514a;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+    --sans:"Avenir Next","Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:"SFMono-Regular",ui-monospace,Menlo,Consolas,monospace;
+    --arab:"SF Arabic","Geeza Pro","Noto Naskh Arabic",serif;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0;background:radial-gradient(130% 100% at 50% -10%,#111a33,var(--ink)) fixed;
+    color:var(--parch);font-family:var(--sans);line-height:1.5;min-height:100vh}
+  .page{max-width:1180px;margin:0 auto;padding:40px 24px 80px}
+  h1,h2,h3,h4{font-family:var(--serif);font-weight:600;margin:0;line-height:1.15}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.26em;text-transform:uppercase;color:var(--gold)}
+  .head h1{font-size:clamp(28px,5vw,44px);margin:14px 0 0;text-wrap:balance}
+  .head p{max-width:600px;margin:16px 0 0;color:var(--dim);font-size:17px}
+
+  .layout{display:grid;grid-template-columns:230px 1fr;gap:40px;margin-top:44px;align-items:start}
+  @media(max-width:800px){.layout{grid-template-columns:1fr}}
+
+  /* screen index */
+  .index{position:sticky;top:24px}
+  .index h4{font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--mute);margin-bottom:14px}
+  .index ol{list-style:none;margin:0;padding:0;counter-reset:s}
+  .index li{counter-increment:s;margin:0}
+  .index button{width:100%;text-align:left;background:none;border:0;color:var(--dim);
+    font-family:var(--sans);font-size:14px;padding:9px 12px;border-radius:6px;cursor:pointer;
+    display:flex;gap:10px;align-items:center;transition:background .15s,color .15s}
+  .index button::before{content:counter(s,decimal-leading-zero);font-family:var(--mono);font-size:11px;color:var(--dusk)}
+  .index button:hover{background:rgba(201,162,75,.06);color:var(--parch)}
+  .index button.active{background:rgba(201,162,75,.12);color:var(--gold2)}
+  .index button.active::before{color:var(--gold)}
+  .index .flowhint{margin-top:20px;font-size:12px;color:var(--mute);line-height:1.5;font-family:var(--mono);
+    border-top:1px solid var(--line);padding-top:16px}
+
+  /* phone stage */
+  .stage{display:flex;flex-direction:column;align-items:center}
+  .phone{width:340px;max-width:100%;height:710px;background:#05070e;border-radius:42px;
+    border:1px solid var(--line);padding:12px;box-shadow:0 40px 90px -40px #000,inset 0 0 0 2px #1c2540;position:relative}
+  .notch{position:absolute;top:12px;left:50%;transform:translateX(-50%);width:130px;height:26px;background:#05070e;border-radius:0 0 16px 16px;z-index:20}
+  .viewport{width:100%;height:100%;background:var(--ink);border-radius:32px;overflow:hidden;position:relative}
+  .screen{position:absolute;inset:0;display:none;flex-direction:column;padding:44px 20px 20px}
+  .screen.on{display:flex}
+  .screen.scrolls{overflow-y:auto}
+
+  /* generic screen chrome */
+  .sbar{position:absolute;top:16px;left:0;right:0;display:flex;justify-content:space-between;padding:0 22px;font-family:var(--mono);font-size:11px;color:var(--mute);z-index:5}
+  .topnav{display:flex;justify-content:space-between;align-items:center;font-family:var(--mono);font-size:11px;color:var(--mute);letter-spacing:.08em;margin-bottom:14px}
+  .topnav .back{cursor:pointer;color:var(--dim)}
+  .scr-label{position:absolute;top:6px;left:50%;transform:translateX(-50%);font-family:var(--mono);font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:var(--dusk);z-index:6}
+
+  h2.title{font-size:24px;text-wrap:balance}
+  .lead{color:var(--dim);font-size:14px;margin-top:8px}
+  .btn{font-family:var(--mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;
+    background:var(--gold);color:var(--ink);border:0;border-radius:6px;padding:15px;cursor:pointer;
+    font-weight:600;width:100%;transition:transform .12s}
+  .btn:hover{transform:translateY(-1px)}
+  .btn:active{transform:translateY(0)}
+  .btn.ghost{background:transparent;color:var(--gold2);border:1px solid var(--line)}
+  .btn.sm{padding:11px;font-size:11px}
+  .row{display:flex;gap:10px}
+  .grow{flex:1}
+  .spacer{flex:1}
+  .arab{font-family:var(--arab);direction:rtl}
+
+  /* SPLASH */
+  #s-splash{align-items:center;justify-content:center;text-align:center}
+  #s-splash .moon{font-size:48px}
+  #s-splash h2{font-size:30px;margin-top:14px}
+  #s-splash .niyyah{color:var(--dim);font-size:14px;margin:18px 0;max-width:230px}
+  #s-splash .bism{font-family:var(--arab);font-size:22px;color:var(--gold);margin-bottom:26px}
+
+  /* ONBOARDING */
+  .pick{border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:12px;cursor:pointer;background:var(--panel2);transition:border-color .15s}
+  .pick:hover,.pick.sel{border-color:var(--gold)}
+  .pick h4{font-size:16px}
+  .pick p{font-size:12px;color:var(--mute);margin-top:3px}
+  .opt-radio{display:flex;align-items:center;gap:10px;padding:11px 0;font-size:14px;color:var(--dim);cursor:pointer}
+  .opt-radio .rd{width:16px;height:16px;border-radius:50%;border:1.5px solid var(--dusk);flex:0 0 16px}
+  .opt-radio.sel .rd{border-color:var(--gold);background:radial-gradient(circle,var(--gold) 40%,transparent 45%)}
+
+  /* STORY MAP */
+  .map-head{display:flex;justify-content:space-between;align-items:center}
+  .streak{font-family:var(--mono);font-size:13px;color:var(--gold2)}
+  .due{font-family:var(--mono);font-size:11px;color:var(--dusk);margin:6px 0 14px;letter-spacing:.04em}
+  .acts{flex:1;overflow-y:auto;margin:0 -4px;padding:0 4px}
+  .act{display:flex;align-items:center;gap:10px;padding:11px 10px;border-radius:8px;margin-bottom:5px;cursor:pointer;transition:background .15s}
+  .act:hover{background:rgba(201,162,75,.05)}
+  .act .st{width:18px;text-align:center;font-size:13px}
+  .act .nm{flex:1;font-size:13.5px;color:var(--parch)}
+  .act.locked .nm{color:var(--mute)}
+  .act.cursor{background:rgba(201,162,75,.1);border:1px solid rgba(201,162,75,.3)}
+  .prog{width:44px;height:5px;background:var(--line);border-radius:3px;overflow:hidden;flex:0 0 44px}
+  .prog i{display:block;height:100%;background:var(--gold)}
+  .cta-wrap{padding-top:12px}
+  .bottomnav{display:flex;justify-content:space-around;border-top:1px solid var(--line);margin:12px -20px -20px;padding:12px 0;font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--mute)}
+  .bottomnav .nav{cursor:pointer;padding:4px 10px}
+  .bottomnav .nav.on{color:var(--gold)}
+
+  /* SCENE PLAYER */
+  .scene-img{border:1px solid var(--line);border-radius:12px;background:
+     radial-gradient(80% 60% at 30% 20%,rgba(91,123,154,.25),transparent),
+     radial-gradient(60% 50% at 80% 90%,rgba(201,162,75,.15),transparent),var(--panel2);
+     min-height:180px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;position:relative;overflow:hidden}
+  .scene-img .film{position:absolute;top:8px;left:10px;font-family:var(--mono);font-size:9px;letter-spacing:.14em;color:var(--dusk)}
+  .scene-img .emoji{font-size:40px;margin-bottom:10px}
+  .scene-img .desc{font-family:var(--serif);font-style:italic;font-size:13px;color:var(--gold2);max-width:220px}
+  .scene-name{font-size:19px;margin-top:16px}
+  .scene-range{font-family:var(--mono);font-size:11px;color:var(--dusk);margin-top:2px}
+  .scene-sum{font-size:13px;color:var(--dim);margin-top:12px;line-height:1.5}
+
+  /* MCQ · 練習 set panel — the whole set, per-item strength (Monoxer) */
+  #s-mcq #mcq-mode{color:var(--gold2)}
+  #s-mcq #mcq-mode b{color:var(--gold)}
+  .setpanel{display:flex;gap:5px;margin-bottom:14px;align-items:flex-end;height:34px}
+  .setitem{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px}
+  .setitem .sbar-bg{width:100%;height:22px;background:var(--panel2);border:1px solid var(--line);border-radius:3px;overflow:hidden;display:flex;align-items:flex-end;position:relative}
+  .setitem .sbar-fill{width:100%;background:linear-gradient(180deg,var(--gold),var(--dusk));transition:height .4s ease}
+  .setitem.mastered .sbar-fill{background:linear-gradient(180deg,var(--ret),#4d7a44)}
+  .setitem.hot .sbar-bg{border-color:var(--dec);box-shadow:0 0 0 1px var(--dec)}
+  .setitem.current .sbar-bg{border-color:var(--gold);box-shadow:0 0 8px rgba(201,162,75,.5)}
+  .setitem .lab{font-family:var(--mono);font-size:8px;color:var(--mute)}
+  .setitem.mastered .lab{color:var(--ret)}
+  .setitem.hot .lab{color:var(--dec)}
+  .set-caption{font-family:var(--mono);font-size:10px;color:var(--dusk);text-align:center;margin-bottom:12px;letter-spacing:.03em}
+  .set-caption b{color:var(--gold2)}
+
+  /* MCQ */
+  .prog-top{height:5px;background:var(--line);border-radius:3px;overflow:hidden;margin-bottom:16px}
+  .prog-top i{display:block;height:100%;background:linear-gradient(90deg,var(--dusk),var(--gold));transition:width .3s}
+  .q-lbl{font-size:12px;color:var(--mute);margin-bottom:10px}
+  #mcq-tierlbl{font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--gold)}
+  .cloze{font-family:var(--arab);direction:rtl;font-size:26px;text-align:center;color:var(--parch);
+    line-height:1.9;min-height:90px;display:flex;align-items:center;justify-content:center}
+  .cloze .bl{color:var(--gold);border-bottom:2px dashed var(--gold);padding:0 .2em}
+  .choices{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:8px}
+  .ch{font-family:var(--arab);direction:rtl;font-size:20px;padding:13px 6px;border-radius:8px;
+    background:var(--panel2);border:1px solid var(--line);color:var(--parch);cursor:pointer;text-align:center;transition:all .14s}
+  .ch:hover:not(.locked){border-color:var(--gold);transform:translateY(-1px)}
+  .ch.right{background:rgba(123,168,111,.16);border-color:var(--ret);color:#bfe0b3}
+  .ch.bad{background:rgba(184,81,74,.15);border-color:var(--wrong);color:#e7a8a3}
+  .ch.dim{opacity:.35}
+
+  /* FEEDBACK panel (inside mcq) */
+  .fb{margin-top:14px;border-top:1px solid var(--line);padding-top:12px;min-height:70px;font-size:13px}
+  .fb .rate{font-family:var(--mono);font-size:12px;letter-spacing:.1em}
+  .fb .lat{color:var(--dusk);font-size:11px}
+  .fb .why b{color:var(--parch)}
+  .fb .why{color:var(--dim);margin-top:4px;display:block}
+
+  /* SET MASTERED → 訓練 */
+  #s-done{align-items:center;text-align:center}
+  #s-done .big{font-size:40px;color:var(--ret);margin-top:6px}
+  #s-done h2{margin:8px 0}
+  #s-done .sub{color:var(--dim);font-size:13px;max-width:250px;margin-bottom:6px}
+  #s-done .rewards{font-family:var(--mono);font-size:12px;color:var(--gold2);margin:10px 0}
+  #s-done .bonus{background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--gold);
+    border-radius:6px;padding:11px;font-size:11.5px;color:var(--dim);margin:10px 0;text-align:left}
+  .handoff{width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:14px;margin:12px 0;text-align:left}
+  .ho-row{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--dim)}
+  .ho-tag{font-family:var(--mono);font-size:10px;letter-spacing:.06em;padding:4px 8px;border-radius:4px;white-space:nowrap}
+  .ho-tag.done{background:rgba(123,168,111,.15);color:var(--ret);border:1px solid var(--ret)}
+  .ho-tag.next{background:rgba(201,162,75,.12);color:var(--gold2);border:1px solid var(--gold)}
+  .ho-arrow{font-family:var(--mono);font-size:10px;color:var(--dusk);text-align:center;margin:7px 0;letter-spacing:.04em}
+  .ho-sched{font-family:var(--mono);font-size:10px;color:var(--mute);margin-top:10px;border-top:1px solid var(--line);padding-top:9px;line-height:1.7}
+  .ho-sched b{color:var(--gold2)}
+
+  /* SATIETY */
+  #s-cap{align-items:center;text-align:center;justify-content:center}
+  #s-cap .moon{font-size:40px;margin-bottom:12px}
+  #s-cap .msg{color:var(--dim);font-size:14px;max-width:230px;margin:12px 0}
+
+  /* SUMMARY */
+  .stat-line{display:flex;justify-content:space-between;font-size:13px;padding:9px 0;border-bottom:1px solid var(--line);color:var(--dim)}
+  .stat-line b{color:var(--parch)}
+  .streak-big{text-align:center;font-family:var(--mono);color:var(--gold);font-size:15px;margin:18px 0}
+
+  /* PROGRESS */
+  .garden{font-size:28px;letter-spacing:4px;text-align:center;margin:6px 0}
+  .receipt{background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--gold);border-radius:6px;padding:14px;font-size:13px;color:var(--parch);margin:14px 0}
+  .meter{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:6px}
+  .meter i{display:block;height:100%;background:linear-gradient(90deg,var(--dusk),var(--ret))}
+
+  .caption{margin-top:22px;max-width:340px;text-align:center;font-size:13px;color:var(--mute);line-height:1.5}
+  .caption b{color:var(--dim)}
+  .restart{margin-top:14px;font-family:var(--mono);font-size:11px;color:var(--dusk);background:none;border:0;cursor:pointer;letter-spacing:.1em}
+  .restart:hover{color:var(--gold)}
+  @media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="page">
+  <div class="head">
+    <p class="eyebrow">Kuiz Quran · Clickable wireframe</p>
+    <h1>Tap through the whole flow.</h1>
+    <p>Low-fidelity, real data. Follow the core path — <b>Niyyah → Story Map → Scene → drill Act 5 → Scene Complete → Summary</b> — or jump to any screen from the index. The MCQ loop is live; the words are the real opening of Act 5 (the Pit).</p>
+  </div>
+
+  <div class="layout">
+    <nav class="index">
+      <h4>Screens</h4>
+      <ol id="idx"></ol>
+      <p class="flowhint">The core loop:<br>Map → Scene → MCQ ⟳ → Complete → “one more?” → Summary → 🔥</p>
+    </nav>
+
+    <div class="stage">
+      <div class="phone">
+        <div class="notch"></div>
+        <div class="viewport" id="vp">
+
+          <!-- 1 SPLASH -->
+          <div class="screen on" id="s-splash" data-name="Splash / Niyyah">
+            <div class="scr-label">Splash / Niyyah</div>
+            <div class="spacer"></div>
+            <div class="moon">🌙</div>
+            <h2>Kuiz Quran</h2>
+            <p class="niyyah">“Before you begin — renew your intention.”</p>
+            <div class="bism arab">﴾ بِسْمِ اللَّه ﴿</div>
+            <button class="btn" data-go="s-map">Begin</button>
+            <div class="spacer"></div>
+            <div style="font-family:var(--mono);font-size:10px;color:var(--dusk);text-align:center">first launch → Onboarding · returning → Map</div>
+          </div>
+
+          <!-- 2 ONBOARDING -->
+          <div class="screen scrolls" id="s-onboard" data-name="Onboarding">
+            <div class="scr-label">Onboarding</div>
+            <div class="topnav"><span class="back" data-go="s-splash">← back</span><span>1 of 2</span></div>
+            <h2 class="title">Where do you want to start?</h2>
+            <div style="margin-top:16px">
+              <div class="pick sel"><h4>Surah Yusuf</h4><p>111 ayahs · the whole story</p></div>
+              <div class="pick"><h4>Short surahs</h4><p>Al-Ikhlas, Al-Kawthar, An-Nas…</p></div>
+            </div>
+            <h2 class="title" style="margin-top:20px;font-size:19px">How much per day?</h2>
+            <div class="opt-radio"><span class="rd"></span> 5 min — gentle</div>
+            <div class="opt-radio sel"><span class="rd"></span> 10 min — steady</div>
+            <div class="opt-radio"><span class="rd"></span> 15 min — committed</div>
+            <div style="flex:1"></div>
+            <button class="btn" data-go="s-map">Start →</button>
+          </div>
+
+          <!-- 3 STORY MAP -->
+          <div class="screen" id="s-map" data-name="Story Map (home)">
+            <div class="scr-label">Story Map · home</div>
+            <div class="map-head"><h2 class="title" style="font-size:20px">Surah Yusuf</h2><span class="streak">🔥 12</span></div>
+            <div class="due" id="due-line">8 reviews due today</div>
+            <div class="acts" id="map-acts"></div>
+            <div class="cta-wrap"><button class="btn" id="map-cta" data-go="s-scene">▶ Continue — Act 5</button></div>
+            <div class="bottomnav">
+              <span class="nav on">Learn</span>
+              <span class="nav" data-go="s-progress">Progress</span>
+              <span class="nav" data-go="s-splash">Profile</span>
+            </div>
+          </div>
+
+          <!-- 4 SCENE PLAYER -->
+          <div class="screen scrolls" id="s-scene" data-name="Scene Player">
+            <div class="scr-label">Scene Player</div>
+            <div class="topnav"><span class="back" data-go="s-map">←</span><span id="scene-idx">Act 5 / 19</span></div>
+            <div class="scene-img">
+              <span class="film">🎬 STILL — symbolic, no faces</span>
+              <div class="emoji">🕳️🩸</div>
+              <div class="desc" id="scene-desc"></div>
+            </div>
+            <div class="scene-name" id="scene-name"></div>
+            <div class="scene-range" id="scene-range"></div>
+            <div class="scene-sum" id="scene-sum"></div>
+            <div style="flex:1;min-height:14px"></div>
+            <button class="btn" data-go="start-drill">Start rebuilding →</button>
+          </div>
+
+          <!-- 5 MCQ · 練習 set-drill (Monoxer loop) -->
+          <div class="screen" id="s-mcq" data-name="練習 · Practice the Set">
+            <div class="scr-label">練習 · Practice the set</div>
+            <div class="topnav">
+              <span class="back" data-go="s-map">←</span>
+              <span id="mcq-mode">練習 · Lap <b id="mcq-lap">1</b></span>
+            </div>
+            <!-- the whole SET, with per-item strength bars (Monoxer: fill the set) -->
+            <div class="setpanel" id="setpanel"></div>
+            <div class="set-caption">the set · fill every bar to <b>3</b> (produce cold) to master · <span style="color:var(--dec)">red = hot, recurs soon</span></div>
+            <div class="q-lbl"><span id="mcq-tierlbl">Recognise the word</span></div>
+            <div class="cloze arab" id="mcq-cloze"></div>
+            <div class="choices" id="mcq-choices"></div>
+            <div class="fb" id="mcq-fb"></div>
+            <button class="btn sm" id="mcq-next" style="display:none;margin-top:10px">Next →</button>
+          </div>
+
+          <!-- 7 SET MASTERED → handed to 訓練 -->
+          <div class="screen scrolls" id="s-done" data-name="Set Mastered → 訓練">
+            <div class="scr-label">Set mastered → 訓練</div>
+            <div class="big">✓</div>
+            <h2>Set mastered.</h2>
+            <p class="sub">You produced all of Act 5's words — cold, no hints. That's acquisition, not just recognition.</p>
+            <!-- the handoff: 練習 done → 訓練 (FSRS) takes over -->
+            <div class="handoff">
+              <div class="ho-row"><span class="ho-tag done">練習 Practice</span><span class="ho-txt">the set, cycled to a clean pass ✓</span></div>
+              <div class="ho-arrow">↓ hands the mastered set to</div>
+              <div class="ho-row"><span class="ho-tag next">訓練 Training</span><span class="ho-txt">FSRS now schedules each word to return</span></div>
+              <div class="ho-sched" id="ho-sched"></div>
+            </div>
+            <div class="rewards">🌱 +8 rooted &nbsp;·&nbsp; 🔥 12 days</div>
+            <div class="bonus">✨ Notice — the <b>shirt</b> appears here for the first time. It returns twice more: to prove his innocence, then to heal his father's sight. Track it.</div>
+            <div class="row" style="width:100%">
+              <button class="btn ghost grow" data-go="s-cap">One more set →</button>
+              <button class="btn grow" data-go="s-summary">Done today</button>
+            </div>
+          </div>
+
+          <!-- 8 SATIETY CAP -->
+          <div class="screen" id="s-cap" data-name="Satiety Cap">
+            <div class="scr-label">Satiety Cap · ethical brake</div>
+            <div class="moon">🌙</div>
+            <h2 class="title">You've done well today.</h2>
+            <p class="msg">The rest is saved for tomorrow. Extra reps now won't help you remember — the science is on your side.</p>
+            <button class="btn" data-go="s-summary">See today's wins</button>
+          </div>
+
+          <!-- 9 SUMMARY -->
+          <div class="screen scrolls" id="s-summary" data-name="Session Summary">
+            <div class="scr-label">Session Summary</div>
+            <h2 class="title">Today</h2>
+            <div style="margin-top:14px">
+              <div class="stat-line"><span>Recalls</span><b>14</b></div>
+              <div class="stat-line"><span>Time</span><b>6 min</b></div>
+              <div class="stat-line"><span>🌱 Strengthened</span><b>6 words</b></div>
+              <div class="stat-line"><span>⚠ Still at risk</span><b class="" style="color:var(--dec)">2 words</b></div>
+            </div>
+            <div class="streak-big">🔥 12 day streak &nbsp; ❄ 1 freeze saved</div>
+            <div style="font-family:var(--mono);font-size:11px;color:var(--dusk);text-align:center;margin-bottom:14px">Next session: after Subuh</div>
+            <button class="btn ghost" data-go="s-progress">See my garden</button>
+            <div style="height:8px"></div>
+            <button class="btn" data-go="s-map">Back to map</button>
+          </div>
+
+          <!-- 10 PROGRESS -->
+          <div class="screen scrolls" id="s-progress" data-name="Progress · Garden">
+            <div class="scr-label">Progress · Garden</div>
+            <h2 class="title">Your Quran Garden</h2>
+            <div class="garden">🌳🌳🌳🌱🌱░░░</div>
+            <div style="text-align:center;font-family:var(--mono);font-size:11px;color:var(--dusk)">38 of 111 ayahs rooted</div>
+            <div class="receipt"><b>27 ayat</b> kept this month that you would otherwise have forgotten.</div>
+            <div style="font-size:12px;color:var(--mute)">Estimated recall in 6 months</div>
+            <div class="meter"><i style="width:89%"></i></div>
+            <div style="text-align:right;font-family:var(--mono);font-size:12px;color:var(--ret);margin-top:4px">89%</div>
+            <div style="flex:1;min-height:14px"></div>
+            <div class="bottomnav">
+              <span class="nav" data-go="s-map">Learn</span>
+              <span class="nav on">Progress</span>
+              <span class="nav" data-go="s-splash">Profile</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+      <p class="caption" id="caption">Tap <b>Begin</b> to walk the real flow. Use the index on the left to jump to any screen.</p>
+      <button class="restart" id="restart">↺ restart the walkthrough</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const DATA = {"acts": [{"n": 1, "name": "Overture: The Best of Stories", "range": "1-3", "summary": "Alif-Laam-Ra. These are the verses of the clear Book, revealed as an Arabic Quran so you may understand. Allah announces He will relate to Muhammad 'the best of stories' (ahsan al-qasas) — a story the Prophet had been unaware of before.", "scene": "A darkened cinema; a single spotlight hits a clear open Book on a stand, and a narrator's voice says 'Watch. This is the finest story ever told.'"}, {"n": 2, "name": "The Dream of Eleven Stars", "range": "4-6", "summary": "Young Yusuf tells his father Yaqub: 'O my father, I saw eleven stars, the sun and the moon — I saw them prostrating to me.' Yaqub warns him not to tell his brothers lest Shaytan plot against him, and foretells that Allah will choose him and teach him the interpretation of dreams (ta'wil al-ahadith).", "scene": "A boy at his father's knee under a night sky where eleven stars plus the sun and moon literally tip and bow toward him."}, {"n": 3, "name": "The Brothers' Jealousy and the Plot", "range": "7-10", "summary": "The brothers grumble: 'Yusuf and his brother are more beloved to our father than us, though we are a strong group.' They plot: 'Kill Yusuf or cast him to some land so our father's face is free for us.' One softer voice says: don't kill him — throw him into the bottom of the well (ghayabat al-jubb), and some caravan will pick him up.", "scene": "A huddle of grown brothers in a field, one pointing down at a dark stone well, the word 'well' hanging in the air like a verdict."}, {"n": 4, "name": "The Deception at the Door", "range": "11-14", "summary": "The brothers coax Yaqub: 'Why don't you trust us with Yusuf? Send him with us tomorrow to play; we will surely guard him.' Yaqub replies it grieves him and he fears a wolf (dhi'b) will eat him while they are heedless. They scoff: 'If the wolf ate him while we are a strong group, we would truly be losers.'", "scene": "A doorway at dawn; smiling brothers leading a small boy by the hand, while a wolf's shadow flickers unnoticed on the wall."}, {"n": 5, "name": "The Pit and the False Shirt", "range": "15-18", "summary": "They take him and agree to drop him into the well; Allah inspires Yusuf: 'You will surely inform them of this affair while they do not perceive.' They come to their father at night weeping, claiming a wolf ate Yusuf while they raced — and bring his shirt (qamees) stained with false blood. Yaqub sees through it: 'Beautiful patience (sabr jameel); Allah is the One whose help is sought.'", "scene": "A boy vanishing into a black well; then a bloodied white shirt held up before an old man whose face hardens into quiet resolve."}, {"n": 6, "name": "The Caravan and the Cheap Sale", "range": "19-20", "summary": "A caravan (sayyara) arrives; their water-drawer lowers his bucket and cries 'Good news! A boy!' They hide him as merchandise and sell him for a paltry price, a few counted dirhams, being of those uninterested in him. Allah is All-Knowing of what they do.", "scene": "A bucket rising from the well with a boy clinging to the rope; then a hand counting a tiny pile of silver coins."}, {"n": 7, "name": "The House of al-Aziz", "range": "21-22", "summary": "The man of Egypt who bought him tells his wife: 'Make his stay honorable; perhaps he will benefit us or we take him as a son.' Thus Allah established Yusuf in the land and taught him interpretation of events — 'Allah is predominant over His affair, but most people do not know.' When Yusuf reached maturity, Allah gave him wisdom and knowledge.", "scene": "A grand Egyptian household's gate opening; a nobleman gesturing to his wife to welcome the boy into a home of marble and light."}, {"n": 8, "name": "The Temptation and 'Ma'adhallah'", "range": "23-24", "summary": "The woman in whose house he lived tried to seduce him, bolted the doors, and said 'Come, you!' He answered 'Ma'adhallah — I seek refuge in Allah; indeed my master honored my stay; the wrongdoers never succeed.' She desired him and he would have inclined but for seeing the proof of his Lord (burhan rabbihi); thus Allah turned evil and immorality from His sincere servant.", "scene": "Bolted doors from the inside; a young man's hand raised in refusal, a beam of light ('the proof') cutting across the dim room."}], "act5": {"n": 5, "name": "The Pit and the False Shirt", "range": "15-18", "summary": "They take him and agree to drop him into the well; Allah inspires Yusuf: 'You will surely inform them of this affair while they do not perceive.' They come to their father at night weeping, claiming a wolf ate Yusuf while they raced — and bring his shirt (qamees) stained with false blood. Yaqub sees through it: 'Beautiful patience (sabr jameel); Allah is the One whose help is sought.'", "scene": "A boy vanishing into a black well; then a bloodied white shirt held up before an old man whose face hardens into quiet resolve."}, "cards": [{"ref": "15:1", "stem": "____ (ayah opening)", "correct": "فَلَمَّا", "tr": "So when", "opts": [{"t": "فَلَمَّا", "ok": true}, {"t": "وَلَمَّا", "type": "visual", "why": "Same 'when' with وَ; wrong connector."}, {"t": "فَلَمْ", "type": "visual", "why": "Shares فَلَم; 'so did not', wrong particle."}, {"t": "لَمَّا", "type": "visual", "why": "Same word without فَ; wrong form."}, {"t": "إِذَا", "type": "semantic", "why": "'When' is a synonym; wrong particle."}, {"t": "حِينَ", "type": "semantic", "why": "'When/at the time' captures sense; wrong word."}]}, {"ref": "15:2", "stem": "فَلَمَّا ____", "correct": "ذَهَبُوا۟", "tr": "they took him", "opts": [{"t": "ذَهَبُوا۟", "ok": true}, {"t": "تَذْهَبُوا۟", "type": "contextual", "why": "'You take him' appears in 13:5; wrong person (2nd)."}, {"t": "ذَهَبْنَا", "type": "contextual", "why": "'We went' appears in 17:4; wrong person."}, {"t": "جَآءُوٓا۟", "type": "contextual", "why": "'They came' opens 16/18; wrong verb here."}, {"t": "ذَهَبُو", "type": "visual", "why": "Missing silent alif; misspelling."}, {"t": "سَارُوا۟", "type": "semantic", "why": "'They journeyed' is a near-synonym; wrong word."}]}, {"ref": "15:4", "stem": "فَلَمَّا ذَهَبُوا۟ بِهِۦ ____", "correct": "وَأَجْمَعُوٓا۟", "tr": "and agreed", "opts": [{"t": "وَأَجْمَعُوٓا۟", "ok": true}, {"t": "أَجْمَعُوٓا۟", "type": "visual", "why": "Same verb without وَ; wrong form."}, {"t": "وَٱتَّفَقُوا۟", "type": "semantic", "why": "'And agreed' by another root; captures meaning, wrong word."}, {"t": "وَأَجْمَعُوا۟", "type": "visual", "why": "Same verb without madd; tashkeel differs."}, {"t": "وَأَلْقُوهُ", "type": "contextual", "why": "'And threw him' appears in 10:7; wrong verb here."}, {"t": "وَعَزَمُوا۟", "type": "phonetic", "why": "'And resolved' is a near-synonym; wrong word."}]}]};
+
+/* ---- screen registry (order = wireframe order) ---- */
+const SCREENS = [
+  ["s-splash","Splash / Niyyah"],
+  ["s-onboard","Onboarding"],
+  ["s-map","Story Map (home)"],
+  ["s-scene","Scene Player"],
+  ["s-mcq","練習 · Practice the set"],
+  ["s-done","Set Mastered → 訓練"],
+  ["s-cap","Satiety Cap"],
+  ["s-summary","Session Summary"],
+  ["s-progress","Progress · Garden"]
+];
+const CAPTIONS = {
+  "s-splash":"<b>Splash / Niyyah</b> — every session opens on intention, not a menu.",
+  "s-onboard":"<b>Onboarding</b> — first launch only: pick a surah, a daily time, salah reminders.",
+  "s-map":"<b>Story Map</b> — home base. The engine surfaces due reviews and rests the cursor on the next act. Locked acts can't be rushed.",
+  "s-scene":"<b>Scene Player</b> — minimal: one still image + a 2-sentence summary. Read it, picture it, then drill.",
+  "s-mcq":"<b>練習 · Practice the set (the Monoxer loop).</b> The bars up top are the whole set — each word's strength. Cycle the set: right answers climb difficulty & fill the bar; a miss goes HOT (red) and recurs SOON with more support. Beat every bar to 3 (produced cold) to master the set. Try missing one on purpose — watch it come back harder-to-cooler.",
+  "s-done":"<b>Set mastered → 訓練.</b> Only now — after you produced the whole set cold — does FSRS start scheduling each word across days. 練習 (acquire today) hands off to 訓練 (retain over time).",
+  "s-cap":"<b>Satiety Cap</b> — the ethical brake. It refuses to let you cram, because undue reps don't help retention.",
+  "s-summary":"<b>Session Summary</b> — today's wins + the streak, softened by a freeze token.",
+  "s-progress":"<b>Progress</b> — the garden (growth, not public metrics) and the retention receipt — the value users pay for."
+};
+
+/* ---- build index ---- */
+const idx=document.getElementById("idx");
+SCREENS.forEach(([id,name])=>{
+  const li=document.createElement("li");
+  const b=document.createElement("button");b.textContent=name;b.dataset.jump=id;
+  li.appendChild(b);idx.appendChild(li);
+});
+
+/* ---- navigation ---- */
+function show(id){
+  document.querySelectorAll(".screen").forEach(s=>s.classList.toggle("on",s.id===id));
+  document.querySelectorAll("#idx button").forEach(b=>b.classList.toggle("active",b.dataset.jump===id));
+  const cap=document.getElementById("caption");if(CAPTIONS[id])cap.innerHTML=CAPTIONS[id];
+  const vp=document.getElementById("vp");const el=document.getElementById(id);if(el&&el.classList.contains("scrolls"))el.scrollTop=0;
+  if(id==="s-scene")renderScene();
+  if(id==="s-mcq")startDrill();
+}
+document.addEventListener("click",e=>{
+  const j=e.target.closest("[data-jump]");if(j){show(j.dataset.jump);return;}
+  const g=e.target.closest("[data-go]");if(!g)return;
+  const t=g.dataset.go;
+  if(t==="start-drill"){show("s-mcq");return;}
+  show(t);
+});
+document.getElementById("restart").onclick=()=>show("s-splash");
+
+/* ---- STORY MAP ---- */
+(function(){
+  const wrap=document.getElementById("map-acts");
+  const states=["done","done","done","done","cursor","locked","locked","locked"];
+  const progs=[100,100,80,80,25,0,0,0];
+  DATA.acts.forEach((a,i)=>{
+    const st=states[i]||"locked";
+    const icon=st==="done"?"✓":st==="cursor"?"▶":"🔒";
+    const d=document.createElement("div");
+    d.className="act "+(st==="locked"?"locked ":"")+(st==="cursor"?"cursor":"");
+    d.innerHTML=`<span class="st">${icon}</span><span class="nm">${a.n} · ${a.name.replace(/^[^:]*:\s*/,'').split(' and ')[0]}</span>`+
+      (st!=="locked"?`<span class="prog"><i style="width:${progs[i]}%"></i></span>`:'');
+    if(st==="cursor"||st==="done")d.onclick=()=>show("s-scene");
+    wrap.appendChild(d);
+  });
+})();
+
+/* ---- SCENE PLAYER ---- */
+function renderScene(){
+  const a=DATA.act5;
+  document.getElementById("scene-desc").textContent="“"+a.scene+"”";
+  document.getElementById("scene-name").textContent=a.name;
+  document.getElementById("scene-range").textContent="Ayahs "+a.range;
+  document.getElementById("scene-sum").textContent=a.summary;
+}
+
+/* ============================================================
+   練習 SET-DRILL — the Monoxer loop, aligned to our model.
+   A FIXED set is cycled; each item has a STRENGTH (0..3) and a
+   TIER (difficulty the engine auto-sets). Right → strength+1,
+   tier climbs, support fades. Wrong → strength drops, item goes
+   HOT and recurs SOON. Set is MASTERED when every item hits
+   strength 3 (produced cold) → handed to 訓練 (FSRS spacing).
+   ============================================================ */
+
+// Difficulty tiers the ENGINE chooses (the learner never picks).
+// nChoices + how much scaffolding. tier 0 easiest → 3 = produce cold.
+const TIERS=[
+  {n:2, lbl:"Recognise · 2 choices", hint:true},
+  {n:4, lbl:"Recall · 4 choices",    hint:false},
+  {n:6, lbl:"Produce · 6 choices",   hint:false},
+  {n:6, lbl:"Produce cold · no scene", hint:false, cold:true}
+];
+const TARGET=3;         // strength needed to master an item
+let SET=[], queue=[], lap=1, answered=false, t0=0, curItem=null;
+
+function startDrill(){
+  // build the set from the real Act-5 cards; strength 0, tier 0, cold=false
+  SET = DATA.cards.map((c,i)=>({ i, card:c, strength:0, tier:0, hot:false, done:false }));
+  queue = SET.map(it=>it.i);   // first lap = every item, in order
+  lap = 1;
+  renderSetPanel();
+  nextItem();
+}
+
+// the whole SET shown as strength bars (Monoxer: fill the set)
+function renderSetPanel(){
+  const p=document.getElementById("setpanel");p.innerHTML="";
+  SET.forEach(it=>{
+    const pct=(it.strength/TARGET)*100;
+    const cls="setitem"+(it.done?" mastered":"")+(it.hot?" hot":"")+(curItem&&curItem.i===it.i?" current":"");
+    const label=it.done?"✓":it.hot?"!":(it.strength||"·");
+    p.innerHTML+=`<div class="${cls}"><div class="sbar-bg"><div class="sbar-fill" style="height:${pct}%"></div></div><span class="lab">${label}</span></div>`;
+  });
+}
+
+function nextItem(){
+  answered=false;
+  // mastered? (all done) → handoff to 訓練
+  if(SET.every(it=>it.done)){ finishSet(); return; }
+  // refill queue for a new lap if empty (put hot/weak items first)
+  if(queue.length===0){
+    lap++;
+    const remaining=SET.filter(it=>!it.done);
+    remaining.sort((a,b)=> (b.hot-a.hot) || (a.strength-b.strength));
+    queue=remaining.map(it=>it.i);
+  }
+  const id=queue.shift();
+  curItem=SET.find(it=>it.i===id);
+  renderItem();
+}
+
+function shuffle(arr,seed){for(let i=arr.length-1;i>0;i--){const j=Math.floor((Math.sin((i+1)*13.7+seed*7.3)*.5+.5)*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]]}return arr}
+
+function renderItem(){
+  const it=curItem, c=it.card, tier=TIERS[it.tier];
+  document.getElementById("mcq-lap").textContent=lap;
+  document.getElementById("mcq-tierlbl").textContent=tier.lbl;
+  renderSetPanel();
+  // cloze
+  const stem=c.stem.replace("____",'<span class="bl">▁▁</span>').replace("(ayah opening)","");
+  document.getElementById("mcq-cloze").innerHTML=stem||'<span class="bl">▁▁</span>';
+  document.getElementById("mcq-fb").innerHTML="";
+  document.getElementById("mcq-next").style.display="none";
+  // build choices sized to the tier: always include correct + fill traps up to n
+  const correct=c.opts.find(o=>o.ok);
+  const traps=c.opts.filter(o=>!o.ok);
+  const chosen=[correct, ...shuffle(traps.slice(),it.tier+lap).slice(0, tier.n-1)];
+  const box=document.getElementById("mcq-choices");box.innerHTML="";
+  shuffle(chosen,it.i+lap).forEach(o=>{
+    const b=document.createElement("button");b.className="ch arab";b.textContent=o.t;
+    b.onclick=()=>answerItem(b,o);box.appendChild(b);
+  });
+  t0=performance.now();
+}
+
+function answerItem(btn,o){
+  if(answered)return;answered=true;
+  const it=curItem, c=it.card;
+  const lat=Math.max(.6,(performance.now()-t0)/1000);
+  [...document.getElementById("mcq-choices").children].forEach(x=>x.classList.add("locked"));
+  const fb=document.getElementById("mcq-fb");
+  if(o.ok){
+    btn.classList.add("right");
+    it.strength=Math.min(TARGET,it.strength+1);
+    it.hot=false;
+    if(it.tier<TIERS.length-1)it.tier++;                 // difficulty climbs
+    if(it.strength>=TARGET)it.done=true;                  // produced cold → mastered
+    const fast=lat<3;
+    const msg = it.done
+      ? `Produced cold. <b>Mastered</b> — this word now enters 訓練.`
+      : `Right — strength ${it.strength}/${TARGET}. Difficulty rises next lap.`;
+    fb.innerHTML=`<span class="rate" style="color:var(--ret)">✓ ${fast?"EASY":"GOOD"}</span> <span class="lat">${lat.toFixed(1)}s · lap ${lap}</span><span class="why">${msg}</span>`;
+  }else{
+    btn.classList.add("bad");
+    [...document.getElementById("mcq-choices").children].forEach(x=>{if(x.textContent===c.correct)x.classList.add("right")});
+    it.strength=Math.max(0,it.strength-1);
+    it.hot=true;
+    if(it.tier>0)it.tier--;                               // drop back to more support
+    // HOT item recurs SOON — reinsert ~2 items ahead (within-session spacing)
+    queue.splice(Math.min(2,queue.length),0,it.i);
+    fb.innerHTML=`<span class="rate" style="color:var(--wrong)">✗ AGAIN</span> <span class="lat">${(o.type||"").toUpperCase()} trap</span><span class="why"><b>Trap:</b> ${o.why||""} It comes back <b>soon</b>, with more support.</span>`;
+  }
+  renderSetPanel();
+  const nx=document.getElementById("mcq-next");nx.style.display="block";
+  const left=SET.filter(x=>!x.done).length;
+  nx.textContent = SET.every(x=>x.done) ? "Set mastered →" : `Next (${left} left) →`;
+  nx.onclick=nextItem;
+}
+
+function finishSet(){
+  // populate the handoff schedule preview
+  document.getElementById("ho-sched").innerHTML=
+    `Each mastered word now scheduled by FSRS:<br>`+
+    `<b>day 1</b> → <b>day 4</b> → <b>day 11</b> → <b>day 30</b> → welded.<br>`+
+    `Any wobble on a due day → a mini-練習 cycle, then re-spaced.`;
+  show("s-done");
+}
+
+/* init */
+show("s-splash");
+</script>

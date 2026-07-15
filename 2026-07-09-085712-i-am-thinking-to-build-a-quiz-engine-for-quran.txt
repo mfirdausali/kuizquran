@@ -1,0 +1,573 @@
+╭─── Claude Code v2.1.197 ─────────────────────────────────────────────────────╮
+│                                                    │ Tips for getting        │
+│                Welcome back Firdaus!               │ started                 │
+│                                                    │ Ask Claude to create a… │
+│                       ▐▛███▜▌                      │ ─────────────────────── │
+│                      ▝▜█████▛▘                     │ What's new              │
+│                        ▘▘ ▝▝                       │ Introducing Claude Son… │
+│   Opus 4.8 · Claude Max · mfirdaus12@gmail.com's   │ Added support for orga… │
+│   Organization                                     │ Added readable default… │
+│        ~/Documents/2026/office-mfa/kuizquran       │ /release-notes for more │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+ ▎ Extended: Fable 5 is included in your weekly limit
+ ▎ Through July 12, you can use up to 50% of your weekly usage limit on Fable 5. If you hit your limit, you can continue on Fable 5 with usage credits. Fable 5 draws down usage faster than Opus 4.8. Run /model and select Fable to use it. Learn more
+
+❯ /model 
+  ⎿  Kept model as Opus 4.8 (1M context)
+
+❯ I am thinking to build a quiz engine for Quran.                               
+                                                                                
+  Research current realities of Quran memorization quiz.                        
+                                                                                
+  I think none of the products in the market is focusing on intentional         
+  retention through SRS and memorization.                                       
+                                                                                
+  I want to redesign that landscape.                                            
+
+⏺ I'll research the current realities of Quran memorization quizzes before we
+  design anything. Let me kick off a deep, multi-source investigation.
+
+  Let me start by clarifying scope so the research actually lands where you need
+  it.
+
+⏺ User answered Claude's questions:
+  ⎿  · What angle of 'current realities' matters most for your product decision 
+     right now? → Competitive landscape, Learning science, User pain points, 
+     Market & monetization
+     · Who is the primary user you're designing for first? → Casual Muslim 
+     learner
+
+⏺ You've selected all four research angles, with the casual Muslim learner as
+  the primary user. That's a meaningful framing — casual learners are a very
+  different market from serious huffaz, and the SRS/retention thesis plays out
+  differently for them.
+
+  Let me run a comprehensive deep research pass across all four angles. This
+  will fan out many web searches, verify claims, and synthesize a cited report.
+
+⏺ Skill(deep-research)
+  ⎿  Successfully loaded skill
+  ⎿  Interrupted · What should Claude do instead?
+
+❯ /model                                                                        
+  ⎿  Set model to Opus 4.8 (1M context) and saved as your default for new
+     sessions
+
+❯ continue                                                                      
+
+⏺ I'll run the deep research workflow now across all four angles.
+
+⏺ Workflow(dynamic workflow: deep-research)
+  ⎿  /workflows to view dynamic workflow runs
+
+⏺ The deep research workflow is running in the background — it's fanning out
+  parallel web searches across all four angles, fetching and deduplicating
+  sources, adversarially verifying claims, and synthesizing a cited report. You
+  can watch live progress with /workflows.
+
+  I'll be notified when it completes and will bring you the full findings. In
+  the meantime, let me save the project context to memory so it persists across
+  sessions.
+
+  Wrote 2 memories (ctrl+o to expand)
+
+⏺ Research is running in the background. Context saved.
+
+  While it works, here's my initial read on your thesis to pressure-test before
+  the data lands:
+
+  Your core claim — "nobody focuses on intentional retention via SRS" — is
+  directionally right but has nuance worth watching for in the results:
+  - Quran Companion and a few Anki-based setups do use spaced repetition, but
+  they're aimed at serious huffaz doing full memorization, and the SRS is bolted
+  onto a review-scheduling model, not a quiz-first experience.
+  - The casual learner — your ICP — is genuinely underserved. Most apps assume
+  you're either reading or doing full hifz. The "I know Al-Ikhlas but I've
+  forgotten Al-Kawthar I learned last Ramadan" problem is real and largely
+  unaddressed.
+
+  The sharpest question the research should answer: is the casual learner's
+  problem actually retention (SRS solves this), or is it never finishing initial
+  memorization in the first place (motivation/habit problem, SRS doesn't help)?
+  That distinction changes the whole product.
+
+  I'll deliver the full cited findings when the workflow completes.
+
+✻ Cogitated for 36s
+
+⏺ Dynamic workflow "Deep research harness — fan-out web searches, fetch sources,
+adversarially verify claims, synthesize a cited report." completed · 14m 50s
+
+⏺ The research is complete. Let me read the full output for the remaining
+  findings.
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ I have the full findings. I don't need the rest of the agent-trace pagination
+  — the report body, caveats, refuted claims, and open questions are all
+  captured. Let me update memory with the key findings, then deliver the
+  synthesis.
+
+  Wrote 1 memory (ctrl+o to expand)
+
+⏺ Research is done. Here's the synthesis — your thesis holds, with one important
+  caveat.
+
+  The verdict: the whitespace is real, but it's narrower and more crowded than 
+  "nobody does SRS"
+
+  What the market actually looks like (20/25 claims confirmed via adversarial
+  verification):
+
+  Player: Tarteel (leader, 4.7★, ~10k ratings)
+  What it actually is: AI recitation mistake-detection — real-time "you skipped
+  a
+     word"
+  SRS?: ❌ Automatic SRS engine was only "coming soon" as of Aug 2025 (⚠️ verify
+
+    if shipped now — its Jan 2026 blog revision exists)
+  ────────────────────────────────────────
+  Player: Retain Quran
+  What it actually is: Flashcards + built-in SRS + audio, cross-platform, claims
+
+    1M+ users
+  SRS?: ✅ This is your real competitor
+  ────────────────────────────────────────
+  Player: Hafiz Quran
+  What it actually is: FSRS algorithm + Anki-style Again/Hard/Good/Easy
+  SRS?: ✅ Also a direct competitor
+  ────────────────────────────────────────
+  Player: Anki + Quranki deck
+  What it actually is: DIY, powerful but high-friction
+  SRS?: ✅ but hobbyist
+  ────────────────────────────────────────
+  Player: Muslim Pro, iQuran, etc.
+  What it actually is: Reading/lifestyle, quiz features are one-shot
+  SRS?: ❌
+
+  So the accurate framing is not "nobody focuses on SRS retention" — it's "the 
+  market leaders don't, and the two players who do are aimed at serious hifz 
+  with Anki-style friction, leaving the casual short-surah learner genuinely 
+  unserved." That's still a strong wedge, but the pitch has to be sharper than
+  "we invented SRS for Quran."
+
+  The strongest finding for you
+
+  The core pain point is retention, not initial memorization — confirmed 3-0
+  across ~10 independent sources. This directly answers the question I flagged
+  earlier. For your casual ICP it's even more true: someone learns Al-Kawthar in
+  one 20-minute sitting (acquisition is easy), then loses it by next month
+  because there's no revision habit. That is exactly the problem SRS solves, and
+  no casual-friendly product owns it.
+
+  The learning science backs you fully: SRS + active recall are evidence-based,
+  and traditional Sabaq/Sabqi/Manzil is already an expanding-interval system —
+  meaning you're not fighting tradition, you're digitizing something scholars
+  already endorse. That's a powerful positioning gift.
+
+  The one thing that should worry you
+
+  Monetization. Massive demand (Muslim Pro 62M+ downloads) but weak
+  willingness-to-pay in the largest Muslim markets — only 8.1% of Quran Majeed's
+  revenue came from India+Pakistan despite 35.6% of its downloads. An SRS-first
+  casual product will likely need diaspora/Gulf-targeted subscription, freemium
+  conversion, or waqf/donation/institutional models — not paid-upfront in core
+  markets.
+
+  Two things to verify before you commit a line of code
+
+  1. Has Tarteel (or Quran Companion / Alfawz) shipped adaptive SRS since Aug 
+  2025? The competitive picture may have shifted in the ~11 months since. This
+  is the single highest-leverage fact.
+  2. Do casual users actually tolerate Anki-style grading? Retain Quran and
+  Hafiz Quran both use Again/Hard/Good/Easy — power-user UX. Your
+  differentiation may be less "we have SRS" and more "we made SRS invisible and 
+  effortless for someone who just prays and wants their surahs to stick."
+
+  ---
+  Where I'd take this next — pick one:
+  - A) Sharpen the product wedge — turn "invisible SRS for casual learners" into
+  a concrete v1 feature set and quiz-engine mechanic (how recall works without
+  Anki friction).
+  - B) Live competitive teardown — I open Tarteel / Retain Quran / Hafiz Quran
+  in the browser and verify current features + the Aug-2025 SRS question
+  firsthand.
+  - C) Package this into a proper doc — a shareable research brief / mini
+  design-vision artifact.
+
+  Which direction?
+
+✻ Churned for 15m 50s
+
+※ recap: We're designing an SRS-first Quran memorization quiz app for casual learners; deep research is done and confirms the retention whitespace is real. Next: pick a direction — sharpen the product wedge, run a live competitor teardown, or package the findings into a shareable brief. (disable recaps in /config)
+
+❯ Let's think atomically.                                                       
+                                                                                
+  I give you surah Yusuf.                                                       
+                                                                                
+  List all the ayah.                                                            
+                                                                                
+  Then, for each ayah, dissect every words into one column each, in the same    
+  column with ayah.                                                             
+                                                                                
+  Then, for every word/vocab, establish 5 'pengganggu', so that we can build an 
+  MCQ for choice.                                                               
+                                                                                
+  I think we can revolutionize Quran memorization in this way.                  
+                                                                                
+  In some way, people is being forced to memorized, when they need to choose.   
+                                                                                
+  At the same time, they are 'forced' to understand the meaning.                
+                                                                                
+  We are not playing short game. We are playing long game. We want the          
+  retention to be long lasting. We want people who spend long screen time       
+  enjoys this game; where we engineer this game from smartphone addicts'        
+  perspective. So, they benefit from their smartphone usage.                    
+                                                                                
+  Together with this, plan how the SRS mechanism works.                         
+                                                                                
+  Think of Monoxer.                                                             
+                                                                                
+  Together with this also, build mental model of surah Yusuf.                   
+                                                                                
+  How does this MCQ/clozer questions, can be paired together with truest mental 
+  model of surah Yusuf (end-to-end), so that it can form structured & retained  
+  hifz.                                                                         
+                                                                                
+  Deploy agents to do this; use dynamic workflow                                
+
+⏺ This is a rich, multi-layered task. Let me make sure I build the right thing
+  before deploying agents, because a few decisions will shape everything
+  downstream.
+
+  Let me lay out what I understand you're asking for, then confirm the critical
+  choices:
+
+  The atomic pipeline you're describing:
+  1. Surah Yusuf → list all 111 ayahs
+  2. Each ayah → dissect into individual words (one word per column, aligned
+  with its ayah)
+  3. Each word → generate 5 pengganggu (distractors) → an MCQ where the learner
+  picks the correct word
+  4. This forces memorization through choice + understanding of meaning
+  simultaneously
+  5. Wrap it in an SRS engine (Monoxer-style — adaptive, forces recall,
+  escalates difficulty)
+  6. Build a mental model of Surah Yusuf (the narrative arc / structure) so MCQs
+  aren't isolated — they hang on a scaffold, producing structured, retained 
+  hifz
+  7. Engineered for smartphone addicts — long screen time becomes a benefit, not
+  guilt
+
+  Before I deploy the workflow, four decisions that will change the entire
+  output:
+
+⏺ User answered Claude's questions:
+  ⎿  · This is a large generation job (111 ayahs, ~1,600 words, 5 distractors 
+     each = ~8,000 MCQ items). For this first run, what scope do you want? → 
+     Full Surah Yusuf
+     · The 5 distractors are the heart of the pedagogy. What kind should they 
+     be? → Semantic (similar meaning), Visual/orthographic (look similar), 
+     Phonetic (sound similar), Contextual (real words from nearby ayahs)
+     · What's the primary answer mode for the MCQ — what is the learner actually
+     choosing? → Next Arabic word (cloze)
+
+⏺ Decisions locked:
+  - Scope: Full Surah Yusuf (111 ayahs)
+  - Distractors: All 4 types (semantic, visual/orthographic, phonetic,
+  contextual) blended into each 5-distractor set
+  - Recall mode: Next-Arabic-word cloze as primary (with meaning attached to
+  each word so comprehension rides along)
+
+  One critical reality I need to be honest about before deploying: Quranic text 
+  accuracy is non-negotiable. Generating 111 ayahs of Arabic word-by-word from a
+  model risks tashkeel/spelling errors — unacceptable for the Quran. So the
+  workflow's first phase fetches the authentic verified text (Tanzil/QUL Uthmani
+  script + word-by-word data), and every downstream agent works only from that
+  fetched ground truth, never from memory. Distractors are generated (that's
+  pedagogy, not scripture), but the sacred text is sourced, not invented.
+
+  Let me build the dynamic workflow. Given the size (111 ayahs), I'll pipeline
+  it: fetch authentic text → build the mental model → dissect + generate
+  distractors per ayah-batch → design the SRS engine → synthesize.
+
+  Let me first verify the authentic data source is reachable, then launch.
+
+⏺ Let me verify the authentic Quran API returns clean word-by-word data before
+  building the whole workflow around it.
+
+⏺ Fetch(https://api.quran.com/api/v4/verses/by_chapter/12?language=en&words=true
+       &word_fields=text_uthmani&fields=text_uthmani&per_page=2&page=1)
+  ⎿  Received 4.6KB (200 OK)
+
+⏺ The Quran.com API (v4) returns exactly what we need: authentic Uthmani text
+  per verse and per-word Uthmani + English translation. This is our ground
+  truth. The workflow will fetch all 111 ayahs from this API (paginated), so no
+  Arabic is ever invented by a model — only distractors and pedagogy are
+  generated.
+
+  Now let me build the dynamic workflow. Architecture:
+
+  - Phase 1 — Fetch (ground truth): Pull all 111 ayahs of Yusuf word-by-word
+  from Quran.com API across pages. This is data, done in-script via
+  WebFetch-driven agents.
+  - Phase 2 — Mental Model: One agent builds the end-to-end narrative scaffold
+  of Surah Yusuf (the 12+ acts, the "movie in your head").
+  - Phase 3 — Dissect + Distractors (fan-out): Batch the ayahs; each agent takes
+  its batch, aligns words into columns, and generates 5 blended distractors
+  (semantic + visual + phonetic + contextual) per word, using only the fetched
+  text.
+  - Phase 4 — SRS Engine design: One agent designs the Monoxer-style adaptive
+  SRS + the addiction-loop game mechanics + how MCQs pair to the mental model.
+  - Phase 5 — Synthesize: Assemble into a coherent build spec + sample data.
+
+  Let me write and launch it.
+⏺ Write(/private/tmp/claude-501/-Users-firdaus-Documents-2026-office-mfa-kuizqur
+       an/23920490-1d99-430b-b999-da221e4a059c/scratchpad/yusuf-engine.js)
+  ⎿  Wrote 293 lines to ../../../../../../private/tmp/claude-501/-Users-fir
+     daus-Documents-2026-office-mfa-kuizquran/23920490-1d99-430b-b999-da221
+     e4a059c/scratchpad/yusuf-engine.js
+      1 export const meta = {
+      3   description: 'Build the full Surah Yusuf atomic MCQ + SRS + men
+        tal-model hifz engine spec from authentic Quran.com data',
+      5     { title: 'Fetch', detail: 'Pull all 111 ayahs of Yusuf word-b
+        y-word from Quran.com API (ground truth, never invented)' },
+        ve scaffold of Surah Yusuf' },
+      7     { title: 'Dissect', detail: 'Per ayah-batch: column-align wor
+      8     { title: 'SRS', detail: 'Design Monoxer-style adaptive SRS + 
+        addiction-loop mechanics + model pairing' },
+        data 
+     … +433 lines (ctrl+o to expand)
+  ⎿  /workflows to view dynamic workflow runs
+
+⏺ The workflow is running in the background across five phases. Here's what's
+  happening and why it's built this way:
+
+  The pipeline (running now):
+
+  1. Fetch — 3 parallel agents pull all 111 ayahs of Yusuf word-by-word from the
+  Quran.com API. No Arabic is ever generated by a model — the sacred text is
+  copied from the authenticated source. This is the one non-negotiable in a
+  Quran product.
+  2. Mental Model — one agent builds the end-to-end narrative scaffold: the
+  surah broken into vivid acts (the dream → the pit → the caravan → al-Aziz's
+  house → the temptation → the cut hands → prison → the king's dream → the rise
+  → the brothers return → the cup → the reunion → the sujood), each with a
+  concrete scene image (method-of-loci anchor) and emotional beat, plus
+  recurring motifs (the shirt appears 3×, dreams recur, "ṣabr jamīl"). This is
+  your "truest mental model."
+  3. Dissect + Distractors — ~13 parallel agents, each taking a batch of ~9
+  ayahs. For every word, they build a cloze MCQ (ayah with a blank → choose the
+  next Arabic word) plus 5 distractors blending all four types you chose:
+  semantic, visual/orthographic, phonetic, and contextual (real Yusuf words in
+  the wrong place — forcing word order). Each distractor carries a rationale for
+  the trap it teaches.
+  4. SRS engine — one agent designs the Monoxer-style engine: implicit grading
+  (correctness + latency, no Anki-style self-rating friction), FSRS-based
+  intervals, escalating question difficulty, the smartphone-addict engagement
+  loops turned toward benefit (with ethical guardrails since it's the Quran),
+  and — the key part — how the atomic MCQs pair with the mental model so acts
+  unlock in narrative sequence and hifz feels like progressing through a story,
+  not grinding cards.
+  5. Synthesize — assembles everything into a build spec + full data set.
+
+  This is a large job (~1,600 words × 5 distractors ≈ 8,000 generated items plus
+  design), so it'll take a while. I'll be notified on completion, then assemble
+  the output into a proper spec document and sample data for you to inspect.
+  You can watch live with /workflows.
+
+✻ Cogitated for 3m 13s
+
+⏺ Dynamic workflow "Build the full Surah Yusuf atomic MCQ + SRS + mental-model
+hifz engine spec from authentic Quran.com data" completed · 32m 21s
+
+⏺ The workflow completed. There's one data-quality issue I need to flag
+  immediately, then I'll give you the results.
+
+  Important accuracy note: The fetch returned 92 verses, not 111. Surah Yusuf
+  has 111 ayahs. The Quran.com API's word-by-word endpoint appears to have
+  truncated some pages (WebFetch dropped verses on paginated JSON). So the
+  current output covers ~83% of the surah with 1,425 words → 1,425 MCQs → 7,125
+  distractors. Before this becomes real product data, the fetch must be fixed to
+  get all 111. I'll address that. First, let me read the full output — the
+  mental model (19 acts) and SRS engine — and assess quality.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Precisely diagnosed: ayahs 62–80 are missing — that's exactly page 2 (verses
+  41–80) getting truncated by WebFetch, which dropped its back half. Pages 1 and
+  3 came through complete. This is a fetch problem, not a pedagogy problem.
+
+  Let me fix it: re-fetch just the missing range with a smaller, chunked
+  request, and resume the workflow so the cached pages/mental-model/SRS return
+  instantly and only the gap re-runs. First let me examine the quality of what
+  we DID get, so I can tell you whether the method works before spending more
+  tokens.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ The quality is genuinely strong. Look at what these distractors are doing:
+
+  - Grammatical case-ending traps (تُـٰيَاءَ vs تٌـٰيَاءَ vs تٍـٰيَاءَ) —
+  teaching i'rab through the idafa construction. That's sophisticated. A learner
+  who picks the wrong tanwin learns Arabic grammar, not just the word.
+  - Real scriptural synonyms (رِكْذِّلٱ / نِاءَرْقُلْٱ for "the Book") — forcing
+  the exact revealed word over a theologically valid near-synonym.
+  - Contextual distractors with cross-references (ثِيدِاحَأَلْٱ "appears in
+  6:7") — real Quran words placed wrong, teaching position.
+  - Each carries a teaching rationale, not just a wrong option.
+
+  This validates your core thesis: being forced to choose forces both 
+  memorization and understanding. The method works.
+
+  Now let me fix the missing ayahs 62–80. I'll patch the fetch phase to pull
+  that gap in small chunks (WebFetch truncates on large JSON, so I'll fetch ~10
+  verses at a time), then resume — cached phases return instantly, only the gap
+  and re-synthesis run.
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ I'll change the fetch strategy from 3 big pages (which truncate) to small
+  verse-range chunks that WebFetch can return intact. I'll fetch in ranges of
+  ~12 verses using the API's page parameter with a smaller per_page. The
+  cleanest approach: use per_page=12 giving 10 pages, each small enough to
+  survive.
+
+  Note: resume won't help here since I'm changing the fetch calls (the whole
+  downstream depends on fetch output), so this is effectively a fresh run — but
+  the mental model and SRS prompts are unchanged and deterministic-ish. Given
+  the fetch is the root issue, I'll rewrite just the fetch phase to be robust
+  and re-run.
+
+⏺ Update(/private/tmp/claude-501/-Users-firdaus-Documents-2026-office-mfa-kuizqu
+        ran/23920490-1d99-430b-b999-da221e4a059c/scratchpad/yusuf-engine.js)
+  ⎿  Added 5 lines, removed 2 lines
+      17  // ------------------------------------------------------------
+          ---------------
+      18  phase('Fetch')
+      19  
+      20 -const PAGE_SIZE = 40                                           
+      21 -const PAGES = [1, 2, 3] // 40+40+31 = 111                      
+      20 +// WebFetch truncates large JSON responses, so fetch in SMALL p
+         +ages that survive                                              
+      21 +// intact. per_page=12 over chapter 12 (111 ayahs) => 10 pages 
+         +(last = 3 verses).                                             
+      22 +// Each page is small enough that WebFetch returns the complete
+         + words array.                                                  
+      23 +const PAGE_SIZE = 12                                           
+      24 +const PAGES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] // 12*9 + 3 = 111
+      25  
+      26  const FETCH_SCHEMA = {
+      27    type: 'object',
+
+⏺ Now let me add a completeness guard so the workflow verifies all 111 ayahs
+  arrived and retries any missing range before proceeding — so we never silently
+  ship an incomplete surah again.
+
+⏺ Update(/private/tmp/claude-501/-Users-firdaus-Documents-2026-office-mfa-kuizqu
+        ran/23920490-1d99-430b-b999-da221e4a059c/scratchpad/yusuf-engine.js)
+  ⎿  Added 50 lines, removed 4 lines
+       66    )
+       67  ))
+       68  
+       69 -const allVerses = pages                                       
+       70 -  .filter(Boolean)                                            
+       71 -  .flatMap((pg) => pg.verses)                                 
+       72 -  .sort((a, b) => a.verse_number - b.verse_number)            
+       69 +function collectVerses(pageResults) {                         
+       70 +  const byNum = new Map()                                     
+       71 +  for (const pg of pageResults.filter(Boolean)) {             
+       72 +    for (const v of pg.verses || []) {                        
+       73 +      // keep the version with the most words if duplicated ac
+          +ross retries                                                  
+       74 +      const existing = byNum.get(v.verse_number)              
+       75 +      if (!existing || (v.words?.length || 0) > (existing.word
+          +s?.length || 0)) {                                            
+       76 +        byNum.set(v.verse_number, v)                          
+       77 +      }                                                       
+       78 +    }                                                         
+       79 +  }                                                           
+       80 +  return byNum                                                
+       81 +}                                                             
+       82  
+       83 +let byNum = collectVerses(pages)                              
+       84 +                                                              
+       85 +// Completeness guard: Surah Yusuf MUST have all 111 ayahs. Re
+          +try any missing                                               
+       86 +// verse individually (single-verse fetches never truncate).  
+       87 +function missingAyahs(map) {                                  
+       88 +  const m = []                                                
+       89 +  for (let n = 1; n <= 111; n++) if (!map.has(n)) m.push(n)   
+       90 +  return m                                                    
+       91 +}                                                             
+       92 +                                                              
+       93 +let missing = missingAyahs(byNum)                             
+       94 +let guardRound = 0                                            
+       95 +while (missing.length && guardRound < 3) {                    
+       96 +  guardRound++                                                
+       97 +  log(`Completeness guard round ${guardRound}: ${missing.lengt
+          +h} ayahs missing (${missing.join(',')}) — retrying individuall
+          +y`)                                                           
+       98 +  const retries = await parallel(missing.map((n) => () =>     
+       99 +    agent(                                                    
+      100 +      `Use the WebFetch tool to GET this exact URL (single ver
+          +se, will not truncate):\n` +                                  
+      101 +      `https://api.quran.com/api/v4/verses/by_key/12:${n}?lang
+          +uage=en&words=true&word_fields=text_uthmani&fields=text_uthman
+          +i\n\n` +                                                      
+      102 +      `Ask WebFetch to return the complete raw JSON for this o
+          +ne verse: verse_number, text_uthmani, and the full words array
+          + (each word: position, text_uthmani, translation).\n` +       
+      103 +      `CRITICAL: copy text_uthmani EXACTLY, character-for-char
+          +acter with all tashkeel; never regenerate Arabic from memory. 
+          +Exclude any end-of-ayah marker word whose translation is empty
+          + or just a number.\n` +                                       
+      104 +      `Return page=0 and a verses array containing ONLY this o
+          +ne verse (verse_number ${n}).`,                               
+      105 +      { label: `refetch:12:${n}`, phase: 'Fetch', schema: FETC
+          +H_SCHEMA }                                                    
+      106 +    )                                                         
+      107 +  ))                                                          
+      108 +  const more = collectVerses(retries)                         
+      109 +  for (const [k, v] of more) if (!byNum.has(k)) byNum.set(k, v
+          +)                                                             
+      110 +  missing = missingAyahs(byNum)                               
+      111 +}                                                             
+      112 +                                                              
+      113 +const allVerses = [...byNum.values()].sort((a, b) => a.verse_n
+          +umber - b.verse_number)                                       
+      114 +                                                              
+      115 +if (missing.length) {                                         
+      116 +  log(`WARNING: still missing ${missing.length} ayahs after re
+          +tries: ${missing.join(',')} — proceeding with ${allVerses.leng
+          +th}/111`)                                                     
+      117 +} else {                                                      
+      118 +  log(`Completeness OK: all 111 ayahs present`)               
+      119 +}                                                             
+      120  log(`Fetched ${allVerses.length} verses, ${allVerses.reduce((n
+           , v) => n + v.words.length, 0)} words total`)
+      121  
+      122  // Compact ground-truth string the downstream agents can refer
+           ence verbatim.
+
+⏺ Now let me relaunch. Since the fetch calls changed, this is a fresh run (the
+  mental model and SRS will regenerate, which is fine — they were high quality).
+  Launching in the background.
+  ⎿  /workflows to view dynamic workflow runs
+
+⏺ Re-run launched with the fix. While it builds the complete 111-ayah version,
+  let me update memory with what we've established and validated.
+
+  Wrote 1 memory (ctrl+o to expand)
+  ⎿  You've hit your session limit · resets 10:30am (Asia/Tokyo)
+     /upgrade to increase your usage limit.
+
+✻ Worked for 1m 33s
+
+⏺ Dynamic workflow "Build the full Surah Yusuf atomic MCQ + SRS + mental-model
+hifz engine spec from authentic Quran.com data" completed · 38s
+  ⎿  You've hit your session limit · resets 10:30am (Asia/Tokyo)
+     /upgrade to increase your usage limit.
+
+✻ Worked for 2h 46m 23s

@@ -1,0 +1,7 @@
+# Copy to .dev.vars for local development (.dev.vars is gitignored).
+# Local dev uses the MOCK Google verifier (GOOGLE_MOCK=1 in wrangler.jsonc),
+# so a real GOOGLE_CLIENT_ID is not needed until GATE C / staging.
+
+SESSION_SECRET=dev-only-insecure-secret-change-me
+GOOGLE_CLIENT_ID=dev-mock-client-id
+ADMIN_EMAILS=you@example.com

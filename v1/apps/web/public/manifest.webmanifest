@@ -1,0 +1,9 @@
+{
+  "name": "iman.app — Yusuf",
+  "short_name": "iman",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#edebe3",
+  "theme_color": "#edebe3",
+  "icons": []
+}

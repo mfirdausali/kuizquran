@@ -1,0 +1,340 @@
+<title>Kuiz Quran — A Day in the Life</title>
+<style>
+  :root{
+    --ink:#0B0E1A; --ink-panel:#141a2e; --ink-2:#0e1424; --ink-line:#232c45;
+    --parch:#F5F0E4; --parch-dim:#cfc9ba; --parch-mute:#9aa0b0;
+    --gold:#C9A24B; --gold-soft:#e0c079; --dusk:#5B7B9A;
+    --retain:#7BA86F; --decay:#C77B5B;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
+    --sans:"Avenir Next","Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:"SFMono-Regular",ui-monospace,"Cascadia Mono",Menlo,Consolas,monospace;
+    --arab:"SF Arabic","Geeza Pro","Noto Naskh Arabic",serif;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0;background:var(--ink);color:var(--parch);font-family:var(--sans);
+    font-size:16px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1160px;margin:0 auto;padding:0 26px}
+  h1,h2,h3,h4{font-family:var(--serif);font-weight:600;line-height:1.14;margin:0;text-wrap:balance}
+  p{margin:0}
+  .eyebrow{font-family:var(--mono);font-size:11.5px;letter-spacing:.26em;text-transform:uppercase;color:var(--gold)}
+  .tabnum{font-variant-numeric:tabular-nums}
+
+  /* header */
+  header{padding:74px 0 40px;border-bottom:1px solid var(--ink-line);
+    background:radial-gradient(120% 120% at 50% -10%,#111a35,var(--ink))}
+  header h1{font-size:clamp(34px,6vw,60px);letter-spacing:-.01em;margin:18px 0 0}
+  header h1 .g{color:var(--gold);font-style:italic}
+  header p.lead{max-width:660px;margin:22px 0 0;font-size:19px;color:var(--parch-dim)}
+  .legend{display:flex;gap:26px;flex-wrap:wrap;margin-top:30px;font-family:var(--mono);font-size:12px;color:var(--parch-mute);letter-spacing:.02em}
+  .legend span{display:inline-flex;align-items:center;gap:7px}
+  .dot{width:9px;height:9px;border-radius:50%}
+  .d-gold{background:var(--gold)} .d-dusk{background:var(--dusk)} .d-ret{background:var(--retain)} .d-dec{background:var(--decay)}
+
+  /* actor summary table */
+  .table-sec{padding:56px 0 20px}
+  .sec-head{display:flex;align-items:baseline;gap:16px;margin-bottom:8px}
+  .sec-head h2{font-size:clamp(24px,4vw,34px)}
+  .sec-head .tag{font-family:var(--mono);font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--dusk)}
+  .sec-lead{color:var(--parch-dim);max-width:680px;margin:6px 0 30px;font-size:16.5px}
+  .scroller{overflow-x:auto;border:1px solid var(--ink-line);border-radius:8px;background:var(--ink-panel)}
+  table{border-collapse:collapse;width:100%;min-width:820px;font-size:14.5px}
+  thead th{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--parch-mute);text-align:left;padding:16px 18px;border-bottom:1px solid var(--ink-line);background:var(--ink-2);position:sticky;top:0}
+  tbody td{padding:15px 18px;border-bottom:1px solid var(--ink-line);vertical-align:top;color:var(--parch-dim)}
+  tbody tr:last-child td{border-bottom:0}
+  tbody tr:hover td{background:rgba(201,162,75,.04)}
+  .who{color:var(--parch);font-family:var(--serif);font-size:17px;font-weight:600}
+  .who .role{display:block;font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dusk);margin-top:3px;font-weight:400}
+  .dur{font-family:var(--mono);color:var(--gold-soft);white-space:nowrap}
+  .badge{display:inline-block;font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;
+    padding:3px 8px;border-radius:3px;border:1px solid var(--ink-line);color:var(--parch-mute);margin:2px 4px 2px 0;white-space:nowrap}
+  .badge.core{border-color:var(--gold);color:var(--gold-soft)}
+
+  /* storyboards */
+  .stories{padding:60px 0}
+  .story{border:1px solid var(--ink-line);border-radius:12px;background:linear-gradient(180deg,var(--ink-panel),#10152a);
+    margin-bottom:30px;overflow:hidden}
+  .story-top{display:grid;grid-template-columns:1fr auto;gap:18px;padding:26px 28px 20px;border-bottom:1px solid var(--ink-line);align-items:start}
+  .story-id{display:flex;align-items:center;gap:16px}
+  .avatar{width:52px;height:52px;border-radius:12px;flex:0 0 52px;display:flex;align-items:center;justify-content:center;
+    font-size:26px;background:var(--ink-2);border:1px solid var(--ink-line)}
+  .story-id h3{font-size:22px}
+  .story-id .sub{color:var(--parch-mute);font-size:13.5px;margin-top:3px}
+  .story-when{text-align:right;font-family:var(--mono);font-size:12px;color:var(--parch-mute);letter-spacing:.02em}
+  .story-when b{display:block;color:var(--gold-soft);font-size:20px;letter-spacing:0;margin-bottom:2px;font-family:var(--serif);font-weight:600}
+  .story-when .len{color:var(--dusk)}
+
+  /* timeline of taps */
+  .flow{padding:6px 28px 26px}
+  .flow-rail{display:flex;gap:0;overflow-x:auto;padding:22px 0 8px;scroll-snap-type:x proximity}
+  .frame{flex:0 0 208px;scroll-snap-align:start;position:relative;padding-right:34px}
+  .frame:not(:last-child)::after{content:"→";position:absolute;right:8px;top:76px;color:var(--dusk);font-size:18px}
+  .screen{border:1px solid var(--ink-line);border-radius:10px;background:var(--ink-2);height:158px;padding:13px 14px;
+    display:flex;flex-direction:column;overflow:hidden;position:relative}
+  .screen .scr-name{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--gold);margin-bottom:8px}
+  .screen .scr-body{flex:1;font-size:12.5px;color:var(--parch-dim);line-height:1.4}
+  .screen.arabic .scr-body{font-family:var(--arab);direction:rtl;font-size:17px;text-align:center;display:flex;align-items:center;justify-content:center}
+  .screen .mini-opt{display:inline-block;font-family:var(--arab);font-size:14px;background:#0b101d;border:1px solid var(--ink-line);border-radius:4px;padding:2px 7px;margin:2px 2px 0 0}
+  .screen .mini-opt.ok{border-color:var(--retain);color:#bfe0b3}
+  .bar{height:5px;background:var(--ink-line);border-radius:3px;margin-top:8px;overflow:hidden}
+  .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--dusk),var(--gold))}
+  .frame .cap{font-size:11.5px;color:var(--parch-mute);margin-top:9px;line-height:1.35}
+  .frame .cap b{color:var(--parch);font-weight:600}
+  .frame .t{font-family:var(--mono);font-size:10px;color:var(--dusk);letter-spacing:.06em;margin-top:6px}
+
+  /* insight strip */
+  .insight{display:flex;gap:14px;flex-wrap:wrap;padding:0 28px 26px}
+  .chip{font-size:12.5px;color:var(--parch-dim);background:var(--ink-2);border:1px solid var(--ink-line);
+    border-left:3px solid var(--gold);border-radius:5px;padding:9px 13px}
+  .chip b{color:var(--parch)}
+  .chip.data{border-left-color:var(--dusk)}
+  .chip.data b{color:var(--dusk)}
+
+  /* rhythm section */
+  .rhythm{padding:20px 0 70px}
+  .clock{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-top:26px}
+  .slot{border:1px solid var(--ink-line);border-radius:9px;padding:18px 18px 16px;background:var(--ink-panel)}
+  .slot .hr{font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--gold);text-transform:uppercase}
+  .slot h4{font-size:16px;margin:9px 0 4px;color:var(--parch)}
+  .slot p{font-size:13px;color:var(--parch-mute);line-height:1.45}
+  .slot .who-mini{font-family:var(--mono);font-size:10px;color:var(--dusk);margin-top:9px;letter-spacing:.04em}
+
+  footer{border-top:1px solid var(--ink-line);padding:44px 0 60px;color:var(--parch-mute);font-size:13px}
+  footer .wrap{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;align-items:center}
+  @media(max-width:640px){.story-top{grid-template-columns:1fr}.story-when{text-align:left}}
+  @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto}}
+</style>
+
+<header>
+  <div class="wrap">
+    <p class="eyebrow">Kuiz Quran · iman.app — Daily scenarios</p>
+    <h1>A day in the life of the people who <span class="g">carry the Quran.</span></h1>
+    <p class="lead">Six actors, six rhythms. Who opens the app, when, on what device, which screens they touch, and for how long — traced tap by tap. Every scenario ends the same way the engine does: another recall event feeding the memory graph.</p>
+    <div class="legend">
+      <span><i class="dot d-gold"></i> Core learning loop</span>
+      <span><i class="dot d-dusk"></i> Oversight / dashboard</span>
+      <span><i class="dot d-ret"></i> Recall succeeded</span>
+      <span><i class="dot d-dec"></i> Word at risk / lapsed</span>
+    </div>
+  </div>
+</header>
+
+<!-- ACTOR SUMMARY -->
+<section class="table-sec">
+  <div class="wrap">
+    <div class="sec-head"><h2>The actors</h2><span class="tag">who · when · what · how long</span></div>
+    <p class="sec-lead">The casual learner is the centre of gravity; the parent, teacher, and institution are the roles the retention data unlocks. The commuter and the reverting beginner are the two hardest-to-retain profiles the product is built for.</p>
+    <div class="scroller">
+      <table>
+        <thead><tr>
+          <th>Actor</th><th>When they use it</th><th>Primary screens</th><th>Typical length</th><th>What they get</th>
+        </tr></thead>
+        <tbody>
+          <tr>
+            <td class="who">Aisyah, 24 <span class="role">Casual learner · core ICP</span></td>
+            <td>After Subuh &amp; before bed — two anchored micro-sessions</td>
+            <td><span class="badge core">Story Map</span><span class="badge core">Scene Player</span><span class="badge core">MCQ Card</span><span class="badge">Scene Complete</span></td>
+            <td class="dur">2 × 6 min</td>
+            <td>Keeps Surah Yusuf from slipping; feels like watching a serial</td>
+          </tr>
+          <tr>
+            <td class="who">Danish, 31 <span class="role">Commuter · time-boxed</span></td>
+            <td>On the LRT, one-handed, headphones in</td>
+            <td><span class="badge core">Quran Feed</span><span class="badge core">MCQ Card</span><span class="badge">Vocab Battle</span></td>
+            <td class="dur">11 min</td>
+            <td>Dead commute becomes ibadah; the app picks everything for him</td>
+          </tr>
+          <tr>
+            <td class="who">Umar, 19 <span class="role">Reverting beginner</span></td>
+            <td>Late night, when motivation spikes</td>
+            <td><span class="badge core">Onboarding</span><span class="badge core">Scene Player</span><span class="badge core">MCQ Card</span><span class="badge">Streak</span></td>
+            <td class="dur">18 min (then tapers)</td>
+            <td>Learns his first short surahs; the satiety cap stops him burning out</td>
+          </tr>
+          <tr>
+            <td class="who">Fatimah, 42 <span class="role">Parent</span></td>
+            <td>Once a week, Sunday evening</td>
+            <td><span class="badge">Family Dashboard</span><span class="badge">Retention Report</span></td>
+            <td class="dur">4 min</td>
+            <td>Confidence: proof her daughter's hifz is actually sticking</td>
+          </tr>
+          <tr>
+            <td class="who">Ustaz Rahim, 38 <span class="role">Tahfiz teacher</span></td>
+            <td>Before class, every morning</td>
+            <td><span class="badge">Class Dashboard</span><span class="badge">Forgetting Alerts</span><span class="badge">Student Detail</span></td>
+            <td class="dur">7 min</td>
+            <td>Prediction: knows who needs revision before they do</td>
+          </tr>
+          <tr>
+            <td class="who">Nur, 9 <span class="role">Child · madrasah student</span></td>
+            <td>15 min after Maghrib, parent nearby</td>
+            <td><span class="badge core">Scene Player</span><span class="badge core">MCQ Card</span><span class="badge">Garden</span><span class="badge">Streak</span></td>
+            <td class="dur">10 min (guided)</td>
+            <td>The story + garden make revision feel like a game, not homework</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- STORYBOARDS -->
+<section class="stories">
+  <div class="wrap">
+    <div class="sec-head"><h2>Traced, tap by tap</h2><span class="tag">screens accessed →</span></div>
+    <p class="sec-lead">Scroll each strip sideways to follow the exact screens each actor touches, in order, with timings. This is the app choosing the next interaction — the user rarely decides.</p>
+    <div id="board"></div>
+  </div>
+</section>
+
+<!-- DAILY RHYTHM -->
+<section class="rhythm">
+  <div class="wrap">
+    <div class="sec-head"><h2>The rhythm of one day</h2><span class="tag">when the engine is touched</span></div>
+    <p class="sec-lead">Usage clusters around salah and dead-time. The engine never demands a fixed slot — it surfaces exactly the day's due reviews, so the session length auto-scales to what memory actually needs.</p>
+    <div class="clock" id="clock"></div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>Kuiz Quran · iman.app — daily-scenario storyboards. Screens grounded in <code>srs-engine.json</code> (Story Map, Scene Player, MCQ Card) and the Memory-OS feed model (Quran Feed, dashboards).</span>
+    <span class="tabnum" style="font-family:var(--mono);color:var(--dusk)">6 actors · 1 day · every tap → the memory graph</span>
+  </div>
+</footer>
+
+<script>
+/* ---------- storyboard data ---------- */
+const SCREENS = {
+  storymap:{name:"Story Map",body:"19-act filmstrip. Streak 🔥 12 · 8 reviews due today. Cursor rests on Act 5 — 'The Pit'.",cap:"Opens on the map, not a menu. <b>Variable-reward anticipation</b> before anything loads.",bar:42},
+  scene:{name:"Scene Player",body:"🎬 A boy vanishing into a black well… a bloodied shirt held before an old man.",cap:"15–20s narration of the act. <b>Low-effort hook</b> — the 'just one more scene' pull.",bar:0},
+  mcq:{name:"MCQ Card",arabic:true,body:"فَلَمَّا ذَهَبُوا۟ بِهِۦ ____",cap:"Forced-choice cloze inside its scene. <b>Choosing forces recall + meaning.</b>",bar:0,opts:true},
+  hit:{name:"Feedback",body:"✓ GOOD · 1.4s. Correct — interval extends. No self-rating.",cap:"Latency + correctness silently grade the card. <b>Machine judges, not you.</b>",bar:70,good:true},
+  scenedone:{name:"Scene Complete",body:"✓ Scene 5 rebuilt. You rescued 6 words from being forgotten. One more?",cap:"Ends on completion. <b>'One more successful recall'</b> — not 'one more video'.",bar:100},
+  feed:{name:"Quran Feed",body:"Ranked cards: ① Review Ayah 27 (93% forget tomorrow) ② Continue Yusuf ③ 15s Vocab Battle",cap:"The <b>app ranks & picks</b>. score = forgetting_risk + momentum + enjoyment…",bar:55},
+  vocab:{name:"Vocab Battle",body:"You always confuse رأى and نظر. Fix it — 15s.",cap:"Targets <b>his</b> confusion pair, surfaced from prior wrong taps.",bar:30},
+  onboard:{name:"Onboarding",body:"Pick where to start: Al-Ikhlas · Al-Kawthar · An-Nas. Your niyyah?",cap:"Casual on-ramp — <b>short surahs first</b>, not full hifz.",bar:12},
+  streak:{name:"Streak / Freeze",body:"🔥 3 days. Freeze token protects tomorrow. Welcome-back path ready.",cap:"Consistency celebrated; <b>sabr jamīl</b> — a lapse never zeroes you.",bar:33},
+  satiety:{name:"Satiety Cap",body:"You've done well — the rest is saved for tomorrow. Extra reps now won't help.",cap:"<b>Refuses to let him cram.</b> An ethical guardrail, backed by FSRS.",bar:100},
+  garden:{name:"Quran Garden",body:"🌱 Your garden grew: Ayah 4 took root. 3 seedlings need water (review).",cap:"Progress as <b>growth, not public metrics</b>. Every recall grows something.",bar:60},
+  family:{name:"Family Dashboard",body:"Nur · Surah Yusuf — Retention 94% · Vocabulary 83% · Recall @6mo (est.) 89%",cap:"Parents pay for <b>confidence</b>, not quizzes. Evidence hifz is sticking.",bar:88,dusk:true},
+  report:{name:"Retention Report",body:"This week: 27 ayat kept that would otherwise have been forgotten. 2 at risk.",cap:"Tangible value stated plainly. <b>The 'you would have forgotten' number.</b>",bar:75,dusk:true},
+  classdash:{name:"Class Dashboard",body:"Class 5A · Highest forgetting today: Surah Yusuf Ayah 37 · 18/24 affected.",cap:"The engine knows <b>who needs revision before they do</b>.",bar:64,dusk:true},
+  alerts:{name:"Forgetting Alerts",body:"⚠ 18 students predicted to lapse on Ayah 37 today. Recommend: review in class.",cap:"<b>Prediction, not attendance.</b> This is the teacher's superpower.",bar:80,dusk:true},
+  student:{name:"Student Detail",body:"Aiman · weak on دبر/قبل confusion · recitation 71% · schedule tightened.",cap:"Drill into one learner's <b>memory graph</b>.",bar:50,dusk:true}
+};
+
+const STORIES = [
+  {emoji:"🌅",name:"Aisyah, 24",sub:"Casual learner · iPhone · after Subuh, then before bed",when:"05:40 & 22:50",len:"2 × 6 min · at home",loop:"core",
+   frames:[
+     ["storymap","05:40 · opens on the map"],
+     ["scene","Act 5 unlocks — the Pit plays"],
+     ["mcq","taps the missing word"],
+     ["hit","✓ 1.4s — logged as GOOD"],
+     ["scenedone","Scene 5 rebuilt · 'one more?'"]
+   ],
+   chips:[["core","She never files through menus — the app rests her cursor on the exact next scene."],
+          ["data","Every tap logs: correct?, latency, which distractor. Night session = interleaved due reviews from Acts 1–4."]]},
+
+  {emoji:"🚆",name:"Danish, 31",sub:"Commuter · Android · one-handed on the LRT",when:"08:12",len:"11 min · in transit",loop:"core",
+   frames:[
+     ["feed","the feed is pre-loaded, ranked"],
+     ["mcq","top card: a 93%-forget review"],
+     ["hit","✓ fast — interval jumps out"],
+     ["vocab","15s battle on his confusion pair"],
+     ["scenedone","done before his stop"]
+   ],
+   chips:[["core","Zero friction: open → content already ranked → one thumb. No search, no typing."],
+          ["data","The engine chose all four cards by forgetting-risk. His dead commute becomes his highest-value retrieval window."]]},
+
+  {emoji:"🌙",name:"Umar, 19",sub:"Reverting beginner · phone · late night motivation spike",when:"23:30",len:"18 min → tapers",loop:"core",
+   frames:[
+     ["onboard","picks Al-Ikhlas to start"],
+     ["scene","short-surah scene sets context"],
+     ["mcq","first forced recalls, 2 distractors"],
+     ["streak","🔥 day 3 · freeze earned"],
+     ["satiety","'saved for tomorrow' — capped"]
+   ],
+   chips:[["core","Starts at the casual on-ramp — short surahs, gentlest question tier, scene-first."],
+          ["data","The satiety cap stops the classic beginner burnout: it refuses the cram his motivation spike wants."]]},
+
+  {emoji:"👧",name:"Nur, 9",sub:"Madrasah student · family iPad · after Maghrib, parent nearby",when:"19:35",len:"10 min · guided",loop:"core",
+   frames:[
+     ["scene","the story plays — she watches"],
+     ["mcq","taps the word, big targets"],
+     ["hit","✓ — a seed is planted"],
+     ["garden","🌱 her garden grows"],
+     ["streak","🔥 sticker-style streak"]
+   ],
+   chips:[["core","Story + garden reframe revision as play. Meaning is always attached — never parroting."],
+          ["data","Her recall events flow to Fatimah's Family Dashboard and Ustaz Rahim's Class Dashboard."]]},
+
+  {emoji:"👩",name:"Fatimah, 42",sub:"Parent · phone · Sunday evening check-in",when:"Sun 21:00",len:"4 min · weekly",loop:"dash",
+   frames:[
+     ["family","opens Nur's dashboard"],
+     ["report","'27 ayat kept this week'"]
+   ],
+   chips:[["data","She doesn't learn — she buys <b>confidence</b>. The 'would-have-forgotten' number is the product she pays for."],
+          ["dash","No public metrics, no leaderboards. Just evidence of her child's growth."]]},
+
+  {emoji:"🧑‍🏫",name:"Ustaz Rahim, 38",sub:"Tahfiz teacher · laptop · before class each morning",when:"07:15",len:"7 min · daily",loop:"dash",
+   frames:[
+     ["classdash","Class 5A — today's forgetting"],
+     ["alerts","18/24 predicted to lapse: Ayah 37"],
+     ["student","drills into one weak learner"]
+   ],
+   chips:[["data","He sells nothing and buys <b>prediction</b> — the engine flags revision needs before students feel them."],
+          ["dash","This is the B2B wedge: educational intelligence, not another quiz app."]]}
+];
+
+/* render storyboards */
+const board=document.getElementById("board");
+STORIES.forEach(s=>{
+  const el=document.createElement("div");el.className="story";
+  const frames=s.frames.map(([key,cap],i)=>{
+    const S=SCREENS[key];
+    let body=`<div class="scr-body">${S.body}</div>`;
+    if(S.opts){body=`<div class="scr-body">فَلَمَّا ذَهَبُوا۟ بِهِۦ ____<div style="margin-top:8px;direction:rtl">
+      <span class="mini-opt ok">رُؤْياكَ</span><span class="mini-opt">حَديثَكَ</span><span class="mini-opt">قَولَكَ</span></div></div>`}
+    const barColor = S.dusk? 'var(--dusk)': S.good?'var(--retain)':'';
+    const bar = (S.bar!==undefined)?`<div class="bar"><i style="width:${S.bar}%${barColor?';background:'+barColor:''}"></i></div>`:'';
+    return `<div class="frame">
+      <div class="screen ${S.arabic?'arabic':''}">
+        <div class="scr-name">${S.name}</div>${body}${bar}
+      </div>
+      <div class="t">step ${i+1}</div>
+      <div class="cap">${cap}</div>
+    </div>`;
+  }).join("");
+  el.innerHTML=`
+    <div class="story-top">
+      <div class="story-id">
+        <div class="avatar">${s.emoji}</div>
+        <div><h3>${s.name}</h3><div class="sub">${s.sub}</div></div>
+      </div>
+      <div class="story-when"><b>${s.when}</b><span class="len">${s.len}</span></div>
+    </div>
+    <div class="flow"><div class="flow-rail">${frames}</div></div>
+    <div class="insight">${s.chips.map(([c,t])=>`<div class="chip ${c==='data'||c==='dash'?'data':''}">${t}</div>`).join("")}</div>`;
+  board.appendChild(el);
+});
+
+/* daily rhythm clock */
+const CLOCK=[
+  ["05:40","Subuh anchor","Aisyah's morning micro-session; the day's due reviews surface first.","Casual learner"],
+  ["07:15","Pre-class","Ustaz Rahim reads the forgetting alerts for Class 5A.","Teacher"],
+  ["08:12","The commute","Danish clears 4 ranked cards one-handed on the LRT.","Commuter"],
+  ["13:10","Zuhr lull","Optional nudge: 'Al-Mulk has reached its ideal review window.'","Any learner"],
+  ["19:35","After Maghrib","Nur's guided 10 min; her garden grows, parent nearby.","Child"],
+  ["21:00","Sunday only","Fatimah checks the Family Dashboard — weekly, 4 min.","Parent"],
+  ["22:50","Before bed","Aisyah's second session; interleaved re-watch of earlier acts.","Casual learner"],
+  ["23:30","Motivation spike","Umar's long beginner session — until the satiety cap steps in.","Beginner"]
+];
+const clock=document.getElementById("clock");
+CLOCK.forEach(([hr,t,p,who])=>{
+  const d=document.createElement("div");d.className="slot";
+  d.innerHTML=`<div class="hr">${hr}</div><h4>${t}</h4><p>${p}</p><div class="who-mini">${who}</div>`;
+  clock.appendChild(d);
+});
+</script>

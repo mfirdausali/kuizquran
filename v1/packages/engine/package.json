@@ -1,0 +1,18 @@
+{
+  "name": "engine",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "description": "Pure scheduling/strength/ladder logic — no DOM, no IO. Consumed by apps/web.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
+  }
+}

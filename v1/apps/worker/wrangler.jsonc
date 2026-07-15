@@ -1,0 +1,73 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "iman-worker",
+	"account_id": "5cc4c0815e04f874f3be45db770ab461",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-06-01",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	// Non-secret vars. Secrets (GOOGLE_CLIENT_ID, SESSION_SECRET, ADMIN_EMAILS) come
+	// from .dev.vars locally and `wrangler secret put` in staging/prod. GOOGLE_MOCK
+	// enables the dev-only mock Google verifier — NEVER set in staging/prod.
+	"vars": {
+		"ALLOWED_ORIGINS": "http://localhost:5173,http://localhost:4173",
+		"GOOGLE_MOCK": "1"
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "iman-db",
+			"database_id": "9d965512-3ec5-4fc5-9613-556874cce531",
+			"migrations_dir": "./migrations"
+		}
+	],
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "USER_DO",
+				"class_name": "UserDO"
+			}
+		]
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": [
+				"UserDO"
+			]
+		}
+	],
+	"env": {
+		"staging": {
+			"name": "iman-worker-staging",
+			"vars": {
+				"ALLOWED_ORIGINS": "https://iman-quiz.pages.dev",
+				"GOOGLE_MOCK": "0"
+			},
+			// Environments do NOT inherit top-level bindings — repeat them here.
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "iman-db",
+					"database_id": "9d965512-3ec5-4fc5-9613-556874cce531",
+					"migrations_dir": "./migrations"
+				}
+			],
+			"durable_objects": {
+				"bindings": [
+					{
+						"name": "USER_DO",
+						"class_name": "UserDO"
+					}
+				]
+			},
+			"migrations": [
+				{
+					"tag": "v1",
+					"new_sqlite_classes": ["UserDO"]
+				}
+			]
+		}
+	}
+}
