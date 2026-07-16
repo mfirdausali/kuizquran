@@ -98,3 +98,28 @@ last_completed=6
 # with NO corpus rebuild; the admin console's Frontier tab marks an ayah
 # verified through its own UI and the metric updates live; no console errors,
 # no horizontal overflow.
+last_completed=7
+# Phase 7: hardening & gates. Data-readiness for GATE-A's early movements
+# (12:1-20) done WITHOUT self-certifying Arabic correctness (v1/CLAUDE.md:
+# "Cannot self-certify Arabic correctness") - ayah_verifications stays empty
+# (verifiedThrough:0, confirmed live), that tap is a required human action.
+# Fixed: 19/19 scene-beat TODO labels authored (corpus-compiler + both shipped
+# corpus.json copies); DATA-1 multi-word grouping resolved end-to-end
+# (overrides.ts's applyOverrides -> CorpusWord.groupPositions -> ladder.ts's
+# S1 pass probes a group once, at its anchor - 10 real phrases from
+# v1/docs/corpus-report.md seeded via Phase7OverrideSeeder); all 257 null MS
+# glosses for ayat 1-20 machine-sourced as question_overrides rows (editor_id
+# null, explicitly unverified). Found + fixed a real bug while verifying MS
+# glosses live: Test.tsx's vocab item never threaded the learner's chosen
+# gloss language (vocabItem() called without `lang`), so onboarding's MS
+# choice silently never reached a learner - fixed at the one call site +
+# regression test. S3 dark-mode tile contrast: verified ALREADY fixed (WCAG
+# ratios 10.0/8.1/5.7:1, live dark-mode screenshot) - no change needed.
+# ~14.8% valid-but-attested distractors: left to case-by-case qari review via
+# the existing Phase-6 override mechanism (v2-D63), no new UI this phase.
+# vitest green (254 tests, 7 new), `php artisan test` green (47 tests, 3 new).
+# Live dev-server + Laravel + Playwright run (375px) confirmed: MS-language
+# onboarding -> /test over 12:1-20 renders genuine Bahasa Melayu vocab options
+# (zero English markers); admin Frontier tab honestly shows verifiedThrough:0/
+# learnerFrontier:0; admin Overrides tab lists all 267 seeded rows; no console
+# errors beyond a benign favicon 404, no horizontal overflow.

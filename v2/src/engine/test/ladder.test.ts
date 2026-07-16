@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { advance, initLadder, nextItem, type LadderItem } from "../src/ladder.ts";
+import { applyOverrides, type QuestionOverride } from "../src/overrides.ts";
 import type { Corpus, DrillItem, LadderDone } from "../src/types.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -155,5 +156,53 @@ describe("S2 fill", () => {
     // still on the same blank
     const again = nextItem(r.state, corpus) as Extract<DrillItem, { rung: "S2" }>;
     expect(again.blankPosition).toBe(s2.blankPosition);
+  });
+});
+
+describe("S1 grouping — DATA-1 (ROADMAP Phase 7)", () => {
+  // 12:4 positions 8-9 (أَحَدَ + عَشَرَ = "eleven") — the real corpus-report.md pair.
+  const GROUP: QuestionOverride = {
+    surah: 12,
+    ayah: AYAH,
+    position: 8,
+    questionType: "S1",
+    field: "group",
+    payload: { groupWith: [9] },
+    createdAt: 1000,
+  };
+
+  it("a clean S1 sweep asks 14 items (15 words, one pair merged), never probing the trailing member alone", () => {
+    const { corpus: patched } = applyOverrides(corpus, [GROUP]);
+    let state = initLadder(patched, 12, AYAH);
+    const probedPositions: number[] = [];
+    let guard = 0;
+    while (guard++ < 500) {
+      const item = nextItem(state, patched);
+      if ("done" in item || item.rung !== "S1") break;
+      probedPositions.push(item.word.position);
+      state = advance(state, patched, item.correct).state;
+    }
+    expect(probedPositions).toEqual(Array.from(new Set(probedPositions))); // no repeats (all-correct)
+    expect(probedPositions).toHaveLength(words().length - 1); // 14, not 15
+    expect(probedPositions).not.toContain(9);
+    expect(probedPositions).toContain(8);
+    expect(state.rung).toBe("S2"); // sweep completed and advanced normally
+  });
+
+  it("the anchor's DrillItem carries groupPositions and the reported total is the probeable count", () => {
+    const { corpus: patched } = applyOverrides(corpus, [GROUP]);
+    let state = initLadder(patched, 12, AYAH);
+    let guard = 0;
+    while (guard++ < 500) {
+      const item = nextItem(state, patched);
+      if ("done" in item || item.rung !== "S1") break;
+      if (item.word.position === 8) {
+        expect(item.groupPositions).toEqual([8, 9]);
+        expect(item.total).toBe(words().length - 1);
+        return;
+      }
+      state = advance(state, patched, item.correct).state;
+    }
+    throw new Error("never reached the group anchor");
   });
 });

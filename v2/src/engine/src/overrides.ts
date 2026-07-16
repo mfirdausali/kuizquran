@@ -8,13 +8,18 @@
 // instead of the raw one, so "overrides win" is true everywhere at once with
 // zero changes to any already-tested generator.
 //
-// `gloss`/`distractor` overrides are corpus-data patches, resolved here.
-// `disable` is exposed as a plain list — filtering "which items to show" is
-// the APP layer's concern (Test.tsx/Drill.tsx), not the engine's. `group`/
-// `custom` are passed through unresolved this phase (v2-D55): they're fully
-// captured in the schema/editor for audit and a later phase's generation
-// wiring, but grouping the S1 unit-of-probe or rendering a wholly custom
-// question is real mechanic/UI work the Phase 6 exit criterion doesn't need.
+// `gloss`/`distractor`/`group` overrides are corpus-data patches, resolved
+// here. `disable` is exposed as a plain list — filtering "which items to
+// show" is the APP layer's concern (Test.tsx/Drill.tsx), not the engine's.
+// `custom` is passed through unresolved (v2-D55): a wholly custom question
+// needs new render branches in Drill/Test, real UI work no phase has needed
+// yet.
+//
+// `group` (DATA-1, ROADMAP Phase 7) went from "stored, not wired" (v2-D55) to
+// resolved: `applyOverrides` now stamps every member position of a group with
+// `CorpusWord.groupPositions`, and `ladder.ts`'s S1 pass reads that to probe
+// the group ONCE (at its lowest position) instead of once per token — see
+// v2-D59.
 
 import type { Corpus, CorpusDistractor, CorpusWord, GlossLang } from "./types.ts";
 
@@ -49,8 +54,8 @@ export interface OverrideResolution {
   corpus: Corpus;
   /** Active (latest per key, not re-enabled) `disable` overrides. */
   disabled: DisabledQuestion[];
-  /** Raw `group` override rows — not corpus-merged this phase; the editor
-   *  lists/creates them, generation wiring is deferred (v2-D55). */
+  /** Raw `group` override rows (every row seen, for the editor's audit list —
+   *  `corpus.words[].groupPositions` carries the RESOLVED latest-wins effect). */
   groups: QuestionOverride[];
   /** Raw `custom` override rows — same deferral as `groups`. */
   customs: QuestionOverride[];
@@ -72,6 +77,13 @@ interface DisablePayload {
   disabled?: boolean;
 }
 
+interface GroupPayload {
+  /** The OTHER position(s) grouped with the override row's own `position`
+   *  (the anchor — the lowest position, the only one ever probed standalone
+   *  in S1). E.g. `{position: 8, payload: {groupWith: [9]}}` for أَحَدَ+عَشَرَ. */
+  groupWith: number[];
+}
+
 function isGlossPayload(p: unknown): p is GlossPayload {
   const o = p as Partial<GlossPayload> | null;
   return !!o && typeof o.text === "string" && (o.lang === "en" || o.lang === "ms");
@@ -80,6 +92,11 @@ function isGlossPayload(p: unknown): p is GlossPayload {
 function isDistractorPayload(p: unknown): p is DistractorPayload {
   const o = p as Partial<DistractorPayload> | null;
   return !!o && Array.isArray(o.distractors);
+}
+
+function isGroupPayload(p: unknown): p is GroupPayload {
+  const o = p as Partial<GroupPayload> | null;
+  return !!o && Array.isArray(o.groupWith) && o.groupWith.every((n) => typeof n === "number");
 }
 
 /**
@@ -93,6 +110,7 @@ export function applyOverrides(corpus: Corpus, overrides: QuestionOverride[]): O
   const glossLatest = new Map<string, QuestionOverride>();
   const distractorLatest = new Map<string, QuestionOverride>();
   const disableLatest = new Map<string, QuestionOverride>();
+  const groupLatest = new Map<string, QuestionOverride>();
   const groups: QuestionOverride[] = [];
   const customs: QuestionOverride[] = [];
 
@@ -115,10 +133,27 @@ export function applyOverrides(corpus: Corpus, overrides: QuestionOverride[]): O
         break;
       case "group":
         groups.push(o);
+        if (o.position != null && isGroupPayload(o.payload)) {
+          groupLatest.set(`${o.ayah}:${o.position}`, o);
+        }
         break;
       case "custom":
         customs.push(o);
         break;
+    }
+  }
+
+  // DATA-1: index every group member position -> its sorted [anchor, ...rest]
+  // position list, so a word gets `groupPositions` whether it's the anchor
+  // (override's own `position`) or one of `groupWith`. A later override for
+  // the same anchor fully REPLACES the group (not additive), matching
+  // gloss/distractor's own latest-wins-per-key semantics.
+  const groupPositionsByWord = new Map<string, number[]>();
+  for (const ov of groupLatest.values()) {
+    const payload = ov.payload as GroupPayload;
+    const members = [ov.position!, ...payload.groupWith].sort((a, b) => a - b);
+    for (const pos of members) {
+      groupPositionsByWord.set(`${ov.ayah}:${pos}`, members);
     }
   }
 
@@ -128,8 +163,13 @@ export function applyOverrides(corpus: Corpus, overrides: QuestionOverride[]): O
       const ov = glossLatest.get(`${w.ayah}:${w.position}:${lang}`);
       if (ov) patches[lang] = (ov.payload as GlossPayload).text;
     }
-    if (Object.keys(patches).length === 0) return w;
-    return { ...w, gloss: { ...w.gloss, ...patches } };
+    const groupPositions = groupPositionsByWord.get(`${w.ayah}:${w.position}`);
+    if (Object.keys(patches).length === 0 && !groupPositions) return w;
+    return {
+      ...w,
+      ...(Object.keys(patches).length > 0 ? { gloss: { ...w.gloss, ...patches } } : {}),
+      ...(groupPositions ? { groupPositions } : {}),
+    };
   });
 
   const replacedPositions = new Set(distractorLatest.keys());

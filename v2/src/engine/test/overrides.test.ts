@@ -143,14 +143,49 @@ describe("applyOverrides — disable", () => {
   });
 });
 
-describe("applyOverrides — group/custom (stored, not generation-wired this phase)", () => {
-  it("passes group and custom rows through untouched, and leaves the corpus unpatched by them", () => {
-    const group = override({ ayah: 4, position: 1, field: "group", payload: { groupWith: [2, 3] } });
+describe("applyOverrides — custom (stored, not generation-wired this phase)", () => {
+  it("passes custom rows through untouched, and leaves the corpus unpatched by them", () => {
     const custom = override({ ayah: 4, position: null, field: "custom", payload: { prompt: "who spoke?", options: ["Yaqub", "Yusuf"], correct: "Yaqub" } });
-    const { groups, customs, corpus: patched } = applyOverrides(corpus, [group, custom]);
-    expect(groups).toEqual([group]);
+    const { customs, corpus: patched } = applyOverrides(corpus, [custom]);
     expect(customs).toEqual([custom]);
     expect(patched.words).toEqual(corpus.words);
     expect(patched.distractors).toEqual(corpus.distractors);
+  });
+});
+
+describe("applyOverrides — group (DATA-1, ROADMAP Phase 7 — resolved into the corpus)", () => {
+  it("stamps groupPositions on every member (anchor + groupWith), leaves other words untouched", () => {
+    // 12:4 positions 8-9 are أَحَدَ + عَشَرَ, the real DATA-1 "eleven" pair.
+    const group = override({ ayah: 4, position: 8, field: "group", payload: { groupWith: [9] } });
+    const { groups, corpus: patched } = applyOverrides(corpus, [group]);
+    expect(groups).toEqual([group]);
+    const anchor = patched.words.find((w) => w.ayah === 4 && w.position === 8)!;
+    const trailing = patched.words.find((w) => w.ayah === 4 && w.position === 9)!;
+    expect(anchor.groupPositions).toEqual([8, 9]);
+    expect(trailing.groupPositions).toEqual([8, 9]);
+    const untouched = patched.words.find((w) => w.ayah === 4 && w.position === 1)!;
+    expect(untouched.groupPositions).toBeUndefined();
+  });
+
+  it("a later group row for the same anchor fully replaces the prior membership (latest-wins, not additive)", () => {
+    const first = override({ ayah: 2, position: 3, field: "group", payload: { groupWith: [4] }, createdAt: 1000 });
+    const corrected = override({ ayah: 2, position: 3, field: "group", payload: { groupWith: [4, 5] }, createdAt: 2000 });
+    const { corpus: patched } = applyOverrides(corpus, [first, corrected]);
+    expect(patched.words.find((w) => w.ayah === 2 && w.position === 3)!.groupPositions).toEqual([3, 4, 5]);
+    expect(patched.words.find((w) => w.ayah === 2 && w.position === 5)!.groupPositions).toEqual([3, 4, 5]);
+  });
+
+  it("ignores a malformed group payload (no crash, no patch)", () => {
+    const bad = override({ ayah: 4, position: 8, field: "group", payload: { groupWith: "9" } });
+    const { corpus: patched } = applyOverrides(corpus, [bad]);
+    expect(patched.words.find((w) => w.ayah === 4 && w.position === 8)!.groupPositions).toBeUndefined();
+  });
+
+  it("flows through initLadder/nextItem — the S1 pass probes the anchor once and skips the trailing member", () => {
+    const group = override({ ayah: 4, position: 8, field: "group", payload: { groupWith: [9] } });
+    const { corpus: patched } = applyOverrides(corpus, [group]);
+    const state = initLadder(patched, 12, 4);
+    expect(state.s1Queue).not.toContain(9);
+    expect(state.s1Queue).toContain(8);
   });
 });

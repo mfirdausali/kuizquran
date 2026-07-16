@@ -1,0 +1,92 @@
+[
+  {
+    "ayah": 2,
+    "anchor": 3,
+    "group_with": [
+      4
+    ],
+    "phrase": "قُرْءَٰنًا عَرَبِيًّۭا",
+    "gloss": "(as) a Quran in Arabic"
+  },
+  {
+    "ayah": 3,
+    "anchor": 13,
+    "group_with": [
+      14
+    ],
+    "phrase": "مِن قَبْلِهِۦ",
+    "gloss": "before it"
+  },
+  {
+    "ayah": 4,
+    "anchor": 8,
+    "group_with": [
+      9
+    ],
+    "phrase": "أَحَدَ عَشَرَ",
+    "gloss": "eleven"
+  },
+  {
+    "ayah": 6,
+    "anchor": 18,
+    "group_with": [
+      19
+    ],
+    "phrase": "مِن قَبْلُ",
+    "gloss": "before"
+  },
+  {
+    "ayah": 9,
+    "anchor": 11,
+    "group_with": [
+      12
+    ],
+    "phrase": "مِنۢ بَعْدِهِۦ",
+    "gloss": "after that"
+  },
+  {
+    "ayah": 13,
+    "anchor": 5,
+    "group_with": [
+      6
+    ],
+    "phrase": "تَذْهَبُوا۟ بِهِۦ",
+    "gloss": "you should take him"
+  },
+  {
+    "ayah": 15,
+    "anchor": 2,
+    "group_with": [
+      3
+    ],
+    "phrase": "ذَهَبُوا۟ بِهِۦ",
+    "gloss": "they took him"
+  },
+  {
+    "ayah": 15,
+    "anchor": 13,
+    "group_with": [
+      14
+    ],
+    "phrase": "بِأَمْرِهِمْ هَـٰذَا",
+    "gloss": "about this affair"
+  },
+  {
+    "ayah": 18,
+    "anchor": 4,
+    "group_with": [
+      5
+    ],
+    "phrase": "بِدَمٍۢ كَذِبٍۢ",
+    "gloss": "with false blood"
+  },
+  {
+    "ayah": 18,
+    "anchor": 8,
+    "group_with": [
+      9
+    ],
+    "phrase": "سَوَّلَتْ لَكُمْ",
+    "gloss": "has enticed you"
+  }
+]
