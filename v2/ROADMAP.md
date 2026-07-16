@@ -42,6 +42,25 @@ fixed as the code is lifted, not carried forward.
 
 ---
 
+## Cross-cutting requirements (apply to every phase)
+
+These three hold across all phases; each phase's exit criteria must satisfy them, not defer them.
+
+- **Mobile-first, whole app (v2-D28).** Design and verify every surface on a phone viewport first —
+  touch primary, tap targets ≥44px, single-column reflow, no hover-only affordances, the Amiri
+  ayah largest at every breakpoint, zero horizontal page overflow (wide ring/grid scrolls inside
+  its own container). Desktop is the enhancement. Every phase's runtime check is run on a phone
+  viewport.
+- **Bilingual glosses EN/MS (v2-D27).** Gloss-based questions read
+  `gloss[lang] ?? gloss.en ?? text_uthmani`; the learner picks EN or MS at onboarding (Phase 3) and
+  it persists. MS glosses are machine-sourced, then qari-verified via the Phase-6 override editor.
+- **Surah-agnostic framework (v2-D29).** No hardcoded surah 12: corpus is loaded by a surah-keyed
+  loader; surah rides on every atom / event / override key; the progress view uses a **per-surah
+  structure map** with a **flat 1→N grid fallback** (Yusuf keeps its 12-point ring). v2 ships Yusuf
+  only, but adding a surah later is compiler-run-only — no code changes.
+
+---
+
 ## Phase 0 — Scaffold the foundation (v2-O2)
 
 **Goal:** a runnable React+Vite+TS v2 project with the reused science wired in and green tests.
@@ -52,7 +71,8 @@ No new UI mechanics yet — just the skeleton everything hangs off.
   `/system-explorer`.
 - **Port `packages/engine`** into v2 (workspace package or `src/engine/`), lifting all 23 modules
   + 16 vitest files unchanged **except** `chain.ts` — apply the **BUG-3 gap guard** + regression test.
-- **Ship `v1/public/corpus.json`** into `v2/public/`. Keep the compiler for regen.
+- **Ship `v1/public/corpus.json`** into `v2/public/`, behind a **surah-keyed corpus loader** (no
+  hardcoded 12, v2-D29). Keep the compiler for regen/other surahs.
 - **Copy `iman-ui.css` verbatim** into v2, loaded globally.
 - **Port the event layer:** append-only IndexedDB log (`db/eventLog.ts` pattern — `append()`
   resolves only after `tx.done`), `rebuildAtoms()` folding through engine `rebuild()`, optional
@@ -106,6 +126,7 @@ prove pace + make-up now fire live.
 - Returning-hifz **binary-search placement** over the 19 story landmarks (`placement.ts`, ≤5
   probes) → carried map + start ayah + daily plan (`capacity.planFor`).
 - Anchor-hour onboarding; pace-mode selection.
+- **Gloss language choice EN/MS** (v2-D27), persisted, driving every gloss-based question.
 - **"Not you? switch account"** affordance on Home (v2-D12 — guards shared-device corruption
   without building multi-profile).
 
@@ -119,7 +140,8 @@ prove pace + make-up now fire live.
   `heatmap.ts`, `strength.ts`, `sessionSummary.ts`.
 - **Ring + flat grid heatmap** (v2-D24/D25): 12-movement chiastic ring (mirror pairs around the
   6↔7 pivot) as overview + linked mushaf-faithful 1→111 grid grouped/tinted by movement; tap a
-  ring arc → drill into its grid cells.
+  ring arc → drill into its grid cells. The ring is **Yusuf's per-surah structure map**; the flat
+  1→N grid is the **universal fallback** for surahs without an authored ring (v2-D29).
 - **`<InfoTip>`** reusable tooltip (v2-D19), first on "half-life".
 - **Test feature** (v2-D13–D16): self-initiated, range defaults to carried (≥80 strength), mixed
   random questions incl. chaining-reorder; **read-only mirror** (`structured:false`, no strength/
@@ -155,7 +177,8 @@ learner Progress Report (v2-D17).
   persisted Laravel override table keyed by ayah+position+type; overrides win at question-build
   time. **Full schema + precedence rules in Appendix A §D–E.**
 - **Qari/scholar-friendly editor** (v2-D22): non-technical UI to fix a gloss, curate a distractor,
-  group multi-word gloss units (gives DATA-1 a home), disable a bad question, add custom ones.
+  group multi-word gloss units (gives DATA-1 a home), disable a bad question, add custom ones. Also
+  the home for **verifying machine-sourced Bahasa Melayu glosses** (v2-D27).
 
 **Exit:** an editor overrides one generated question and the change surfaces in a drill without a
 corpus rebuild; admin metrics match a hand-computed sample.
@@ -237,7 +260,7 @@ Six generators today; v2 adds tap-to-reconstruct as the primary loop and the Tes
 
 | Type | Prompt pattern | Options / bank source | Correct | Difficulty scaling |
 |---|---|---|---|---|
-| **S1 — meaning MCQ** | Whole ayah shown, target word lit, rest dimmed; "what does this word mean?" | Correct EN gloss + up to 3 **nearest-by-position sibling glosses** (`ladder.s1Options`) | word's EN gloss | fixed 4 options |
+| **S1 — meaning MCQ** | Whole ayah shown, target word lit, rest dimmed; "what does this word mean?" | Correct EN gloss + up to 3 **nearest-by-position sibling glosses** (`ladder.s1Options`) | word's gloss in chosen language (EN/MS) | fixed 4 options |
 | **S2 — cloze fill MCQ** | Ayah shown with **one word gapped**; tap the Arabic form that fills it | Correct Arabic surface + top *(count−1)* **ranked distractors** (`options.pickOptions` → `corpus.distractorsFor`) | word's `text_uthmani` | **band-scaled**: Learn 4 opts/rank≤4 · Reinforce 3/≤3 · Carry 2/≤2 (`options.options()`) |
 | **S3 — whole-bank production** | Empty ayah; produce it **first→last** by tapping words in reading order | all ayah words as a bank (UI shuffles) | next `expectedPosition` word | no MCQ — full production |
 | **S4 — bridge** | "What comes next?" — probes ayah n+1's **opening 3 words** as meaning MCQ; births the n→n+1 connection atom | correct gloss + sibling glosses from the opening set + n's last words (`bridge.bridgeItems`) | opening word's gloss | fixed |
@@ -293,6 +316,12 @@ override { surah, ayah, position, question_type,   // the key
 
 - **Deterministic engine, no RNG** — same corpus + same strength ⇒ same option *set*; only the UI
   randomizes display order (keeps grading and confusion-signal reproducible).
+- **Language-parameterized glosses (v2-D27)** — every gloss read as
+  `gloss[lang] ?? gloss.en ?? text_uthmani`; the learner's EN/MS onboarding choice selects `lang`.
+  MS glosses are machine-sourced, then qari-verified in the override editor.
+- **Surah-keyed throughout (v2-D29)** — corpus loaded per surah; surah is part of every
+  atom / event / override key; the generator has no hardcoded surah. The progress structure map is
+  per-surah with a flat-grid fallback.
 - **Strength-driven difficulty** — option count + `maxRank` come from the atom's band
   (`options.options()`); v2 tap-to-reconstruct extends this to *blank count*.
 - **Override precedence** — a matching override replaces the generated field; a `disable` override

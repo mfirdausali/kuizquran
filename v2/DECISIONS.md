@@ -195,6 +195,33 @@ recommendation each; the user chose "Go with your recommendations."_
 
 ---
 
+## v2 framework & reach (i18n · mobile · multi‑surah)
+
+### v2‑D27 — Bilingual glosses (EN/MS); learner picks language at onboarding
+- **When:** 2026‑07‑16 00:35:30 UTC (2026‑07‑16 09:35 JST)
+- **Kind:** product · ux · **Status:** accepted
+- **Context:** The corpus already carries a three‑slot gloss (`{en, ms, ja}`), but MS and JA are null (unsourced in v1). All meaning‑probe questions (S1, S4 bridge) currently hardcode `gloss.en`.
+- **Decision:** Make **Bahasa Melayu** a first‑class gloss language alongside English. The learner **chooses EN or MS during onboarding**; the choice persists and drives every gloss‑based question and any meaning text. Neither is hardcoded default. Gloss generation is parameterized by the selected language (`gloss[lang] ?? gloss.en ?? text_uthmani`). MS glosses are **sourced machine‑first, then qari/scholar‑verified through the Phase‑6 override editor** (v2‑D21/D22) — the same layer that already owns gloss corrections. JA stays deferred (column remains).
+- **Why:** kuizquran's audience is Malaysian; MS is a primary comprehension language, not a nice‑to‑have. Onboarding‑time choice avoids forcing a default and keeps the meaning layer honest for both audiences. Reuses the override editor instead of a corpus rebuild.
+- **Related:** v2‑D21/D22 (override editor is MS's sourcing/verification home), v2‑D05/D23 (meaning questions), DATA‑1.
+
+### v2‑D28 — Mobile‑first across the whole app (non‑negotiable)
+- **When:** 2026‑07‑16 00:35:30 UTC (2026‑07‑16 09:35 JST)
+- **Kind:** ux · **Status:** accepted
+- **Decision:** Every v2 surface is **designed mobile‑first and verified on a phone viewport** — the drill, Home/session, onboarding, Progress Report (ring + grid), Test, and the admin console all reflow to small screens. Touch is the primary input (tap‑to‑reconstruct is a thumb interaction): tap targets ≥44px, single‑column reflow, no hover‑only affordances, the Amiri ayah stays the largest type at every breakpoint (invariant #5), and horizontal page overflow is never allowed (wide content — ring, heatmap grid — scrolls inside its own container). Desktop is the enhancement, not the baseline.
+- **Why:** The learner uses this in 2‑minute floor sessions on a phone; a desktop‑first build would fail the real usage context. Made a standing requirement so every phase's exit criteria includes a phone check, not an end‑of‑project retrofit.
+- **Related:** invariant #5 (Amiri largest), v2‑D06 (calm system), every phase.
+
+### v2‑D29 — Surah‑agnostic framework: ship Yusuf, architecture‑ready for any surah
+- **When:** 2026‑07‑16 00:35:30 UTC (2026‑07‑16 09:35 JST)
+- **Kind:** stack · product · **Status:** accepted
+- **Context:** Today everything is Surah Yusuf (surah 12) only: one `corpus.json` and a Yusuf‑specific 12‑point chiasmus ring (v2‑D24/D25). The engine already threads `surah` through most signatures and events, so the dimension is half‑present.
+- **Decision:** Build v2 so **surah is a first‑class parameter end‑to‑end** — no hardcoded `12`. Specifically: (a) a **corpus loader keyed by surah** (per‑surah `corpus.json` from the existing compiler), (b) **per‑surah structure maps** for the progress view, with a **generic flat 1→N grid fallback** when a surah has no authored ring/chiasmus (Yusuf keeps its ring; other surahs start on the grid), (c) surah carried on every atom / event / override key, (d) placement landmarks (scene‑beats) sourced per surah. **v2 still ships Yusuf only**; adding a surah later = run the compiler (+ optionally author a structure map), **no code changes**.
+- **Why:** The moat (the learned retention model) generalizes across scripture; locking the framework to one surah would force a rewrite to grow. Parameterizing now is cheap (the engine is already mostly surah‑keyed) and irreversible‑if‑skipped. Deferring the *content* (other surahs' corpora + scholar review) keeps the first release focused. Enables NEXT‑STEPS 4a (short‑surah pack) with no re‑architecture.
+- **Related:** v2‑D24/D25 (the ring becomes one per‑surah structure map; flat grid is the universal fallback), NEXT‑STEPS 4a, corpus‑compiler (already surah‑parameterized).
+
+---
+
 ## Live code bugs to fix in v2 (surfaced during scenario planning)
 
 These are confirmed in the current v1 source and must not carry into v2.
