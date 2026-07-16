@@ -99,6 +99,10 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # The loop self-dispatches, so the triggering actor is the github-actions
+          # bot; the action blocks bot actors by default. Allow it (this IS the
+          # intended autonomous loop, operator-chosen).
+          allowed_bots: "*"
           # Direct headless prompt — build exactly this phase and open a PR.
           prompt: |
             Execute **Phase ${{ steps.phase.outputs.next }}** of the iman.app v2 build.
