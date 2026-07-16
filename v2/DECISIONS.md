@@ -434,6 +434,50 @@ recommendation each; the user chose "Go with your recommendations."_
 
 ---
 
+## Phase 6 build decisions (executed under v2‑D31 autonomous authorization)
+
+### v2‑D54 — Admin auth: `ADMIN_EMAILS` allowlist middleware over the existing Sanctum guard, not a new role column
+- **When:** 2026‑07‑16 03:56:59 UTC (12:56 JST)
+- **Kind:** stack · **Status:** accepted (assistant decision under the v2‑D31 standing autonomous‑loop authorization)
+- **Context:** ROADMAP Phase 6 needs an operator‑only surface (admin console + override editor) but neither the ROADMAP nor DECISIONS specify how an admin is identified. v1 already solved this exact problem (`v1/apps/worker/src/middleware.ts`'s `isAdmin`/`requireAdmin`): a comma‑separated `ADMIN_EMAILS` env allowlist, checked against the authenticated user's email, failing closed (empty allowlist ⇒ nobody is admin) — no separate roles/permissions system.
+- **Decision:** Port the same shape onto Sanctum: `config/admin.php` reads `ADMIN_EMAILS` (comma‑separated) into `emails`; a new `App\Http\Middleware\EnsureIsAdmin` runs after `auth:sanctum`, 403s unless `$request->user()->email` (lower‑cased, trimmed) is in the allowlist, and fails closed exactly like v1. Registered as the `admin` middleware alias in `bootstrap/app.php`. Since anonymous users have a null email, they can never match — an operator must first `POST /auth/register` (adopt an email) before being allow‑listed, which is the correct shape (admin identity should be a real, durable account).
+- **Why:** Reuses a decision the user already implicitly approved for v1 rather than inventing a heavier roles/permissions model the ROADMAP doesn't ask for; fail‑closed matches v1's explicit security posture ("Fails closed... never throws").
+- **Related:** v1's `middleware.ts` (`isAdmin`/`requireAdmin`, ported), v2‑D51 (bearer‑token auth this middleware runs after), ROADMAP Phase 6.
+
+### v2‑D55 — Question‑bank overrides are one append‑only table; resolution is latest‑`created_at`‑wins per field‑scoped key; `group`/`custom` are stored and editable but not generation‑wired this phase
+- **When:** 2026‑07‑16 03:56:59 UTC (12:56 JST)
+- **Kind:** stack · mechanic · **Status:** accepted
+- **Context:** ROADMAP Appendix A §D specifies the override row shape (`{surah, ayah, position, question_type, field, payload, editor_id, note, created_at}`, explicitly "append‑only audit") and §E's precedence rule ("a matching override replaces the generated field... unmatched stays automatic") but not how a REPEAT edit to the same question resolves, nor which of the five `field` values (`gloss`/`distractor`/`group`/`disable`/`custom`) get real generation‑time effect this phase.
+- **Decision:** (a) **One table, never updated/deleted** (`question_overrides` migration — mirrors the `events` table's own append‑only shape) — correcting a prior edit means inserting a NEW row for the same key, never mutating the old one; "undo a disable" is a new `disable` row with `payload:{disabled:false}`. (b) **Resolution key varies by field, computed in `applyOverrides()`** (engine/src/overrides.ts, new): `gloss` resolves latest‑wins per `(ayah, position, payload.lang)`; `distractor` resolves latest‑wins per `(ayah, position)` (a full replacement set, not a merge); `disable` resolves latest‑wins per `(ayah, position, question_type)` and is exposed as a `disabled` list the APP layer (not the engine) filters against, since "which items to show" is Test.tsx/Drill.tsx's concern, not the engine's. (c) **`group` and `custom` are fully modeled in the schema, the API, and the qari editor UI** (create/list/view — satisfying v2‑D22's "group multi‑word gloss units... add custom ones" as an editor AFFORDANCE and giving DATA‑1 its schema home, as v2‑D21 promises) **but are not resolved by `applyOverrides()` into live question generation this phase** — grouping changes the ladder's S1 unit‑of‑probe (a mechanic change beyond a corpus‑data patch) and a fully custom question needs new render branches in Drill/Test; both are real engine/UI work the exit criterion doesn't require ("an editor overrides ONE generated question" — satisfied by `gloss`/`distractor`).
+- **Why:** Matches the "append‑only audit" wording literally (same pattern already proven for `events`) rather than inventing update/delete semantics the schema doc doesn't ask for. Scoping live generation effect to `gloss`/`distractor` is the same kind of deliberate, stated scope‑narrowing v2‑D49 already set a precedent for (store the full audit trail; wire only what the exit criterion needs) — full `group`/`custom` generation wiring is real scope for a later pass, not silently dropped (the data model and editor already carry it).
+- **Related:** v2‑D21/D22 (the override layer + editor), v2‑D49 (precedent for phased wiring), ROADMAP Appendix A §D/E, Roadmap Phase 6 exit criterion.
+
+### v2‑D56 — Override resolution is a pure corpus‑patching function in the engine (`applyOverrides`), not per‑generator parameters
+- **When:** 2026‑07‑16 03:56:59 UTC (12:56 JST)
+- **Kind:** mechanic · stack · **Status:** accepted
+- **Context:** v2‑D21 says overrides "apply at question‑build time" and "merged in `pickOptions`/gloss lookup." The literal reading would thread a new `overrides` parameter through `pickOptions`, `s1Options`, `wordGloss`, every `test.ts` builder, etc. — a signature change to nearly every generator in the engine.
+- **Decision:** Instead, `applyOverrides(corpus: Corpus, overrides: QuestionOverride[]): { corpus: Corpus; disabled: DisabledQuestion[] }` returns a NEW `Corpus` with `gloss`/`distractor` overrides already patched into `words[]`/`distractors[]` — every existing pure generator (`wordGloss`, `distractorsFor`, `pickOptions`, `s1Options`, `ladder.nextItem`, every `test.ts` builder, `reconstruct.ts`) keeps its exact current signature and is simply called with the PATCHED corpus instead of the raw one. The app layer (Drill/Test/Gate/Placement) calls `loadCorpus()` then `applyOverrides()` once per screen mount and uses the result everywhere it currently uses `corpus`.
+- **Why:** Zero signature changes to any tested generator (all 16+ existing engine test files stay byte‑for‑byte valid) and the override‑application logic lives in exactly ONE new pure, tested engine function — invariant #6 ("all engine logic lives in packages/engine as pure functions with tests... no scheduling/strength logic in React") is honored more strongly this way, not less, since "gloss[lang] ?? gloss.en" and "the top‑ranked distractors" are already corpus‑shaped reads; patching the corpus is the minimal‑surface‑area way to make "overrides win" true everywhere at once, matching how v2‑D43 threaded `lang` in the smallest way that worked.
+- **Related:** v2‑D21 (override layer), v2‑D43 (the precedent for a minimal, additive engine change), invariant #6.
+
+### v2‑D57 — Verified‑frontier‑vs‑learner‑frontier (v2‑D30's operator metric) is a new `ayah_verifications` table, admin‑marked; frontier = max ayah with an S3‑equivalent completion event, any user
+- **When:** 2026‑07‑16 03:56:59 UTC (12:56 JST)
+- **Kind:** product · stack · **Status:** accepted
+- **Context:** v2‑D30 commits to tracking "the verified line vs. the learner frontier... as an operator metric on the admin console" but no prior phase built either half: there was no notion of "this ayah has been scholar‑verified" anywhere in the schema, and "learner frontier" (the furthest any learner has actually reached) isn't one of v1's §3 metrics either.
+- **Decision:** New migration `ayah_verifications` (`surah`, `ayah`, unique together, `verified_by` nullable string, `note` nullable, `created_at`) — an admin action (`POST /admin/verifications`) marks one ayah verified; `GET /admin/frontier` returns `{ verifiedThrough, learnerFrontier, bufferAyat, surahAyahCount }` where `verifiedThrough` = the highest ayah `N` such that every ayah `1..N` has a verification row (a verified PREFIX, not just a max — matching "the verified frontier stays ahead of the learner" literally, since one verified ayah deep in the surah with gaps before it wouldn't actually cover a learner working through in order) and `learnerFrontier` = `MAX(ayah)` across all users' `ayah_produced`/`rung_complete` events with `rung='S3'` (the same "encoded" signal v1's `admin.ts` already used server‑side). The admin console renders both lines plus the buffer and a per‑ayah verify toggle grouped by the 12 movements (reusing `src/progress/movements.ts` client‑side for display grouping only — the table itself stays ayah‑granular and surah‑agnostic, keyed by `(surah, ayah)`).
+- **Why:** A prefix‑verified count is the only shape that makes "verified frontier stays ahead of the learner frontier" a meaningful single number to compare — a scattered set of verified ayat can't be safely summarized as "verified through N." Reusing the existing S3 completion signal for learner frontier avoids inventing a second definition of "encoded" alongside the one `rebuild.ts`/the client atoms cache already use.
+- **Related:** v2‑D30 (the decision this fulfills), v2‑D24 (the 12 movements, reused for display grouping), ROADMAP Phase 6 exit criterion (admin metrics), ROADMAP Phase 7 (GATE‑A, which reads this same metric).
+
+### v2‑D58 — Resolves v2‑O1: no `<InfoTip>` on the admin console; jargon stays raw for the operator audience
+- **When:** 2026‑07‑16 03:56:59 UTC (12:56 JST)
+- **Kind:** ux · **Status:** accepted — resolves the open item v2‑O1
+- **Context:** v2‑O1 asked whether the half‑life `<InfoTip>` (v2‑D19, built for the learner‑facing Progress Report) should also appear on the admin console, explicitly flagging "operator audience — raw term may be fine" as the likely answer.
+- **Decision:** No. The admin console keeps §3 metric labels and any half‑life‑adjacent numbers (e.g. per‑user average retrievability) as raw technical terms, with the PRD target text already doing the explanatory work (exactly as v1's `admin.ts` did — target column, no tooltip). `<InfoTip>` remains exclusively a Progress Report (learner‑facing) component.
+- **Why:** Simplest reasonable default consistent with the ROADMAP's own parenthetical steer, v2‑D17's hard separation of learner vs. operator surfaces (an operator‑friendly affordance leaking onto the warm learner page would be the worse direction; the reverse — a technical page staying technical — costs nothing), and avoids stretching `<InfoTip>`'s copy (written for a warm, reassuring voice) onto a dense metrics table it wasn't designed for.
+- **Related:** v2‑O1 (resolved by this entry), v2‑D19 (`<InfoTip>`, stays learner‑only), v2‑D17 (learner/operator separation), ROADMAP Phase 6 ("Resolve v2‑O1").
+
+---
+
 ## Live code bugs to fix in v2 (surfaced during scenario planning)
 
 These are confirmed in the current v1 source and must not carry into v2.
@@ -451,7 +495,7 @@ These are confirmed in the current v1 source and must not carry into v2.
 
 ## Open — awaiting the user (not yet decided)
 
-- **v2‑O1 — Half‑life tooltip on the admin console too?** (operator audience — raw term may be fine.) _Raised 2026‑07‑15 21:52 UTC._
+- **v2‑O1 — Half‑life tooltip on the admin console too?** (operator audience — raw term may be fine.) _Raised 2026‑07‑15 21:52 UTC._ **Resolved 2026‑07‑16 — see v2‑D58 (no).**
 - **v2‑O2 — Scaffold v2 now?** The design corpus is complete (screens, onboarding, admin, ecosystem, atomic map, scenarios, decisions, Test, recording/progress). Awaiting "scaffold v2" to begin the real React + Laravel project. **Resolved 2026‑07‑16 — see v2‑D32.**
 
 ---

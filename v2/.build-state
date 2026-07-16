@@ -1,7 +1,7 @@
 # Autonomous build progress. The orchestrator (.github/workflows/v2-autobuild.yml)
 # reads last_completed to decide the next phase; each phase's PR appends its number here.
 # -1 means nothing built yet → next phase is 0.
-last_completed=5
+last_completed=6
 # Phase 0: engine ported to v2/src/engine (BUG-3 gap-guard fixed in chain.ts + the
 # live rebuild.ts chain_step fold), corpus + iman-ui.css shipped, event log/atoms
 # rebuild wired, router added, vitest green (112 tests), dev server verified.
@@ -74,3 +74,27 @@ last_completed=5
 # confirmed: anonymous device posts events -> idempotent resend is a no-op ->
 # register adopts the device -> a second device logs in and GET /events
 # hydrates the identical event history.
+# Phase 6: admin console + question-bank override layer. Laravel: ADMIN_EMAILS-
+# allowlist middleware (v2-D54) gates new /admin/* routes; §3 metrics + per-user
+# drill-down ported from v1's metrics.ts/admin.ts (app/Services/AdminMetrics.php);
+# append-only question_overrides table (surah+ayah+position+question_type+field,
+# v2-D55) with a PUBLIC GET /overrides (every device resolves overrides, even
+# anonymous) and admin-only POST; ayah_verifications table backs the v2-D30/D57
+# verified-frontier-vs-learner-frontier metric (a verified PREFIX from ayah 1,
+# so gaps don't inflate it). Engine: new src/engine/src/overrides.ts's pure
+# applyOverrides(corpus, overrides) patches gloss/distractor overrides straight
+# into a derived Corpus (v2-D56) - every existing generator (wordGloss/
+# pickOptions/s1Options/ladder/test.ts) keeps its exact signature; disable is
+# exposed as a list the app filters; group/custom are schema+editor-complete but
+# not generation-wired this phase (v2-D55, precedent v2-D49). Client: src/
+# overrides/loadOverrides.ts + src/corpus/loadEffectiveCorpus.ts wire the patched
+# corpus into Drill/Gate/Test; new src/admin/Admin.tsx (Metrics/Users/Frontier/
+# Overrides tabs, qari-friendly override editor with word-chip picking, no raw
+# JSON) at /admin, kept fully separate from the learner Progress Report (v2-D17).
+# Resolved v2-O1: no <InfoTip> on admin (v2-D58, operator audience keeps raw
+# terms). vitest green (247 tests, 15 new) and `php artisan test` green (44
+# tests, 24 new). Live dev-server + Playwright run (375px) confirmed: an admin
+# override (custom RC distractor on 12:4) surfaces in /drill's live tile bank
+# with NO corpus rebuild; the admin console's Frontier tab marks an ayah
+# verified through its own UI and the metric updates live; no console errors,
+# no horizontal overflow.

@@ -20,7 +20,7 @@ import {
   makeEvent,
   nextReconstructItem,
 } from "engine";
-import { loadCorpus } from "../corpus/loadCorpus.ts";
+import { loadEffectiveCorpus } from "../corpus/loadEffectiveCorpus.ts";
 import { append } from "../db/eventLog.ts";
 import { rebuildAtoms } from "../db/atoms.ts";
 
@@ -50,8 +50,8 @@ export function Gate() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    loadCorpus(SURAH)
-      .then(setCorpus)
+    loadEffectiveCorpus(SURAH)
+      .then((r) => setCorpus(r.corpus))
       .catch((e: unknown) => setError(String(e)));
   }, []);
 

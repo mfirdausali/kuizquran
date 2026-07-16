@@ -1,0 +1,29 @@
+/* v2-D54/ROADMAP Phase 6 — admin-console-only chrome, imported ONLY by
+   Admin.tsx. Consumes iman-ui.css's design tokens (colors/spacing/radius) but
+   adds table layout the learner-facing design system doesn't need — same
+   approach v1's admin.ts took with its own scoped <style> block. Not a
+   restyle of iman-ui.css (invariant #5 governs learner surfaces; this is the
+   operator surface v2-D17 keeps deliberately separate). */
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.admin-table th,
+.admin-table td {
+  padding: 8px 6px;
+  border-bottom: var(--hairline) solid var(--border);
+  text-align: left;
+  font-size: 13px;
+}
+
+.admin-table th {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.option--arabic-inline {
+  font-family: var(--font-arabic);
+  direction: rtl;
+}
