@@ -56,14 +56,24 @@ jobs:
             echo "::group::$d"
             cd "$GITHUB_WORKSPACE/$d"
             # Prefer pnpm if a lockfile/workspace exists, else npm.
-            if [ -f pnpm-lock.yaml ] || [ -f pnpm-workspace.yaml ]; then
-              pnpm install --frozen-lockfile || pnpm install
-              pnpm run build --if-present || true
-              pnpm test
-            else
-              npm ci || npm install
-              npm run build --if-present || true
-              npm test
+            if [ -f pnpm-lock.yaml ] || [ -f pnpm-workspace.yaml ]; then PM="pnpm"; else PM="npm"; fi
+            if [ "$PM" = "pnpm" ]; then npm i -g pnpm@9 >/dev/null 2>&1 || true; pnpm install --frozen-lockfile || pnpm install; else npm ci || npm install; fi
+            $PM run build --if-present || true
+
+            # Run tests, but treat "no test files yet" as a PASS (a project scaffolded
+            # ahead of its tests isn't broken). Real test failures still fail CI.
+            # Capture BOTH streams; pass --passWithNoTests through to vitest.
+            set +e
+            $PM test -- --passWithNoTests > /tmp/t.log 2>&1
+            RC=$?
+            set -e
+            cat /tmp/t.log
+            if [ $RC -ne 0 ]; then
+              if grep -qi "No test files found" /tmp/t.log; then
+                echo "→ no test files yet — treating as pass"
+              else
+                echo "→ real test failure"; exit 1
+              fi
             fi
             cd "$GITHUB_WORKSPACE"
             echo "::endgroup::"
