@@ -1,7 +1,7 @@
 # Autonomous build progress. The orchestrator (.github/workflows/v2-autobuild.yml)
 # reads last_completed to decide the next phase; each phase's PR appends its number here.
 # -1 means nothing built yet → next phase is 0.
-last_completed=4
+last_completed=5
 # Phase 0: engine ported to v2/src/engine (BUG-3 gap-guard fixed in chain.ts + the
 # live rebuild.ts chain_step fold), corpus + iman-ui.css shipped, event log/atoms
 # rebuild wired, router added, vitest green (112 tests), dev server verified.
@@ -60,3 +60,17 @@ last_completed=4
 # ran a full range-picker -> mixed-item -> score -> "send to reviews" -> back-to-
 # /progress loop with the flag visible in Test history; no console errors, no
 # horizontal overflow at 375px.
+# Phase 5: Laravel + Sanctum backend at v2/api (bearer personal-access tokens,
+# not the stateful cookie guard - v2-D51), anonymous-first auth with claim-in-
+# place account adoption (v2-D52: POST /auth/anonymous mints a device row,
+# /auth/register claims it in place, /auth/login switches to an existing
+# account's token). users/events migrations reproduce v1's D1 schema plus the
+# v2 Phase 1-4 event fields; events.id is the client uuid PK itself, idempotent
+# via insertOrIgnore (v2-D53). New src/sync/{auth,outbox,useBackgroundSync}.ts
+# on the client (Bearer auth replaces v1's session cookie in the ported
+# outbox.ts), mounted once at the app root, plus a minimal Account panel on
+# Home for email-based save/sign-in (social deferred). vitest green (232 tests,
+# 20 new) and `php artisan test` green (20 tests). Live end-to-end curl run
+# confirmed: anonymous device posts events -> idempotent resend is a no-op ->
+# register adopts the device -> a second device logs in and GET /events
+# hydrates the identical event history.
