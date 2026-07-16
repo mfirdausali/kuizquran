@@ -11,6 +11,7 @@ import { loadCorpus } from "../corpus/loadCorpus.ts";
 import { useSession } from "../session/useSession.ts";
 import { useOnboarding } from "../onboarding/useOnboarding.ts";
 import { resetForNewLearner } from "../session/resetAccount.ts";
+import { Account } from "../sync/Account.tsx";
 
 const SURAH = 12; // v2 ships Yusuf only (v2-D29); the loader itself takes surah as a param.
 
@@ -173,6 +174,8 @@ function HomeSession({ corpus, navigate }: { corpus: Corpus; navigate: NavigateF
             Not you? Switch account
           </button>
         </p>
+
+        <Account />
       </div>
     </div>
   );
