@@ -28,6 +28,9 @@ export interface ScheduleConfig {
   connectionWeight?: number;
   /** Ayah numbers eligible to be newly Learned this session, in priority order. */
   learnCandidates?: number[];
+  /** v2-D07 unlock tolerance: pending cold gates still tolerated before blocking
+   *  new Learn (mode-scoped via pace.ts's PaceConfig.gateTolerance). Default 0. */
+  gateTolerance?: number;
 }
 
 // Appendix A cost constants: T ≈ 0.33·W_new + 0.4·R_due + 1.25·chains + 0.17·junctions.
@@ -132,9 +135,10 @@ export function assembleQueue(input: AssembleInput): QueueItem[] {
     spent += q.estMin;
   }
 
-  // 5. INTERLEAVE LEARN — only if the mastery gate permits new unlocks AND budget
-  //    remains. Learn cycles are interleaved between review items.
-  if (unlockPermitted(atoms, now)) {
+  // 5. INTERLEAVE LEARN — only if the mastery gate permits new unlocks (within
+  //    the mode-scoped tolerance band, v2-D07) AND budget remains. Learn cycles
+  //    are interleaved between review items.
+  if (unlockPermitted(atoms, now, cfg.gateTolerance ?? 0)) {
     const encodedOrQueued = new Set(atoms.filter((a) => a.encoded).map((a) => a.ref));
     for (const ayah of cfg.learnCandidates ?? []) {
       if (encodedOrQueued.has(ayah)) continue;

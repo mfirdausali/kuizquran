@@ -2,7 +2,18 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { chainSteps, junctionItem, applyChain, type ChainStepResult } from "../src/chain.ts";
+import {
+  chainSteps,
+  junctionItem,
+  applyChain,
+  applyVictoryLapChain,
+  applyWeakSeamChain,
+  riskiestJunctions,
+  weakSeamChainRange,
+  junctionOutcome,
+  type ChainStepResult,
+} from "../src/chain.ts";
+import { forgettingRisk } from "../src/strength.ts";
 import { initAtom, atomKey, type AtomState } from "../src/atom.ts";
 import type { Corpus } from "../src/types.ts";
 
@@ -102,5 +113,93 @@ describe("applyChain — FIRe credit (D17: breadth, not extra weight)", () => {
     expect(after.get("ayah:4")!.strength).toBeGreaterThan(before.get("ayah:4")!.strength);
     expect(after.get("connection:4")!.strength).toBeGreaterThan(before.get("connection:4")!.strength);
     expect(after.get("ayah:5")).toBeUndefined();
+  });
+});
+
+describe("victory-lap vs weak-seam repair chains (v2-D11)", () => {
+  function atomsWith(...refs: [string, number][]): Map<string, AtomState> {
+    const m = new Map<string, AtomState>();
+    for (const [kind, ref] of refs) {
+      m.set(atomKey(kind as "ayah" | "connection", ref), {
+        ...initAtom(kind as "ayah" | "connection", ref),
+        strength: 40,
+        stability: 3,
+        lastRetrieval: 3 * DAY,
+        encoded: true,
+      });
+    }
+    return m;
+  }
+
+  it("a victory-lap chain never changes strength, even on a clean run (default free chain)", () => {
+    const before = atomsWith(["ayah", 4], ["connection", 4], ["ayah", 5]);
+    const results: ChainStepResult[] = chainSteps(4, 5).map((step) => ({ step, correct: true }));
+    const after = applyVictoryLapChain(before, results, 10 * DAY);
+    for (const key of ["ayah:4", "connection:4", "ayah:5"]) {
+      expect(after.get(key)!.strength).toBe(before.get(key)!.strength);
+      expect(after.get(key)!.reps).toBe(before.get(key)!.reps); // no lapse/rep either
+    }
+  });
+
+  it("a victory-lap chain never lapses a strong verse even on a slip", () => {
+    const before = atomsWith(["ayah", 4], ["connection", 4], ["ayah", 5]);
+    const results: ChainStepResult[] = chainSteps(4, 5).map((step) => ({
+      step,
+      correct: step.kind !== "junction",
+    }));
+    const after = applyVictoryLapChain(before, results, 10 * DAY);
+    expect(after.get("connection:4")!.strength).toBe(before.get("connection:4")!.strength);
+    expect(after.get("connection:4")!.lapses).toBe(before.get("connection:4")!.lapses);
+  });
+
+  it("a weak-seam repair chain IS graded (equivalent to the original applyChain default)", () => {
+    const before = atomsWith(["ayah", 4], ["connection", 4], ["ayah", 5]);
+    const results: ChainStepResult[] = chainSteps(4, 5).map((step) => ({ step, correct: true }));
+    const viaWrapper = applyWeakSeamChain(before, results, 10 * DAY);
+    const viaDefault = applyChain(before, results, 10 * DAY);
+    for (const key of ["ayah:4", "connection:4", "ayah:5"]) {
+      expect(viaWrapper.get(key)!.strength).toBe(viaDefault.get(key)!.strength);
+      expect(viaWrapper.get(key)!.strength).toBeGreaterThan(before.get(key)!.strength);
+    }
+  });
+
+  it("riskiestJunctions ranks encoded connections by forgetting risk, riskiest first", () => {
+    const now = 20 * DAY;
+    const atoms = atomsWith(["connection", 4], ["connection", 8]);
+    // Make connection:8 riskier by decaying it further (older lastRetrieval, lower stability).
+    const decayed: AtomState = { ...atoms.get("connection:8")!, lastRetrieval: 1 * DAY, stability: 1 };
+    atoms.set("connection:8", decayed);
+    const ranked = riskiestJunctions([...atoms.values()], now);
+    expect(ranked[0]!.ref).toBe(8);
+    expect(forgettingRisk(ranked[0]!, now)).toBeGreaterThanOrEqual(forgettingRisk(ranked[1]!, now));
+  });
+
+  it("weakSeamChainRange straddles the single riskiest junction", () => {
+    const now = 20 * DAY;
+    const atoms = atomsWith(["connection", 4]);
+    const range = weakSeamChainRange([...atoms.values()], now);
+    expect(range).toEqual({ from: 4, to: 5 });
+  });
+
+  it("weakSeamChainRange is null when nothing is at risk (no encoded connections)", () => {
+    expect(weakSeamChainRange([], 20 * DAY)).toBeNull();
+  });
+});
+
+describe("junction retry-before-commit (v2-D11)", () => {
+  it("a first-attempt pass commits correct with no retry needed", () => {
+    expect(junctionOutcome([true])).toBe(true);
+  });
+
+  it("a first-attempt fail followed by a retry pass commits correct", () => {
+    expect(junctionOutcome([false, true])).toBe(true);
+  });
+
+  it("two fails commit incorrect", () => {
+    expect(junctionOutcome([false, false])).toBe(false);
+  });
+
+  it("no attempts commits incorrect", () => {
+    expect(junctionOutcome([])).toBe(false);
   });
 });

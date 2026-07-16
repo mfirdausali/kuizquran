@@ -1,7 +1,7 @@
 # Autonomous build progress. The orchestrator (.github/workflows/v2-autobuild.yml)
 # reads last_completed to decide the next phase; each phase's PR appends its number here.
 # -1 means nothing built yet → next phase is 0.
-last_completed=1
+last_completed=2
 # Phase 0: engine ported to v2/src/engine (BUG-3 gap-guard fixed in chain.ts + the
 # live rebuild.ts chain_step fold), corpus + iman-ui.css shipped, event log/atoms
 # rebuild wired, router added, vitest green (112 tests), dev server verified.
@@ -12,3 +12,13 @@ last_completed=1
 # vitest green (125 tests), dev-server-driven Playwright run confirmed strength
 # moves and both event types land in the append-only IndexedDB log for both a
 # short (12:1, 5 words) and long (12:4, 15 words) ayah.
+# Phase 2: daily session loop + pace modes (Steady/Sprint/Maintain, engine/src/
+# pace.ts) wired through a real src/session/useSession.ts caller of assembleQueue,
+# fixing BUG-1 (real budgetMin) and BUG-2 (real lastActiveDay via activity.ts) live;
+# v2-D07 unlock tolerance + recompute-after-in-session-gate-pass; v2-D08 gate
+# forgiveness ladder (gateFails, gate_demote event) with a new /gate cold-check
+# screen; v2-D11 victory-lap vs weak-seam chains + junction retry. vitest green
+# (158 tests incl. a multi-day multi-pace-mode sim and explicit BUG-1/BUG-2
+# regressions), dev-server Playwright run confirmed the pace selector changes the
+# live queue and a seeded overdue gate surfaces as "make-up" and routes correctly,
+# no console errors, no horizontal overflow at 375px.

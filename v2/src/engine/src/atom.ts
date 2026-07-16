@@ -32,6 +32,9 @@ export interface AtomState {
   gateDueAt: number | null;
   /** Whether the day-1 cold gate has been passed. */
   gatePassed: boolean;
+  /** Consecutive cold-gate fails since the last pass (v2-D08 forgiveness ladder;
+   *  reset to 0 on a pass or an accepted demote-to-Learn). */
+  gateFails: number;
 }
 
 export const BAND_REINFORCE = 40;
@@ -58,6 +61,7 @@ export function initAtom(kind: AtomKind, ref: number): AtomState {
     encoded: false,
     gateDueAt: null,
     gatePassed: false,
+    gateFails: 0,
   };
 }
 

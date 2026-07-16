@@ -149,3 +149,30 @@ describe("rebuild — v2 Phase 1 tap-to-reconstruct events (reconstruct_tap/ayah
     expect(atom.reps).toBe(2); // the slip + the completion; the bare correct tap carries no signal
   });
 });
+
+describe("rebuild — v2 Phase 2 gate_demote (v2-D08 forgiveness ladder)", () => {
+  it("a gate_demote after repeated fails clears encoding/gate state, and doesn't itself touch strength", () => {
+    const t = 5 * DAY;
+    const beforeDemote: DrillEvent[] = [
+      { type: "ayah_produced", ts: t, surah: 12, ayah: 4, rung: "S3" }, // encode + schedule gate
+      { type: "gate_result", ts: t + DAY, surah: 12, ayah: 4, rung: "S3", correct: false },
+    ];
+    const demoteEvent: DrillEvent = { type: "gate_demote", ts: t + DAY + 1000, surah: 12, ayah: 4, rung: "S3" };
+
+    const preAtom = rebuild(beforeDemote).get("ayah:4")!;
+    const atoms = rebuild([...beforeDemote, demoteEvent]);
+    const atom = atoms.get("ayah:4")!;
+    expect(atom.encoded).toBe(false);
+    expect(atom.gateDueAt).toBeNull();
+    expect(atom.gatePassed).toBe(false);
+    expect(atom.gateFails).toBe(0);
+    // demoteToLearn is a lifecycle transition, not a retrieval — strength is left
+    // exactly as the gate fail evidence already put it (not additionally zeroed).
+    expect(atom.strength).toBe(preAtom.strength);
+  });
+
+  it("a gate_demote on a never-taught ayah is a no-op (nothing to send back)", () => {
+    const events: DrillEvent[] = [{ type: "gate_demote", ts: 5 * DAY, surah: 12, ayah: 99, rung: "S3" }];
+    expect(rebuild(events).get("ayah:99")).toBeUndefined();
+  });
+});

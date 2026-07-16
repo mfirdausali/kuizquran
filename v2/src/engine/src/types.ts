@@ -180,8 +180,10 @@ export type EventType =
   | "adoption" // untaught-ayah cold pass adopted into Carrying (v0.7 FR6)
   | "session_start" // app-open → first drill; latency = open-into-drill ms (v0.8)
   | "reconstruct_tap" // v2 Phase 1 (v2-D05): one tap-to-reconstruct blank-fill attempt
-  | "ayah_produced"; // v2 Phase 1: a reconstruct pass finished (all blanks filled) —
+  | "ayah_produced" // v2 Phase 1: a reconstruct pass finished (all blanks filled) —
   // the graded completion event; `rung` carries "S2" (partial) or "S3" (whole-ayah).
+  | "gate_demote"; // v2 Phase 2 (v2-D08): a learner-accepted "send back to Learn"
+  // offer after repeated cold-gate fails — folds via gate.ts's demoteToLearn().
 
 export interface DrillEvent {
   /** Stable client-generated id (uuid), assigned at creation. Idempotency key for

@@ -22,3 +22,5 @@ export * from "./streak.ts";
 export * from "./floor.ts";
 export * from "./heatmap.ts";
 export * from "./sessionSummary.ts";
+export * from "./pace.ts";
+export * from "./activity.ts";
