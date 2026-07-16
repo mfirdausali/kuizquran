@@ -85,10 +85,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Does a Laravel app exist?
+      - name: Locate the Laravel app
         id: has
         run: |
-          if [ -f v2/api/artisan ]; then echo "yes=true" >> "$GITHUB_OUTPUT"; else echo "yes=false" >> "$GITHUB_OUTPUT"; fi
+          # Find an artisan file anywhere under v2 (layout may vary).
+          DIR=$(dirname "$(find v2 -maxdepth 3 -name artisan -not -path '*/vendor/*' 2>/dev/null | head -1)" 2>/dev/null)
+          if [ -n "$DIR" ] && [ -f "$DIR/artisan" ]; then
+            echo "yes=true" >> "$GITHUB_OUTPUT"; echo "dir=$DIR" >> "$GITHUB_OUTPUT"; echo "Laravel at: $DIR"
+          else
+            echo "yes=false" >> "$GITHUB_OUTPUT"; echo "no Laravel app yet"
+          fi
 
       - uses: shivammathur/setup-php@v2
         if: steps.has.outputs.yes == 'true'
@@ -97,9 +103,16 @@ jobs:
 
       - name: Composer install + test
         if: steps.has.outputs.yes == 'true'
-        working-directory: v2/api
+        working-directory: ${{ steps.has.outputs.dir }}
+        env:
+          # package:discover runs during composer install's post-autoload hook and
+          # reads config — provide .env + a key FIRST, and skip auto-scripts on install
+          # so a missing app key can't fail the autoload step.
+          APP_KEY: base64:2fl+Ktt0V1Sj9K0m7hHkK2n8xY3qZp1Rw6cV0aB9eD4=
         run: |
-          composer install --no-interaction --prefer-dist
-          cp -n .env.example .env || true
-          php artisan key:generate || true
+          cp -n .env.example .env 2>/dev/null || true
+          composer install --no-interaction --prefer-dist --no-scripts
+          php artisan key:generate --force || true
+          composer run-script post-autoload-dump --no-interaction || true
+          php artisan config:clear || true
           php artisan test
