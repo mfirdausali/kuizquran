@@ -35,6 +35,7 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
+  actions: write        # required for the self-dispatch (gh workflow run) at the end
   id-token: write
 
 env:
