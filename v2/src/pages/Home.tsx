@@ -9,6 +9,8 @@ import { Link, useNavigate, type NavigateFunction } from "react-router-dom";
 import type { Corpus, PaceMode, QueueItem } from "engine";
 import { loadCorpus } from "../corpus/loadCorpus.ts";
 import { useSession } from "../session/useSession.ts";
+import { useOnboarding } from "../onboarding/useOnboarding.ts";
+import { resetForNewLearner } from "../session/resetAccount.ts";
 
 const SURAH = 12; // v2 ships Yusuf only (v2-D29); the loader itself takes surah as a param.
 
@@ -35,12 +37,19 @@ export function Home() {
   const navigate = useNavigate();
   const [corpus, setCorpus] = useState<Corpus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const onboardStatus = useOnboarding();
 
   useEffect(() => {
     loadCorpus(SURAH)
       .then(setCorpus)
       .catch((e: unknown) => setError(String(e)));
   }, []);
+
+  // First run (no local history, no cached placement) → onboarding before the
+  // main session (ROADMAP Phase 3).
+  useEffect(() => {
+    if (onboardStatus === "needed") navigate("/onboarding", { replace: true });
+  }, [onboardStatus, navigate]);
 
   if (error) {
     return (
@@ -52,7 +61,7 @@ export function Home() {
     );
   }
 
-  if (!corpus) {
+  if (!corpus || onboardStatus === "loading" || onboardStatus === "needed") {
     return (
       <div className="screen">
         <p className="voice">Loading…</p>
@@ -65,12 +74,24 @@ export function Home() {
 
 function HomeSession({ corpus, navigate }: { corpus: Corpus; navigate: NavigateFunction }) {
   const { loading, queue, current, mode, setMode } = useSession(corpus);
+  const [switching, setSwitching] = useState(false);
 
   const counts = queue.reduce(
     (acc, i) => ({ ...acc, [i.kind]: (acc[i.kind] ?? 0) + 1 }),
     {} as Record<QueueItem["kind"], number>,
   );
   const totalMin = queue.reduce((s, i) => s + i.estMin, 0);
+
+  // v2-D12: no multi-profile yet — this is a local-only reset (wipes this
+  // device's event log + settings) so a different learner on a shared device
+  // doesn't corrupt the current one's progress. Two-tap: the browser confirm()
+  // is the deliberate friction against an accidental tap.
+  async function switchAccount() {
+    if (!confirm("Switch account? This clears all progress on this device.")) return;
+    setSwitching(true);
+    await resetForNewLearner();
+    navigate("/onboarding", { replace: true });
+  }
 
   return (
     <div className="screen">
@@ -136,6 +157,11 @@ function HomeSession({ corpus, navigate }: { corpus: Corpus; navigate: NavigateF
           <Link className="btn btn--ghost" to="/system-explorer">
             System Explorer →
           </Link>
+        </p>
+        <p>
+          <button className="btn btn--ghost" disabled={switching} onClick={() => void switchAccount()}>
+            Not you? Switch account
+          </button>
         </p>
       </div>
     </div>

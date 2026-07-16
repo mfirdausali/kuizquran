@@ -25,11 +25,29 @@ import {
 import { rebuildAtoms } from "../db/atoms.ts";
 import { getAll } from "../db/eventLog.ts";
 import { getPaceMode, setPaceMode as persistPaceMode } from "./pace.ts";
+import { loadPlacement } from "./placement.ts";
 
 // A small learn window of ayat immediately after the highest ENCODED ayah — the
 // same "continue from where the learner actually is" pattern v1 used, clipped to
 // the pace mode's new-ayah ceiling (v2-D09) before it ever reaches assembleQueue.
 const LEARN_WINDOW = 6;
+
+/**
+ * Where the Learn window should start. Once anything is encoded, always
+ * continue from maxEncoded+1 (never skip back). Before that (day 1, nothing
+ * encoded yet), fall back to a returning-hifz learner's placement start ayah
+ * (ROADMAP Phase 3) rather than a hardcoded 1 — otherwise placement would
+ * re-Learn ayat the learner told onboarding they already carry. Pure and
+ * exported so the fallback is unit-testable without a React render.
+ */
+export function learnWindowStart(
+  maxEncoded: number,
+  placementStartAyah: number | null,
+  ayahCount: number,
+): number {
+  const fallback = maxEncoded > 0 ? maxEncoded + 1 : (placementStartAyah ?? 1);
+  return Math.min(Math.max(1, fallback), ayahCount);
+}
 
 export interface SessionPlan {
   loading: boolean;
@@ -65,7 +83,7 @@ export function useSession(corpus: Corpus, now: () => number = Date.now): Sessio
     for (const a of rebuilt.values()) {
       if (a.kind === "ayah" && a.encoded && a.ref > maxEncoded) maxEncoded = a.ref;
     }
-    const windowStart = Math.min(Math.max(1, maxEncoded + 1), corpus.meta.ayahCount);
+    const windowStart = learnWindowStart(maxEncoded, loadPlacement()?.startAyah ?? null, corpus.meta.ayahCount);
     const window: number[] = [];
     for (let a = windowStart; a < windowStart + LEARN_WINDOW && a <= corpus.meta.ayahCount; a++) {
       window.push(a);

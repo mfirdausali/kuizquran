@@ -1,7 +1,7 @@
 # Autonomous build progress. The orchestrator (.github/workflows/v2-autobuild.yml)
 # reads last_completed to decide the next phase; each phase's PR appends its number here.
 # -1 means nothing built yet → next phase is 0.
-last_completed=2
+last_completed=3
 # Phase 0: engine ported to v2/src/engine (BUG-3 gap-guard fixed in chain.ts + the
 # live rebuild.ts chain_step fold), corpus + iman-ui.css shipped, event log/atoms
 # rebuild wired, router added, vitest green (112 tests), dev server verified.
@@ -22,3 +22,20 @@ last_completed=2
 # regressions), dev-server Playwright run confirmed the pace selector changes the
 # live queue and a seeded overdue gate surfaces as "make-up" and routes correctly,
 # no console errors, no horizontal overflow at 375px.
+# Phase 3: onboarding & placement. New /onboarding flow (src/onboarding/) sequences
+# returning-hifz binary-search placement (engine/src/placement.ts, already ported,
+# now wired to real UI probes) -> anchor hour -> pace mode -> gloss language
+# (EN/MS, v2-D27), each persisted locally (session/anchor.ts, session/glossLang.ts,
+# placement cache written LAST so a mid-flow exit re-enters at the top - v2-D45).
+# Engine gloss resolution parameterized (wordGloss() in corpus.ts; s1Options/
+# nextItem/bridgeItems take lang, default "en" - v2-D43). useSession's learn
+# window now falls back to the placement start ayah instead of a hardcoded 1
+# before anything's encoded (learnWindowStart(), unit tested). Home redirects to
+# /onboarding on first run and gained "Not you? switch account" (v2-D12/D44) -
+# a confirmed local-only reset (event log + atoms snapshot + all settings) since
+# Laravel per-account auth doesn't land until Phase 5. vitest green (186 tests,
+# 28 new), dev-server Playwright run confirmed: fresh install -> onboarding ->
+# <=5 placement probes -> populated Home with the chosen pace/anchor/lang
+# persisted; a carried-placement run correctly starts Home's Learn item at the
+# placement's start ayah (not ayah 1); switch-account wipes local state and
+# returns to onboarding; no console errors, no horizontal overflow at 375px.

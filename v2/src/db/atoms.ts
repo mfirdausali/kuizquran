@@ -42,6 +42,15 @@ export async function saveSnapshot(atoms: AtomsMap): Promise<void> {
   await tx.done;
 }
 
+/** Wipe the atoms snapshot cache. Paired with eventLog.clearAll() for the
+ *  "switch account" reset (v2-D12) — the atoms cache is rebuildable, so
+ *  clearing it is always safe; the next rebuildAtoms() re-derives from
+ *  whatever's left in the (also-cleared) event log. */
+export async function clearSnapshot(): Promise<void> {
+  const database = await db();
+  await database.clear(STORE);
+}
+
 export async function _closeForTest(): Promise<void> {
   if (dbPromise) {
     (await dbPromise).close();

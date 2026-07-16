@@ -10,8 +10,8 @@
 // The machine is deterministic: no RNG. Option/tile display order is the UI's
 // concern; the engine emits stable, rank/position-ordered sets.
 
-import type { Corpus, CorpusWord, DrillItem, LadderDone, Rung } from "./types.ts";
-import { ayahWords } from "./corpus.ts";
+import type { Corpus, CorpusWord, DrillItem, GlossLang, LadderDone, Rung } from "./types.ts";
+import { ayahWords, wordGloss } from "./corpus.ts";
 import { pickOptions } from "./options.ts";
 
 /** The ladder only ever emits S1/S2/S3 (S4 bridge lives in bridge.ts; RC — v2
@@ -76,17 +76,22 @@ function wordAt(state: LadderState, position: number): CorpusWord {
 }
 
 /**
- * S1 gloss MCQ options for a word: its own EN gloss (correct) plus up to 3
- * sibling-word glosses as distractors, chosen deterministically as the nearest
- * distinct-gloss neighbors (closest by position first). Falls back gracefully
- * if the ayah is tiny.
+ * S1 gloss MCQ options for a word: its own gloss in the learner's chosen
+ * language (correct, v2-D27 — `gloss[lang] ?? gloss.en ?? text_uthmani`) plus
+ * up to 3 sibling-word glosses as distractors, chosen deterministically as the
+ * nearest distinct-gloss neighbors (closest by position first). Falls back
+ * gracefully if the ayah is tiny.
  */
-export function s1Options(state: LadderState, position: number): { options: string[]; correct: string } {
+export function s1Options(
+  state: LadderState,
+  position: number,
+  lang: GlossLang = "en",
+): { options: string[]; correct: string } {
   const target = wordAt(state, position);
-  const correct = target.gloss.en ?? target.text_uthmani;
+  const correct = wordGloss(target, lang);
   const siblings = state.words
     .filter((w) => w.position !== position)
-    .map((w) => ({ pos: w.position, gloss: w.gloss.en ?? w.text_uthmani }))
+    .map((w) => ({ pos: w.position, gloss: wordGloss(w, lang) }))
     .filter((s) => s.gloss !== correct)
     // nearest by position, deterministic
     .sort((a, b) => Math.abs(a.pos - position) - Math.abs(b.pos - position) || a.pos - b.pos);
@@ -103,13 +108,13 @@ export function s1Options(state: LadderState, position: number): { options: stri
 }
 
 /** The next drill item, or {done:true} when the whole ayah is encoded (S3 complete). */
-export function nextItem(state: LadderState, corpus: Corpus): LadderItem | LadderDone {
+export function nextItem(state: LadderState, corpus: Corpus, lang: GlossLang = "en"): LadderItem | LadderDone {
   if (state.ayahComplete) return { done: true };
 
   if (state.rung === "S1") {
     const position = state.s1Queue[0];
     if (position === undefined) return { done: true }; // guard; advance handles rung flips
-    const { options, correct } = s1Options(state, position);
+    const { options, correct } = s1Options(state, position, lang);
     return {
       rung: "S1",
       word: wordAt(state, position),
@@ -161,8 +166,13 @@ export interface AdvanceResult {
  * Apply an answer to the current item. `choice` is the chosen text (gloss for S1,
  * Arabic surface for S2/S3). Returns the next immutable state + grading flags.
  */
-export function advance(state: LadderState, corpus: Corpus, choice: string): AdvanceResult {
-  const item = nextItem(state, corpus);
+export function advance(
+  state: LadderState,
+  corpus: Corpus,
+  choice: string,
+  lang: GlossLang = "en",
+): AdvanceResult {
+  const item = nextItem(state, corpus, lang);
   if ("done" in item) return { state, correct: false, pretest: false };
 
   const next: LadderState = cloneState(state);

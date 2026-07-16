@@ -144,6 +144,17 @@ export async function count(): Promise<number> {
 }
 
 /**
+ * Wipe every locally-stored event. Used ONLY by the "switch account" affordance
+ * (v2-D12 — shared-device guard, local-only until Phase 5 auth lands) — a
+ * deliberate, confirmed, destructive reset, never called from a normal session
+ * flow. Does not touch the server (nothing has synced yet in v2; Phase 5).
+ */
+export async function clearAll(): Promise<void> {
+  const database = await db();
+  await database.clear(STORE);
+}
+
+/**
  * Close the current handle (used by tests to simulate a process crash: the
  * next call reopens from disk). No-op if never opened.
  */
