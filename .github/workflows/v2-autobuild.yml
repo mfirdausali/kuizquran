@@ -19,10 +19,11 @@ name: v2 Autobuild (orchestrator)
 # on it (visible as no progress) rather than merging corruption.
 
 on:
-  pull_request:
-    types: [closed]
+  # NOTE: pull_request:closed does NOT reliably trigger this — GitHub suppresses events
+  # from GITHUB_TOKEN-driven merges (anti-recursion). So advancement relies on the cron
+  # below + the self-dispatch step at the end of a successful build.
   schedule:
-    - cron: "0 * * * *"      # hourly: resume after usage-limit / stalled runs
+    - cron: "*/10 * * * *"   # every 10 min: advance to the next phase / resume after limits
   workflow_dispatch:
     inputs:
       start_phase:
@@ -42,10 +43,11 @@ env:
 
 jobs:
   drive:
-    if: >
-      github.event_name != 'pull_request' ||
-      (github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
     runs-on: ubuntu-latest
+    # Prevent two orchestrator runs racing on the same phase (cron + self-dispatch).
+    concurrency:
+      group: v2-autobuild
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:
@@ -125,17 +127,34 @@ jobs:
           # Let the agent create branches, commit, and open PRs.
           claude_args: "--allowedTools Bash,Edit,Write,Read,Glob,Grep"
 
-      # ---------- turn on auto-merge for the freshly-opened PR ----------
-      - name: Enable auto-merge on the new phase PR
+      # ---------- turn on auto-merge, then wait for the merge and self-advance ----------
+      - name: Enable auto-merge + advance to the next phase
         if: steps.phase.outputs.done == 'false' && steps.phase.outputs.open_pr == ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           sleep 15
           PR=$(gh pr list --state open --search "in:title v2 Phase ${{ steps.phase.outputs.next }}" --json number --jq '.[0].number // empty' || true)
-          if [ -n "$PR" ]; then
-            echo "Enabling auto-merge on PR #$PR"
-            gh pr merge "$PR" --auto --squash || true
-          else
-            echo "No PR opened yet for Phase ${{ steps.phase.outputs.next }} — the hourly cron will retry."
+          if [ -z "$PR" ]; then
+            echo "No PR opened for Phase ${{ steps.phase.outputs.next }} — the */10 cron will retry."
+            exit 0
           fi
+          echo "Enabling auto-merge on PR #$PR"
+          gh pr merge "$PR" --auto --squash || true
+
+          # Poll up to ~20 min for CI to pass and the PR to merge. When it does,
+          # self-dispatch the orchestrator so the NEXT phase starts immediately
+          # (the pull_request:closed event is suppressed for GITHUB_TOKEN merges, so
+          # we must re-trigger ourselves). If CI never goes green, we simply exit and
+          # the cron keeps this phase's PR — the safe stall.
+          for i in $(seq 1 40); do
+            STATE=$(gh pr view "$PR" --json state --jq .state 2>/dev/null || echo "")
+            if [ "$STATE" = "MERGED" ]; then
+              echo "PR #$PR merged — dispatching the next phase."
+              gh workflow run v2-autobuild.yml || true
+              exit 0
+            fi
+            if [ "$STATE" = "CLOSED" ]; then echo "PR #$PR closed unmerged — stopping."; exit 0; fi
+            sleep 30
+          done
+          echo "PR #$PR not merged within the window (CI slow/failing). The cron will re-assert auto-merge."
