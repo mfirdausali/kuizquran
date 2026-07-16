@@ -1,0 +1,95 @@
+name: CI
+
+# The merge gate. Auto-merge (v2-autobuild) is conditioned on this passing — it is
+# the ONLY thing stopping "merge everything" from merging broken code. Tolerant of the
+# still-evolving v2 layout: each job runs only if its target exists, so early phases
+# (scaffolding, before tests exist) don't fail on absent dirs, but any suite that DOES
+# exist must be green.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ---- JS / TS: engine + web (vitest), wherever they live under v2 ----
+  js:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect JS projects with a test script
+        id: detect
+        run: |
+          set -e
+          # Any package.json under v2/ that defines a "test" script.
+          mapfile -t PKGS < <(find v2 -maxdepth 3 -name package.json \
+            -not -path '*/node_modules/*' -print 2>/dev/null || true)
+          FOUND=""
+          for p in "${PKGS[@]}"; do
+            if node -e "process.exit(require('./'+process.argv[1]).scripts?.test?0:1)" "$p" 2>/dev/null; then
+              FOUND="$FOUND $(dirname "$p")"
+            fi
+          done
+          echo "dirs=$FOUND" >> "$GITHUB_OUTPUT"
+          echo "Projects with tests:${FOUND:- (none yet)}"
+
+      - uses: actions/setup-node@v4
+        if: steps.detect.outputs.dirs != ''
+        with:
+          node-version: 20
+
+      - name: Install pnpm
+        if: steps.detect.outputs.dirs != ''
+        run: npm i -g pnpm@9 || true
+
+      - name: Build + test each JS project
+        if: steps.detect.outputs.dirs != ''
+        run: |
+          set -e
+          for d in ${{ steps.detect.outputs.dirs }}; do
+            echo "::group::$d"
+            cd "$GITHUB_WORKSPACE/$d"
+            # Prefer pnpm if a lockfile/workspace exists, else npm.
+            if [ -f pnpm-lock.yaml ] || [ -f pnpm-workspace.yaml ]; then
+              pnpm install --frozen-lockfile || pnpm install
+              pnpm run build --if-present || true
+              pnpm test
+            else
+              npm ci || npm install
+              npm run build --if-present || true
+              npm test
+            fi
+            cd "$GITHUB_WORKSPACE"
+            echo "::endgroup::"
+          done
+
+  # ---- Laravel API (PHPUnit), only once v2/api exists ----
+  php:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Does a Laravel app exist?
+        id: has
+        run: |
+          if [ -f v2/api/artisan ]; then echo "yes=true" >> "$GITHUB_OUTPUT"; else echo "yes=false" >> "$GITHUB_OUTPUT"; fi
+
+      - uses: shivammathur/setup-php@v2
+        if: steps.has.outputs.yes == 'true'
+        with:
+          php-version: "8.3"
+
+      - name: Composer install + test
+        if: steps.has.outputs.yes == 'true'
+        working-directory: v2/api
+        run: |
+          composer install --no-interaction --prefer-dist
+          cp -n .env.example .env || true
+          php artisan key:generate || true
+          php artisan test

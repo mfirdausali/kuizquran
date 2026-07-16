@@ -232,6 +232,14 @@ recommendation each; the user chose "Go with your recommendations."_
 - **Why:** Fastest path to real recall data (the strategic priority in `../NEXT-STEPS.md`) without blocking on a full 1,777‑word review. Trades a **real, knowingly‑accepted risk** — a fast learner could reach an unverified ayah before scholar review — mitigated by the gated pace, the required verified buffer, and the just‑in‑time override editor. Chosen over the safer tiered / all‑111 options.
 - **Related:** v1 GATE‑A (refined here), v2‑D21/D22 (the override editor is the JIT verification tool), v2‑D07/D09 (gated pace bounds how fast the frontier moves), Roadmap Phase 6/7.
 
+### v2‑D31 — Build v2 via a fully-autonomous GitHub Actions loop (merge-everything)
+- **When:** 2026‑07‑16 01:33:58 UTC (2026‑07‑16 10:33 JST)
+- **Kind:** process · **Status:** accepted (user chose "fully autonomous, merge everything" over the safer autonomous-until-gate and wait-on-limit-only options, after being shown the drift risk).
+- **Decision:** Execute the ROADMAP autonomously in GitHub's cloud — no local machine, no per-phase human gate. Three workflows: `v2-autobuild.yml` (orchestrator: reads `v2/.build-state` → posts `@claude execute Phase N` → enables GitHub auto-merge → loops on PR-merge, hourly cron, and dispatch), `claude.yml` (the Claude GitHub-app builder), `ci.yml` (the **required merge gate**: build + vitest + `php artisan test`). Auto-merge is conditioned on CI green. Phase progress is tracked in `v2/.build-state`. Wait-on-limit is handled by the hourly cron re-poking the current phase.
+- **Why:** Fastest hands-off path to a candidate v2; the operator explicitly accepted the tradeoff — an AI approving its own architectural PRs across 7 phases can drift silently, so review happens at the END, not per phase.
+- **Guardrails / accepted risks:** (a) CI is the only thing preventing merge-of-broken-code — no CI, no auto-merge. (b) Safe failure = a stall (a phase whose CI keeps failing never merges) rather than corruption. (c) CI green ≠ vision-correct; the human judgment that caught earlier design errors is deliberately traded for speed. (d) Requires `ANTHROPIC_API_KEY` secret + Actions write/PR perms + auto-merge enabled (operator one-time setup in `v2/RUNNING.md`).
+- **Related:** `v2/RUNNING.md` (operator guide), `v2/ROADMAP.md` (what gets built), the standing decision-logging rule (the builder appends new decisions here per phase).
+
 ---
 
 ## Live code bugs to fix in v2 (surfaced during scenario planning)

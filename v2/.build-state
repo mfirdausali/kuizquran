@@ -1,0 +1,4 @@
+# Autonomous build progress. The orchestrator (.github/workflows/v2-autobuild.yml)
+# reads last_completed to decide the next phase; each phase's PR appends its number here.
+# -1 means nothing built yet → next phase is 0.
+last_completed=-1

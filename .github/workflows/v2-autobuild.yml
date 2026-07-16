@@ -1,0 +1,115 @@
+name: v2 Autobuild (orchestrator)
+
+# Drives the v2 ROADMAP autonomously, phase by phase, to completion — no human gate
+# (user-chosen: fully autonomous, merge-everything). It:
+#   1. reads v2/.build-state to find the next unbuilt phase N,
+#   2. posts "@claude execute Phase N …" (the Claude app in claude.yml builds → opens a PR),
+#   3. enables GitHub auto-merge on that PR so it merges the moment CI (ci.yml) is green,
+#   4. the merge re-triggers this workflow → phase N+1, until all phases are done.
+# Wait-on-limit: the `schedule` cron re-pokes the current phase if a run stalled (e.g. a
+# usage limit), so it resumes automatically when the limit resets.
+#
+# SAFE FAILURE MODE: a phase whose CI keeps failing never auto-merges; the loop stalls
+# on it (visible as no progress) rather than merging corruption.
+
+on:
+  pull_request:
+    types: [closed]
+  schedule:
+    - cron: "0 * * * *"      # hourly: resume after usage-limit / stalled runs
+  workflow_dispatch:
+    inputs:
+      start_phase:
+        description: "Phase to (re)start from (blank = resume from state file)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+env:
+  LAST_PHASE: 7              # final phase number in the roadmap
+  STATE_FILE: v2/.build-state
+
+jobs:
+  drive:
+    # Run only on a MERGE (not a mere close), or a schedule tick, or manual dispatch.
+    if: >
+      github.event_name != 'pull_request' ||
+      (github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute next phase
+        id: phase
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          # Determine last completed phase from the state file (default: -1 → next is 0).
+          LAST=-1
+          [ -f "$STATE_FILE" ] && LAST="$(grep -oE 'last_completed=[0-9-]+' "$STATE_FILE" | cut -d= -f2 || echo -1)"
+          # Manual override:
+          OVERRIDE="${{ github.event.inputs.start_phase }}"
+          if [ -n "$OVERRIDE" ]; then NEXT="$OVERRIDE"; else NEXT=$((LAST + 1)); fi
+          echo "last=$LAST" >> "$GITHUB_OUTPUT"
+          echo "next=$NEXT" >> "$GITHUB_OUTPUT"
+          if [ "$NEXT" -gt "$LAST_PHASE" ]; then echo "done=true" >> "$GITHUB_OUTPUT"; else echo "done=false" >> "$GITHUB_OUTPUT"; fi
+
+          # Guard: is there already an OPEN autobuild PR for this phase? If so, don't
+          # re-poke — just try to (re)enable auto-merge on it (resume path).
+          OPEN=$(gh pr list --state open --search "in:title v2 Phase $NEXT" --json number,headRefName --jq '.[0].number // empty' 2>/dev/null || true)
+          echo "open_pr=$OPEN" >> "$GITHUB_OUTPUT"
+
+      - name: Stop — all phases complete
+        if: steps.phase.outputs.done == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "All phases (0..$LAST_PHASE) complete. Halting the loop."
+          # Post once (idempotent-ish): only if no 'build complete' issue exists yet.
+          EXISTS=$(gh issue list --state all --search "v2 build complete in:title" --json number --jq '.[0].number // empty' || true)
+          if [ -z "$EXISTS" ]; then
+            gh issue create --title "🎉 v2 build complete" \
+              --body "All roadmap phases 0–$LAST_PHASE are merged. Review the result end-to-end and run it locally before shipping — autonomy produced a candidate, not a guarantee." || true
+          fi
+
+      - name: Re-enable auto-merge on an existing open phase PR (resume)
+        if: steps.phase.outputs.done == 'false' && steps.phase.outputs.open_pr != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Open PR #${{ steps.phase.outputs.open_pr }} for Phase ${{ steps.phase.outputs.next }} exists — ensuring auto-merge is on."
+          gh pr merge "${{ steps.phase.outputs.open_pr }}" --auto --squash || true
+
+      - name: Kick off the next phase (@claude)
+        if: steps.phase.outputs.done == 'false' && steps.phase.outputs.open_pr == ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          N="${{ steps.phase.outputs.next }}"
+          gh issue create \
+            --title "@claude execute Phase $N" \
+            --body "$(cat <<EOF
+          @claude Execute **Phase $N** of the v2 build.
+
+          **Read first (authoritative):** \`v2/ROADMAP.md\` (the phase spec + exit criteria) and \`v2/DECISIONS.md\` (the 46 locked decisions). Honor every decision, the invariants (#1 ayah-as-unit, #2 append-only/commit-before-feedback, #5 Amiri-largest/coral-slips-only, #6 logic-in-engine), and the standing decision-logging rule in \`v1/CLAUDE.md\` (append any new decision to \`v2/DECISIONS.md\` with a real \`date -u\` timestamp).
+
+          **Do ONLY Phase $N.** Do not start later phases.
+
+          **Requirements for this run:**
+          - Implement exactly what Phase $N of the roadmap specifies, reusing v1 assets marked "port as-is" and rebuilding only what's marked "rebuild".
+          - Add/keep tests so Phase $N's exit-criterion suite is green (CI must pass — that gates the merge).
+          - When Phase $N is complete, **append \`last_completed=$N\` (and a one-line note) to \`v2/.build-state\`** so the orchestrator advances.
+          - Open a PR whose **title starts with "v2 Phase $N:"** so the loop can track it.
+          - If Phase $N genuinely needs a human decision the roadmap flags as open (e.g. v2-O1, language default, first-shippable scope), make the **simplest reasonable default consistent with DECISIONS.md**, log it as a new decision, and proceed — do not stall (the loop is fully autonomous by the operator's choice).
+          EOF
+          )"
+          echo "Requested Phase $N."
