@@ -110,6 +110,11 @@ jobs:
           # so a missing app key can't fail the autoload step.
           APP_KEY: base64:2fl+Ktt0V1Sj9K0m7hHkK2n8xY3qZp1Rw6cV0aB9eD4=
         run: |
+          # Laravel's bootstrap/cache + storage are gitignored (generated dirs), so a
+          # fresh CI checkout lacks them → package:discover fails ("must be present and
+          # writable"). Recreate them before anything runs.
+          mkdir -p bootstrap/cache storage/framework/{cache,sessions,views} storage/logs
+          chmod -R 775 bootstrap/cache storage
           cp -n .env.example .env 2>/dev/null || true
           composer install --no-interaction --prefer-dist --no-scripts
           php artisan key:generate --force || true
