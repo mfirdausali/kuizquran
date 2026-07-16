@@ -4,6 +4,7 @@
 // facts; the UI keeps it quiet. Pure; `now` passed in.
 
 import { learningDayIndex, type DayConfig } from "./daybound.ts";
+import type { DrillEvent } from "./types.ts";
 
 export interface StreakState {
   /** Current streak length in active learning-days ending today or yesterday. */
@@ -52,4 +53,33 @@ export function computeStreak(
     makeupAvailable: gap === 2,
     lastActiveDay: lastActive,
   };
+}
+
+/** Event types that mark a learning-day as "a session was completed" — see
+ *  computeStreak's own doc comment. Deliberately NOT gated on `structured` — a
+ *  victory-lap chain (structured:false) or a Test still counts as showing up for
+ *  streak/heatmap purposes even though neither moves strength (v2-D11: "records
+ *  the run for streak/heatmap, no strength change"; v2-D14 mirrors that for
+ *  Test). Bare `tap`/`reconstruct_tap` evidence doesn't count on its own — only
+ *  a completed unit does. */
+const COMPLETION_TYPES: ReadonlySet<DrillEvent["type"]> = new Set([
+  "ayah_complete",
+  "rung_complete",
+  "ayah_produced",
+  "gate_result",
+  "chain_step",
+  "test_start",
+]);
+
+/**
+ * Learning-day indices on which a session was completed — feeds computeStreak()
+ * and the Progress Report's streak calendar (v2-D17). Pure, no clock.
+ */
+export function completedDayIndices(events: DrillEvent[], cfg?: DayConfig): number[] {
+  const days = new Set<number>();
+  for (const e of events) {
+    if (!COMPLETION_TYPES.has(e.type)) continue;
+    days.add(learningDayIndex(e.ts, cfg));
+  }
+  return [...days].sort((a, b) => a - b);
 }

@@ -24,3 +24,4 @@ export * from "./heatmap.ts";
 export * from "./sessionSummary.ts";
 export * from "./pace.ts";
 export * from "./activity.ts";
+export * from "./test.ts";

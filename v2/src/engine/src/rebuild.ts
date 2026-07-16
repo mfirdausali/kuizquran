@@ -148,7 +148,12 @@ export function applyEvent(atoms: AtomsMap, e: DrillEvent, cfg?: DayConfig): voi
     atoms.set(k, update(atom, outcome, { cfg }));
     return;
   }
-  // rung_start / ayah_complete carry no strength signal on their own.
+  // rung_start / ayah_complete carry no strength signal on their own. Neither do
+  // test_start / test_answer / test_result (v2 Phase 4, v2-D14): a Test is a
+  // READ-ONLY MIRROR by design — it generates and grades questions but must never
+  // move strength or due-dates, so it deliberately has no branch here at all
+  // (rather than routing through update() with structured:false, which would
+  // still cost a no-op traversal per item). See rebuild.test.ts.
 }
 
 /** Rebuild the entire atoms cache from an ordered event log (fold). */

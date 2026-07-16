@@ -69,6 +69,13 @@ export interface Corpus {
  *  or "S3" (whole-ayah production), never "RC" — see reconstruct.ts. */
 export type Rung = "S1" | "S2" | "S3" | "S4" | "RC";
 
+/** v2 Phase 4 (v2-D13) Test feature sub-types — the mixed random question set
+ *  drawn over a self-chosen proficient range. `vocab`/`cloze`/`junction` reuse
+ *  the S1/S2/junction generators as-is; `produce` reuses reconstruct.ts's
+ *  full-ayah pass (produce-from-cold); `locate`/`reorder` are new-to-Test
+ *  patterns (see test.ts). */
+export type TestItemKind = "vocab" | "cloze" | "produce" | "junction" | "locate" | "reorder";
+
 /** One presented drill question. */
 export type DrillItem =
   | {
@@ -186,8 +193,14 @@ export type EventType =
   | "reconstruct_tap" // v2 Phase 1 (v2-D05): one tap-to-reconstruct blank-fill attempt
   | "ayah_produced" // v2 Phase 1: a reconstruct pass finished (all blanks filled) —
   // the graded completion event; `rung` carries "S2" (partial) or "S3" (whole-ayah).
-  | "gate_demote"; // v2 Phase 2 (v2-D08): a learner-accepted "send back to Learn"
+  | "gate_demote" // v2 Phase 2 (v2-D08): a learner-accepted "send back to Learn"
   // offer after repeated cold-gate fails — folds via gate.ts's demoteToLearn().
+  | "test_start" // v2 Phase 4 (v2-D13): a self-initiated Test began over [ayah, to].
+  | "test_answer" // v2 Phase 4: one Test item answered — `testKind` names the
+  // sub-type, `correct` the verdict. Read-only mirror (v2-D14): never folded by
+  // rebuild.ts, so it carries no strength/due-date signal (structured:false).
+  | "test_result"; // v2 Phase 4: a Test finished — `score`/`total` summarize it;
+  // `sentToReviews` records whether the optional nudge (v2-D14) was accepted.
 
 export interface DrillEvent {
   /** Stable client-generated id (uuid), assigned at creation. Idempotency key for
@@ -220,4 +233,16 @@ export interface DrillEvent {
   latency?: number;
   /** For interruption events: the resumePolicy classification. v0.6 metric. */
   resume?: "resume" | "restart" | "replan" | "makeup";
+  /** v2 Phase 4 Test events only. test_start/test_result: the range end (`ayah`
+   *  holds the range start, reusing the same from/to shape as connection/junction
+   *  events). test_answer: which Test sub-type this item was. */
+  testKind?: TestItemKind;
+  /** test_result: correct ÷ total, 0..1. */
+  score?: number;
+  /** test_result: total items in the Test. */
+  total?: number;
+  /** test_result: whether the learner tapped "send weak ayat to reviews"
+   *  (v2-D14's optional nudge) — recorded for the audit trail; a tap-gated,
+   *  never-automatic action, same spirit as gate_demote. */
+  sentToReviews?: boolean;
 }

@@ -1,7 +1,7 @@
 # Autonomous build progress. The orchestrator (.github/workflows/v2-autobuild.yml)
 # reads last_completed to decide the next phase; each phase's PR appends its number here.
 # -1 means nothing built yet → next phase is 0.
-last_completed=3
+last_completed=4
 # Phase 0: engine ported to v2/src/engine (BUG-3 gap-guard fixed in chain.ts + the
 # live rebuild.ts chain_step fold), corpus + iman-ui.css shipped, event log/atoms
 # rebuild wired, router added, vitest green (112 tests), dev server verified.
@@ -39,3 +39,24 @@ last_completed=3
 # persisted; a carried-placement run correctly starts Home's Learn item at the
 # placement's start ayah (not ayah 1); switch-account wipes local state and
 # returns to onboarding; no console errors, no horizontal overflow at 375px.
+# Phase 4: learner progress surfaces + Test feature. New /progress page (Ring +
+# flat Grid, two zoom levels over the same ayahHeatmap data - v2-D24/D25/D48,
+# movement table lives app-side in src/progress/movements.ts, engine stays
+# surah-agnostic - v2-D48) with a growth curve (heatmap.ts growthCurve()), streak
+# calendar (streak.ts completedDayIndices()), average half-life via a reusable
+# <InfoTip> (strength.ts halfLifeDays() - v2-D19/D50), Test history, and a raw
+# event-log export. New /test page: self-initiated Test (v2-D13-D16) over a
+# learner-chosen range (defaults to carried >=80 strength via engine/src/test.ts
+# carriedAyat() - v2-D15), mixing all six v2-D13 question types (vocab/cloze/
+# junction/locate-the-ayah/produce-from-cold/chaining-reorder as tap-to-order -
+# v2-D47), purple accent (v2-D16). Test is read-only BY CONSTRUCTION: rebuild.ts
+# has no branch at all for test_start/test_answer/test_result, so they can never
+# move strength/due-dates (v2-D46) - proven by a rebuild() before/after equality
+# test. Optional "send weak ayat to reviews" nudge records sentToReviews on the
+# test_result event; wiring it into assembleQueue is deferred (v2-D49). vitest
+# green (212 tests, 26 new), dev-server Playwright run (seeded 10-day event log)
+# confirmed: /progress renders the ring (12 arcs), the 111-cell grid, a 6-bar
+# growth curve, a 14-day streak calendar, and a working half-life InfoTip; /test
+# ran a full range-picker -> mixed-item -> score -> "send to reviews" -> back-to-
+# /progress loop with the flag visible in Test history; no console errors, no
+# horizontal overflow at 375px.

@@ -7,7 +7,7 @@ import type { AtomState, Stage } from "./atom.ts";
 import type { Corpus, DrillEvent } from "./types.ts";
 import { atomKey } from "./atom.ts";
 import { currentStrength, currentBand } from "./strength.ts";
-import type { DayConfig } from "./daybound.ts";
+import { learningDayIndex, type DayConfig } from "./daybound.ts";
 
 export interface HeatmapRow {
   ayah: number;
@@ -81,4 +81,45 @@ export function wordDiagnostics(
       taps: agg?.total ?? 0,
     };
   });
+}
+
+export interface GrowthPoint {
+  /** Learning-day index (daybound.ts) the point falls on. */
+  day: number;
+  /** Total distinct ayat ENCODED (S3 whole-bank completed at least once) as of
+   *  the end of this day. Monotonically non-decreasing. */
+  cumulativeEncoded: number;
+}
+
+/**
+ * Progress Report growth curve (v2-D17/D20): one point per learning-day that saw
+ * at least one ayah newly encoded, the cumulative encoded count as of that day.
+ * Each ayah counts once, at its FIRST encode (ayah_produced rung S3, or the
+ * legacy rung_complete S3), structured only (invariant #5 — a free-play pass
+ * never counts as encoding). Pure, no clock.
+ */
+export function growthCurve(events: DrillEvent[], cfg?: DayConfig): GrowthPoint[] {
+  const firstEncodeTs = new Map<number, number>(); // ayah -> ts of its first encode
+  for (const e of events) {
+    const isEncode =
+      (e.type === "ayah_produced" && e.rung === "S3") || (e.type === "rung_complete" && e.rung === "S3");
+    if (!isEncode || e.structured === false) continue;
+    const prior = firstEncodeTs.get(e.ayah);
+    if (prior === undefined || e.ts < prior) firstEncodeTs.set(e.ayah, e.ts);
+  }
+
+  const perDay = new Map<number, number>(); // day -> # ayat first-encoded that day
+  for (const ts of firstEncodeTs.values()) {
+    const day = learningDayIndex(ts, cfg);
+    perDay.set(day, (perDay.get(day) ?? 0) + 1);
+  }
+
+  const days = [...perDay.keys()].sort((a, b) => a - b);
+  const points: GrowthPoint[] = [];
+  let cumulative = 0;
+  for (const day of days) {
+    cumulative += perDay.get(day)!;
+    points.push({ day, cumulativeEncoded: cumulative });
+  }
+  return points;
 }
