@@ -7,6 +7,7 @@ import { Gate } from "./pages/Gate.tsx";
 import { Progress } from "./pages/Progress.tsx";
 import { Test } from "./pages/Test.tsx";
 import { OnboardingRoute } from "./onboarding/OnboardingRoute.tsx";
+import { Admin } from "./admin/Admin.tsx";
 import { SystemExplorer } from "./pages/SystemExplorer.tsx";
 import { useBackgroundSync } from "./sync/useBackgroundSync.ts";
 import "./styles/iman-ui.css";
@@ -18,6 +19,7 @@ const router = createBrowserRouter([
   { path: "/gate", element: <Gate /> },
   { path: "/progress", element: <Progress /> },
   { path: "/test", element: <Test /> },
+  { path: "/admin", element: <Admin /> },
   { path: "/system-explorer", element: <SystemExplorer /> },
 ]);
 

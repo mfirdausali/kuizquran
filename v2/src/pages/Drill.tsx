@@ -14,7 +14,7 @@ import {
   makeEvent,
   nextReconstructItem,
 } from "engine";
-import { loadCorpus } from "../corpus/loadCorpus.ts";
+import { loadEffectiveCorpus } from "../corpus/loadEffectiveCorpus.ts";
 import { append } from "../db/eventLog.ts";
 import { rebuildAtoms } from "../db/atoms.ts";
 
@@ -50,8 +50,8 @@ export function Drill() {
   const [strengthBefore, setStrengthBefore] = useState(0);
 
   useEffect(() => {
-    loadCorpus(SURAH)
-      .then(setCorpus)
+    loadEffectiveCorpus(SURAH)
+      .then((r) => setCorpus(r.corpus))
       .catch((e: unknown) => setError(String(e)));
   }, []);
 

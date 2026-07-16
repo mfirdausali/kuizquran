@@ -16,6 +16,7 @@ import {
   isCorrectChoice,
   isCorrectLocate,
   isCorrectReorder,
+  isQuestionDisabled,
   junctionTestItem,
   locateItem,
   produceItem,
@@ -27,6 +28,7 @@ import {
   nextReconstructItem,
   type AtomsMap,
   type Corpus,
+  type DisabledQuestion,
   type ReconstructState,
   type TestItem,
   type TestItemKind,
@@ -36,7 +38,7 @@ import {
   type TestReorderItem,
   type TestProduceItem,
 } from "engine";
-import { loadCorpus } from "../corpus/loadCorpus.ts";
+import { loadEffectiveCorpus } from "../corpus/loadEffectiveCorpus.ts";
 import { append } from "../db/eventLog.ts";
 import { rebuildAtoms } from "../db/atoms.ts";
 
@@ -53,7 +55,25 @@ function shuffledArr<T>(items: T[]): T[] {
   return a;
 }
 
-function buildItems(corpus: Corpus, pool: number[]): TestItem[] {
+/** (ayah, position) an override's `disable` row targets for one TestItem —
+ *  position is null for item kinds that aren't a single-word probe (v2-D55:
+ *  disable resolution is scoped to what the override editor can express). */
+function itemDisableKey(item: TestItem): { ayah: number; position: number | null } {
+  switch (item.kind) {
+    case "vocab":
+      return { ayah: item.ayah, position: item.position };
+    case "cloze":
+      return { ayah: item.ayah, position: item.blankPosition };
+    case "junction":
+      return { ayah: item.from, position: null };
+    case "reorder":
+      return { ayah: item.ayahs[0]!, position: null };
+    default:
+      return { ayah: item.ayah, position: null };
+  }
+}
+
+function buildItems(corpus: Corpus, pool: number[], disabled: DisabledQuestion[]): TestItem[] {
   if (pool.length === 0) return [];
   const order = shuffledArr(pool);
   const count = Math.min(ITEM_COUNT, order.length);
@@ -89,7 +109,15 @@ function buildItems(corpus: Corpus, pool: number[]): TestItem[] {
   const reorderCount = Math.min(3, corpus.meta.ayahCount - reorderFrom + 1);
   if (reorderCount >= 2) items.push(reorderItem(reorderFrom, reorderCount));
 
-  return shuffledArr(items);
+  // v2-D21/D55: a qari-disabled question never surfaces in a Test — filtered
+  // out post-generation rather than backfilled (a Test that started with a
+  // disabled item just runs slightly shorter; no silent replacement item).
+  const live = items.filter((it) => {
+    const key = itemDisableKey(it);
+    return !isQuestionDisabled(disabled, key.ayah, key.position, it.kind);
+  });
+
+  return shuffledArr(live);
 }
 
 function itemAyah(item: TestItem): number {
@@ -110,6 +138,7 @@ type Phase = "range" | "running" | "result";
 export function Test() {
   const navigate = useNavigate();
   const [corpus, setCorpus] = useState<Corpus | null>(null);
+  const [disabled, setDisabled] = useState<DisabledQuestion[]>([]);
   const [atoms, setAtoms] = useState<AtomsMap | null>(null);
   const [phase, setPhase] = useState<Phase>("range");
   const [from, setFrom] = useState<number | null>(null);
@@ -127,7 +156,12 @@ export function Test() {
   const produceSlipped = useRef(false);
 
   useEffect(() => {
-    loadCorpus(SURAH).then(setCorpus).catch(() => setCorpus(null));
+    loadEffectiveCorpus(SURAH)
+      .then((r) => {
+        setCorpus(r.corpus);
+        setDisabled(r.disabled);
+      })
+      .catch(() => setCorpus(null));
     void rebuildAtoms().then(setAtoms);
   }, []);
 
@@ -190,7 +224,7 @@ export function Test() {
     if (!corpus || from === null || to === null) return;
     const pool: number[] = [];
     for (let a = Math.min(from, to); a <= Math.max(from, to); a++) pool.push(a);
-    const built = buildItems(corpus, pool);
+    const built = buildItems(corpus, pool, disabled);
     setItems(built);
     setIndex(0);
     setResults([]);
