@@ -75,6 +75,8 @@ data, emitting real recall events. Front-loaded because everything downstream ne
 - Wire outcomes through engine `update()`; emit new v2 events **`reconstruct_tap`**,
   **`ayah_produced`** (append-before-feedback, invariant #2).
 - Use `iman-ui.css` classes (`.ayah`, `.gap-slot`, `.bank`, `.tile`) — no restyle.
+- Questions (prompt, blanks, distractor bank) are **generated on demand** by the engine — no
+  stored question list. See **Appendix A** for the full construction/type/format spec.
 
 **Exit:** play a real ayah, tap to reconstruct, see strength move, and confirm the two new event
 types land in the append-only log.
@@ -150,7 +152,8 @@ learner Progress Report (v2-D17).
   `confusionPairs`, forgetting curve, per-user drill-down) from the same event columns
   (`worker/src/metrics.ts` as the spec). Resolve **v2-O1** (half-life tooltip here too?).
 - **Question-bank override layer** (v2-D21): keep runtime auto-generation from corpus; add a
-  persisted Laravel override table keyed by ayah+position+type; overrides win at build time.
+  persisted Laravel override table keyed by ayah+position+type; overrides win at question-build
+  time. **Full schema + precedence rules in Appendix A §D–E.**
 - **Qari/scholar-friendly editor** (v2-D22): non-technical UI to fix a gloss, curate a distractor,
   group multi-word gloss units (gives DATA-1 a home), disable a bad question, add custom ones.
 
@@ -203,3 +206,104 @@ Each phase is validated by *driving the real thing*, not just types:
   in the single v2 app. (Recommend: workspace package to keep tests + regen tidy.)
 - **First shippable scope** — Surah Yusuf only (recommended, matches corpus) vs. add a short-surah
   onboarding pack (NEXT-STEPS 4a) later.
+
+---
+
+## Appendix A — Question bank: construction, types, format & specification
+
+*Answers: when is the bank built, what question patterns are generated, in what format, to what
+spec. Grounds v2-D21/D22/D23 in the mechanics v1 already ships (`v1/packages/engine/src/*`,
+`v1/packages/corpus-compiler/src/*`).*
+
+### A. When questions are constructed — three layers, three timings
+
+There is **no stored table of finished questions**. A "question" is produced fresh each time it
+is shown. Construction happens across three distinct moments:
+
+| Layer | When | Where | Output |
+|---|---|---|---|
+| **1. Corpus compile** (source material) | **Build-time, once** (regenerable) | `packages/corpus-compiler` → `public/corpus.json` | The 6 tables: verses, words+glosses+morphology, **ranked distractors**, connections, look-alikes, scene-beats. Authored distractors live in `data/yusuf-mcq-items.json`; the compiler only ranks + labels them. |
+| **2. Question generation** (the actual questions) | **Runtime, on demand, per item** | `packages/engine` — `ladder.nextItem()`, `options.pickOptions()`, `bridge.bridgeItems()`, `chain.junctionItem()` | A `DrillItem` object (prompt + option set + correct answer), computed from corpus **+ the learner's current strength**. Deterministic — no RNG in the engine; the UI shuffles display order only. |
+| **3. Override resolution** (v2 new, v2-D21) | **Runtime, at question-build time** | Laravel override table, merged in `pickOptions`/gloss lookup | Admin/qari edits (fixed gloss, curated distractor, grouped multi-word unit, disabled/custom question) applied *over* the generated question. **Overrides win; anything not overridden stays automatic.** |
+
+**Consequence for the build order:** because generation is on-demand and strength-driven, the
+"question bank" ships the day the corpus ships (Phase 0) — every one of the 111 ayat is covered
+with zero manual authoring. The override layer (Phase 6) is the *only* persisted question data,
+and it is sparse (just the human corrections).
+
+### B. Question types (the patterns generated)
+
+Six generators today; v2 adds tap-to-reconstruct as the primary loop and the Test mixed set.
+
+| Type | Prompt pattern | Options / bank source | Correct | Difficulty scaling |
+|---|---|---|---|---|
+| **S1 — meaning MCQ** | Whole ayah shown, target word lit, rest dimmed; "what does this word mean?" | Correct EN gloss + up to 3 **nearest-by-position sibling glosses** (`ladder.s1Options`) | word's EN gloss | fixed 4 options |
+| **S2 — cloze fill MCQ** | Ayah shown with **one word gapped**; tap the Arabic form that fills it | Correct Arabic surface + top *(count−1)* **ranked distractors** (`options.pickOptions` → `corpus.distractorsFor`) | word's `text_uthmani` | **band-scaled**: Learn 4 opts/rank≤4 · Reinforce 3/≤3 · Carry 2/≤2 (`options.options()`) |
+| **S3 — whole-bank production** | Empty ayah; produce it **first→last** by tapping words in reading order | all ayah words as a bank (UI shuffles) | next `expectedPosition` word | no MCQ — full production |
+| **S4 — bridge** | "What comes next?" — probes ayah n+1's **opening 3 words** as meaning MCQ; births the n→n+1 connection atom | correct gloss + sibling glosses from the opening set + n's last words (`bridge.bridgeItems`) | opening word's gloss | fixed |
+| **Junction** | "Which ayah opens next?" (crossing n→n+1 in a chain) | correct Arabic opening + **look-alike openings** from other ayat (`chain.junctionItem`) | n+1's opening | — |
+| **v2 tap-to-reconstruct** (v2-D05) — *generalizes S2+S3* | Ayah with words **progressively hidden** (1 blank → whole ayah); rebuild by tapping | correct words + near-miss **ranked distractors** from the same `distractorsFor` pool | in-order words | **auto-scales blanks with strength/band** |
+| **v2 Test mixed set** (v2-D13) | Over a chosen proficient range: random mix of the above **+ locate-the-ayah, chaining-reorder (drag shuffled ayat into order), produce-from-cold** | as above per sub-type | as above | read-only mirror (`structured:false`) |
+
+**Grounding invariant (v2-D23):** every generated question is framed *inside its ayah* — the
+verse (or its immediate context) is always shown; no decontextualized flashcards.
+
+### C. Distractor taxonomy — the *pedagogy* of the wrong answers
+
+The trap patterns are the point of the product (they teach i'rāb and word-order, and they are the
+confusion signal the retention model learns from). Two coordinates per distractor:
+
+- **Authored `src_type`** (in the source data, with a free-text `why` rationale):
+  `visual` · `semantic` · `contextual` · `phonetic`.
+- **FR1 `prd_rank`** (compiler-mapped, `corpus-compiler/src/prdRank.ts`), highest-priority first:
+  1. **suffix-variant** — same stem, differs only in the tail (case-ending / inflection trap → teaches i'rāb)
+  2. **look-alike-verse** — visually near-identical script
+  3. **same-root** — shares the triliteral root (morphology)
+  4. **synonym** — semantically related
+  5. **class-neighbor** — POS/contextual/phonetic neighbor (the residual)
+
+Each distractor also carries an integer **`rank`** (1 = strongest as authored); `pickOptions`
+selects the top *(count−1)* by rank under the band's `maxRank` ceiling — so stronger learners face
+harder, more confusable options.
+
+### D. Format / schema
+
+**Compiled distractor row** (`corpus.json`, consumed by `corpus.distractorsFor`):
+```
+{ ayah, position, rank, text, prd_rank, src_type, why }
+```
+
+**Generated question object** (`DrillItem` discriminated union, `engine/types.ts`) — the shape the
+UI renders; e.g. the S2/cloze member:
+```
+{ rung:"S2", ayahWords[], blankPosition, options[], correct, index, total }
+```
+(S1 adds `word`; S3 uses `expectedPosition`; S4 adds `fromAyah/toAyah/nextOpening`;
+junction uses `{ from, to, correct, options[] }`.)
+
+**v2 override row** (new, Laravel — Phase 6, keyed for precedence):
+```
+override { surah, ayah, position, question_type,   // the key
+           field: "gloss"|"distractor"|"group"|"disable"|"custom",
+           payload,                                  // e.g. corrected gloss, curated distractor set + ranks
+           editor_id, note, created_at }             // append-only audit
+```
+
+### E. Specification / invariants the generator must honor
+
+- **Deterministic engine, no RNG** — same corpus + same strength ⇒ same option *set*; only the UI
+  randomizes display order (keeps grading and confusion-signal reproducible).
+- **Strength-driven difficulty** — option count + `maxRank` come from the atom's band
+  (`options.options()`); v2 tap-to-reconstruct extends this to *blank count*.
+- **Override precedence** — a matching override replaces the generated field; a `disable` override
+  drops the auto question; unmatched questions stay fully automatic (v2-D21).
+- **Grounded in the ayah** (v2-D23) and **graded unit is the whole ayah** (invariant #1 — S1/S2 are
+  scaffolding; only full production counts).
+- **Read-only types carry `structured:false`** (Test, victory-lap chains) — they generate and
+  score questions but never move strength or due-dates (v2-D14).
+- **Every shown/answered question emits an append-only event** *before* feedback (invariant #2);
+  v2 adds `reconstruct_tap`, `ayah_produced`, `test_start/answer/result`.
+
+**Reuse note:** the entire generation layer (`ladder`, `options`, `bridge`, `chain.junctionItem`,
+`corpus.distractorsFor`) ports **as-is** in Phase 0/1; the override layer is the *only* net-new
+question-bank code, added in Phase 6.
