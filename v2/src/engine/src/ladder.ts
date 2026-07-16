@@ -14,6 +14,11 @@ import type { Corpus, CorpusWord, DrillItem, LadderDone, Rung } from "./types.ts
 import { ayahWords } from "./corpus.ts";
 import { pickOptions } from "./options.ts";
 
+/** The ladder only ever emits S1/S2/S3 (S4 bridge lives in bridge.ts; RC — v2
+ *  tap-to-reconstruct — lives in reconstruct.ts). Narrowing here keeps callers'
+ *  discriminated-union checks exhaustive without an unreachable RC/S4 branch. */
+export type LadderItem = Extract<DrillItem, { rung: "S1" } | { rung: "S2" } | { rung: "S3" }>;
+
 export interface LadderState {
   surah: number;
   ayah: number;
@@ -98,7 +103,7 @@ export function s1Options(state: LadderState, position: number): { options: stri
 }
 
 /** The next drill item, or {done:true} when the whole ayah is encoded (S3 complete). */
-export function nextItem(state: LadderState, corpus: Corpus): DrillItem | LadderDone {
+export function nextItem(state: LadderState, corpus: Corpus): LadderItem | LadderDone {
   if (state.ayahComplete) return { done: true };
 
   if (state.rung === "S1") {

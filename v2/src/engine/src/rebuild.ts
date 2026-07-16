@@ -21,7 +21,11 @@ import { birthConnection } from "./bridge.ts";
 import type { DayConfig } from "./daybound.ts";
 
 // S4 rolls up as a light meaning signal, like S1 (bridge = meaning items).
-const RUNG_KIND: Record<Rung, RetrievalKind> = { S1: "s1", S2: "s2", S3: "s3", S4: "s1" };
+// RC (v2 reconstruct) is never written to the wire directly — a reconstruct
+// pass's DrillEvent.rung carries its grading equivalence class "S2"/"S3"
+// (see reconstruct.ts); this entry only exists so the Record<Rung,...> stays
+// total and is never actually read.
+const RUNG_KIND: Record<Rung, RetrievalKind> = { S1: "s1", S2: "s2", S3: "s3", S4: "s1", RC: "s2" };
 
 export type AtomsMap = Map<string, AtomState>;
 
@@ -45,8 +49,10 @@ function isStructured(e: DrillEvent): boolean {
 export function applyEvent(atoms: AtomsMap, e: DrillEvent, cfg?: DayConfig): void {
   const key = atomKey("ayah", e.ayah);
 
-  if (e.type === "tap" && e.correct === false) {
+  if ((e.type === "tap" || e.type === "reconstruct_tap") && e.correct === false) {
     // A slip → negative retrieval of the current rung (pretest excluded in update()).
+    // reconstruct_tap (v2 Phase 1) rolls up exactly like the old S2/S3 `tap`: its
+    // `rung` already carries the grading equivalence class ("S2"/"S3").
     const atom = getAtom(atoms, e.ayah);
     const outcome: RetrievalOutcome = {
       kind: RUNG_KIND[e.rung],
@@ -59,7 +65,10 @@ export function applyEvent(atoms: AtomsMap, e: DrillEvent, cfg?: DayConfig): voi
     return;
   }
 
-  if (e.type === "rung_complete") {
+  if (e.type === "rung_complete" || e.type === "ayah_produced") {
+    // ayah_produced (v2 Phase 1) is the tap-to-reconstruct completion event —
+    // graded exactly like rung_complete, using whatever grading rung ("S2"/"S3")
+    // reconstruct.ts stamped on it.
     const atom = getAtom(atoms, e.ayah);
     const outcome: RetrievalOutcome = {
       kind: RUNG_KIND[e.rung],

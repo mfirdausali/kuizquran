@@ -57,6 +57,11 @@ export function Home() {
         </button>
         {atomCount !== null && <p className="caption">Atoms cache rebuilt from the log: {atomCount} atom(s).</p>}
         <p>
+          <Link className="btn btn--primary" to="/drill?ayah=1">
+            Drill — tap to reconstruct →
+          </Link>
+        </p>
+        <p>
           <Link className="btn btn--ghost" to="/system-explorer">
             System Explorer →
           </Link>

@@ -1,7 +1,14 @@
 # Autonomous build progress. The orchestrator (.github/workflows/v2-autobuild.yml)
 # reads last_completed to decide the next phase; each phase's PR appends its number here.
 # -1 means nothing built yet → next phase is 0.
-last_completed=0
+last_completed=1
 # Phase 0: engine ported to v2/src/engine (BUG-3 gap-guard fixed in chain.ts + the
 # live rebuild.ts chain_step fold), corpus + iman-ui.css shipped, event log/atoms
 # rebuild wired, router added, vitest green (112 tests), dev server verified.
+# Phase 1: tap-to-reconstruct engine module (src/engine/src/reconstruct.ts,
+# blank count auto-scales Learn 1 -> Reinforce half -> Carry whole-ayah) wired
+# through the real /drill screen; new reconstruct_tap/ayah_produced events fold
+# into rebuild.ts via the existing S2/S3 grading path (no new RetrievalKind).
+# vitest green (125 tests), dev-server-driven Playwright run confirmed strength
+# moves and both event types land in the append-only IndexedDB log for both a
+# short (12:1, 5 words) and long (12:4, 15 words) ayah.
