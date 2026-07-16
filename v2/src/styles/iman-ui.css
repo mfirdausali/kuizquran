@@ -1,0 +1,294 @@
+/* ==========================================================================
+   iman.app — web UI design system (Yusuf prelude)
+   Language: the Claude "visualize" aesthetic — warm paper surfaces,
+   hairline borders, flat components, one teal ramp for all learning
+   semantics, coral strictly for slips. The Amiri ayah is the only hero.
+   Drop-in: <link rel="stylesheet" href="iman-ui.css">
+   ========================================================================== */
+
+/* ---- 0. Fonts ------------------------------------------------------------
+   Exact faces from the approved specimen. Amiri is exact and free.
+   The Claude UI faces (Styrene B sans / Tiempos Text serif) are
+   commercial — they sit first in the stacks for if they're ever
+   licensed; Inter and Source Serif 4 are the shipping open
+   equivalents, loaded below so every visitor sees the same page.
+   -------------------------------------------------------------------------- */
+
+@import url('https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Inter:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400..600&display=swap');
+
+/* ---- 1. Tokens ---------------------------------------------------------- */
+
+:root {
+  /* surfaces: page -> panel -> card -> raised control (tile on card) */
+  --surface-0: #edebe3;
+  --surface-1: #f5f4ee;
+  --surface-2: #fcfbf8;
+  --surface-3: #ffffff;
+
+  --text-primary:   #1f1e1b;
+  --text-secondary: #5f5d55;
+  --text-muted:     #918f86;
+
+  --border:          rgba(31, 30, 27, 0.14);
+  --border-stronger: rgba(31, 30, 27, 0.30);
+
+  /* teal ramp — the learning color. Bands: Learn / Reinforce / Carry */
+  --teal-100: #e1f5ee;
+  --teal-300: #9fe1cb;
+  --teal-400: #5dcaa5;
+  --teal-600: #1d9e75;
+  --teal-800: #085041;
+  --teal-900: #04342c;
+
+  /* coral — slips and lapses only. Never decoration. */
+  --coral-100: #faece7;
+  --coral-300: #f0997b;
+  --coral-500: #d85a30;
+  --coral-700: #993c1d;
+  --coral-800: #712b13;
+
+  /* amber — streak / consistency only */
+  --amber-100: #faeeda;
+  --amber-600: #ba7517;
+
+  /* purple — meaning work (vs teal recall work) */
+  --purple-100: #ece7f8;
+  --purple-600: #6c5bb8;
+  --purple-800: #332a66;
+
+  /* semantic pairs */
+  --ok-bg: var(--teal-100);   --ok-fg: var(--teal-800);   --ok-border: var(--teal-400);
+  --warn-bg: var(--coral-100);--warn-fg: var(--coral-800);--warn-border: var(--coral-300);
+
+  --fill-primary: #1f1e1b;
+  --on-primary:   #fcfbf8;
+
+  /* stage dots (home rows) */
+  --stage-learn:     var(--teal-600);
+  --stage-reinforce: var(--teal-400);
+  --stage-carry:     var(--coral-500);
+
+  /* type — pinned to the approved specimen */
+  --font-ui: "Styrene B", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-arabic: "Amiri", "Scheherazade New", serif;   /* exact — loaded above */
+  --font-voice: "Tiempos Text", "Source Serif 4", Georgia, serif;   /* intention lines, one per screen max */
+
+  /* shape */
+  --r-card: 20px;
+  --r-control: 10px;
+  --r-tile: 8px;
+  --hairline: 0.5px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface-0: #161613;
+    --surface-1: #1e1d1a;
+    --surface-2: #282723;
+    --surface-3: #38362f;   /* raised control on a --surface-2 card: reads as lifted, not sunk */
+
+    --text-primary:   #eceae2;
+    --text-secondary: #a5a399;
+    --text-muted:     #7a786f;
+
+    --border:          rgba(236, 234, 226, 0.14);
+    --border-stronger: rgba(236, 234, 226, 0.32);
+
+    --ok-bg: rgba(29, 158, 117, 0.16);  --ok-fg: #9fe1cb;  --ok-border: rgba(93, 202, 165, 0.5);
+    --warn-bg: rgba(216, 90, 48, 0.16); --warn-fg: #f0997b;--warn-border: rgba(240, 153, 123, 0.5);
+
+    --amber-100: rgba(186, 117, 23, 0.18);
+    --purple-100: rgba(108, 91, 184, 0.18);
+
+    --fill-primary: #eceae2;
+    --on-primary:   #1f1e1b;
+  }
+}
+
+/* ---- 2. Base ------------------------------------------------------------ */
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--surface-0);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--teal-600);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+/* ---- 3. Layout ---------------------------------------------------------- */
+
+.screen {                      /* one drill = one card, centered like a page */
+  max-width: 420px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.card {
+  background: var(--surface-2);
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--r-card);
+  padding: 18px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card-header {                 /* "Learn 12:4 · fill    word 7 / 14" */
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.caption { font-size: 12px; color: var(--text-muted); margin: 0; }
+.voice   { font-family: var(--font-voice); color: var(--text-secondary); font-size: 13px; }
+
+/* ---- 4. The hero: the ayah ---------------------------------------------- */
+
+.ayah {
+  direction: rtl;
+  font-family: var(--font-arabic);
+  font-size: 22px;             /* the largest type on any screen — always */
+  line-height: 2.1;
+  text-align: right;
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--r-control);
+  padding: 12px 14px;
+  background: var(--surface-2);
+}
+.ayah--dim { color: var(--text-secondary); }      /* prompts, prev-verse tails */
+.ayah--display { border: none; text-align: center; font-size: 28px; padding: 8px 0; }
+
+.gap-slot {                    /* hidden word inside an ayah */
+  display: inline-block;
+  min-width: 3ch;
+  border-bottom: 1.5px dashed var(--border-stronger);
+  color: var(--text-muted);
+}
+.gap-slot.is-current { border-bottom: 2px solid var(--teal-600); }
+.gap-slot.is-filled  { border-bottom: none; color: var(--text-primary); }
+
+/* ---- 5. Tiles & options -------------------------------------------------- */
+
+.bank { direction: rtl; display: flex; flex-wrap: wrap; gap: 8px; }
+
+.tile {
+  font-family: var(--font-arabic);
+  font-size: 18px;
+  padding: 6px 14px;
+  border-radius: var(--r-tile);
+  background: var(--surface-3);          /* raised above the card, never sunk into it */
+  color: var(--text-primary);            /* explicit — a tile's own glyph, not inherited */
+  border: var(--hairline) solid var(--border-stronger);
+  cursor: pointer;
+  user-select: none;
+  transition: opacity .2s, background .2s;
+}
+.tile:hover { background: var(--surface-2); }
+.tile.is-ok   { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-border); }
+.tile.is-used { opacity: .25; pointer-events: none; }
+.tile.is-err  { background: var(--warn-bg); color: var(--warn-fg);
+                border-color: var(--warn-border); animation: shake .35s; }
+
+@keyframes shake {
+  25% { transform: translateX(-3px); }
+  75% { transform: translateX(3px); }
+}
+
+.option {                      /* meaning-match / junction choices */
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: var(--r-tile);
+  background: var(--surface-1);
+  border: var(--hairline) solid var(--border);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.option--arabic { font-family: var(--font-arabic); font-size: 17px; text-align: right; direction: rtl; }
+.option.is-ok  { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-border); }
+.option.is-err { background: var(--warn-bg); color: var(--warn-fg);
+                 border-color: var(--warn-border); animation: shake .35s; }
+
+/* ---- 6. Strength & stages ------------------------------------------------ */
+
+.meter {
+  height: 6px;
+  background: var(--surface-0);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.meter > div { height: 100%; background: var(--teal-600); border-radius: 3px; transition: width .7s; }
+
+.bands {                       /* Learn 0-40 / Reinforce 40-80 / Carry 80+ */
+  display: flex; height: 22px; border-radius: var(--r-tile);
+  overflow: hidden; font-size: 11px; text-align: center; line-height: 22px;
+}
+.bands .b-learn     { width: 40%; background: var(--teal-100); color: var(--teal-900); }
+.bands .b-reinforce { width: 40%; background: var(--teal-300); color: var(--teal-900); }
+.bands .b-carry     { width: 20%; background: var(--teal-600); color: var(--teal-100); }
+
+.stage-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; }
+.stage-dot--learn     { background: var(--stage-learn); }
+.stage-dot--reinforce { background: var(--stage-reinforce); }
+.stage-dot--carry     { background: var(--stage-carry); }
+
+/* ---- 7. Banners, pills, buttons ------------------------------------------ */
+
+.banner { border-radius: var(--r-control); padding: 10px 12px; font-size: 13px; }
+.banner--ok   { background: var(--ok-bg);   color: var(--ok-fg);
+                border: var(--hairline) solid var(--ok-border); }
+.banner--warn { background: var(--warn-bg); color: var(--warn-fg);
+                border: var(--hairline) solid var(--warn-border); }
+.banner p { margin: 0; }
+.banner .sub { font-size: 12px; opacity: .85; }
+
+.pill-streak {
+  font-size: 12px; padding: 3px 10px; border-radius: 10px;
+  background: var(--amber-100); color: var(--amber-600);
+}
+.pill-meaning {                /* purple = meaning work */
+  font-size: 12px; padding: 3px 10px; border-radius: 10px;
+  background: var(--purple-100); color: var(--purple-600);
+}
+
+.btn {
+  width: 100%;
+  padding: 11px;
+  border-radius: var(--r-control);
+  border: var(--hairline) solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font: inherit; font-size: 14px;
+  cursor: pointer;
+}
+.btn--primary {
+  background: var(--fill-primary);
+  color: var(--on-primary);
+  border: none;
+  font-weight: 500;
+}
+.btn--ghost { background: none; border: none; color: var(--text-secondary); }
+
+/* ---- 8. Rules of use (enforced by taste, not lint) -----------------------
+   1. The .ayah is the largest type on every screen. Nothing competes.
+   2. Coral appears only when something slipped. Zero decorative coral.
+   3. One .voice line per screen, maximum (the intention line).
+   4. No shadows, no gradients, no borders thicker than the hairline.
+   5. Captions explain mechanics quietly; buttons say what happens.
+   -------------------------------------------------------------------------- */

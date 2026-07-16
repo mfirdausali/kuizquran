@@ -1,4 +1,7 @@
 # Autonomous build progress. The orchestrator (.github/workflows/v2-autobuild.yml)
 # reads last_completed to decide the next phase; each phase's PR appends its number here.
 # -1 means nothing built yet → next phase is 0.
-last_completed=-1
+last_completed=0
+# Phase 0: engine ported to v2/src/engine (BUG-3 gap-guard fixed in chain.ts + the
+# live rebuild.ts chain_step fold), corpus + iman-ui.css shipped, event log/atoms
+# rebuild wired, router added, vitest green (112 tests), dev server verified.

@@ -242,25 +242,59 @@ recommendation each; the user chose "Go with your recommendations."_
 
 ---
 
+## Phase 0 build decisions (executed under v2‑D31 autonomous authorization)
+
+### v2‑D32 — Resolve v2‑O2: scaffold v2 now
+- **When:** 2026‑07‑16 02:03:50 UTC (2026‑07‑16 11:03 JST)
+- **Kind:** process · **Status:** accepted (assistant decision under the v2‑D31 standing autonomous-loop authorization — "the loop is fully autonomous by operator choice")
+- **Decision:** Execute ROADMAP Phase 0 now. v2‑O2 is resolved: yes, scaffold.
+- **Why:** v2‑D31 commits to a fully-autonomous, no-per-phase-gate build; Phase 0 is next in `.build-state` (`last_completed=-1`) and the design corpus is complete. Stalling on a question the operator already pre-authorized would contradict v2‑D31.
+- **Related:** v2‑O2 (superseded by this), v2‑D31.
+
+### v2‑D33 — Engine placement: vendored `v2/src/engine/`, not a pnpm workspace package
+- **When:** 2026‑07‑16 02:03:50 UTC (11:03 JST)
+- **Kind:** stack · **Status:** accepted (resolves the ROADMAP "Engine placement" open item)
+- **Context:** ROADMAP.md flagged two options — a pnpm workspace package (mirrors v1) vs. a vendored `src/engine/` in the single v2 app — and recommended the workspace package "to keep tests + regen tidy."
+- **Decision:** Go with vendored `v2/src/engine/{src,test}` (mirroring `v1/packages/engine`'s own internal `src`/`test` split exactly, so all 24 ported source files + 16 test files needed **zero import-path edits** beyond the corpus fixture path). An `"engine"` alias (`vite.config.ts` `resolve.alias` + `tsconfig.json` `paths`) resolves `import ... from "engine"` for every ported/app file, exactly matching what v1's pnpm workspace `engine` package provided.
+- **Why:** v2 was scaffolded as a single npm app (`package-lock.json`, no `pnpm-workspace.yaml`, no sibling packages) — introducing a pnpm workspace now would be a second, unrelated stack change (npm→pnpm) bundled into "port the engine," and Phase 0's own scope note says port "unchanged" where possible. The alias gives the same ergonomics (bare `"engine"` import, no relative-path spaghetti) without the tooling switch. Regen (`corpus-compiler`) stays in `v1/` per ROADMAP — not part of Phase 0.
+- **Related:** ROADMAP.md "Open items to confirm" (Engine placement), v2‑D01 (React+Vite, not a monorepo statement either way).
+
+### v2‑D34 — Router = react-router-dom; per-surah corpus files at `public/corpus/<surah>.json`
+- **When:** 2026‑07‑16 02:03:50 UTC (11:03 JST)
+- **Kind:** stack · **Status:** accepted
+- **Decision:** (a) Replace the dev-only hash router in `main.tsx` with `react-router-dom` (`createBrowserRouter`/`RouterProvider`); routes today are `/` (shell Home) and `/system-explorer`. (b) The surah-keyed corpus loader (v2‑D29) fetches `/corpus/<surah>.json`; `v1/public/corpus.json` ships verbatim to `v2/public/corpus/12.json`.
+- **Why:** ROADMAP.md Phase 0 calls for "a router" without naming one; `react-router-dom` is the standard choice for a React+Vite SPA and needs no other scaffolding. The per-surah file path is the simplest layout that satisfies "no hardcoded 12" (v2‑D29) — adding a surah later is dropping a new `<n>.json` next to it, no loader changes.
+- **Related:** v2‑D29 (surah-agnostic framework), ROADMAP Phase 0.
+
+### v2‑D35 — BUG‑3 fix scope extended to the live `rebuild.ts` chain_step fold
+- **When:** 2026‑07‑16 02:03:50 UTC (11:03 JST)
+- **Kind:** mechanic · **Status:** accepted
+- **Context:** v2‑BUG‑3 (below) names `chain.ts:70`'s `applyChain`. While porting, `applyChain` turned out to be **dead code in v1** — grep shows it's called only from its own test; the live app instead drives chains through `ChainDrill.tsx` → `chain_step` events → `rebuild.ts`'s `applyEvent`/`getAtom`, which has the **identical phantom-materialization flaw** (`atoms.get(key) ?? initAtom(...)` for an ayah chain step, regardless of whether that ayah was ever encoded).
+- **Decision:** Fix both: `chain.ts`'s `applyChain` (as named in v2‑BUG‑3) AND `rebuild.ts`'s `chain_step` branch (the actual live path) get the same gap guard — an ayah step only credits an atom that already exists **and** is `encoded`; a junction step only credits a connection that already exists (born via S4). A step whose atom doesn't qualify is skipped (no map mutation); the triggering event still lands in the append-only log (invariant #2) — it just carries no strength signal. Regression tests added in both `chain.test.ts` and `rebuild.test.ts`.
+- **Why:** Fixing only the dead function would leave the real bug live in v2 exactly where the ROADMAP says it must not carry forward ("fixed as the code is lifted"). Same root cause, same minimal guard, no new mechanics — in scope for "one fix: chain.ts BUG‑3" in spirit even though the surface area is one file wider than literally named.
+- **Related:** v2‑BUG‑3, ROADMAP Phase 0 ("One fix: `chain.ts` BUG‑3").
+
+---
+
 ## Live code bugs to fix in v2 (surfaced during scenario planning)
 
 These are confirmed in the current v1 source and must not carry into v2.
 
 ### v2‑BUG‑1 — The pace dial is decorative
-- `v1/apps/web/src/session/useSession.ts:115` hardcodes `budgetMin:8`; the live session never reads the stored pace. Steady and Sprint collapse to the same drip. **Fix:** wire pace/mode into `assembleQueue` (v2‑D09).
+- `v1/apps/web/src/session/useSession.ts:115` hardcodes `budgetMin:8`; the live session never reads the stored pace. Steady and Sprint collapse to the same drip. **Fix:** wire pace/mode into `assembleQueue` (v2‑D09). **Status: open** — this is Phase 2 work (the caller doesn't exist in v2 yet).
 
 ### v2‑BUG‑2 — Make‑up recovery is dead code
-- `v1/apps/web/src/session/useSession.ts:113` passes `lastActiveDay:null`, so the make‑up merge never fires live; the "never dropped" guarantee exists only in tests. **Fix:** wire `lastActiveDay` from the event log.
+- `v1/apps/web/src/session/useSession.ts:113` passes `lastActiveDay:null`, so the make‑up merge never fires live; the "never dropped" guarantee exists only in tests. **Fix:** wire `lastActiveDay` from the event log. **Status: open** — Phase 2 work.
 
 ### v2‑BUG‑3 — Chains materialize un‑learned ayat as phantoms
-- `v1/packages/engine/src/chain.ts:70` inits + credits an un‑encoded ayah as "reviewed" (strength ~18, no gate), corrupting the shared atom model that all personas read. **Fix:** gap guard — refuse or bridge‑skip un‑encoded atoms; bound chains to the real ayah count.
+- `v1/packages/engine/src/chain.ts:70` inits + credits an un‑encoded ayah as "reviewed" (strength ~18, no gate), corrupting the shared atom model that all personas read. **Fix:** gap guard — refuse or bridge‑skip un‑encoded atoms; bound chains to the real ayah count. **Status: fixed in Phase 0** — see v2‑D35 (guard applied in both `chain.ts` and the live `rebuild.ts` chain_step fold, with regression tests).
 
 ---
 
 ## Open — awaiting the user (not yet decided)
 
 - **v2‑O1 — Half‑life tooltip on the admin console too?** (operator audience — raw term may be fine.) _Raised 2026‑07‑15 21:52 UTC._
-- **v2‑O2 — Scaffold v2 now?** The design corpus is complete (screens, onboarding, admin, ecosystem, atomic map, scenarios, decisions, Test, recording/progress). Awaiting "scaffold v2" to begin the real React + Laravel project.
+- **v2‑O2 — Scaffold v2 now?** The design corpus is complete (screens, onboarding, admin, ecosystem, atomic map, scenarios, decisions, Test, recording/progress). Awaiting "scaffold v2" to begin the real React + Laravel project. **Resolved 2026‑07‑16 — see v2‑D32.**
 
 ---
 
