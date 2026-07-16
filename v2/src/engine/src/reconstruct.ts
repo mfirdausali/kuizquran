@@ -48,20 +48,30 @@ export function blankCountFor(strength: number, total: number): number {
   return total; // carry (and lapsed, which never starts a fresh pass here)
 }
 
+export interface InitReconstructOptions {
+  /** Force whole-ayah blanking regardless of strength band — the day-1 COLD gate
+   *  check (ROADMAP Phase 2 / invariant "cold = first attempt of a fresh
+   *  learning-day, no warm-up") is always full production, even for an atom
+   *  that just encoded and is still band "learn". */
+  full?: boolean;
+}
+
 /**
  * Start a reconstruct pass over one ayah. Blanks are the LAST `blankCountFor`
  * positions (reading order) — the ayah's opening stays visible as scaffold and
  * the hidden tail grows toward the front as strength climbs, until at Carry
- * band nothing is given (pure production, matching S3).
+ * band nothing is given (pure production, matching S3). Pass `opts.full` to
+ * force whole-ayah blanking regardless of band (the cold gate check).
  */
 export function initReconstruct(
   corpus: Corpus,
   surah: number,
   ayah: number,
   strength: number,
+  opts?: InitReconstructOptions,
 ): ReconstructState {
   const words = ayahWords(corpus, ayah);
-  const blankCount = blankCountFor(strength, words.length);
+  const blankCount = opts?.full ? words.length : blankCountFor(strength, words.length);
   const start = words.length - blankCount;
   const blankPositions = words.slice(start).map((w) => w.position);
   return { surah, ayah, words, blankPositions, blankIndex: 0, strength };

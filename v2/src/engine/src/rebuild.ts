@@ -16,7 +16,7 @@
 import type { DrillEvent, Rung } from "./types.ts";
 import { atomKey, initAtom, type AtomState } from "./atom.ts";
 import { update, type RetrievalKind, type RetrievalOutcome } from "./update.ts";
-import { applyGateResult, scheduleGate } from "./gate.ts";
+import { applyGateResult, demoteToLearn, scheduleGate } from "./gate.ts";
 import { birthConnection } from "./bridge.ts";
 import type { DayConfig } from "./daybound.ts";
 
@@ -96,6 +96,15 @@ export function applyEvent(atoms: AtomsMap, e: DrillEvent, cfg?: DayConfig): voi
     };
     const updated = update(atom, outcome, { cfg });
     atoms.set(key, applyGateResult(updated, passed, e.ts, cfg));
+    return;
+  }
+
+  if (e.type === "gate_demote") {
+    // v2-D08: a learner-accepted "send back to Learn" offer after repeated cold-
+    // gate fails. Only meaningful on an atom that already exists; a demote of a
+    // never-taught atom is a no-op (nothing to send back).
+    const atom = atoms.get(key);
+    if (atom) atoms.set(key, demoteToLearn(atom));
     return;
   }
 

@@ -1,21 +1,40 @@
-// Phase 0 shell (v2-ROADMAP Phase 0): no drill mechanics yet — just proof that
-// the reused science is wired: corpus loads (surah-keyed, v2-D29), an event
-// commits to the append-only log, and atoms rebuild from it (invariant #2).
-// The real Home surface (assembleQueue, pace modes) is rebuilt in Phase 2.
+// ROADMAP Phase 2 — the real session home: driven by assembleQueue (FR3 order:
+// make-up → gate → review → learn), with pace as a first-class, persisted,
+// mid-surah-editable mode (v2-D09). This is where v2-BUG-1 (pace dial
+// decorative) and v2-BUG-2 (make-up recovery dead) get fixed live — see
+// session/useSession.ts, which wires the real budgetMin and lastActiveDay into
+// assembleQueue instead of the v1 hardcoded 8 / null.
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import type { Corpus } from "engine";
-import { makeEvent } from "engine";
+import { Link, useNavigate, type NavigateFunction } from "react-router-dom";
+import type { Corpus, PaceMode, QueueItem } from "engine";
 import { loadCorpus } from "../corpus/loadCorpus.ts";
-import { append } from "../db/eventLog.ts";
-import { rebuildAtoms } from "../db/atoms.ts";
+import { useSession } from "../session/useSession.ts";
 
 const SURAH = 12; // v2 ships Yusuf only (v2-D29); the loader itself takes surah as a param.
 
+const PACE_MODES: { mode: PaceMode; label: string; blurb: string }[] = [
+  { mode: "steady", label: "Steady", blurb: "1 new ayah/day, reserved slot" },
+  { mode: "sprint", label: "Sprint", blurb: "More new ayat, wider gate window" },
+  { mode: "maintain", label: "Maintain", blurb: "Reviews + chains only, no new" },
+];
+
+const KIND_LABEL: Record<QueueItem["kind"], string> = {
+  makeup: "Make-up",
+  gate: "Gate check",
+  review: "Review",
+  learn: "Learn",
+};
+
+function routeFor(item: QueueItem): string {
+  return item.kind === "gate" || item.kind === "makeup"
+    ? `/gate?ayah=${item.ayah}`
+    : `/drill?ayah=${item.ayah}`;
+}
+
 export function Home() {
+  const navigate = useNavigate();
   const [corpus, setCorpus] = useState<Corpus | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [atomCount, setAtomCount] = useState<number | null>(null);
 
   useEffect(() => {
     loadCorpus(SURAH)
@@ -23,42 +42,94 @@ export function Home() {
       .catch((e: unknown) => setError(String(e)));
   }, []);
 
-  async function smokeTest() {
-    // Append one event, then rebuild atoms from the durable log — proves the
-    // ported event layer works end to end from the UI, not just in tests.
-    await append(makeEvent({ type: "rung_complete", ts: Date.now(), surah: SURAH, ayah: 1, rung: "S1" }));
-    const atoms = await rebuildAtoms();
-    setAtomCount(atoms.size);
+  if (error) {
+    return (
+      <div className="screen">
+        <div className="banner banner--warn">
+          <p>Corpus failed to load: {error}</p>
+        </div>
+      </div>
+    );
   }
+
+  if (!corpus) {
+    return (
+      <div className="screen">
+        <p className="voice">Loading…</p>
+      </div>
+    );
+  }
+
+  return <HomeSession corpus={corpus} navigate={navigate} />;
+}
+
+function HomeSession({ corpus, navigate }: { corpus: Corpus; navigate: NavigateFunction }) {
+  const { loading, queue, current, mode, setMode } = useSession(corpus);
+
+  const counts = queue.reduce(
+    (acc, i) => ({ ...acc, [i.kind]: (acc[i.kind] ?? 0) + 1 }),
+    {} as Record<QueueItem["kind"], number>,
+  );
+  const totalMin = queue.reduce((s, i) => s + i.estMin, 0);
 
   return (
     <div className="screen">
       <div className="card">
         <div className="card-header">
           <span>iman.app v2</span>
-          <span>Phase 0 — scaffold</span>
+          <span>
+            Surah {corpus.meta.surah} · {corpus.meta.ayahCount} ayat
+          </span>
         </div>
-        {error && (
-          <div className="banner banner--warn">
-            <p>Corpus failed to load: {error}</p>
-          </div>
-        )}
-        {!error && !corpus && <p className="voice">Loading corpus…</p>}
-        {corpus && (
+
+        <p className="voice">Today&apos;s session — assembled in make-up → gate → review → learn order.</p>
+
+        <div style={{ display: "flex", gap: "8px" }}>
+          {PACE_MODES.map((p) => (
+            <button
+              key={p.mode}
+              className={p.mode === mode ? "btn btn--primary" : "btn btn--ghost"}
+              style={{ flex: 1 }}
+              onClick={() => setMode(p.mode)}
+              aria-pressed={p.mode === mode}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+        <p className="caption">{PACE_MODES.find((p) => p.mode === mode)!.blurb}</p>
+
+        {loading && <p className="voice">Assembling today&apos;s queue…</p>}
+
+        {!loading && queue.length === 0 && (
           <div className="banner banner--ok">
-            <p>
-              Surah {corpus.meta.surah} loaded — {corpus.meta.ayahCount} ayat, {corpus.meta.wordCount} words.
-            </p>
-            <p className="sub">Retention engine + append-only event log ported from v1, tests green.</p>
+            <p>Nothing due right now — you&apos;re caught up.</p>
           </div>
         )}
-        <button className="btn btn--primary" onClick={smokeTest}>
-          Append event + rebuild atoms
-        </button>
-        {atomCount !== null && <p className="caption">Atoms cache rebuilt from the log: {atomCount} atom(s).</p>}
+
+        {!loading && queue.length > 0 && (
+          <>
+            <div className="banner banner--ok">
+              <p>
+                {(["makeup", "gate", "review", "learn"] as const)
+                  .filter((k) => counts[k])
+                  .map((k) => `${counts[k]} ${KIND_LABEL[k].toLowerCase()}`)
+                  .join(" · ")}
+              </p>
+              <p className="sub">~{Math.round(totalMin * 10) / 10} min</p>
+            </div>
+            <button
+              className="btn btn--primary"
+              onClick={() => current && navigate(routeFor(current))}
+            >
+              Start — {KIND_LABEL[current!.kind]} 12:{current!.ayah}
+            </button>
+          </>
+        )}
+
         <p>
-          <Link className="btn btn--primary" to="/drill?ayah=1">
-            Drill — tap to reconstruct →
+          <Link className="btn btn--ghost" to="/drill?ayah=1">
+            Free drill (pick an ayah) →
           </Link>
         </p>
         <p>

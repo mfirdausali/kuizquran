@@ -200,6 +200,9 @@ export function Drill() {
               {Math.round(completion.before)} → {Math.round(completion.after)}.
             </p>
             <p className="sub">reconstruct_tap + ayah_produced logged to the append-only event log.</p>
+            <Link className="btn btn--primary" to="/">
+              ← Back to session
+            </Link>
           </div>
         ) : (
           item && (
