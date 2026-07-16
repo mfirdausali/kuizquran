@@ -9,6 +9,10 @@ export interface Gloss {
   ja: string | null;
 }
 
+/** Gloss language the learner chose at onboarding (v2-D27). MS is
+ *  machine-sourced/qari-verified later (Phase 6); JA stays deferred. */
+export type GlossLang = "en" | "ms";
+
 export interface CorpusWord {
   ayah: number;
   position: number;

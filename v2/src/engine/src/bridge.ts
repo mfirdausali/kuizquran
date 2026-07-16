@@ -2,8 +2,8 @@
 // introduces ayah n+1's OPENING vocab as meaning items ("what comes next?"),
 // and BIRTHS the connection atom n→n+1. Pure.
 
-import type { Corpus, CorpusWord, DrillItem } from "./types.ts";
-import { ayahWords } from "./corpus.ts";
+import type { Corpus, CorpusWord, DrillItem, GlossLang } from "./types.ts";
+import { ayahWords, wordGloss } from "./corpus.ts";
 import { atomKey, initAtom, type AtomState } from "./atom.ts";
 
 /** How many opening words of the next ayah the bridge probes. */
@@ -16,23 +16,27 @@ export function nextOpening(corpus: Corpus, fromAyah: number): CorpusWord[] {
 
 /**
  * Build the S4 bridge meaning items for ayah n → n+1. Each item probes one of
- * n+1's opening words with a gloss MCQ (correct EN gloss + 3 sibling-gloss
- * distractors drawn from the SAME opening set + a couple of n's own words for
- * near context). Deterministic order.
+ * n+1's opening words with a gloss MCQ (correct gloss in the learner's chosen
+ * language, v2-D27, + 3 sibling-gloss distractors drawn from the SAME opening
+ * set + a couple of n's own words for near context). Deterministic order.
  */
-export function bridgeItems(corpus: Corpus, fromAyah: number): Extract<DrillItem, { rung: "S4" }>[] {
+export function bridgeItems(
+  corpus: Corpus,
+  fromAyah: number,
+  lang: GlossLang = "en",
+): Extract<DrillItem, { rung: "S4" }>[] {
   const opening = nextOpening(corpus, fromAyah);
   const toAyah = fromAyah + 1;
   // Distractor gloss pool: the opening words' glosses + the from-ayah's last words.
   const pool = [
-    ...opening.map((w) => w.gloss.en ?? w.text_uthmani),
+    ...opening.map((w) => wordGloss(w, lang)),
     ...ayahWords(corpus, fromAyah)
       .slice(-4)
-      .map((w) => w.gloss.en ?? w.text_uthmani),
+      .map((w) => wordGloss(w, lang)),
   ];
 
   return opening.map((word, i) => {
-    const correct = word.gloss.en ?? word.text_uthmani;
+    const correct = wordGloss(word, lang);
     const distractors: string[] = [];
     const seen = new Set<string>([correct]);
     for (const g of pool) {
