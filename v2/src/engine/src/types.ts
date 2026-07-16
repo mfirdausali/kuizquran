@@ -23,6 +23,13 @@ export interface CorpusWord {
   gloss: Gloss;
   act: number | null;
   sceneImage: string | null;
+  /** DATA-1 (ROADMAP Phase 7, v2-D21/D55's deferred `group` field, now resolved):
+   *  ascending positions of a multi-word vocab/idiom unit this word belongs to
+   *  (e.g. [8,9] for أَحَدَ+عَشَرَ = "eleven"), set on EVERY member by
+   *  `overrides.ts`'s `applyOverrides`. Absent for ungrouped words. Only the
+   *  first (lowest) position is ever probed as an independent S1 meaning item
+   *  — see ladder.ts. */
+  groupPositions?: number[];
 }
 
 export interface CorpusDistractor {
@@ -85,6 +92,10 @@ export type DrillItem =
       /** Full ayah words in reading order — the hero renders the whole ayah with
        *  the target word lit and the rest dimmed (in-context meaning probe). */
       ayahWords: CorpusWord[];
+      /** DATA-1: set when `word` anchors a multi-word vocab unit — every
+       *  position in this list (including `word.position`) should light
+       *  together in the hero, since the gloss covers the whole phrase. */
+      groupPositions?: number[];
       /** Gloss MCQ options (EN); exactly one is correct. */
       options: string[];
       correct: string;

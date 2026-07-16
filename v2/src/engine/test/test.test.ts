@@ -17,6 +17,7 @@ import {
 } from "../src/test.ts";
 import { initAtom, type AtomState } from "../src/atom.ts";
 import { rebuild } from "../src/rebuild.ts";
+import { applyOverrides, type QuestionOverride } from "../src/overrides.ts";
 import type { Corpus, DrillEvent } from "../src/types.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -46,6 +47,27 @@ describe("Test item generators reuse the same engine generators as Learn (invari
     expect(item.options).toContain(item.correct);
     expect(isCorrectChoice(item, item.correct)).toBe(true);
     expect(isCorrectChoice(item, "not-the-answer")).toBe(false);
+  });
+
+  // ROADMAP Phase 7 (v2-D59): Test.tsx was calling vocabItem() without the
+  // learner's chosen gloss language, so the MS overrides seeded by
+  // Phase7OverrideSeeder never surfaced live — fixed at the call site, and
+  // guarded here at the generator level so it can't silently regress.
+  it("vocab item honors an explicit lang, picking up MS gloss overrides", () => {
+    const ov: QuestionOverride = {
+      surah: SURAH,
+      ayah: 16,
+      position: 1,
+      questionType: "S1",
+      field: "gloss",
+      payload: { lang: "ms", text: "Dan mereka datang" },
+      createdAt: 1000,
+    };
+    const { corpus: patched } = applyOverrides(corpus, [ov]);
+    const enItem = vocabItem(patched, SURAH, 16, "en");
+    const msItem = vocabItem(patched, SURAH, 16, "ms");
+    expect(msItem.correct).toBe("Dan mereka datang");
+    expect(enItem.correct).not.toBe(msItem.correct);
   });
 
   it("cloze item — an Arabic-form MCQ for the ayah's middle word", () => {

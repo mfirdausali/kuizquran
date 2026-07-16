@@ -51,6 +51,19 @@ export interface LadderState {
 
 const STRENGTH_LEARN = 0; // v0.2 encodes at Learn band
 
+/** DATA-1: a word is independently probeable in S1 unless it's a NON-anchor
+ *  member of a multi-word group (`groupPositions[0]` is the anchor — the
+ *  lowest position, the only one ever probed; the phrase's shared gloss is
+ *  already correct there, so asking the trailing token(s) again would be a
+ *  near-duplicate question, per the corpus-report grouping review). */
+function isS1Probeable(w: CorpusWord): boolean {
+  return !w.groupPositions || w.groupPositions[0] === w.position;
+}
+
+function s1ProbeablePositions(words: CorpusWord[]): number[] {
+  return words.filter(isS1Probeable).map((w) => w.position);
+}
+
 export function initLadder(corpus: Corpus, surah: number, ayah: number): LadderState {
   const words = ayahWords(corpus, ayah);
   return {
@@ -58,7 +71,7 @@ export function initLadder(corpus: Corpus, surah: number, ayah: number): LadderS
     ayah,
     words,
     rung: "S1",
-    s1Queue: words.map((w) => w.position),
+    s1Queue: s1ProbeablePositions(words),
     s1PassCorrect: new Set(),
     s1Seen: new Set(),
     s1MissedThisPass: [],
@@ -115,14 +128,16 @@ export function nextItem(state: LadderState, corpus: Corpus, lang: GlossLang = "
     const position = state.s1Queue[0];
     if (position === undefined) return { done: true }; // guard; advance handles rung flips
     const { options, correct } = s1Options(state, position, lang);
+    const target = wordAt(state, position);
     return {
       rung: "S1",
-      word: wordAt(state, position),
+      word: target,
       ayahWords: state.words,
+      ...(target.groupPositions ? { groupPositions: target.groupPositions } : {}),
       options,
       correct,
       index: state.s1Seen.size + (state.s1Seen.has(position) ? 0 : 1),
-      total: state.words.length,
+      total: s1ProbeablePositions(state.words).length,
     };
   }
 
@@ -194,10 +209,14 @@ export function advance(
 
     // Pass exhausted?
     if (next.s1Queue.length === 0) {
-      // Complete once EVERY word has been answered correctly at least once
-      // (cumulative across passes) — not a single flawless sweep. This keeps the
-      // "know all glosses" bar without re-drilling all 15 words on one slip.
-      const allKnown = next.words.every((w) => next.s1PassCorrect.has(w.position));
+      // Complete once EVERY PROBEABLE word has been answered correctly at
+      // least once (cumulative across passes) — not a single flawless sweep.
+      // This keeps the "know all glosses" bar without re-drilling all 15
+      // words on one slip. Grouped non-anchor words (DATA-1) are never
+      // probed, so they're excluded from this check too — the group's
+      // anchor already covers their shared gloss.
+      const probeable = s1ProbeablePositions(next.words);
+      const allKnown = probeable.every((p) => next.s1PassCorrect.has(p));
       if (allKnown) {
         next.s1CleanSwept = true;
         next.rung = "S2";
@@ -206,9 +225,7 @@ export function advance(
       }
       // Next pass: re-ask ONLY the words not yet known (missed this pass), in
       // reading order. Already-correct words are not re-probed.
-      const stillMissed = next.words
-        .map((w) => w.position)
-        .filter((p) => !next.s1PassCorrect.has(p));
+      const stillMissed = probeable.filter((p) => !next.s1PassCorrect.has(p));
       next.s1Queue = stillMissed;
       next.s1MissedThisPass = [];
     }

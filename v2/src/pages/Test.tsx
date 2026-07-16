@@ -29,6 +29,7 @@ import {
   type AtomsMap,
   type Corpus,
   type DisabledQuestion,
+  type GlossLang,
   type ReconstructState,
   type TestItem,
   type TestItemKind,
@@ -41,6 +42,7 @@ import {
 import { loadEffectiveCorpus } from "../corpus/loadEffectiveCorpus.ts";
 import { append } from "../db/eventLog.ts";
 import { rebuildAtoms } from "../db/atoms.ts";
+import { getGlossLang } from "../session/glossLang.ts";
 
 const SURAH = 12;
 const ITEM_COUNT = 6;
@@ -73,7 +75,7 @@ function itemDisableKey(item: TestItem): { ayah: number; position: number | null
   }
 }
 
-function buildItems(corpus: Corpus, pool: number[], disabled: DisabledQuestion[]): TestItem[] {
+function buildItems(corpus: Corpus, pool: number[], disabled: DisabledQuestion[], lang: GlossLang): TestItem[] {
   if (pool.length === 0) return [];
   const order = shuffledArr(pool);
   const count = Math.min(ITEM_COUNT, order.length);
@@ -87,7 +89,7 @@ function buildItems(corpus: Corpus, pool: number[], disabled: DisabledQuestion[]
     }
     switch (kind) {
       case "vocab":
-        items.push(vocabItem(corpus, SURAH, ayah));
+        items.push(vocabItem(corpus, SURAH, ayah, lang));
         break;
       case "cloze":
         items.push(clozeItem(corpus, ayah));
@@ -224,7 +226,7 @@ export function Test() {
     if (!corpus || from === null || to === null) return;
     const pool: number[] = [];
     for (let a = Math.min(from, to); a <= Math.max(from, to); a++) pool.push(a);
-    const built = buildItems(corpus, pool, disabled);
+    const built = buildItems(corpus, pool, disabled, getGlossLang());
     setItems(built);
     setIndex(0);
     setResults([]);
