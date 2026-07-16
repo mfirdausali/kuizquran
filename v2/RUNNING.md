@@ -32,9 +32,13 @@ babysitting** (operator-chosen: fully autonomous, merge-everything). Logged as *
 
 ## One-time setup (you must do these — cannot be scripted)
 
-1. **Add the API key secret:** repo → **Settings → Secrets and variables → Actions →
-   New repository secret** → name `ANTHROPIC_API_KEY`, paste your key.
-   *(This is real API spend — a 7-phase autonomous build can be substantial.)*
+1. **Add the auth secret (Claude Code subscription — no API billing):**
+   - On your machine, run **`claude setup-token`** → completes a browser OAuth flow →
+     prints a long-lived token.
+   - Repo → **Settings → Secrets and variables → Actions → New repository secret** →
+     name **`CLAUDE_CODE_OAUTH_TOKEN`**, paste the token.
+   - *(This uses your Pro/Max subscription, not metered API billing. If you'd rather use
+     a pay-per-use API key instead, set `ANTHROPIC_API_KEY` — the workflow accepts either.)*
 2. **Actions permissions:** Settings → **Actions → General** →
    - Workflow permissions: **Read and write**.
    - Check **Allow GitHub Actions to create and approve pull requests**.

@@ -2,7 +2,12 @@ name: Claude
 
 # The BUILDER. Responds to @claude mentions in issues / PRs / comments and does the
 # work (opening or updating a PR). The autonomous orchestrator (v2-autobuild.yml) posts
-# those mentions to drive each phase. Requires the ANTHROPIC_API_KEY repo secret.
+# those mentions to drive each phase.
+#
+# AUTH: uses a Claude Code SUBSCRIPTION (Pro/Max) via CLAUDE_CODE_OAUTH_TOKEN — no
+# metered API billing. Generate it once with `claude setup-token` and add it as the
+# repo secret CLAUDE_CODE_OAUTH_TOKEN. (An ANTHROPIC_API_KEY secret also works as a
+# fallback if you ever switch to a pay-per-use key.)
 
 on:
   issue_comment:
@@ -37,6 +42,10 @@ jobs:
       - name: Run Claude Code
         uses: anthropics/claude-code-action@v1
         with:
+          # Subscription auth (preferred, no API billing). Falls back to an API key
+          # if that's the secret you set instead.
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          # Give the builder the context it needs every run (fresh context each invocation):
-          # it must read the roadmap + decisions and honor the standing rules.
+          # The builder reads v2/ROADMAP.md + v2/DECISIONS.md fresh each invocation
+          # (fresh context per run) and honors the standing rules — see the @claude
+          # issue body the orchestrator posts.
