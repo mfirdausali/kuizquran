@@ -222,6 +222,18 @@ recommendation each; the user chose "Go with your recommendations."_
 
 ---
 
+## Release gating
+
+### v2‑D30 — Rolling scholar verification: ship after early movements, verify/override as learners advance
+- **When:** 2026‑07‑16 00:49:38 UTC (2026‑07‑16 09:49 JST)
+- **Kind:** process · product · **Status:** accepted — refines v1's GATE‑A ("verify all before testers") into a rolling gate for v2.
+- **Context:** All 111 ayat are mechanically covered from day one (auto‑generation, v2‑D21), but coverage ≠ qari‑verified trust. v1's GATE‑A required verifying everything before any tester.
+- **Decision:** Release does **not** wait for full‑surah scholar review. Verify the **early movements** first (e.g. movements 1–2, ayat 1–20), ship, and **verify/override later ayat just‑in‑time** through the Phase‑6 override editor as learners approach them. The **verified frontier must stay ahead of the fastest learner**: because unlock is gated (~1 new ayah/day, faster in Sprint) and the scheduler paces progression, a small verified buffer ahead of the frontier is enough. Track the **verified line vs. the learner frontier** as an operator metric on the admin console.
+- **Why:** Fastest path to real recall data (the strategic priority in `../NEXT-STEPS.md`) without blocking on a full 1,777‑word review. Trades a **real, knowingly‑accepted risk** — a fast learner could reach an unverified ayah before scholar review — mitigated by the gated pace, the required verified buffer, and the just‑in‑time override editor. Chosen over the safer tiered / all‑111 options.
+- **Related:** v1 GATE‑A (refined here), v2‑D21/D22 (the override editor is the JIT verification tool), v2‑D07/D09 (gated pace bounds how fast the frontier moves), Roadmap Phase 6/7.
+
+---
+
 ## Live code bugs to fix in v2 (surfaced during scenario planning)
 
 These are confirmed in the current v1 source and must not carry into v2.

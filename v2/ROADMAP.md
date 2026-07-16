@@ -187,14 +187,18 @@ corpus rebuild; admin metrics match a hand-computed sample.
 
 **Goal:** the trust and polish gates before external testers.
 
-- **Scholar distractor review (GATE-A)** — hard gate before any public release; the Phase-6 editor
-  is the tool. Resolve DATA-1 (multi-word gloss grouping), the ~14.8% valid-but-attested
-  distractors, scene-beat TODO labels, null MS/JA glosses.
+- **Scholar review — rolling, not up-front (GATE-A, v2-D30):** verify the **early movements**
+  (e.g. ayat 1–20) → ship → **verify/override later ayat just-in-time** via the Phase-6 editor as
+  learners approach them. Invariant: the **verified frontier stays ahead of the learner frontier**
+  (the gated ~1-ayah/day pace makes a small verified buffer sufficient); surface the two lines as
+  an admin metric. Through this editor, resolve DATA-1 (multi-word gloss grouping), the ~14.8%
+  valid-but-attested distractors, scene-beat TODO labels, and null glosses (incl. **MS**, v2-D27).
 - S3 dark-mode tile contrast fix.
 - Deferred (post-proof, per NEXT-STEPS): feed-ranking engine (1b), audio/recitation (2b),
   short-surah pack (4a), parallel threads promotion (v2-D10).
 
-**Exit:** GATE-A signed off; no open correctness/trust items block testers.
+**Exit:** early movements verified and shippable; the verified-frontier-ahead-of-learner metric is
+live on the admin console; no open correctness/trust item can reach a learner ahead of review.
 
 ---
 
