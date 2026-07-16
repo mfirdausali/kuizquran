@@ -276,6 +276,25 @@ recommendation each; the user chose "Go with your recommendations."_
 
 ---
 
+## Phase 1 build decisions (executed under v2‑D31 autonomous authorization)
+
+### v2‑D36 — Tap-to-reconstruct: blank-count-by-band formula, tail-first blanking, and grading reuse
+- **When:** 2026‑07‑16 02:24:17 UTC (11:24 JST)
+- **Kind:** mechanic · **Status:** accepted (assistant decision under the v2‑D31 standing autonomous-loop authorization)
+- **Context:** ROADMAP Phase 1 / Appendix A specifies the v2 mechanic in shape ("words progressively hidden," "auto-scales blanks with strength," "generalizes S2+S3") but not the exact blank-count-per-band formula, which positions get blanked, or how the new event types (`reconstruct_tap`, `ayah_produced`) should fold into the existing `update()`/`rebuild()` grading machinery.
+- **Decision:** (a) **Blank count by band** (`reconstruct.ts` `blankCountFor`): Learn → 1 blank, Reinforce → `ceil(total/2)`, Carry → the whole ayah (full production, matching old S3 exactly). (b) **Which positions**: the LAST `blankCount` positions in reading order — the ayah's opening stays visible as scaffold, the hidden tail grows toward the front as strength climbs, until Carry band gives nothing (pure production). Blanks always fill in ascending (reading) order, one at a time, invariant #1's graded unit staying the whole ayah (one `ayah_produced` per pass, not per blank). (c) **Grading reuse, no new RetrievalKind**: a reconstruct pass's `DrillEvent.rung` is stamped directly with its grading equivalence class — `"S2"` for a partial pass, `"S3"` for a full-ayah pass — never a literal `"RC"` on the wire. `rebuild.ts` treats `reconstruct_tap` exactly like the old `tap` (negative-only grading) and `ayah_produced` exactly like `rung_complete` (positive grading + S3 gate-scheduling), reusing `RUNG_KIND`/`update()` unchanged. `Rung` gained an `"RC"` member solely for the `DrillItem` UI-facing discriminant (`reconstruct.ts`'s own `ReconstructItem` type); it is never assigned to a `DrillEvent`.
+- **Why:** Reusing the exact S2/S3 grading path (rather than inventing new `RetrievalKind`s or new `update()` branches) keeps invariant #6 (logic lives in the engine, and there's exactly one scheduling function) intact with zero changes to `update.ts`/`atom.ts`, and keeps the "generalizes S2+S3" framing in the ROADMAP literally true at the grading layer, not just the UI layer. Tail-first blanking was chosen over front-first because it gives the Learn-band single blank a natural place (the last word) without special-casing position 1, and scales smoothly to "produce everything" at Carry.
+- **Related:** ROADMAP Phase 1 (mechanic spec + Appendix A), v2‑D05 (tap-to-reconstruct), v2‑D23 (grounded in the ayah), invariant #1 (graded unit = whole ayah), invariant #6 (logic in engine).
+
+### v2‑D37 — Phase 1 Drill screen: single-ayah, prev/next navigation, no queue yet
+- **When:** 2026‑07‑16 02:24:17 UTC (11:24 JST)
+- **Kind:** ux · **Status:** accepted (assistant decision under the v2‑D31 standing autonomous-loop authorization)
+- **Decision:** The new `/drill?ayah=N` screen (`src/pages/Drill.tsx`) drills exactly one ayah per visit, chosen by the learner via Prev/Next ayah buttons (bounded to the corpus's ayah count) — there is no daily queue, pace mode, or `assembleQueue` wiring yet. Tile display order is shuffled client-side per item (the engine's option set stays deterministic/rank-ordered per v2-D23/Appendix A §E); every tap commits its `reconstruct_tap` event before any tile animates (invariant #2), and the completion banner shows the before/after strength read back from a fresh `rebuildAtoms()`.
+- **Why:** ROADMAP Phase 1's scope is explicitly the drill mechanic + event instrument ("the single most important build... front-loaded because everything downstream needs the stream"); `assembleQueue`, pace modes, and the daily-session loop are named Phase 2 work. Building session/queue logic now would be scope creep ahead of its own phase and duplicate work once Phase 2 replaces the ayah picker with the real queue.
+- **Related:** ROADMAP Phase 1 exit criterion, ROADMAP Phase 2 (`assembleQueue`, pace modes — where this picker gets replaced).
+
+---
+
 ## Live code bugs to fix in v2 (surfaced during scenario planning)
 
 These are confirmed in the current v1 source and must not carry into v2.

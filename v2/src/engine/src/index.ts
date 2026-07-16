@@ -3,6 +3,7 @@ export * from "./corpus.ts";
 export * from "./options.ts";
 export * from "./events.ts";
 export * from "./ladder.ts";
+export * from "./reconstruct.ts";
 export * from "./atom.ts";
 export * from "./daybound.ts";
 export * from "./strength.ts";

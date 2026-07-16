@@ -98,3 +98,54 @@ describe("rebuild — atoms are a rebuildable cache (invariant #2)", () => {
     expect(interleaved.get("ayah:5")).toEqual(straight.get("ayah:5"));
   });
 });
+
+describe("rebuild — v2 Phase 1 tap-to-reconstruct events (reconstruct_tap/ayah_produced)", () => {
+  it("a reconstruct slip (reconstruct_tap, correct:false) grades exactly like a tap slip", () => {
+    const t = 5 * DAY;
+    const viaTap: DrillEvent[] = [
+      { type: "tap", ts: t, surah: 12, ayah: 4, rung: "S2", correct: false },
+    ];
+    const viaReconstruct: DrillEvent[] = [
+      { type: "reconstruct_tap", ts: t, surah: 12, ayah: 4, rung: "S2", correct: false },
+    ];
+    expect(rebuild(viaReconstruct).get("ayah:4")).toEqual(rebuild(viaTap).get("ayah:4"));
+  });
+
+  it("ayah_produced (rung S2, partial reconstruction) grades like rung_complete S2 — no gate scheduled", () => {
+    const t = 5 * DAY;
+    const events: DrillEvent[] = [
+      { type: "ayah_produced", ts: t, surah: 12, ayah: 4, rung: "S2" },
+    ];
+    const atoms = rebuild(events);
+    const atom = atoms.get("ayah:4")!;
+    expect(atom.strength).toBeGreaterThan(0);
+    expect(atom.encoded).toBe(false);
+    expect(atom.gateDueAt).toBeNull();
+  });
+
+  it("ayah_produced (rung S3, whole-ayah reconstruction) encodes the ayah and schedules the gate", () => {
+    const t = 5 * DAY;
+    const events: DrillEvent[] = [
+      { type: "ayah_produced", ts: t, surah: 12, ayah: 4, rung: "S3" },
+    ];
+    const atoms = rebuild(events);
+    const atom = atoms.get("ayah:4")!;
+    expect(atom.encoded).toBe(true);
+    expect(atom.gateDueAt).not.toBeNull();
+    expect(atom.strength).toBeGreaterThan(0);
+  });
+
+  it("a full end-to-end reconstruct pass (one slip + completion) moves strength once, via the log", () => {
+    const t = 5 * DAY;
+    const events: DrillEvent[] = [
+      { type: "reconstruct_tap", ts: t, surah: 12, ayah: 7, rung: "S2", correct: false },
+      { type: "reconstruct_tap", ts: t + 500, surah: 12, ayah: 7, rung: "S2", correct: true },
+      { type: "ayah_produced", ts: t + 600, surah: 12, ayah: 7, rung: "S2" },
+    ];
+    const atoms = rebuild(events);
+    const atom = atoms.get("ayah:7")!;
+    // Net of one slip (-15, Learn band) then a graded S2 completion (+12): still positive.
+    expect(atom.strength).toBeGreaterThan(0);
+    expect(atom.reps).toBe(2); // the slip + the completion; the bare correct tap carries no signal
+  });
+});

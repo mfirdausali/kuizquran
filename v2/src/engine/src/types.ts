@@ -59,8 +59,11 @@ export interface Corpus {
 
 // ---- Ladder ----
 
-/** FR2 rungs. S4 = the bridge to the next ayah (v0.4). */
-export type Rung = "S1" | "S2" | "S3" | "S4";
+/** FR2 rungs. S4 = the bridge to the next ayah (v0.4). RC = v2 tap-to-reconstruct
+ *  (v2-D05, ROADMAP Phase 1) — a DrillItem-only tag; on the wire (DrillEvent.rung)
+ *  a reconstruct pass is recorded as its grading equivalence class "S2" (partial)
+ *  or "S3" (whole-ayah production), never "RC" — see reconstruct.ts. */
+export type Rung = "S1" | "S2" | "S3" | "S4" | "RC";
 
 /** One presented drill question. */
 export type DrillItem =
@@ -113,6 +116,29 @@ export type DrillItem =
       correct: string;
       index: number;
       total: number;
+    }
+  | {
+      rung: "RC";
+      /** Full ayah words in reading order — grounded in the whole verse (v2-D23);
+       *  non-blank positions render normally, blank positions render as gap-slots. */
+      ayahWords: CorpusWord[];
+      /** Positions currently hidden as gap-slots (reading order), scaled by strength
+       *  band (v2-D05: more blanks as strength climbs — Learn 1 → Carry all). */
+      blankPositions: number[];
+      /** The blank position currently being filled — blanks fill in ascending
+       *  (reading) order, one at a time. */
+      currentBlank: number;
+      /** Arabic tile bank for the CURRENT blank: correct form + band-scaled
+       *  near-miss distractors (same pool as S2, via corpus.distractorsFor). */
+      options: string[];
+      correct: string;
+      /** 1-based index of currentBlank within blankPositions, and total blanks
+       *  in this pass. */
+      index: number;
+      total: number;
+      /** True when this pass blanks the WHOLE ayah (Carry band) — grades as S3
+       *  (encodes, schedules the gate) rather than S2 (partial reconstruction). */
+      full: boolean;
     };
 
 // ---- Chain / junction (FR4 Carry) ----
@@ -152,7 +178,10 @@ export type EventType =
   | "placement_probe" // a placement onboarding probe answer (v0.7)
   | "placement_result" // placement finished; carried map decided (v0.7)
   | "adoption" // untaught-ayah cold pass adopted into Carrying (v0.7 FR6)
-  | "session_start"; // app-open → first drill; latency = open-into-drill ms (v0.8)
+  | "session_start" // app-open → first drill; latency = open-into-drill ms (v0.8)
+  | "reconstruct_tap" // v2 Phase 1 (v2-D05): one tap-to-reconstruct blank-fill attempt
+  | "ayah_produced"; // v2 Phase 1: a reconstruct pass finished (all blanks filled) —
+  // the graded completion event; `rung` carries "S2" (partial) or "S3" (whole-ayah).
 
 export interface DrillEvent {
   /** Stable client-generated id (uuid), assigned at creation. Idempotency key for

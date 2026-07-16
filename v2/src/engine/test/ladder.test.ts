@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { advance, initLadder, nextItem } from "../src/ladder.ts";
+import { advance, initLadder, nextItem, type LadderItem } from "../src/ladder.ts";
 import type { Corpus, DrillItem, LadderDone } from "../src/types.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -15,10 +15,9 @@ function words() {
   return corpus.words.filter((w) => w.ayah === AYAH).sort((a, b) => a.position - b.position);
 }
 
-/** The correct answer for any item (S1/S2 carry `correct`; S3 = expected word).
- *  The ladder only ever emits S1/S2/S3 (S4 bridge lives in bridge.ts). */
-function correctAnswer(item: Extract<DrillItem, { rung: string }>): string {
-  if (item.rung === "S1" || item.rung === "S2" || item.rung === "S4") return item.correct;
+/** The correct answer for any item (S1/S2 carry `correct`; S3 = expected word). */
+function correctAnswer(item: LadderItem): string {
+  if (item.rung === "S1" || item.rung === "S2") return item.correct;
   // S3: the word at the expected position
   return item.ayahWords.find((w) => w.position === item.expectedPosition)!.text_uthmani;
 }
@@ -29,7 +28,7 @@ function encodeAllCorrect() {
   const log: { rung: string; correct: boolean; pretest: boolean; rungCompleted?: string }[] = [];
   let guard = 0;
   while (guard++ < 500) {
-    const item = nextItem(state, corpus) as DrillItem | LadderDone;
+    const item = nextItem(state, corpus) as LadderItem | LadderDone;
     if ("done" in item) break;
     const r = advance(state, corpus, correctAnswer(item));
     log.push({
