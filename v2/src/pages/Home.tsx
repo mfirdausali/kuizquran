@@ -154,6 +154,16 @@ function HomeSession({ corpus, navigate }: { corpus: Corpus; navigate: NavigateF
           </Link>
         </p>
         <p>
+          <Link className="btn btn--ghost" to="/progress">
+            Your Yūsuf — progress report →
+          </Link>
+        </p>
+        <p>
+          <Link className="btn btn--purple" to="/test">
+            Take a Test →
+          </Link>
+        </p>
+        <p>
           <Link className="btn btn--ghost" to="/system-explorer">
             System Explorer →
           </Link>

@@ -42,3 +42,13 @@ export function currentBand(atom: AtomState, now: number, cfg?: DayConfig): Stag
 export function clamp(x: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, x));
 }
+
+/**
+ * Half-life, in learning-days: how long the atom stays retrievable before a
+ * learner would forget half of it without review — retrievability(t) = exp(−t/
+ * stability), so retrievability = 0.5 at t = stability·ln(2). Feeds the Progress
+ * Report's first `<InfoTip>` (v2-D19). 0 for a never-retrieved atom (stability 0).
+ */
+export function halfLifeDays(atom: AtomState): number {
+  return atom.stability * Math.LN2;
+}

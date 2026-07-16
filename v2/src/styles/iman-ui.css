@@ -285,7 +285,65 @@ body {
 }
 .btn--ghost { background: none; border: none; color: var(--text-secondary); }
 
-/* ---- 8. Rules of use (enforced by taste, not lint) -----------------------
+/* ---- 8. Progress Report (v2 Phase 4: v2-D17/D19/D24/D25) ----------------- */
+
+.infotip { position: relative; display: inline-flex; vertical-align: middle; }
+.infotip-trigger {
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--surface-3); color: var(--text-secondary);
+  border: var(--hairline) solid var(--border-stronger);
+  font-size: 10px; line-height: 1; cursor: pointer; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.infotip-bubble {
+  position: absolute; z-index: 1; top: 22px; left: 0; width: 220px;
+  background: var(--surface-3); color: var(--text-secondary);
+  border: var(--hairline) solid var(--border); border-radius: var(--r-tile);
+  padding: 8px 10px; font-size: 12px; line-height: 1.4;
+}
+
+/* the 12-movement ring — an overview, not a literal SVG pie (v2-D24/D25):
+   12 tap targets (>=44px) placed on a circle, tinted by the movement's average
+   strength via the same teal ramp the meter/heatmap already use. */
+.ring { position: relative; width: 260px; height: 260px; margin: 8px auto; }
+.ring-arc {
+  position: absolute; width: 44px; height: 44px; margin: -22px;
+  border-radius: 50%; border: var(--hairline) solid var(--border-stronger);
+  background: var(--teal-100); color: var(--text-primary);
+  font-size: 11px; display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+}
+.ring-arc.is-selected { border: 2px solid var(--teal-600); }
+.ring-center {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 120px; text-align: center; font-size: 11px; color: var(--text-muted);
+}
+
+/* the flat 1->N grid (v2-D25 detail zoom / v2-D29 universal fallback) */
+.grid-progress { display: grid; grid-template-columns: repeat(auto-fill, minmax(28px, 1fr)); gap: 4px; }
+.grid-cell {
+  aspect-ratio: 1; border-radius: 4px; font-size: 9px;
+  border: var(--hairline) solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-primary); cursor: pointer; padding: 0;
+}
+.grid-cell.is-dimmed { opacity: 0.35; }
+.grid-cell.is-in-movement { border-color: var(--teal-600); border-width: 1.5px; }
+
+/* growth curve — plain bars, no chart library (invariant: no shadows/gradients) */
+.growth-curve { display: flex; align-items: flex-end; gap: 2px; height: 60px; }
+.growth-curve > div { flex: 1; background: var(--teal-400); border-radius: 2px 2px 0 0; min-height: 2px; }
+
+/* streak calendar — one dot per recent learning-day */
+.streak-calendar { display: flex; gap: 4px; flex-wrap: wrap; }
+.streak-day { width: 18px; height: 18px; border-radius: 4px; background: var(--surface-0); border: var(--hairline) solid var(--border); }
+.streak-day.is-active { background: var(--amber-600); border-color: var(--amber-600); }
+
+/* Test feature accent (v2-D16): purple, distinct from the teal learning loop */
+.btn--purple { background: var(--purple-600); color: #fff; border: none; font-weight: 500; }
+.card--purple { border-color: var(--purple-600); }
+
+/* ---- 9. Rules of use (enforced by taste, not lint) -----------------------
    1. The .ayah is the largest type on every screen. Nothing competes.
    2. Coral appears only when something slipped. Zero decorative coral.
    3. One .voice line per screen, maximum (the intention line).
