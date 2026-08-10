@@ -10,6 +10,7 @@ SHELL := /bin/bash
 V2      := v2
 API     := v2/api
 CORPUS_COMPILER := v3/packages/corpus-compiler
+ENGINE  := v3/packages/engine
 
 .PHONY: help setup dev dev-web dev-api test test-web test-api test-v3 build clean doctor golden-log compile-corpus
 
@@ -31,6 +32,7 @@ setup: ## First run: install deps, create .env, key, migrate
 	cd $(V2) && npm install
 	@[ -f $(V2)/.env ] || (cp $(V2)/.env.example $(V2)/.env && echo "→ created $(V2)/.env")
 	cd $(CORPUS_COMPILER) && npm install
+	cd $(ENGINE) && npm install
 	@echo ""
 	@echo "✓ setup complete. Run: make dev"
 
@@ -54,8 +56,9 @@ test-web: ## vitest (v2)
 test-api: ## PHPUnit
 	cd $(API) && php artisan test
 
-test-v3: ## vitest (v3 packages, e.g. corpus-compiler)
+test-v3: ## vitest (v3 packages: corpus-compiler, engine)
 	cd $(CORPUS_COMPILER) && npm test
+	cd $(ENGINE) && npm test
 
 build: ## Type-check + build the SPA (must pass; see B9)
 	cd $(V2) && npm run build

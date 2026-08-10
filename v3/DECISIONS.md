@@ -109,3 +109,47 @@ data. No transcoder, no determinism proof for imported logs.
 `lemma` / `root` / `class` feed distractor generation and are **stripped from the
 learner artifact**. 1131/1777 shipped words currently carry `root`, so GPL
 exposure in a paid bundle is real. Attribution page ships regardless.
+
+---
+
+## Ratified 2026-08-10 (evening) — build-plan step 5 execution decision
+
+### v3-D25 — Ladder/bridge/chain attic boundary
+BUILD-PLAN.md's M2 order names "attic ladder/bridge/chain with retired-test
+mapping published" as part of step 5, but no prior entry recorded WHERE the
+line falls. Verified in v2 source before porting:
+
+- `src/pages/Drill.tsx` and `Gate.tsx` (the only live drill/gate screens)
+  import `ReconstructState`/`Rung` from `engine` — **never** `LadderState`,
+  `ChainStep`, or anything from `bridge.ts`. Confirmed by grepping every
+  `.tsx` under `v2/src` for `applyChain`, `applyVictoryLapChain`,
+  `applyWeakSeamChain`, `initLadder`, `bridgeItems`: zero hits outside
+  `engine/src/` and `engine/test/` themselves.
+- So `ladder.ts`'s S1→S2→S3 state machine (`nextItem`/`advance`), all of
+  `bridge.ts`'s S4 item-generation (`bridgeItems`/`nextOpening`), and
+  `chain.ts`'s repair-chain orchestration (`applyChain`/
+  `applyVictoryLapChain`/`applyWeakSeamChain`/`chainSteps`/
+  `riskiestJunctions`/`weakSeamChainRange`/`junctionOutcome`) were built and
+  unit-tested in v2 but **never shipped** — B6's DEFECTS.md description of
+  reconstruct.ts as "the ONLY graded path in the product" is the same fact
+  from the defect side. This is exactly the speculative surface M4's
+  spec-driven question compiler (4 closed shapes) and step 19's
+  connection-atom rendering are built to replace, not extend — porting it
+  forward would carry dead weight into the invariant-gated spine for no
+  later step to consume.
+- Two pieces of those three files ARE load-bearing and are **ported, not
+  atticked**, because live code genuinely calls them:
+  - `bridge.ts#birthConnection` — `rebuild.ts`'s fold uses it directly for
+    `connection_born`/`junction_result` events (real wire events, invariant
+    #2 territory). Relocated into the rebuild.ts port rather than kept as a
+    single-function bridge.ts.
+  - `ladder.ts#initLadder`/`s1Options` and `chain.ts#junctionItem` —
+    `test.ts` (the live, shipped Test feature — `src/pages/Test.tsx` imports
+    its generators) explicitly reuses these "verbatim" per its own header
+    comment. Ported as the surviving surface of otherwise-atticked files.
+- Retired-test mapping: `v3/packages/engine/RETIRED-TESTS.md`, published in
+  the same commit as the port, names every v2 test case retired under this
+  decision and why.
+
+Supersede this entry, don't edit it, if a later step's design proves the
+boundary wrong.

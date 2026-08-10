@@ -1,0 +1,14 @@
+{
+  "name": "v3-engine",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "v3 pure engine — verbatim-or-documented port of v2/src/engine (build-plan step 5). See RETIRED-TESTS.md for the ladder/bridge/chain attic boundary (v3-D25).",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "vitest": "^2.1.9"
+  }
+}
