@@ -11,6 +11,10 @@ export type Stage = "learn" | "reinforce" | "carry" | "lapsed";
 export type AtomKind = "ayah" | "connection";
 
 export interface AtomState {
+  /** DEFECTS.md#E-01: the surah this atom belongs to. Without this, Yusuf
+   *  ayah 5 and a second surah's ayah 5 are the same atom — every atom must
+   *  carry it, the same way `kind`/`ref` are non-optional. */
+  surah: number;
   kind: AtomKind;
   /** For an ayah atom: the ayah number. For a connection: the `from` ayah (n→n+1). */
   ref: number;
@@ -48,8 +52,9 @@ export function bandOf(strength: number): Stage {
 }
 
 /** A fresh, never-retrieved atom. */
-export function initAtom(kind: AtomKind, ref: number): AtomState {
+export function initAtom(surah: number, kind: AtomKind, ref: number): AtomState {
   return {
+    surah,
     kind,
     ref,
     strength: 0,
@@ -65,7 +70,12 @@ export function initAtom(kind: AtomKind, ref: number): AtomState {
   };
 }
 
-/** Stable key for an atom (used to index the atoms cache). */
-export function atomKey(kind: AtomKind, ref: number): string {
-  return `${kind}:${ref}`;
+/** Stable key for an atom (used to index the atoms cache). DEFECTS.md#E-01:
+ *  surah-scoped — `${surah}:${kind}:${ref}` (edge case #36) — so Yusuf ayah 5
+ *  and a second surah's ayah 5 never collide. Every call site must route
+ *  through this function; a raw `` `${kind}:${ref}` `` template literal
+ *  anywhere else silently emits an unkeyed string that fails to match
+ *  (a lookup miss, not a type error — see this package's e01.test.ts). */
+export function atomKey(surah: number, kind: AtomKind, ref: number): string {
+  return `${surah}:${kind}:${ref}`;
 }

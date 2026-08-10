@@ -66,6 +66,7 @@ describe("7-day interruption simulation (v0.3 exit criterion)", () => {
       // Assemble the queue from the truth log (atoms rebuilt each morning).
       const atoms = [...rebuild(log, cfg).values()];
       const queue = assembleQueue({
+      surah: 12,
         atoms,
         now: morning,
         lastActiveDay,
@@ -127,12 +128,12 @@ describe("7-day interruption simulation (v0.3 exit criterion)", () => {
     // All six encoded ayat (missed-day ayah 7 never encoded) are present & encoded.
     const encodedAyat = [4, 5, 6, 8, 9, 10];
     for (const a of encodedAyat) {
-      const atom = atoms.get(`ayah:${a}`);
+      const atom = atoms.get(`12:ayah:${a}`);
       expect(atom, `ayah ${a} atom`).toBeDefined();
       expect(atom!.encoded).toBe(true);
     }
     // The missed day's ayah (7) was never encoded.
-    expect(atoms.get("ayah:7")).toBeUndefined();
+    expect(atoms.get("12:ayah:7")).toBeUndefined();
 
     // Fold == replay: rebuilding the same log twice is identical (no loss/dupe).
     expect([...rebuild(log, cfg).entries()]).toEqual([...rebuild(log, cfg).entries()]);
@@ -151,6 +152,7 @@ describe("7-day interruption simulation (v0.3 exit criterion)", () => {
     const returnDay = base + 2 * DAY;
     const atoms = [...rebuild(log, cfg).values()];
     const queue = assembleQueue({
+      surah: 12,
       atoms,
       now: morningOf(returnDay),
       lastActiveDay: morningOf(base), // last active day 0; day 1 skipped

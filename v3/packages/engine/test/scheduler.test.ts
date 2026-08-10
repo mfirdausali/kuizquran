@@ -11,7 +11,7 @@ function local(y: number, mo: number, d: number, h: number): number {
 const wordCounts = new Map<number, number>([[4, 15], [5, 12], [6, 20]]);
 
 function encoded(ref: number, opts: Partial<AtomState> = {}): AtomState {
-  return { ...initAtom("ayah", ref), encoded: true, gatePassed: true, strength: 60, stability: 4, lastRetrieval: local(2026, 7, 10, 8), ...opts };
+  return { ...initAtom(12, "ayah", ref), encoded: true, gatePassed: true, strength: 60, stability: 4, lastRetrieval: local(2026, 7, 10, 8), ...opts };
 }
 
 describe("assembleQueue (FR3 order)", () => {
@@ -19,8 +19,9 @@ describe("assembleQueue (FR3 order)", () => {
 
   it("gates come before new Learn, and Learn is blocked while a gate is due", () => {
     // ayah 4 encoded yesterday, gate due today (not passed) → blocks unlock.
-    const gated = scheduleGate({ ...initAtom("ayah", 4), encoded: true }, local(2026, 7, 13, 20), DEFAULT_DAY_CONFIG);
+    const gated = scheduleGate({ ...initAtom(12, "ayah", 4), encoded: true }, local(2026, 7, 13, 20), DEFAULT_DAY_CONFIG);
     const q = assembleQueue({
+      surah: 12,
       atoms: [gated],
       now,
       lastActiveDay: local(2026, 7, 13, 8),
@@ -36,6 +37,7 @@ describe("assembleQueue (FR3 order)", () => {
 
   it("permits Learn once no gate is due, respecting the time budget", () => {
     const q = assembleQueue({
+      surah: 12,
       atoms: [encoded(4)],
       now,
       lastActiveDay: local(2026, 7, 13, 8),
@@ -51,8 +53,9 @@ describe("assembleQueue (FR3 order)", () => {
   it("ranks a due connection above an equal-risk ayah (connection weighted up)", () => {
     const t = local(2026, 7, 8, 8); // decayed a few days
     const ayah: AtomState = { ...encoded(4), lastRetrieval: t, stability: 3 };
-    const conn: AtomState = { ...initAtom("connection", 4), encoded: true, gatePassed: true, strength: 60, stability: 3, lastRetrieval: t };
+    const conn: AtomState = { ...initAtom(12, "connection", 4), encoded: true, gatePassed: true, strength: 60, stability: 3, lastRetrieval: t };
     const q = assembleQueue({
+      surah: 12,
       atoms: [ayah, conn],
       now,
       lastActiveDay: local(2026, 7, 13, 8),
@@ -60,13 +63,14 @@ describe("assembleQueue (FR3 order)", () => {
       cfg: { day: DEFAULT_DAY_CONFIG, budgetMin: 8, connectionWeight: 1.5 },
     });
     const reviews = q.filter((i) => i.kind === "review");
-    expect(reviews[0]!.atomKey).toBe("connection:4"); // weighted up → ranks first
+    expect(reviews[0]!.atomKey).toBe("12:connection:4"); // weighted up → ranks first
   });
 
   it("a missed day produces make-up items that are never dropped by the budget", () => {
     // gate came due on a skipped day; user returns two days later with a tight budget.
-    const gated = scheduleGate({ ...initAtom("ayah", 4), encoded: true }, local(2026, 7, 12, 20), DEFAULT_DAY_CONFIG);
+    const gated = scheduleGate({ ...initAtom(12, "ayah", 4), encoded: true }, local(2026, 7, 12, 20), DEFAULT_DAY_CONFIG);
     const q = assembleQueue({
+      surah: 12,
       atoms: [gated],
       now: local(2026, 7, 15, 8), // returned after missing the 14th
       lastActiveDay: local(2026, 7, 13, 8),
@@ -78,8 +82,9 @@ describe("assembleQueue (FR3 order)", () => {
   });
 
   it("session is always finishable: mandatory items present even at budget 0", () => {
-    const gated = scheduleGate({ ...initAtom("ayah", 4), encoded: true }, local(2026, 7, 13, 20), DEFAULT_DAY_CONFIG);
+    const gated = scheduleGate({ ...initAtom(12, "ayah", 4), encoded: true }, local(2026, 7, 13, 20), DEFAULT_DAY_CONFIG);
     const q = assembleQueue({
+      surah: 12,
       atoms: [gated],
       now,
       lastActiveDay: local(2026, 7, 13, 8),

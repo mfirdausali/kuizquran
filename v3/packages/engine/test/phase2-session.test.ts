@@ -72,6 +72,7 @@ function runUnderPace(mode: PaceMode, days: number): number {
     // Learn rather than deferring it to tomorrow.
     const atomsAfterGates = [...rebuild(log, cfg).values()];
     const queue = assembleQueue({
+      surah: 12,
       atoms: atomsAfterGates,
       now: morning,
       lastActiveDay,
@@ -124,6 +125,7 @@ describe("v2-BUG-1 regression: budgetMin is genuinely wired (Steady ≠ Sprint o
     const learnCandidatesFull = CANDIDATE_POOL.slice(0, 5);
 
     const steadyQueue = assembleQueue({
+      surah: 12,
       atoms: [],
       now,
       lastActiveDay: null,
@@ -135,6 +137,7 @@ describe("v2-BUG-1 regression: budgetMin is genuinely wired (Steady ≠ Sprint o
       },
     });
     const sprintQueue = assembleQueue({
+      surah: 12,
       atoms: [],
       now,
       lastActiveDay: null,
@@ -167,6 +170,7 @@ describe("v2-BUG-2 regression: lastActiveDay is wired from the real event log, n
     expect(realLastActive).not.toBeNull();
 
     const queueWithFix = assembleQueue({
+      surah: 12,
       atoms,
       now: morningOf(returnDay),
       lastActiveDay: realLastActive,
@@ -178,6 +182,7 @@ describe("v2-BUG-2 regression: lastActiveDay is wired from the real event log, n
     // The OLD bug: hardcoding null suppresses the make-up merge entirely (step 1
     // of FR3 never fires) — demonstrate the concrete behavioral gap being closed.
     const queueWithOldBug = assembleQueue({
+      surah: 12,
       atoms,
       now: morningOf(returnDay),
       lastActiveDay: null,

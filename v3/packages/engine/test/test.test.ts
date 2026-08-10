@@ -29,14 +29,14 @@ const SURAH = 12;
 
 describe("carriedAyat (v2-D15 smart default range)", () => {
   it("returns only ayat at or above the carry band, sorted", () => {
-    const carried: AtomState = { ...initAtom("ayah", 5), strength: 85, stability: 10 };
-    const reinforce: AtomState = { ...initAtom("ayah", 3), strength: 60, stability: 5 };
-    const alsoCarried: AtomState = { ...initAtom("ayah", 2), strength: 90, stability: 12 };
+    const carried: AtomState = { ...initAtom(12, "ayah", 5), strength: 85, stability: 10 };
+    const reinforce: AtomState = { ...initAtom(12, "ayah", 3), strength: 60, stability: 5 };
+    const alsoCarried: AtomState = { ...initAtom(12, "ayah", 2), strength: 90, stability: 12 };
     expect(carriedAyat([carried, reinforce, alsoCarried], Date.now())).toEqual([2, 5]);
   });
 
   it("empty when nothing is carried yet", () => {
-    expect(carriedAyat([initAtom("ayah", 1)], Date.now())).toEqual([]);
+    expect(carriedAyat([initAtom(12, "ayah", 1)], Date.now())).toEqual([]);
   });
 });
 

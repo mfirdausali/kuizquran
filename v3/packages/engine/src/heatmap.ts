@@ -26,7 +26,7 @@ export function ayahHeatmap(
 ): HeatmapRow[] {
   const rows: HeatmapRow[] = [];
   for (let ayah = 1; ayah <= corpus.meta.ayahCount; ayah++) {
-    const atom = atoms.get(atomKey("ayah", ayah));
+    const atom = atoms.get(atomKey(corpus.meta.surah, "ayah", ayah));
     if (!atom) {
       rows.push({ ayah, strength: 0, band: "learn", encoded: false });
     } else {

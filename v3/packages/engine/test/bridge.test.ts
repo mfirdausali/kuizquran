@@ -12,14 +12,15 @@ import type { AtomState } from "../src/atom.ts";
 describe("birthConnection", () => {
   it("births the connection atom for n (ref = from ayah), idempotently", () => {
     const atoms = new Map<string, AtomState>();
-    const born = birthConnection(atoms, 4);
+    const born = birthConnection(atoms, 12, 4);
     expect(born.kind).toBe("connection");
     expect(born.ref).toBe(4);
-    expect(atoms.get("connection:4")).toBeDefined();
+    expect(born.surah).toBe(12);
+    expect(atoms.get("12:connection:4")).toBeDefined();
     // idempotent: second call returns the same, doesn't reset
     const mutated = { ...born, strength: 42 };
-    atoms.set("connection:4", mutated);
-    const again = birthConnection(atoms, 4);
+    atoms.set("12:connection:4", mutated);
+    const again = birthConnection(atoms, 12, 4);
     expect(again.strength).toBe(42);
   });
 });

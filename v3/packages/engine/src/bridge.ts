@@ -12,11 +12,11 @@ import { atomKey, initAtom, type AtomState } from "./atom.ts";
  * Birth the connection atom for n→n+1 into an atoms map (ref = the `from` ayah).
  * Idempotent — if it already exists, returns the existing one unchanged.
  */
-export function birthConnection(atoms: Map<string, AtomState>, fromAyah: number): AtomState {
-  const key = atomKey("connection", fromAyah);
+export function birthConnection(atoms: Map<string, AtomState>, surah: number, fromAyah: number): AtomState {
+  const key = atomKey(surah, "connection", fromAyah);
   let a = atoms.get(key);
   if (!a) {
-    a = initAtom("connection", fromAyah);
+    a = initAtom(surah, "connection", fromAyah);
     atoms.set(key, a);
   }
   return a;

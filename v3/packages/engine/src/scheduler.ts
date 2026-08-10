@@ -3,7 +3,7 @@
 //   connections weighted up) → fit to time budget → interleave Learn cycles.
 // New-ayah unlock is gated by the mastery gate (unlockPermitted). Pure.
 
-import type { AtomState } from "./atom.ts";
+import { atomKey, type AtomState } from "./atom.ts";
 import { forgettingRisk } from "./strength.ts";
 import { dueGates, unlockPermitted } from "./gate.ts";
 import { daysBetween, type DayConfig } from "./daybound.ts";
@@ -47,6 +47,11 @@ export function estLearnMinutes(wordCount: number): number {
 }
 
 export interface AssembleInput {
+  /** DEFECTS.md#E-01: the surah this queue is assembled for. Every emitted
+   *  QueueItem.atomKey is scoped to this surah — atoms from a different
+   *  surah are never mixed into one queue at this step (E-02's multi-surah
+   *  budget/merge logic is build-plan step 9, not this one). */
+  surah: number;
   atoms: AtomState[];
   now: number;
   /** ms of the last learning-day the user had a session, or null if none. */
@@ -62,7 +67,7 @@ export interface AssembleInput {
  * make-ups are never dropped — they define the minimum viable session).
  */
 export function assembleQueue(input: AssembleInput): QueueItem[] {
-  const { atoms, now } = input;
+  const { atoms, now, surah } = input;
   const cfg = input.cfg ?? {};
   const dayCfg = cfg.day;
   const budget = cfg.budgetMin ?? DEFAULT_BUDGET;
@@ -86,7 +91,7 @@ export function assembleQueue(input: AssembleInput): QueueItem[] {
         // came due strictly after the last active day (i.e. on a skipped day)
         a.gateDueAt > input.lastActiveDay!
       ) {
-        queue.push({ kind: "makeup", atomKey: `${a.kind}:${a.ref}`, ayah: a.ref, estMin: COST_MAKEUP });
+        queue.push({ kind: "makeup", atomKey: atomKey(a.surah, a.kind, a.ref), ayah: a.ref, estMin: COST_MAKEUP });
       }
     }
   }
@@ -94,7 +99,7 @@ export function assembleQueue(input: AssembleInput): QueueItem[] {
   // 2. GATES — day-1 cold gates due now (that weren't already pulled as make-ups).
   const alreadyQueued = new Set(queue.map((q) => q.atomKey));
   for (const a of dueGates(atoms, now)) {
-    const key = `${a.kind}:${a.ref}`;
+    const key = atomKey(a.surah, a.kind, a.ref);
     if (!alreadyQueued.has(key)) {
       queue.push({ kind: "gate", atomKey: key, ayah: a.ref, estMin: COST_GATE });
       alreadyQueued.add(key);
@@ -104,7 +109,7 @@ export function assembleQueue(input: AssembleInput): QueueItem[] {
   // 3. DUE REVIEWS — encoded, gate-passed atoms, ranked by forgetting-risk ×
   //    weight (connection atoms weighted up).
   const reviews = atoms
-    .filter((a) => a.encoded && a.gatePassed && !alreadyQueued.has(`${a.kind}:${a.ref}`))
+    .filter((a) => a.encoded && a.gatePassed && !alreadyQueued.has(atomKey(a.surah, a.kind, a.ref)))
     .map((a) => {
       const risk = forgettingRisk(a, now, dayCfg);
       const weight = a.kind === "connection" ? connWeight : 1;
@@ -116,7 +121,7 @@ export function assembleQueue(input: AssembleInput): QueueItem[] {
   for (const r of reviews) {
     queue.push({
       kind: "review",
-      atomKey: `${r.a.kind}:${r.a.ref}`,
+      atomKey: atomKey(r.a.surah, r.a.kind, r.a.ref),
       ayah: r.a.ref,
       estMin: COST_REVIEW,
       score: r.score,
@@ -144,7 +149,7 @@ export function assembleQueue(input: AssembleInput): QueueItem[] {
       if (encodedOrQueued.has(ayah)) continue;
       const est = estLearnMinutes(input.wordCounts.get(ayah) ?? 12);
       if (spent + est > budget) break;
-      fitted.push({ kind: "learn", atomKey: `ayah:${ayah}`, ayah, estMin: est });
+      fitted.push({ kind: "learn", atomKey: atomKey(surah, "ayah", ayah), ayah, estMin: est });
       spent += est;
     }
   }

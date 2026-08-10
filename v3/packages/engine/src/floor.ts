@@ -4,7 +4,7 @@
 // still gives one quick, winnable touch). Keeps the habit alive on the worst days.
 // Pure; `now` passed in.
 
-import type { AtomState } from "./atom.ts";
+import { atomKey, type AtomState } from "./atom.ts";
 import { forgettingRisk } from "./strength.ts";
 import { dueGates } from "./gate.ts";
 import type { DayConfig } from "./daybound.ts";
@@ -30,7 +30,7 @@ export function floorQueue(atoms: AtomState[], now: number, cfg?: DayConfig): Fl
   // 1. A due cold gate — the highest-value 2-minute thing there is.
   const gate = dueGates(atoms, now)[0];
   if (gate) {
-    out.push({ kind: "gate", atomKey: `${gate.kind}:${gate.ref}`, ref: gate.ref, estMin: 0.9 });
+    out.push({ kind: "gate", atomKey: atomKey(gate.surah, gate.kind, gate.ref), ref: gate.ref, estMin: 0.9 });
     spent += 0.9;
   }
 
@@ -42,7 +42,7 @@ export function floorQueue(atoms: AtomState[], now: number, cfg?: DayConfig): Fl
     .sort((x, y) => y.risk - x.risk);
   for (const r of reviews) {
     if (spent + 0.9 > CAP_MIN) break;
-    const key = `${r.a.kind}:${r.a.ref}`;
+    const key = atomKey(r.a.surah, r.a.kind, r.a.ref);
     if (out.some((i) => i.atomKey === key)) continue;
     out.push({ kind: "review", atomKey: key, ref: r.a.ref, estMin: 0.9 });
     spent += 0.9;
@@ -57,7 +57,7 @@ export function floorQueue(atoms: AtomState[], now: number, cfg?: DayConfig): Fl
     if (strongest) {
       out.push({
         kind: "warmup",
-        atomKey: `${strongest.kind}:${strongest.ref}`,
+        atomKey: atomKey(strongest.surah, strongest.kind, strongest.ref),
         ref: strongest.ref,
         estMin: 0.8,
       });

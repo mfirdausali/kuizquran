@@ -29,11 +29,11 @@ const RUNG_KIND: Record<Rung, RetrievalKind> = { S1: "s1", S2: "s2", S3: "s3", S
 
 export type AtomsMap = Map<string, AtomState>;
 
-function getAtom(atoms: AtomsMap, ayah: number): AtomState {
-  const key = atomKey("ayah", ayah);
+function getAtom(atoms: AtomsMap, surah: number, ayah: number): AtomState {
+  const key = atomKey(surah, "ayah", ayah);
   let a = atoms.get(key);
   if (!a) {
-    a = initAtom("ayah", ayah);
+    a = initAtom(surah, "ayah", ayah);
     atoms.set(key, a);
   }
   return a;
@@ -47,13 +47,13 @@ function isStructured(e: DrillEvent): boolean {
 
 /** Apply a single event to the atoms map (mutates the map, replaces atom values). */
 export function applyEvent(atoms: AtomsMap, e: DrillEvent, cfg?: DayConfig): void {
-  const key = atomKey("ayah", e.ayah);
+  const key = atomKey(e.surah, "ayah", e.ayah);
 
   if ((e.type === "tap" || e.type === "reconstruct_tap") && e.correct === false) {
     // A slip → negative retrieval of the current rung (pretest excluded in update()).
     // reconstruct_tap (v2 Phase 1) rolls up exactly like the old S2/S3 `tap`: its
     // `rung` already carries the grading equivalence class ("S2"/"S3").
-    const atom = getAtom(atoms, e.ayah);
+    const atom = getAtom(atoms, e.surah, e.ayah);
     const outcome: RetrievalOutcome = {
       kind: RUNG_KIND[e.rung],
       correct: false,
@@ -69,7 +69,7 @@ export function applyEvent(atoms: AtomsMap, e: DrillEvent, cfg?: DayConfig): voi
     // ayah_produced (v2 Phase 1) is the tap-to-reconstruct completion event —
     // graded exactly like rung_complete, using whatever grading rung ("S2"/"S3")
     // reconstruct.ts stamped on it.
-    const atom = getAtom(atoms, e.ayah);
+    const atom = getAtom(atoms, e.surah, e.ayah);
     const outcome: RetrievalOutcome = {
       kind: RUNG_KIND[e.rung],
       correct: true,
@@ -86,7 +86,7 @@ export function applyEvent(atoms: AtomsMap, e: DrillEvent, cfg?: DayConfig): voi
   }
 
   if (e.type === "gate_result") {
-    const atom = getAtom(atoms, e.ayah);
+    const atom = getAtom(atoms, e.surah, e.ayah);
     const passed = e.correct === true;
     const outcome: RetrievalOutcome = {
       kind: "gate",
@@ -110,14 +110,14 @@ export function applyEvent(atoms: AtomsMap, e: DrillEvent, cfg?: DayConfig): voi
 
   if (e.type === "connection_born") {
     // S4 bridge created the n→n+1 connection atom (ref = the `from` ayah = e.ayah).
-    birthConnection(atoms, e.ayah);
+    birthConnection(atoms, e.surah, e.ayah);
     return;
   }
 
   if (e.type === "junction_result") {
     // A junction check crossing n→n+1 → review the connection atom (ref = e.ayah).
-    const connKey = atomKey("connection", e.ayah);
-    const conn = atoms.get(connKey) ?? birthConnection(atoms, e.ayah);
+    const connKey = atomKey(e.surah, "connection", e.ayah);
+    const conn = atoms.get(connKey) ?? birthConnection(atoms, e.surah, e.ayah);
     const outcome: RetrievalOutcome = {
       kind: "review",
       correct: e.correct === true,
@@ -136,7 +136,7 @@ export function applyEvent(atoms: AtomsMap, e: DrillEvent, cfg?: DayConfig): voi
     // dropped here (the event itself still lands in the append-only log; it just
     // carries no strength signal) instead of being silently faked as "reviewed".
     const isJunction = e.stepKind === "junction";
-    const k = isJunction ? atomKey("connection", e.ayah) : atomKey("ayah", e.ayah);
+    const k = isJunction ? atomKey(e.surah, "connection", e.ayah) : atomKey(e.surah, "ayah", e.ayah);
     const atom = atoms.get(k);
     if (!atom || (!isJunction && !atom.encoded)) return;
     const outcome: RetrievalOutcome = {

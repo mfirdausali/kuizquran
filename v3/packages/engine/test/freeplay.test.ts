@@ -22,7 +22,7 @@ const DAY = 86_400_000;
 const wc = new Map<number, number>([[4, 15], [5, 12], [6, 20]]);
 
 function encoded(ref: number, extra: Partial<AtomState> = {}): AtomState {
-  return { ...initAtom("ayah", ref), encoded: true, gatePassed: true, strength: 50, stability: 4, lastRetrieval: 3 * DAY, ...extra };
+  return { ...initAtom(12, "ayah", ref), encoded: true, gatePassed: true, strength: 50, stability: 4, lastRetrieval: 3 * DAY, ...extra };
 }
 
 describe("Door 1 — extraLearnGrant (gate intact)", () => {
@@ -34,7 +34,7 @@ describe("Door 1 — extraLearnGrant (gate intact)", () => {
   });
 
   it("does NOT grant while a cold gate is due (gate intact)", () => {
-    const gated = scheduleGate({ ...initAtom("ayah", 4), encoded: true }, 5 * DAY, undefined);
+    const gated = scheduleGate({ ...initAtom(12, "ayah", 4), encoded: true }, 5 * DAY, undefined);
     const g = extraLearnGrant([gated], [4, 5], 6 * DAY, wc); // gate due next day
     expect(g.granted).toBe(false);
     expect(g.reason).toMatch(/gate/);

@@ -21,7 +21,7 @@ describe("day-1 cold gate (FR3 / invariant #9)", () => {
 
   it("scheduling a gate sets it due at the NEXT learning-day start", () => {
     const encodedAt = local(2026, 7, 14, 20); // evening
-    const a = scheduleGate({ ...initAtom("ayah", 4), encoded: true }, encodedAt, cfg);
+    const a = scheduleGate({ ...initAtom(12, "ayah", 4), encoded: true }, encodedAt, cfg);
     // next learning-day begins at 2026-07-15 04:30
     expect(a.gateDueAt).toBe(local(2026, 7, 15, 4) + 30 * 60_000);
     expect(a.gatePassed).toBe(false);
@@ -29,14 +29,14 @@ describe("day-1 cold gate (FR3 / invariant #9)", () => {
 
   it("gate is not due same day, is due next day", () => {
     const encodedAt = local(2026, 7, 14, 20);
-    const a = scheduleGate({ ...initAtom("ayah", 4), encoded: true }, encodedAt, cfg);
+    const a = scheduleGate({ ...initAtom(12, "ayah", 4), encoded: true }, encodedAt, cfg);
     expect(gateDue(a, encodedAt)).toBe(false); // same evening
     expect(gateDue(a, local(2026, 7, 15, 8))).toBe(true); // next morning
   });
 
   it("a pass marks gatePassed; a fail re-arms for the following day", () => {
     const encodedAt = local(2026, 7, 14, 20);
-    let a = scheduleGate({ ...initAtom("ayah", 4), encoded: true }, encodedAt, cfg);
+    let a = scheduleGate({ ...initAtom(12, "ayah", 4), encoded: true }, encodedAt, cfg);
     const attempt = local(2026, 7, 15, 8);
     const passed = applyGateResult(a, true, attempt, cfg);
     expect(passed.gatePassed).toBe(true);
@@ -47,7 +47,7 @@ describe("day-1 cold gate (FR3 / invariant #9)", () => {
 
   it("unlock is blocked while any cold gate is due, permitted once passed", () => {
     const encodedAt = local(2026, 7, 14, 20);
-    const a = scheduleGate({ ...initAtom("ayah", 4), encoded: true }, encodedAt, cfg);
+    const a = scheduleGate({ ...initAtom(12, "ayah", 4), encoded: true }, encodedAt, cfg);
     const nextMorning = local(2026, 7, 15, 8);
     expect(unlockPermitted([a], nextMorning)).toBe(false); // gate due, not passed
     const passed = applyGateResult(a, true, nextMorning, cfg);
@@ -57,7 +57,7 @@ describe("day-1 cold gate (FR3 / invariant #9)", () => {
   // v2-D07 unlock tolerance.
   it("a mode-scoped tolerance permits unlock with pending gates within the band", () => {
     const encodedAt = local(2026, 7, 14, 20);
-    const a = scheduleGate({ ...initAtom("ayah", 4), encoded: true }, encodedAt, cfg);
+    const a = scheduleGate({ ...initAtom(12, "ayah", 4), encoded: true }, encodedAt, cfg);
     const nextMorning = local(2026, 7, 15, 8);
     // Steady-style strict (default 0): blocked.
     expect(unlockPermitted([a], nextMorning, 0)).toBe(false);
@@ -67,8 +67,8 @@ describe("day-1 cold gate (FR3 / invariant #9)", () => {
 
   it("tolerance is a ceiling: 2 pending gates still blocks a tolerance of 1", () => {
     const encodedAt = local(2026, 7, 14, 20);
-    const a = scheduleGate({ ...initAtom("ayah", 4), encoded: true }, encodedAt, cfg);
-    const b = scheduleGate({ ...initAtom("ayah", 5), encoded: true }, encodedAt, cfg);
+    const a = scheduleGate({ ...initAtom(12, "ayah", 4), encoded: true }, encodedAt, cfg);
+    const b = scheduleGate({ ...initAtom(12, "ayah", 5), encoded: true }, encodedAt, cfg);
     const nextMorning = local(2026, 7, 15, 8);
     expect(unlockPermitted([a, b], nextMorning, 1)).toBe(false);
   });
@@ -78,12 +78,12 @@ describe("gate forgiveness ladder (v2-D08)", () => {
   const cfg = DEFAULT_DAY_CONFIG;
 
   it("a fresh atom is on the normal cold check", () => {
-    expect(gateForgiveness(initAtom("ayah", 4))).toBe("cold");
+    expect(gateForgiveness(initAtom(12, "ayah", 4))).toBe("cold");
   });
 
   it("gateFails increments on each fail and resets on a pass", () => {
     const encodedAt = local(2026, 7, 14, 20);
-    let a = scheduleGate({ ...initAtom("ayah", 4), encoded: true }, encodedAt, cfg);
+    let a = scheduleGate({ ...initAtom(12, "ayah", 4), encoded: true }, encodedAt, cfg);
     for (let i = 1; i <= 3; i++) {
       a = applyGateResult(a, false, local(2026, 7, 14 + i, 8), cfg);
       expect(a.gateFails).toBe(i);
@@ -93,18 +93,18 @@ describe("gate forgiveness ladder (v2-D08)", () => {
   });
 
   it(`rescaffolds to a lighter S2 re-teach after ${RESCAFFOLD_AFTER_FAILS} fails`, () => {
-    const atom = { ...initAtom("ayah", 4), encoded: true, gateFails: RESCAFFOLD_AFTER_FAILS };
+    const atom = { ...initAtom(12, "ayah", 4), encoded: true, gateFails: RESCAFFOLD_AFTER_FAILS };
     expect(gateForgiveness(atom)).toBe("rescaffold");
   });
 
   it(`offers demote-to-Learn after ${DEMOTE_OFFER_AFTER_FAILS} fails`, () => {
-    const atom = { ...initAtom("ayah", 4), encoded: true, gateFails: DEMOTE_OFFER_AFTER_FAILS };
+    const atom = { ...initAtom(12, "ayah", 4), encoded: true, gateFails: DEMOTE_OFFER_AFTER_FAILS };
     expect(gateForgiveness(atom)).toBe("demote");
   });
 
   it("demoteToLearn clears encoding/gate state but never zeroes strength (re-learned, not abandoned)", () => {
     const atom = {
-      ...initAtom("ayah", 4),
+      ...initAtom(12, "ayah", 4),
       encoded: true,
       gatePassed: false,
       gateDueAt: local(2026, 7, 15, 8),

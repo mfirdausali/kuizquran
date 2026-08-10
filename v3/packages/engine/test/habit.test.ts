@@ -80,10 +80,10 @@ describe("completedDayIndices (v2-D17 streak calendar)", () => {
 
 describe("floor session (≤2 min, never empty)", () => {
   function enc(ref: number, extra: Partial<AtomState> = {}): AtomState {
-    return { ...initAtom("ayah", ref), encoded: true, gatePassed: true, strength: 60, stability: 3, lastRetrieval: dayMs(995), ...extra };
+    return { ...initAtom(12, "ayah", ref), encoded: true, gatePassed: true, strength: 60, stability: 3, lastRetrieval: dayMs(995), ...extra };
   }
   it("prioritises a due cold gate", () => {
-    const gated = scheduleGate({ ...initAtom("ayah", 4), encoded: true }, dayMs(999), undefined);
+    const gated = scheduleGate({ ...initAtom(12, "ayah", 4), encoded: true }, dayMs(999), undefined);
     const q = floorQueue([gated], dayMs(1001));
     expect(q[0]!.kind).toBe("gate");
     expect(floorMinutes(q)).toBeLessThanOrEqual(2.01);
@@ -103,7 +103,7 @@ describe("floor session (≤2 min, never empty)", () => {
 
 describe("decay visible (FR9)", () => {
   it("shows now vs a past strength with a plain label", () => {
-    const atom = { ...initAtom("ayah", 4), encoded: true, strength: 90, stability: 5, lastRetrieval: dayMs(1000) };
+    const atom = { ...initAtom(12, "ayah", 4), encoded: true, strength: 90, stability: 5, lastRetrieval: dayMs(1000) };
     const d = decaySince(atom, dayMs(1000), dayMs(1005), DEFAULT_DAY_CONFIG);
     expect(d.nowPct).toBeLessThan(d.sincePct); // decayed
     expect(d.declined).toBe(true);
@@ -120,7 +120,7 @@ describe("decay visible (FR9)", () => {
 describe("mushaf heatmap (FR9 P1)", () => {
   it("111 rows, encoded atoms lit, others zero", () => {
     const atoms = new Map<string, AtomState>();
-    atoms.set(atomKey("ayah", 4), { ...initAtom("ayah", 4), encoded: true, strength: 85, stability: 10, lastRetrieval: dayMs(1000) });
+    atoms.set(atomKey(12, "ayah", 4), { ...initAtom(12, "ayah", 4), encoded: true, strength: 85, stability: 10, lastRetrieval: dayMs(1000) });
     const rows = ayahHeatmap(corpus, atoms, dayMs(1000));
     expect(rows).toHaveLength(111);
     expect(rows[3]!.ayah).toBe(4);

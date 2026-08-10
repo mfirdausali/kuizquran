@@ -39,7 +39,7 @@ describe("rebuild — atoms are a rebuildable cache (invariant #2)", () => {
 
   it("encodes the ayah and passes its gate", () => {
     const atoms = rebuild(stream());
-    const atom = atoms.get("ayah:4")!;
+    const atom = atoms.get("12:ayah:4")!;
     expect(atom.encoded).toBe(true);
     expect(atom.gatePassed).toBe(true);
     expect(atom.strength).toBeGreaterThan(0);
@@ -50,8 +50,8 @@ describe("rebuild — atoms are a rebuildable cache (invariant #2)", () => {
     // proving the pretest tap contributed nothing.
     const withPretest = stream();
     const withoutPretest = stream().filter((e) => !(e.type === "tap" && e.pretest));
-    const a = rebuild(withPretest).get("ayah:4")!;
-    const b = rebuild(withoutPretest).get("ayah:4")!;
+    const a = rebuild(withPretest).get("12:ayah:4")!;
+    const b = rebuild(withoutPretest).get("12:ayah:4")!;
     expect(a).toEqual(b);
   });
 
@@ -71,10 +71,10 @@ describe("rebuild — atoms are a rebuildable cache (invariant #2)", () => {
       { type: "chain_step", ts: t + 3200, surah: 12, ayah: 5, rung: "S4", stepKind: "ayah", correct: true },
     ];
     const atoms = rebuild(events);
-    expect(atoms.get("connection:4")).toBeDefined(); // born
-    expect(atoms.get("connection:4")!.strength).toBeGreaterThan(0); // reviewed
-    expect(atoms.get("ayah:4")).toBeDefined();
-    expect(atoms.get("ayah:5")).toBeUndefined(); // never encoded — gap guard skipped it, no phantom
+    expect(atoms.get("12:connection:4")).toBeDefined(); // born
+    expect(atoms.get("12:connection:4")!.strength).toBeGreaterThan(0); // reviewed
+    expect(atoms.get("12:ayah:4")).toBeDefined();
+    expect(atoms.get("12:ayah:5")).toBeUndefined(); // never encoded — gap guard skipped it, no phantom
     // fold == replay still holds with the new event kinds
     expect([...rebuild(events).entries()]).toEqual([...atoms.entries()]);
   });
@@ -94,8 +94,8 @@ describe("rebuild — atoms are a rebuildable cache (invariant #2)", () => {
     ];
     const straight = rebuild([...evA, ...evB]);
     const interleaved = rebuild([evA[0]!, evB[0]!, evA[1]!, evB[1]!, evA[2]!, evB[2]!]);
-    expect(interleaved.get("ayah:4")).toEqual(straight.get("ayah:4"));
-    expect(interleaved.get("ayah:5")).toEqual(straight.get("ayah:5"));
+    expect(interleaved.get("12:ayah:4")).toEqual(straight.get("12:ayah:4"));
+    expect(interleaved.get("12:ayah:5")).toEqual(straight.get("12:ayah:5"));
   });
 });
 
@@ -108,7 +108,7 @@ describe("rebuild — v2 Phase 1 tap-to-reconstruct events (reconstruct_tap/ayah
     const viaReconstruct: DrillEvent[] = [
       { type: "reconstruct_tap", ts: t, surah: 12, ayah: 4, rung: "S2", correct: false },
     ];
-    expect(rebuild(viaReconstruct).get("ayah:4")).toEqual(rebuild(viaTap).get("ayah:4"));
+    expect(rebuild(viaReconstruct).get("12:ayah:4")).toEqual(rebuild(viaTap).get("12:ayah:4"));
   });
 
   it("ayah_produced (rung S2, partial reconstruction) grades like rung_complete S2 — no gate scheduled", () => {
@@ -117,7 +117,7 @@ describe("rebuild — v2 Phase 1 tap-to-reconstruct events (reconstruct_tap/ayah
       { type: "ayah_produced", ts: t, surah: 12, ayah: 4, rung: "S2" },
     ];
     const atoms = rebuild(events);
-    const atom = atoms.get("ayah:4")!;
+    const atom = atoms.get("12:ayah:4")!;
     expect(atom.strength).toBeGreaterThan(0);
     expect(atom.encoded).toBe(false);
     expect(atom.gateDueAt).toBeNull();
@@ -129,7 +129,7 @@ describe("rebuild — v2 Phase 1 tap-to-reconstruct events (reconstruct_tap/ayah
       { type: "ayah_produced", ts: t, surah: 12, ayah: 4, rung: "S3" },
     ];
     const atoms = rebuild(events);
-    const atom = atoms.get("ayah:4")!;
+    const atom = atoms.get("12:ayah:4")!;
     expect(atom.encoded).toBe(true);
     expect(atom.gateDueAt).not.toBeNull();
     expect(atom.strength).toBeGreaterThan(0);
@@ -143,7 +143,7 @@ describe("rebuild — v2 Phase 1 tap-to-reconstruct events (reconstruct_tap/ayah
       { type: "ayah_produced", ts: t + 600, surah: 12, ayah: 7, rung: "S2" },
     ];
     const atoms = rebuild(events);
-    const atom = atoms.get("ayah:7")!;
+    const atom = atoms.get("12:ayah:7")!;
     // Net of one slip (-15, Learn band) then a graded S2 completion (+12): still positive.
     expect(atom.strength).toBeGreaterThan(0);
     expect(atom.reps).toBe(2); // the slip + the completion; the bare correct tap carries no signal
@@ -159,9 +159,9 @@ describe("rebuild — v2 Phase 2 gate_demote (v2-D08 forgiveness ladder)", () =>
     ];
     const demoteEvent: DrillEvent = { type: "gate_demote", ts: t + DAY + 1000, surah: 12, ayah: 4, rung: "S3" };
 
-    const preAtom = rebuild(beforeDemote).get("ayah:4")!;
+    const preAtom = rebuild(beforeDemote).get("12:ayah:4")!;
     const atoms = rebuild([...beforeDemote, demoteEvent]);
-    const atom = atoms.get("ayah:4")!;
+    const atom = atoms.get("12:ayah:4")!;
     expect(atom.encoded).toBe(false);
     expect(atom.gateDueAt).toBeNull();
     expect(atom.gatePassed).toBe(false);
@@ -173,6 +173,6 @@ describe("rebuild — v2 Phase 2 gate_demote (v2-D08 forgiveness ladder)", () =>
 
   it("a gate_demote on a never-taught ayah is a no-op (nothing to send back)", () => {
     const events: DrillEvent[] = [{ type: "gate_demote", ts: 5 * DAY, surah: 12, ayah: 99, rung: "S3" }];
-    expect(rebuild(events).get("ayah:99")).toBeUndefined();
+    expect(rebuild(events).get("12:ayah:99")).toBeUndefined();
   });
 });
