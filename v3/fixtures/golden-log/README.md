@@ -5,19 +5,32 @@ golden log + fixtures from it."
 
 ## Provenance
 
-- **Cut from:** `v2` at `c34f5c3` (the parity oracle SHA named in
+- **Originally cut from:** `v2` at `c34f5c3` (the parity oracle SHA named in
   `v3/CLAUDE.md`). No `v2` engine file has changed since — the only later
   commit touching the `v2` tree (`283dab8`) added `.env.example` harness
   files, not engine code.
-- **Generator:** `v3/scripts/gen-golden-log.ts` — imports `v2/src/engine/src/{events,rebuild,daybound}.ts`
-  read-only (never edits `v2`), builds a `DrillEvent[]`, folds it once through
-  v2's own `rebuild()`, and writes both files below. Regenerate with
-  `make golden-log` (requires `TZ=UTC`, enforced by the script itself — see
-  "Why TZ=UTC" below).
+- **Regenerated 2026-08-10 for build-plan step 7 (E-01):** surah-keying
+  changed `atomKey`'s shape from `${kind}:${ref}` to `${surah}:${kind}:${ref}`
+  and added `AtomState.surah` — a legitimate, scheduled oracle invalidation
+  (BUILD-PLAN.md's "Oracle regen protocol"), regenerated via the
+  human-reviewed process (NIGHTLY.md's absolute rule) after human approval.
+  `events.json` is byte-identical to the pre-E-01 version (`DrillEvent`
+  already carried `surah` on every event); `oracle.json`'s diff is EXACTLY
+  the key-shape delta — every atom gained a `12:` key prefix and a
+  `"surah": 12` field, no strength/stability/reps/lapses/gate* value changed.
+  Diffed by hand before commit; see `v3/DECISIONS.md`'s v3-D25 and the
+  step-7/step-8 commits for the full trail.
+- **Generator:** `v3/scripts/gen-golden-log.ts` — now imports
+  `v3/packages/engine/src/{events,rebuild,daybound}.ts` (v3's own, E-01-fixed
+  engine, not v2's frozen one — see the script's own header comment for why),
+  builds a `DrillEvent[]`, folds it once through `rebuild()`, and writes both
+  files below. Regenerate with `make golden-log` (requires `TZ=UTC`, enforced
+  by the script itself — see "Why TZ=UTC" below).
 - **`events.json`** — the append-only log, 24 events, surah 12 (Yusuf) only.
 - **`oracle.json`** — `rebuild(events, DEFAULT_DAY_CONFIG)`, i.e. the atoms
-  cache v2 itself produces from that log. This is the committed fold-parity
-  oracle for `v3/docs/BUILD-PLAN.md` step 6 (golden-log fold-parity snapshot),
+  cache v3's own engine produces from that log. This is the committed
+  fold-parity oracle for `v3/docs/BUILD-PLAN.md` step 6 (golden-log
+  fold-parity snapshot),
   which will assert the *ported* v3 engine reproduces it byte-for-byte before
   E-01 keys the atoms by surah.
 
@@ -32,7 +45,7 @@ Absolute B without needing a placeholder.
 
 ## Why `TZ=UTC`
 
-`v2/src/engine/src/daybound.ts:23` computes the learning-day boundary with
+`v3/packages/engine/src/daybound.ts` (ported verbatim from `v2/src/engine/src/daybound.ts:23`) computes the learning-day boundary with
 `new Date(now).getFullYear()/getMonth()/getDate()` — machine-**local** date
 getters (`v3/INVARIANTS.md` Absolute A names this exact leak). The oracle is
 only reproducible if every generation run pins the same TZ, so the script

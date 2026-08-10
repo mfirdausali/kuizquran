@@ -1,5 +1,6 @@
 {
-  "ayah:1": {
+  "12:ayah:1": {
+    "surah": 12,
     "kind": "ayah",
     "ref": 1,
     "strength": 5.28,
@@ -13,7 +14,8 @@
     "gatePassed": false,
     "gateFails": 0
   },
-  "ayah:11": {
+  "12:ayah:11": {
+    "surah": 12,
     "kind": "ayah",
     "ref": 11,
     "strength": 11.399999999999999,
@@ -27,7 +29,8 @@
     "gatePassed": false,
     "gateFails": 0
   },
-  "ayah:2": {
+  "12:ayah:2": {
+    "surah": 12,
     "kind": "ayah",
     "ref": 2,
     "strength": 12.5304,
@@ -41,7 +44,8 @@
     "gatePassed": false,
     "gateFails": 0
   },
-  "ayah:3": {
+  "12:ayah:3": {
+    "surah": 12,
     "kind": "ayah",
     "ref": 3,
     "strength": 7.1532,
@@ -55,7 +59,8 @@
     "gatePassed": false,
     "gateFails": 0
   },
-  "ayah:4": {
+  "12:ayah:4": {
+    "surah": 12,
     "kind": "ayah",
     "ref": 4,
     "strength": 11.727999999999994,
@@ -69,7 +74,8 @@
     "gatePassed": true,
     "gateFails": 0
   },
-  "ayah:5": {
+  "12:ayah:5": {
+    "surah": 12,
     "kind": "ayah",
     "ref": 5,
     "strength": 0,
@@ -83,7 +89,8 @@
     "gatePassed": false,
     "gateFails": 0
   },
-  "ayah:7": {
+  "12:ayah:7": {
+    "surah": 12,
     "kind": "ayah",
     "ref": 7,
     "strength": 0,
@@ -97,7 +104,8 @@
     "gatePassed": false,
     "gateFails": 0
   },
-  "connection:8": {
+  "12:connection:8": {
+    "surah": 12,
     "kind": "connection",
     "ref": 8,
     "strength": 21.459600000000002,
