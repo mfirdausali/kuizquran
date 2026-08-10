@@ -483,3 +483,51 @@ dev DB, has no equivalent to test against), dead-letter quarantine, and
 late-arrival refold triggering. `fold_determinism_check` as a genuinely
 *nightly, staging-run* job — as opposed to the pure comparison primitive
 proven here — needs all of the above first.
+
+---
+
+## Ratified 2026-08-10 (very late) — build-plan step 15 completion: specs + verification architecture
+
+### v3-D33 — specs table ships as an explicitly flagged placeholder; question compiler (M4) owns the real payload shape
+
+Step 15 names "specs (immutable, versioned, tombstone-as-flip)" but the
+question compiler that actually INTERPRETS a spec (`buildQuestion(spec,
+ctx)`, WIREFRAME.md §22) is build-plan step 16, one step later — by
+design (the corrected order's own reasoning: data model before the
+consumer). The `specs` table therefore ships now with the STRUCTURAL
+guarantees WIREFRAME.md already commits to regardless of M4's eventual
+payload shape (immutable — no row is ever UPDATEd; versioned — a lineage
+groups rows by `spec_id`, each edit is a new row with an incremented
+`version`; tombstone-as-flip — deactivating is a new version row with
+`active: false`, never a delete), and a `payload` JSON column whose INNER
+shape is provisional. The one guarantee enforced NOW, not deferred to M4:
+`payload` structurally CANNOT carry `rung`/`pretest`/`atom`/`structured` —
+WIREFRAME's hard problem 1 ("no spec contains a bound check... the fold
+never dereferences a spec id") demands this hold from the first row ever
+written, not from whenever M4 remembers to enforce it. A validation rule
+rejects any payload containing those keys, at any depth, tested with a
+mutation check.
+
+### v3-D34 — the qari-tier/admin-tier hash-with-overrides duplication is intentional, not an oversight
+
+`corpus-compiler/src/hash.ts`'s new `ayahQariHashWithOverrides`/
+`ayahAdminHashWithOverrides` re-implement a MINIMAL subset of
+`packages/engine/src/overrides.ts#applyOverrides`'s latest-wins resolution
+(gloss + distractor only, skipping group/disable — the two fields that
+never feed a hash). This is duplication across two separate packages with
+no shared-types layer, accepted rather than fixed by adding a dependency
+edge corpus-compiler has never had, because:
+
+1. Both copies resolve "latest wins" via the IDENTICAL `(createdAt, id)`
+   rule DEFECTS.md#B4 already fixed and tested in both places
+   (`packages/engine/test/b4-override-ties.test.ts` and
+   `corpus-compiler/test/hash.test.ts`'s own case) — the two cannot
+   silently diverge in a way neither test suite would catch.
+2. `packages/engine` must never depend on `corpus-compiler` (the engine is
+   the invariant-gated spine; the compiler is a build-time tool) and
+   `corpus-compiler` gaining a dependency on `packages/engine` purely for
+   one shared type is a heavier coupling than the ~15 lines this
+   duplicates.
+
+If a third consumer ever needs this resolution logic, extract a shared
+`packages/override-resolution` package then — not before.

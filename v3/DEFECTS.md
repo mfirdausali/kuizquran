@@ -96,7 +96,7 @@ existing so nothing later has anywhere else to put the decision) is done.
 Exact per-value mapping recorded as v3-D26 (DECISIONS.md), explicitly
 flagged for re-verification once M4's spec system gives it a real caller.
 
-## B3 — `ayah_verifications` has no content hash (M3)
+## B3 — `ayah_verifications` has no content hash ✅ CLOSED (build-plan step 15)
 
 Migration is `unique(surah,ayah)` + `verified_by` + `note` + `created_at`. A qari
 signs ayah 5, an admin then overrides its gloss, the row still reads verified.
@@ -104,6 +104,26 @@ signs ayah 5, an admin then overrides its gloss, the row still reads verified.
 
 *Closes when:* the tiered hash (v3-D13) ships and an override on a verified ayah
 flips the frontier amber in a test.
+
+**Fixed 2026-08-10:** two halves, each tested independently.
+`corpus-compiler/src/hash.ts` gained `ayahQariHashWithOverrides`/
+`ayahAdminHashWithOverrides` — the override IS what changes the hash now
+(mutation-tested: a no-op override-application patch turns the closing
+test red). `v3/api` gained `corpus_ayah_hashes` (current-state, ingested
+from TS via `corpus:ingest-hashes` — Laravel never computes a hash,
+v3-D08) + `ayah_verifications` rebuilt APPEND-ONLY (not v2's single-
+upserted row, which is exactly how B3 became possible) +
+`VerificationsController`'s any-row-matches-current frontier (mutation-
+tested: ignoring a hash mismatch turns the closing test red).
+
+**Explicitly deferred, not forgotten:** the LIVE wiring that automatically
+re-runs `corpus:ingest-hashes` with an override-aware recompute the moment
+an override is written — the same class of "needs a running TS-side
+service reacting to a Laravel write" gap the fold-runner's DB adapter has
+(DECISIONS.md v3-D32). Today, closing the loop end-to-end requires
+manually re-running the ingest command after an override; the COMPUTATION
+and the FRONTIER LOGIC are both proven correct, only the automatic trigger
+is missing.
 
 ## B4 — override ties are unordered (M2) ✅ CLOSED (build-plan step 8)
 
