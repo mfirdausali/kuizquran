@@ -1,0 +1,101 @@
+[
+  {
+    "verse_number": 1,
+    "text_uthmani": " قُلْ هُوَ ٱللَّهُ أَحَدٌ",
+    "words": [
+      {
+        "position": 1,
+        "text_uthmani": "قُلْ",
+        "translation": "Say"
+      },
+      {
+        "position": 2,
+        "text_uthmani": "هُوَ",
+        "translation": "He"
+      },
+      {
+        "position": 3,
+        "text_uthmani": "ٱللَّهُ",
+        "translation": "(is) Allah"
+      },
+      {
+        "position": 4,
+        "text_uthmani": "أَحَدٌ",
+        "translation": "the One"
+      }
+    ]
+  },
+  {
+    "verse_number": 2,
+    "text_uthmani": "ٱللَّهُ ٱلصَّمَدُ",
+    "words": [
+      {
+        "position": 1,
+        "text_uthmani": "ٱللَّهُ",
+        "translation": "Allah"
+      },
+      {
+        "position": 2,
+        "text_uthmani": "ٱلصَّمَدُ",
+        "translation": "the Eternal, the Absolute"
+      }
+    ]
+  },
+  {
+    "verse_number": 3,
+    "text_uthmani": "لَمْ يَلِدْ وَلَمْ يُولَدْ",
+    "words": [
+      {
+        "position": 1,
+        "text_uthmani": "لَمْ",
+        "translation": "Not"
+      },
+      {
+        "position": 2,
+        "text_uthmani": "يَلِدْ",
+        "translation": "He begets"
+      },
+      {
+        "position": 3,
+        "text_uthmani": "وَلَمْ",
+        "translation": "and not"
+      },
+      {
+        "position": 4,
+        "text_uthmani": "يُولَدْ",
+        "translation": "He is begotten"
+      }
+    ]
+  },
+  {
+    "verse_number": 4,
+    "text_uthmani": "وَلَمْ يَكُن لَّهُۥ كُفُوًا أَحَدٌۢ",
+    "words": [
+      {
+        "position": 1,
+        "text_uthmani": "وَلَمْ",
+        "translation": "And not"
+      },
+      {
+        "position": 2,
+        "text_uthmani": "يَكُن",
+        "translation": "is"
+      },
+      {
+        "position": 3,
+        "text_uthmani": "لَّهُۥ",
+        "translation": "for Him"
+      },
+      {
+        "position": 4,
+        "text_uthmani": "كُفُوًا",
+        "translation": "equivalent"
+      },
+      {
+        "position": 5,
+        "text_uthmani": "أَحَدٌۢ",
+        "translation": "any [one]"
+      }
+    ]
+  }
+]

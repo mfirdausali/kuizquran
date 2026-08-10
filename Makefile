@@ -9,8 +9,9 @@ SHELL := /bin/bash
 
 V2      := v2
 API     := v2/api
+CORPUS_COMPILER := v3/packages/corpus-compiler
 
-.PHONY: help setup dev dev-web dev-api test test-web test-api build clean doctor golden-log
+.PHONY: help setup dev dev-web dev-api test test-web test-api test-v3 build clean doctor golden-log compile-corpus
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -29,6 +30,7 @@ setup: ## First run: install deps, create .env, key, migrate
 	cd $(API) && php artisan migrate --force
 	cd $(V2) && npm install
 	@[ -f $(V2)/.env ] || (cp $(V2)/.env.example $(V2)/.env && echo "→ created $(V2)/.env")
+	cd $(CORPUS_COMPILER) && npm install
 	@echo ""
 	@echo "✓ setup complete. Run: make dev"
 
@@ -44,13 +46,16 @@ dev-web: ## Run only the SPA (:5273)
 dev-api: ## Run only the API (:8000)
 	cd $(API) && php artisan serve --port=8000
 
-test: test-web test-api ## Run every suite
+test: test-web test-api test-v3 ## Run every suite
 
-test-web: ## vitest
+test-web: ## vitest (v2)
 	cd $(V2) && npm test
 
 test-api: ## PHPUnit
 	cd $(API) && php artisan test
+
+test-v3: ## vitest (v3 packages, e.g. corpus-compiler)
+	cd $(CORPUS_COMPILER) && npm test
 
 build: ## Type-check + build the SPA (must pass; see B9)
 	cd $(V2) && npm run build
@@ -72,3 +77,8 @@ clean: ## Remove build output and caches
 
 golden-log: ## Regenerate v3's golden log + oracle from pinned v2 (human-reviewed diff only — see v3/fixtures/golden-log/README.md)
 	cd $(V2) && TZ=UTC node_modules/.bin/vite-node ../v3/scripts/gen-golden-log.ts
+
+compile-corpus: ## Compile the v3 corpus for surahs 12, 103, 112 (build-plan step 3)
+	cd $(CORPUS_COMPILER) && npm run compile -- 12
+	cd $(CORPUS_COMPILER) && npm run compile -- 103
+	cd $(CORPUS_COMPILER) && npm run compile -- 112

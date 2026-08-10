@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 jobs:
-  # ---- JS / TS: engine + web (vitest), wherever they live under v2 ----
+  # ---- JS / TS: engine + web (vitest), wherever they live under v2 or v3 ----
   js:
     runs-on: ubuntu-latest
     steps:
@@ -27,8 +27,10 @@ jobs:
         id: detect
         run: |
           set -e
-          # Any package.json under v2/ that defines a "test" script.
-          mapfile -t PKGS < <(find v2 -maxdepth 3 -name package.json \
+          # Any package.json under v2/ or v3/ that defines a "test" script.
+          # v3 lives at packages/<name>/package.json (one level deeper than v2's
+          # root-level package.json), so maxdepth 3 covers both trees.
+          mapfile -t PKGS < <(find v2 v3 -maxdepth 3 -name package.json \
             -not -path '*/node_modules/*' -print 2>/dev/null || true)
           FOUND=""
           for p in "${PKGS[@]}"; do

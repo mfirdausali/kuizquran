@@ -66,8 +66,9 @@ are the baseline everywhere else.
 1. Identify the next step from `BUILD-PLAN.md` and `git log`.
 2. Write failing tests first; observe them fail.
 3. Implement the minimum that makes them pass.
-4. Run the gates: `make build`, `make test` (255 vitest + 47 PHPUnit must stay
-   green), plus any step-specific check.
+4. Run the gates: `make build`, `make test` (v2's 255 vitest + v3's growing
+   vitest suite — 23 as of build-plan step 3's corpus-compiler port — + 47
+   PHPUnit must all stay green), plus any step-specific check.
 5. Commit with a message naming the step and what was verified.
 6. Push to `main`.
 
