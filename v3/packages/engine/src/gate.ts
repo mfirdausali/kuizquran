@@ -55,9 +55,13 @@ export function dueGates(atoms: AtomState[], now: number): AtomState[] {
  * mode-scoped tolerance band allows up to `maxPendingGates` gates to still be
  * outstanding without blocking new Learn (Sprint = 1, Steady/Maintain = 0 —
  * strict). Default 0 preserves the original all-gates-clear behavior.
+ *
+ * DEFECTS.md#E-02 (build-plan step 9): scoped to ONE `surah` — a pending
+ * cold gate in a different surah must never block unlock here. `atoms` may
+ * safely contain other surahs' atoms; they are filtered out before counting.
  */
-export function unlockPermitted(atoms: AtomState[], now: number, maxPendingGates = 0): boolean {
-  const pending = atoms.filter((a) => gateDue(a, now)).length;
+export function unlockPermitted(atoms: AtomState[], now: number, surah: number, maxPendingGates = 0): boolean {
+  const pending = atoms.filter((a) => a.surah === surah && gateDue(a, now)).length;
   return pending <= maxPendingGates;
 }
 

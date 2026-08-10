@@ -49,9 +49,9 @@ describe("day-1 cold gate (FR3 / invariant #9)", () => {
     const encodedAt = local(2026, 7, 14, 20);
     const a = scheduleGate({ ...initAtom(12, "ayah", 4), encoded: true }, encodedAt, cfg);
     const nextMorning = local(2026, 7, 15, 8);
-    expect(unlockPermitted([a], nextMorning)).toBe(false); // gate due, not passed
+    expect(unlockPermitted([a], nextMorning, 12)).toBe(false); // gate due, not passed
     const passed = applyGateResult(a, true, nextMorning, cfg);
-    expect(unlockPermitted([passed], nextMorning)).toBe(true);
+    expect(unlockPermitted([passed], nextMorning, 12)).toBe(true);
   });
 
   // v2-D07 unlock tolerance.
@@ -60,9 +60,9 @@ describe("day-1 cold gate (FR3 / invariant #9)", () => {
     const a = scheduleGate({ ...initAtom(12, "ayah", 4), encoded: true }, encodedAt, cfg);
     const nextMorning = local(2026, 7, 15, 8);
     // Steady-style strict (default 0): blocked.
-    expect(unlockPermitted([a], nextMorning, 0)).toBe(false);
+    expect(unlockPermitted([a], nextMorning, 12, 0)).toBe(false);
     // Sprint-style tolerance (1 pending gate tolerated): permitted.
-    expect(unlockPermitted([a], nextMorning, 1)).toBe(true);
+    expect(unlockPermitted([a], nextMorning, 12, 1)).toBe(true);
   });
 
   it("tolerance is a ceiling: 2 pending gates still blocks a tolerance of 1", () => {
@@ -70,7 +70,7 @@ describe("day-1 cold gate (FR3 / invariant #9)", () => {
     const a = scheduleGate({ ...initAtom(12, "ayah", 4), encoded: true }, encodedAt, cfg);
     const b = scheduleGate({ ...initAtom(12, "ayah", 5), encoded: true }, encodedAt, cfg);
     const nextMorning = local(2026, 7, 15, 8);
-    expect(unlockPermitted([a, b], nextMorning, 1)).toBe(false);
+    expect(unlockPermitted([a, b], nextMorning, 12, 1)).toBe(false);
   });
 });
 

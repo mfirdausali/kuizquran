@@ -51,7 +51,7 @@ anyone builds the renderer. An admin can type Arabic into `correct` today.
 *Closes by deletion:* v3 has no `custom` field. `POST` rejects `kind=custom`
 forever; existing rows are archived with no serving path.
 
-## B2 — React decides the grading rung (M2)
+## B2 — React decides the grading rung (M2) ✅ CLOSED (build-plan step 8)
 
 `Drill.tsx:203` and `Gate.tsx:100`: `const rung: Rung = item.full ? "S3" : "S2"`.
 Invariant 6 leaking on the most consequential axis — S3 triggers `scheduleGate()`
@@ -59,6 +59,15 @@ and grants `GAIN.s3` (30) versus `s2` (12).
 
 *Closes when:* `gradeClassToWire()` owns the mapping (v3-D11) and JSX is
 grep-clean for `rung`.
+
+**Fixed 2026-08-10:** `v3/packages/engine/src/gradeClass.ts` — `GradeClass`
+closed set + `gradeClassToWire()` owning the mapping. No v2 UI file was
+ported (v3 has no UI yet — M5 is build-plan step 18) and nothing in the
+current port constructs a `rung` via a ternary, so the JSX-grep half of the
+closing criterion is vacuously true; the substantive half (the function
+existing so nothing later has anywhere else to put the decision) is done.
+Exact per-value mapping recorded as v3-D26 (DECISIONS.md), explicitly
+flagged for re-verification once M4's spec system gives it a real caller.
 
 ## B3 — `ayah_verifications` has no content hash (M3)
 
@@ -69,7 +78,7 @@ signs ayah 5, an admin then overrides its gloss, the row still reads verified.
 *Closes when:* the tiered hash (v3-D13) ships and an override on a verified ayah
 flips the frontier amber in a test.
 
-## B4 — override ties are unordered (M2)
+## B4 — override ties are unordered (M2) ✅ CLOSED (build-plan step 8)
 
 `overrides.ts:117` sorts on `createdAt` alone; ties fall back to DB row order,
 and the seeder bulk-inserts rows sharing a millisecond.
@@ -80,6 +89,11 @@ nondeterministic tie ordering is a nondeterministic hash.
 *Closes when:* ordering is `(createdAt, id)` and a same-millisecond fixture is
 stable across runs.
 
+**Fixed 2026-08-10:** `applyOverrides` now sorts
+`(a.createdAt - b.createdAt) || ((a.id ?? -1) - (b.id ?? -1))`. Proven stable
+regardless of input array order (both directions tested) and across 5
+repeated runs on a same-millisecond fixture.
+
 ## B5 — `mergeFromServer` drops `seq` (M6)
 
 `db/eventLog.ts:113` — `const { seq: _drop, ...rest } = e`, so IndexedDB assigns
@@ -89,23 +103,31 @@ byte-identical event sets would order differently.
 *Closes when:* merge preserves `deviceSeq` and a two-device test yields identical
 folds regardless of arrival order.
 
-## B6 — string-match grading (M2)
+## B6 — string-match grading (M2) ✅ CLOSED (build-plan step 8)
 
 `reconstruct.ts advanceReconstruct` grades with `choice === item.correct` — a
 pure string comparison, in the **only graded path in the product**. 26 of 111
-Yusuf ayat contain a repeated Arabic surface form (ayah 87 has مِن ×3), so tapping
-the *wrong* instance still matches and is graded correct.
+Yusuf ayat contain a repeated Arabic surface form (ayah 87 has one word 3
+times), so tapping the *wrong* instance still matches and is graded correct.
 
 *Closes when:* grading is surface-equivalence-at-position (v3-D12), proven by a
 sweep over all 26 ayat.
+
+**Fixed 2026-08-10:** `v3/packages/engine/src/arabic.ts` —
+`normalizeArabicSurface` (NFC + tatweel-strip; harakat kept distinct, so a
+wrong vowel-marking still grades wrong) + `surfaceEquals`, used in
+`advanceReconstruct` in place of raw `===`. Computed the exact 26/111 Yusuf
+ayat with a repeated normalized surface form (matches this entry's own count
+exactly) and swept full reconstruct passes across all 26 — every position
+grades correct on the legitimate answer and wrong on an unrelated one.
 
 ---
 
 ## Multi-surah defects
 
-**E-01 — atom key collision (M2, the hard blocker).** `atomKey(kind, ref)` is
-`` `${kind}:${ref}` `` and `AtomState` has no `surah` field, so Yusuf ayah 5 and
-Al-Mulk ayah 5 are **the same atom**.
+**E-01 — atom key collision (M2, the hard blocker) ✅ CLOSED (build-plan step 7).**
+`atomKey(kind, ref)` is `` `${kind}:${ref}` `` and `AtomState` has no `surah` field,
+so Yusuf ayah 5 and Al-Mulk ayah 5 are **the same atom**.
 
 Larger than it looks: **five** sites build keys by raw interpolation, and
 `scheduler.ts` never imports `atomKey()` at all —
@@ -122,14 +144,56 @@ Must land **before any second-surah artifact exists anywhere** (H1). Afterwards
 the merge is unrepairable: the events survive, but the atoms they produced are
 ambiguous.
 
-| | Defect | Milestone |
-|---|---|---|
-| **E-02** | One budget, N decay curves — `assembleQueue` takes one atoms array | M2 |
-| **E-03** | `unlockPermitted()` spans surahs — a pending gate in one blocks learning in another | M2 |
-| **E-05** | Pace is per-learner, not per-surah | M2 |
-| **E-06** | `planFor()` gives every surah the full daily budget — every ETA lies | M2 |
-| **E-07** | Corpus fetch is per-surah and unguarded — N fetches per load, one 404 breaks the page | M1/M5 |
-| **E-08** | Chains can cross a surah boundary; `bridge.ts:14` has no bound check | M2 |
+**Fixed 2026-08-10:** `atomKey`/`initAtom` now take `surah`;
+`atomKey(surah, kind, ref) = `` `${surah}:${kind}:${ref}` ``; every call site
+across atom/bridge/rebuild/heatmap/scheduler/floor updated, including the five
+raw-interpolation sites this entry names — `e01.test.ts` grep-enforces that no
+raw `kind:ref`-shaped template literal survives outside `atom.ts`. Golden-log
+oracle regenerated (human-approved) to the new key shape; diffed by hand —
+every strength/stability/reps value byte-identical, only the key format and a
+new `surah` field changed.
+
+| | Defect | Milestone | Status |
+|---|---|---|---|
+| **E-02** | One budget, N decay curves — `assembleQueue` takes one atoms array | M2 | ✅ CLOSED (step 9) |
+| **E-03** | `unlockPermitted()` spans surahs — a pending gate in one blocks learning in another | M2 | ✅ CLOSED (step 9) |
+| **E-05** | Pace is per-learner, not per-surah | M2 | Not an engine bug — see note below |
+| **E-06** | `planFor()` gives every surah the full daily budget — every ETA lies | M2 | ✅ CLOSED (step 9) |
+| **E-07** | Corpus fetch is per-surah and unguarded — N fetches per load, one 404 breaks the page | M1/M5 | Open (M5, no UI yet) |
+| **E-08** | Chains can cross a surah boundary; `bridge.ts:14` has no bound check | M2 | ✅ CLOSED (step 5, incidentally) |
+
+**E-02/E-03 fixed 2026-08-10 (build-plan step 9):** `unlockPermitted(atoms,
+now, surah, maxPendingGates)` and `extraLearnGrant(atoms, surah, ...)` now
+filter to one surah's atoms before counting pending gates — a gate due in a
+different surah can no longer block unlock. `assembleQueue` defensively
+filters its own atoms to `input.surah` before building anything, so a caller
+that hands it atoms from more than one surah can never have them mixed into
+one queue. New `multiSurah.ts#splitBudget` divides one total daily-minutes
+budget across N surahs by weight — the mechanism that was simply missing
+before, which both E-02 and E-06 needed.
+
+**E-06 fixed 2026-08-10:** `planFor()` itself was already correct (it takes
+whatever `minutesPerDay` it's given) — the bug was that nothing existed to
+compute a surah's FAIR SHARE of the total when more than one is active, so
+every caller had no honest option but to pass the full total to each.
+`splitBudget()` is that missing mechanism; callers now pass a surah's split
+share into `planFor`, never the raw total.
+
+**E-08 closed incidentally at step 5:** `bridge.ts`'s `nextOpening`/
+`bridgeItems` (the only code this entry's "`bridge.ts:14` has no bound check"
+could refer to) was atticked entirely during the engine port (v3-D25) —
+verified never wired into any shipped v2 screen, so it was never ported. The
+unguarded call site this defect names does not exist in v3. Its by-construction
+closure via `expand()` (seams only for `a..b-1`) is still Site/admit,
+build-plan step 11 — but there is nothing left to construct a seam FROM today.
+
+**E-05 — not an engine defect.** `pace.ts`'s `paceConfig`/`candidatesForPace`
+are pure, stateless lookups already callable once per surah with zero shared
+state between calls — nothing in the engine couples pace to "the learner"
+globally. "Pace is per-learner, not per-surah" describes a STORAGE schema
+choice (which surah's pace setting persists where) that belongs to the
+sync/IndexedDB layer, build-plan M6 — a layer that doesn't exist yet. No
+engine change closes this; flagged here so M6's schema design doesn't miss it.
 
 E-08 dies **by construction**: `expand()` emits seams only for `a..b−1`, so the
 seam at ayah N is never constructed and the unguarded call has no reachable

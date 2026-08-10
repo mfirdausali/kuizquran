@@ -27,7 +27,7 @@ function encoded(ref: number, extra: Partial<AtomState> = {}): AtomState {
 
 describe("Door 1 — extraLearnGrant (gate intact)", () => {
   it("grants the next un-encoded candidate with a disclosed cost", () => {
-    const g = extraLearnGrant([encoded(4)], [4, 5, 6], 10 * DAY, wc);
+    const g = extraLearnGrant([encoded(4)], 12, [4, 5, 6], 10 * DAY, wc);
     expect(g.granted).toBe(true);
     expect(g.ayah).toBe(5); // 4 is encoded → next is 5
     expect(g.costMin).toBeCloseTo(0.33 * 12, 1);
@@ -35,7 +35,7 @@ describe("Door 1 — extraLearnGrant (gate intact)", () => {
 
   it("does NOT grant while a cold gate is due (gate intact)", () => {
     const gated = scheduleGate({ ...initAtom(12, "ayah", 4), encoded: true }, 5 * DAY, undefined);
-    const g = extraLearnGrant([gated], [4, 5], 6 * DAY, wc); // gate due next day
+    const g = extraLearnGrant([gated], 12, [4, 5], 6 * DAY, wc); // gate due next day
     expect(g.granted).toBe(false);
     expect(g.reason).toMatch(/gate/);
   });

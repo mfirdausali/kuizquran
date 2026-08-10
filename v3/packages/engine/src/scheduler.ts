@@ -67,7 +67,12 @@ export interface AssembleInput {
  * make-ups are never dropped — they define the minimum viable session).
  */
 export function assembleQueue(input: AssembleInput): QueueItem[] {
-  const { atoms, now, surah } = input;
+  const { now, surah } = input;
+  // DEFECTS.md#E-02 (build-plan step 9): "one atoms array, N decay curves"
+  // — defensively scope to THIS surah's atoms only, so a caller that (by
+  // accident or by a future multi-surah caller's design) passes atoms from
+  // more than one surah can never have them mixed into one queue/budget.
+  const atoms = input.atoms.filter((a) => a.surah === surah);
   const cfg = input.cfg ?? {};
   const dayCfg = cfg.day;
   const budget = cfg.budgetMin ?? DEFAULT_BUDGET;
@@ -143,7 +148,7 @@ export function assembleQueue(input: AssembleInput): QueueItem[] {
   // 5. INTERLEAVE LEARN — only if the mastery gate permits new unlocks (within
   //    the mode-scoped tolerance band, v2-D07) AND budget remains. Learn cycles
   //    are interleaved between review items.
-  if (unlockPermitted(atoms, now, cfg.gateTolerance ?? 0)) {
+  if (unlockPermitted(atoms, now, surah, cfg.gateTolerance ?? 0)) {
     const encodedOrQueued = new Set(atoms.filter((a) => a.encoded).map((a) => a.ref));
     for (const ayah of cfg.learnCandidates ?? []) {
       if (encodedOrQueued.has(ayah)) continue;

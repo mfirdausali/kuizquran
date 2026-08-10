@@ -14,6 +14,7 @@ export * from "./gate.ts";
 export * from "./resume.ts";
 export * from "./rebuild.ts";
 export * from "./scheduler.ts";
+export * from "./multiSurah.ts";
 export * from "./bridge.ts";
 export * from "./chain.ts";
 export * from "./capacity.ts";

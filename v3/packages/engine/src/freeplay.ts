@@ -27,17 +27,23 @@ export interface ExtraLearnGrant {
 /**
  * Grant extra Learn ONLY if the mastery gate is intact (no cold gate due) — FR6
  * "gate intact". Returns the next un-encoded candidate + its disclosed cost.
+ *
+ * DEFECTS.md#E-03 (build-plan step 9): scoped to ONE `surah` — a pending
+ * cold gate in a different surah must never block this door's grant.
  */
 export function extraLearnGrant(
   atoms: AtomState[],
+  surah: number,
   candidates: number[],
   now: number,
   wordCounts: Map<number, number>,
 ): ExtraLearnGrant {
-  if (!unlockPermitted(atoms, now)) {
+  if (!unlockPermitted(atoms, now, surah)) {
     return { granted: false, ayah: null, costMin: 0, reason: "a cold gate is still due" };
   }
-  const encoded = new Set(atoms.filter((a) => a.encoded).map((a) => a.ref));
+  const encoded = new Set(
+    atoms.filter((a) => a.surah === surah && a.encoded).map((a) => a.ref),
+  );
   const ayah = candidates.find((c) => !encoded.has(c)) ?? null;
   if (ayah === null) return { granted: false, ayah: null, costMin: 0, reason: "nothing left to Learn" };
   const words = wordCounts.get(ayah) ?? 16;
