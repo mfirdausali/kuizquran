@@ -53,7 +53,7 @@ export interface LadderState {
  *  lowest position, the only one ever probed; the phrase's shared gloss is
  *  already correct there, so asking the trailing token(s) again would be a
  *  near-duplicate question, per the corpus-report grouping review). */
-function isS1Probeable(w: CorpusWord): boolean {
+export function isS1Probeable(w: CorpusWord): boolean {
   return !w.groupPositions || w.groupPositions[0] === w.position;
 }
 

@@ -311,3 +311,73 @@ in `v3/api` per `v3-D08`; `EnsureIsAdmin` now requires
 `hasVerifiedEmail() && allowlist` (closes `DEFECTS.md#B7`); a password reset
 revokes every existing Sanctum token and mints one fresh (backend half of
 `DEFECTS.md#B8`, frontend interceptor still open — see that entry).
+
+---
+
+## Ratified 2026-08-10 (much later night) — build-plan step 12 execution decision
+
+### v3-D30 — `admit()`/`Variant`/`ResourceLedger` built now, against real corpus data, explicitly flagged for re-verification at M4
+
+v3-D28 (a concurrent pass at step 11) proposed two paths for step 12:
+wait for M4's question compiler to define a real `Variant`, or build a
+placeholder shape now, "explicitly flagged for re-verification." This run
+takes the second path, on human authorization (asked, and told to proceed)
+after weighing v3-D28's own concern — BUILD-PLAN.md's warning against "a
+standing check that no lane has invented a contract the spine never
+ratified" — against the fact that WIREFRAME.md §23 Q4 already fully
+specifies what `admit()`'s 4 clauses measure (sibling glosses, distractor
+rank ≤4, successorExists, option/prompt text distinctness), all of it
+readable off the REAL compiled 12/103/112 corpora today. The part that
+genuinely needs M4 is the render/kernel layer (spec.ts/faces/kernels/
+buildQuestion/render.ts's 4 closed shapes) — not `admit()`'s judgment logic.
+
+**What landed**, in `v3/packages/engine/src/variant.ts` + `selection.ts`:
+
+- `Lane = "s1" | "cloze" | "junction"` — scoped to the 3 lanes with a real
+  single-`Site` enumerator today. `rc`/`locate`/`reorder` are RANGE-level
+  generators (`test.ts`'s `locateItem`/`reorderItem` take a pool/range, not
+  one Site) — deferred, not forgotten, same discipline as v3-D27/v3-D28.
+- `Variant` — explicitly a PLACEHOLDER shape (`lane`, `site`, `position?`,
+  `prompt`, `optionSurfaces`, `correctIndex`): enough for `admit()` to judge
+  real supply/distinctness/uniqueness, not a claim about what M4's
+  `buildQuestion`/`render.ts` will actually produce. Re-verify every field
+  once M4 lands (same pattern v3-D26 used for `gradeClassToWire()`).
+- `ResourceLedger` — built once per site (clause 1's supply counts: per-word
+  sibling-gloss count for s1, per-word rank≤4-distractor count for cloze,
+  `successorExists` for seams).
+- `admit(variant, fibre, ledger)` — all 4 WIREFRAME clauses: (1) supply via
+  the ledger, (2) option-set distinctness (plain equality for s1's English
+  glosses, `normalizeArabicSurface`/v3-D12 for cloze/junction's Arabic
+  surfaces), (3) prompt uniqueness across the fibre — a collision keeps the
+  FIRST (lowest position) occurrence and drops the rest, never drops all
+  colliding items (WIREFRAME: "starves zero ayat"), (4) junction's fallback
+  ladder — escalating opening-snippet width (1→3→5→8 words) until the
+  option set is distinct, never dropping the seam.
+- `selectFor(corpus, site, deviceId, visitOrdinal)` — the actual selection:
+  `rotation.ts#lapPerm` over the site's admissible lane list, then
+  `rotation.ts#affineIndex` within the chosen lane's admitted variant pool.
+  Both seeds are derived from `${siteKey}:${deviceId}[...]` via a pure
+  FNV-1a hash (`seedFromKey`) — never `Math.random` — so two devices at the
+  same site get independent, non-colliding rotation sequences (WIREFRAME
+  edge case #48/#49's per-device ordinal namespace fix).
+- `replaySelection(events, corpusBySurah)` — folds a log in ANY order into
+  a trace keyed by `${siteKey}:${deviceId}:${visitOrdinal}`. Order-
+  independent BY CONSTRUCTION: `selectFor` never reads the log, only the
+  three recorded facts on the event itself — so shuffle-invariance is a
+  property of the function signature, not an incidental test result.
+- `test/selection.test.ts`'s `selection_determinism_check`: replays a
+  shuffled log across 20 varying (seeded, pinnable) shuffle orders, plus a
+  genuine 2-device and 3-device merge/interleave, asserting a byte-identical
+  trace every time. Mutation-checked twice: dropping `deviceId` from the
+  seed, and dropping it from the trace key, both turn the corresponding
+  test red (verified, then reverted).
+
+**Still explicitly deferred**, per the same scope discipline: `assembleQueue`/
+`floorQueue` (`scheduler.ts`/`floor.ts`) remain ayah-scoped, not Site-aware —
+they decide WHICH ayah/connection to review, a separate concern from
+`selectFor`'s WHICH QUESTION VARIANT within an already-chosen site, and
+BUILD-PLAN.md's "hard precondition for any compiler merge" language names
+selection determinism, not the review-scheduler's internal representation.
+Widening those two functions to emit `Site` instead of raw ayah numbers is
+real, lower-stakes follow-on work for whenever M4 or a UI consumer actually
+needs it.
