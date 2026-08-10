@@ -33,3 +33,5 @@ export * from "./overrides.ts";
 export * from "./rotation.ts";
 export * from "./variant.ts";
 export * from "./selection.ts";
+export * from "./corpusRef.ts";
+export * from "./faces.ts";
