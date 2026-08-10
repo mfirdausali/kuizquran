@@ -17,6 +17,7 @@ import type { Corpus, CorpusWord, DrillItem, LadderDone } from "./types.ts";
 import { ayahWords } from "./corpus.ts";
 import { pickOptions } from "./options.ts";
 import { bandOf } from "./atom.ts";
+import { surfaceEquals } from "./arabic.ts";
 
 /** reconstruct.ts only ever emits the RC item. Narrowing keeps callers' checks
  *  exhaustive without an unreachable S1/S2/S3/S4 branch. */
@@ -111,6 +112,15 @@ export interface ReconstructAdvance {
 /**
  * Apply one tap to the current blank. A wrong tap is a slip — it does not
  * advance (stays on the same blank), mirroring the old S2/S3 slip behavior.
+ *
+ * Grading (DEFECTS.md#B6 / v3-D12): surface-equivalence-AT-POSITION. `item`
+ * is derived from the CURRENT blank's position (via nextReconstructItem ->
+ * pickOptions(..., position, ...)), so `item.correct` already IS "the
+ * expected surface at this position" — the position-scoping was never the
+ * missing piece. What WAS missing is normalization: `surfaceEquals` (NFC +
+ * tatweel-strip, harakat kept distinct) replaces a raw `===`, so a tap that
+ * differs only in inconsequential Unicode encoding still grades correct,
+ * while a genuinely different vowel-marking still grades wrong.
  */
 export function advanceReconstruct(
   state: ReconstructState,
@@ -120,7 +130,7 @@ export function advanceReconstruct(
   const item = nextReconstructItem(state, corpus);
   if ("done" in item) return { state, correct: false };
 
-  const correct = choice === item.correct;
+  const correct = surfaceEquals(choice, item.correct);
   if (!correct) return { state, correct: false };
 
   const next: ReconstructState = { ...state, blankIndex: state.blankIndex + 1 };

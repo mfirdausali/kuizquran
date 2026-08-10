@@ -153,3 +153,40 @@ line falls. Verified in v2 source before porting:
 
 Supersede this entry, don't edit it, if a later step's design proves the
 boundary wrong.
+
+---
+
+## Ratified 2026-08-10 (night) — build-plan step 8 execution decision
+
+### v3-D26 — gradeClassToWire()'s exact mapping
+DEFECTS.md#B2 / v3-D11 name the closed set `{ pretest, ungraded, s2_partial,
+s3_full, rc, gate }` and require the engine (never a spec, never a UI
+component) to resolve it to a `Rung`. No spec system exists yet (M4) and no
+UI exists yet (M5) to show how this is actually consumed, so the exact
+per-value mapping has no live call site to derive it from. Ratified from the
+best textual evidence available, in `v3/packages/engine/src/gradeClass.ts`:
+
+- `s2_partial` -> `S2`, `s3_full` -> `S3`, `rc` -> `RC`: direct name
+  correspondence — reconstruct.ts's own header comment already describes a
+  reconstruct pass's completion as its "grading equivalence class S2/S3, on
+  the wire, never RC"; `rc` here covers the INTERMEDIATE, non-completing
+  reconstruct taps (`reconstruct_tap` events before the pass finishes),
+  which types.ts's own `EventType` already distinguishes from the
+  completing `ayah_produced` event.
+- `gate` -> `S3`: empirical, from the golden log — every `gate_result` event
+  it contains carries `rung: "S3"` (gates only ever apply to already-S3-
+  encoded ayat; there is no other rung a gate could be checking).
+- `pretest` -> `S1`: empirical, from the golden log's own pretest tap (g01,
+  `type: "tap", rung: "S1", pretest: true`) — the only concrete pretest
+  example in the codebase.
+- `ungraded` -> `S4`: rebuild.ts's own comment groups them explicitly —
+  "S4 rolls up as a light meaning signal, like S1" — pairing the bridge
+  rung with the meaning-pass rung as both being introduction-shaped,
+  non-production-grading rungs.
+
+**Explicitly flagged for reconsideration**: this mapping has zero call
+sites exercising it end-to-end (no UI, no spec system). When M4's
+spec-driven question compiler lands and a spec actually declares a
+`gradeClass`, re-verify every entry against that real usage before trusting
+it further — this decision is a placeholder built to be correct-looking,
+not battle-tested.

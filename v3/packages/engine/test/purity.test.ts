@@ -2,24 +2,14 @@
 // no crypto, no zero-arg new Date(), no local-date getters. `now`/`tz` are
 // always passed in.
 //
-// KNOWN, deliberate violations survive the step-5 verbatim port. Step 5 is
-// "port verbatim, bugs included" so step 6's golden-log parity has the
-// original buggy behavior to diff against; the "tz-explicit daybound
-// rewrite" is build-plan step 8, not this one. This test enforces purity
-// everywhere else NOW and will start failing each carve-out entry the
-// moment step 8's rewrite reaches it — entries should be DELETED as they're
-// fixed, never added to once step 8 starts.
-//
-// - daybound.ts — INVARIANTS.md's own named example ("v2/daybound.ts:23,49
-//   uses machine-local dates").
-// - decay.ts — `sinceLabel()`'s `new Date(since).getDay()` (the "since
-//   Thursday" weekday label): same bug class, NOT previously named in
-//   INVARIANTS.md or DEFECTS.md. Found by this test, not by prior audit —
-//   step 8's scope should cover this file too, not just daybound.ts.
-// - sessionSummary.ts — `hourOf`'s default `(ts) => new Date(ts).getHours()`:
-//   same bug class, same "not previously named" note. The default is
-//   overridable by callers, which is why it shipped unnoticed; it is still
-//   an impure default and belongs in step 8's scope.
+// Build-plan step 8 (the tz-explicit daybound rewrite) closed every local-
+// date-getter violation this package had: daybound.ts (INVARIANTS.md's own
+// named example), decay.ts's `sinceLabel()` and sessionSummary.ts's
+// `hourOf` default (two more instances of the same bug class, found by this
+// test rather than named in advance — see v3/DECISIONS.md and the step-8
+// commit for the trail). The carve-out below is now empty; if this test
+// ever needs a new entry, that is itself a purity regression worth pausing
+// on, not a routine addition.
 
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
@@ -30,9 +20,10 @@ import { fileURLToPath } from "node:url";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC_DIR = resolve(HERE, "..", "src");
 
-/** build-plan step 8 fixes these; until then they're the documented
- * exceptions to Absolute A in this package. */
-const KNOWN_LOCAL_DATE_GETTER_VIOLATIONS = new Set(["daybound.ts", "decay.ts", "sessionSummary.ts"]);
+/** Empty since build-plan step 8. Kept as a named, typed set (not deleted)
+ * so a future regression has an obvious place to land — and so landing
+ * something here is a visible, deliberate act, not a silent bypass. */
+const KNOWN_LOCAL_DATE_GETTER_VIOLATIONS = new Set<string>();
 
 const BANNED_PATTERNS: Array<{ name: string; re: RegExp; exempt?: Set<string> }> = [
   { name: "Date.now()", re: /\bDate\.now\s*\(/ },
@@ -50,13 +41,15 @@ function engineSourceFiles(): string[] {
   return readdirSync(SRC_DIR).filter((f) => f.endsWith(".ts"));
 }
 
-/** Strip `//` line comments before matching, so a comment that MENTIONS a
- * banned pattern (e.g. daybound.ts's own "the engine never calls Date.now()"
- * doc comment) doesn't false-positive as a real usage. Deliberately simple —
- * no block-comment or string-literal awareness — good enough for this
- * codebase's style (no `//` inside string literals in this package). */
+/** Strip `//` line comments and block/JSDoc comments before matching, so a
+ * comment that MENTIONS a banned pattern (e.g. a JSDoc line describing what
+ * `Date.getDay()`'s convention means) doesn't false-positive as a real
+ * usage. Deliberately simple — no string-literal awareness (this codebase's
+ * style has no comment-opener sequences inside string literals) and no
+ * handling for nested block comments (JS/TS doesn't have them). */
 function codeOnly(content: string): string {
   return content
+    .replace(/\/\*[\s\S]*?\*\//g, "")
     .split("\n")
     .map((line) => line.replace(/\/\/.*$/, ""))
     .join("\n");

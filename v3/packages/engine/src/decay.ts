@@ -4,7 +4,7 @@
 
 import type { AtomState } from "./atom.ts";
 import { currentStrength } from "./strength.ts";
-import { daysBetween, type DayConfig } from "./daybound.ts";
+import { daysBetween, dayOfWeek, type DayConfig } from "./daybound.ts";
 
 export interface DecaySince {
   /** Strength % now (0–100, decayed to `now`). */
@@ -24,7 +24,7 @@ export function sinceLabel(since: number, now: number, cfg?: DayConfig): string 
   const d = daysBetween(since, now, cfg);
   if (d <= 0) return "today";
   if (d === 1) return "yesterday";
-  if (d < 7) return WEEKDAYS[new Date(since).getDay()]!; // "Thursday"
+  if (d < 7) return WEEKDAYS[dayOfWeek(since, cfg)]!; // "Thursday", in cfg.tz
   return `${d} days ago`;
 }
 

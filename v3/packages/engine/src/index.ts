@@ -1,4 +1,6 @@
 export * from "./types.ts";
+export * from "./gradeClass.ts";
+export * from "./arabic.ts";
 export * from "./corpus.ts";
 export * from "./options.ts";
 export * from "./events.ts";

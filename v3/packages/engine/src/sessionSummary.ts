@@ -5,6 +5,17 @@
 // invariant #3 (first-pass meaning errors are pretest, excluded from recall).
 
 import type { DrillEvent } from "./types.ts";
+import { DEFAULT_DAY_CONFIG, type DayConfig } from "./daybound.ts";
+
+/** Hour-of-day (0-23) `ts` displays as, AS OBSERVED IN `cfg.tz` — never the
+ *  machine's own zone (build-plan step 8's tz-explicit rewrite). */
+function hourInTz(ts: number, cfg: DayConfig): number {
+  const hour = new Intl.DateTimeFormat("en-US", { timeZone: cfg.tz, hour: "2-digit", hour12: false }).format(
+    new Date(ts),
+  );
+  const n = Number(hour);
+  return n === 24 ? 0 : n;
+}
 
 export type Greeting = "morning" | "afternoon" | "evening" | "night";
 
@@ -34,14 +45,16 @@ export function greetingForHour(hour: number): Greeting {
 
 /**
  * Summarize ONE session's worth of events. Pass the events from the most recent
- * `session_start` onward (the caller slices the log); `hourOf` maps a ts to a
- * local hour (default: the Date local hour) so the engine stays free of Date in
- * tests. Duration is (last tap ts − session_start ts); a session with no taps
- * has duration 0.
+ * `session_start` onward (the caller slices the log). `hourOf` maps a ts to an
+ * hour; the default resolves it in `cfg.tz` (build-plan step 8 — never the
+ * machine's own zone), and stays overridable so tests can inject an
+ * hour directly without needing a real epoch/tz pair. Duration is
+ * (last tap ts − session_start ts); a session with no taps has duration 0.
  */
 export function summarizeSession(
   events: DrillEvent[],
-  hourOf: (ts: number) => number = (ts) => new Date(ts).getHours(),
+  cfg: DayConfig = DEFAULT_DAY_CONFIG,
+  hourOf: (ts: number) => number = (ts) => hourInTz(ts, cfg),
 ): SessionSummary {
   const start = events.find((e) => e.type === "session_start");
   const startTs = start?.ts ?? events[0]?.ts ?? 0;

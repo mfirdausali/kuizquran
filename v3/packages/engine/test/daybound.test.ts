@@ -49,8 +49,8 @@ describe("secular day boundary (rollover, no Fajr calc)", () => {
   it("rollover hour is configurable", () => {
     const at5am = local(2026, 7, 14, 5, 0);
     // With rollover 6.0, 5am is still yesterday.
-    expect(learningDayIndex(at5am, { rolloverHour: 6 })).toBe(
-      learningDayIndex(local(2026, 7, 13, 12, 0), { rolloverHour: 6 }),
+    expect(learningDayIndex(at5am, { rolloverHour: 6, tz: "UTC" })).toBe(
+      learningDayIndex(local(2026, 7, 13, 12, 0), { rolloverHour: 6, tz: "UTC" }),
     );
   });
 });

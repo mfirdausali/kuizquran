@@ -103,9 +103,14 @@ function isGroupPayload(p: unknown): p is GroupPayload {
 /**
  * Resolve override precedence into a patched corpus + a disabled-question
  * list. Pure and deterministic for a given (corpus, overrides) input — the
- * ONLY ordering that matters is `createdAt` (latest wins per key), never
- * array order. Overrides for a different surah than `corpus.meta.surah` are
- * ignored (defensive; callers should already filter by surah).
+ * ordering that matters is `(createdAt, id)` (DEFECTS.md#B4: `createdAt`
+ * alone left same-millisecond rows — the seeder bulk-inserts this way — to
+ * fall back to array/DB row order, nondeterministic). `id` is the DB
+ * autoincrement PK; a row without one yet (not synced) sorts before any
+ * synced row at the same `createdAt`, which is the only sane default since
+ * there is no other ordering signal for it. Overrides for a different surah
+ * than `corpus.meta.surah` are ignored (defensive; callers should already
+ * filter by surah).
  */
 export function applyOverrides(corpus: Corpus, overrides: QuestionOverride[]): OverrideResolution {
   const glossLatest = new Map<string, QuestionOverride>();
@@ -115,7 +120,9 @@ export function applyOverrides(corpus: Corpus, overrides: QuestionOverride[]): O
   const groups: QuestionOverride[] = [];
   const customs: QuestionOverride[] = [];
 
-  const sorted = overrides.filter((o) => o.surah === corpus.meta.surah).sort((a, b) => a.createdAt - b.createdAt);
+  const sorted = overrides
+    .filter((o) => o.surah === corpus.meta.surah)
+    .sort((a, b) => a.createdAt - b.createdAt || (a.id ?? -1) - (b.id ?? -1));
 
   for (const o of sorted) {
     switch (o.field) {

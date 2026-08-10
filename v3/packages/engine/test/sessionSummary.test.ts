@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { summarizeSession, formatDuration, greetingForHour } from "../src/sessionSummary.ts";
+import { DEFAULT_DAY_CONFIG } from "../src/daybound.ts";
 import type { DrillEvent } from "../src/types.ts";
 
 // Minimal event factory — only the fields summarizeSession reads.
@@ -89,8 +90,8 @@ describe("summarizeSession", () => {
   });
 
   it("greeting is derived from the session_start hour", () => {
-    const morning = summarizeSession([ev({ type: "session_start", ts: 100 })], () => 8);
-    const night = summarizeSession([ev({ type: "session_start", ts: 100 })], () => 23);
+    const morning = summarizeSession([ev({ type: "session_start", ts: 100 })], DEFAULT_DAY_CONFIG, () => 8);
+    const night = summarizeSession([ev({ type: "session_start", ts: 100 })], DEFAULT_DAY_CONFIG, () => 23);
     expect(morning.greeting).toBe("morning");
     expect(night.greeting).toBe("night");
   });
