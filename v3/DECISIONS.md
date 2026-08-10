@@ -224,9 +224,66 @@ work too, not done here.
 
 ---
 
+## Ratified 2026-08-10 (still later night) — build-plan step 11 continued: rotation, admit() still deferred
+
+### v3-D28 — Rotation mechanism landed; admit()/ResourceLedger remain deferred pending M4's Variant shape
+
+This run (a later, separate pass at step 11) implements
+`v3/packages/engine/src/rotation.ts` — `lapPerm(lap, laneCount, seedKey)` and
+`stride(poolSize)`/`affineIndex(n, poolSize, offset)`, WIREFRAME.md §23 Q2's
+lane-then-affine rotation mechanism, proven by property rather than by
+replicating the WIREFRAME prototype's own measured numbers (that
+prototype's exact algorithm was never committed to source, so "17/30
+distinct on 12:4" etc. cannot be reproduced byte-for-byte — what CAN be
+proven, and is, by `rotation.test.ts`'s property + stress tests, is every
+property WIREFRAME actually states as a *requirement*):
+
+- every lane fires exactly once per lap (no starvation) — `lapPerm` always
+  returns a permutation of `[0..laneCount-1]`;
+- zero immediate repeats at ANY lap boundary, including the degenerate
+  L=1/L=2 cases edge case #40 names — proven mathematically in
+  `rotation.ts`'s own doc comment (a rotate-by-`lap mod L` scheme has no
+  boundary collision for L≥3; L≤2 uses a fixed, unrotated base, which is
+  the only boundary-collision-free sequencing available at that size);
+- lap order varies across laps for L≥3 (WIREFRAME's "variety"), while L=1/2
+  cannot satisfy variety AND zero-repeats simultaneously, so zero-repeats
+  wins (matching "the swap was measured failing at L=2" — the swap being
+  exactly the failure mode a naive per-lap re-shuffle would reintroduce);
+- `affineIndex` gives full pool coverage before any repeat and never
+  repeats the immediately-prior index, by construction (`stride` is always
+  coprime with the pool size — `poolSize−1` is always available as a
+  coprime candidate since consecutive integers are always coprime);
+- pure integer arithmetic throughout, no `Math.random`, no float on the
+  selection path (INVARIANTS.md Absolute A).
+
+**Still explicitly deferred, same reason as v3-D27's own scope cut, now
+sharper:** `admit(variant, fibre, ctx)`'s 4 clauses and `ResourceLedger`
+both take a concrete `Variant` as an argument, and no such type exists in
+the codebase yet — `variants()` (WIREFRAME's own enumerator) is M4's
+question compiler (build-plan step 16), which hasn't landed. Building
+`admit()`/`ResourceLedger` against an invented `Variant` shape now risks
+exactly the failure mode BUILD-PLAN.md's own "Agent deployment strategy"
+section warns against — "a standing check that no lane has invented a
+contract the spine never ratified." `assembleQueue`/`floorQueue` are
+likewise NOT made Site-aware this run: a Site-aware queue with no
+admissibility filtering behind it doesn't yet serve a real caller.
+
+**What this means for step 12** (`selection_determinism_check`): it is
+still not startable — it replays "recorded selection snapshots (siteKey,
+per-device ordinal, lane/variant)" per BUILD-PLAN.md's own description,
+which needs a real `admit()`+rotation+Variant integration to produce
+those snapshots from. `rotation.ts` is the piece of that integration this
+run could build without inventing `Variant`; `admit()`/`ResourceLedger`
+remain the honest gap, to be built either alongside M4's compiler (when
+`Variant` is finally concrete) or in a future step-11 pass that accepts
+inventing a placeholder `Variant` shape explicitly flagged for
+re-verification (the same pattern v3-D26 used for `gradeClassToWire()`).
+
+---
+
 ## Ratified 2026-08-10 (later night) — build-plan step 13 execution decision
 
-### v3-D28 — Auth email links target the API directly until apps/web exists
+### v3-D29 — Auth email links target the API directly until apps/web exists
 Build-plan step 13 (Laravel skeleton + Sanctum + password reset + email
 verification) lands before `apps/web` (step 17, M5) — there is no frontend
 route to link an email to yet. Two different link shapes were needed:
