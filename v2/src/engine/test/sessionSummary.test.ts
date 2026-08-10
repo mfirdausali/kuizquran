@@ -59,6 +59,25 @@ describe("summarizeSession", () => {
     expect(s.ayatRefs).toEqual([1, 2]);
   });
 
+  it("folds the v2 drill vocabulary (reconstruct_tap / ayah_produced) identically", () => {
+    // The live drill emits these, not the legacy tap/ayah_complete — the summary
+    // must count them the same way, or the session-end screen shows all zeros.
+    const s = summarizeSession([
+      ev({ type: "session_start", ts: 1000 }),
+      ev({ type: "reconstruct_tap", ts: 2000, correct: true, structured: true }),
+      ev({ type: "reconstruct_tap", ts: 3000, correct: false, structured: true }),
+      ev({ type: "reconstruct_tap", ts: 4000, correct: true, structured: true }),
+      ev({ type: "ayah_produced", ts: 4500, ayah: 1, rung: "S3" }),
+      ev({ type: "reconstruct_tap", ts: 6000, correct: true, structured: true }),
+      ev({ type: "ayah_produced", ts: 7200, ayah: 2, rung: "S2" }),
+    ]);
+    expect(s.durationMs).toBe(6200); // 7200 − 1000
+    expect(s.recall).toBeCloseTo(3 / 4); // 3 correct of 4 graded taps
+    expect(s.ayatCompleted).toBe(2);
+    expect(s.ayatRefs).toEqual([1, 2]);
+    expect(s.taps).toBe(4);
+  });
+
   it("recall is null when there are no graded taps (pure gate/chain session)", () => {
     const s = summarizeSession([
       ev({ type: "session_start", ts: 0 }),

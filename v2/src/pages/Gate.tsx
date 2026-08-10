@@ -40,6 +40,9 @@ type Stage = "rescaffold" | "cold" | "demote-offer" | "demoted" | "pass" | "fail
 export function Gate() {
   const [params] = useSearchParams();
   const ayah = Number(params.get("ayah") ?? "1");
+  // In session mode the gate returns to the session queue (which re-plans and either
+  // serves the next item or shows the completion screen — v2-D64), not to Home.
+  const inSession = params.get("session") === "1";
 
   const [corpus, setCorpus] = useState<Corpus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -203,6 +206,8 @@ export function Gate() {
             <div className="banner banner--warn">
               <p>This ayah hasn't been learned yet — nothing to cold-check.</p>
             </div>
+            {/* A deliberate detour to learn this specific ayah — free mode, so the
+                session queue (which still heads with this gate) can't bounce us back. */}
             <Link className="btn btn--primary" to={`/drill?ayah=${ayah}`}>
               Learn it →
             </Link>
@@ -290,9 +295,17 @@ export function Gate() {
           </div>
         )}
 
+        {/* In session mode, terminal verdicts continue the queue; the demote flow
+            already re-routes to /drill above, so it also stays in-session. */}
+        {inSession && (stage === "pass" || stage === "fail" || stage === "demoted") && (
+          <Link className="btn btn--primary" to="/drill?session=1">
+            Continue session →
+          </Link>
+        )}
+
         <p>
           <Link className="btn btn--ghost" to="/">
-            ← Home
+            {inSession ? "Pause — leave session" : "← Home"}
           </Link>
         </p>
       </div>

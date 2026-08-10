@@ -525,6 +525,14 @@ recommendation each; the user chose "Go with your recommendations."_
 - **Why:** Keeps Phase 7 focused on the items the ROADMAP actually lists (DATA‑1, scene‑beat TODOs, null MS glosses, the dark‑mode nit) rather than expanding scope to a related‑but‑unlisted admin affordance — the same "store the full data, wire only what's needed" discipline v2‑D49/D55 already established as precedent.
 - **Related:** v1/docs/corpus-report.md, v2‑D21/D55/D56 (the override mechanism this relies on), v2‑D59.
 
+### v2‑D64 — The drill has a session mode with a real ending; free drill stays open-ended
+- **When:** 2026‑07‑16 06:33:41 UTC (15:33 JST)
+- **Kind:** ux · **Status:** accepted
+- **Context:** The Phase‑1 drill (`src/pages/Drill.tsx`) was built before the session/queue existed (its own header comment: "No session/queue logic here yet") and no later phase re‑wired it. Home's "Start" button handed a single `?ayah=N` to it; the learner could tap "Next ayah →" forever with only "Home" as an exit — the exact v1 "heavily continuous, when does this stop?" gap, reproduced. `summarizeSession` (the session‑end data) and a queue caller (`useSession`) both already existed but were never connected to a completion screen.
+- **Decision:** The drill now has two modes, selected by a `?session=1` flag. (1) SESSION (Home "Start" sets the flag): driven by `useSession`'s queue — drills the fresh queue head, and on `ayah_produced` re‑plans via `refresh()` and advances to the next item; when no fresh work remains it lands on a new calm `SessionComplete` screen (facts, not fanfare — greeting, ayat completed, recall %, duration, streak; no guilt copy; built only from iman‑ui.css primitives per invariant #5, all arithmetic from the engine per #6). Gate/make‑up items route to `/gate?…&session=1` and return to the queue. A `session_start` event is stamped once per session so the summary's clock is real. (2) FREE (no flag; the "Free drill (pick an ayah)" link): unchanged single‑ayah prev/next, no ending. Ayat produced this session are tracked (`doneThisSession`) so a same‑day re‑served ayah is stepped past rather than looped on — the session genuinely ends. Only the structured session mutates lifecycle state (invariant #4 preserved; free drill still commits evidence).
+- **Why:** Restores the "you're done for today" ending the design artifacts specified (the calm session‑end screen, D38 lineage) without discarding the useful open‑ended free‑drill affordance. Reuses existing engine helpers (`summarizeSession`, `computeStreak`, `useSession.refresh`) rather than adding parallel logic. Trades a slightly more complex Drill component for closing the single worst UX gap carried over from v1.
+- **Related:** v2‑BUG‑4 (the dead‑end this also fixed), v2‑D05/D23 (the drill), v2‑D09 (pace/queue), v2‑D38 lineage (session‑end screen), invariants #1/#4/#5/#6.
+
 ---
 
 ## Live code bugs to fix in v2 (surfaced during scenario planning)
@@ -539,6 +547,9 @@ These are confirmed in the current v1 source and must not carry into v2.
 
 ### v2‑BUG‑3 — Chains materialize un‑learned ayat as phantoms
 - `v1/packages/engine/src/chain.ts:70` inits + credits an un‑encoded ayah as "reviewed" (strength ~18, no gate), corrupting the shared atom model that all personas read. **Fix:** gap guard — refuse or bridge‑skip un‑encoded atoms; bound chains to the real ayah count. **Status: fixed in Phase 0** — see v2‑D35 (guard applied in both `chain.ts` and the live `rebuild.ts` chain_step fold, with regression tests).
+
+### v2‑BUG‑4 — The drill never ends (v2, discovered live)
+- `v2/src/pages/Drill.tsx` was the Phase‑1 standalone per‑ayah drill and no phase re‑wired it into the session; the learner could tap "Next ayah →" indefinitely with only "Home" to escape — the v1 "when does this stop?" gap reproduced in v2. A first fix attempt exposed a second dead‑end: after producing an ayah the engine can re‑surface it at the queue head same‑day (its strength settles), and advancing onto the SAME ayah number didn't re‑init the reconstruct pass (the effect keyed only on `ayah`), leaving a bankless, buttonless stuck screen. **Fix (this session):** session mode + `SessionComplete` screen (v2‑D64); step past ayat already produced this session (`doneThisSession`) and force a fresh pass via a `passNonce` effect dep so a re‑served ayah re‑drills instead of dead‑ending. **Status: fixed** — engine test `folds the v2 drill vocabulary` added to `sessionSummary.test.ts` (255 frontend tests green), verified live: Steady session (1 learn) → tap 12:1 → "Session complete · 0:24 · Completed 12:1 · 100% recall · 1‑day streak" → "Done for today" → Home, no console errors.
 
 ---
 

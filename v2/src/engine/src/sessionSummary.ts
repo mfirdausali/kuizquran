@@ -53,7 +53,10 @@ export function summarizeSession(
   const ayatRefs: number[] = [];
 
   for (const e of events) {
-    if (e.type === "tap") {
+    // The v2 drill emits `reconstruct_tap` per blank and `ayah_produced` per
+    // finished pass (v2 Phase 1); the legacy `tap`/`ayah_complete` names are kept
+    // so historical logs still summarize. Both vocabularies fold identically here.
+    if (e.type === "tap" || e.type === "reconstruct_tap") {
       taps++;
       if (e.ts > lastTapTs) lastTapTs = e.ts;
       // Graded taps: structured session only (free play is evidence-only,
@@ -64,7 +67,7 @@ export function summarizeSession(
         graded++;
         if (e.correct) gradedCorrect++;
       }
-    } else if (e.type === "ayah_complete") {
+    } else if (e.type === "ayah_complete" || e.type === "ayah_produced") {
       if (e.ts > lastTapTs) lastTapTs = e.ts;
       if (!ayatRefs.includes(e.ayah)) ayatRefs.push(e.ayah);
     }

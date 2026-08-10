@@ -28,10 +28,13 @@ const KIND_LABEL: Record<QueueItem["kind"], string> = {
   learn: "Learn",
 };
 
+// The `session=1` flag puts the drill/gate into structured-session mode: it advances
+// through the queue and ends on the completion screen (v2-D64), instead of the free
+// single-ayah drill the "Free drill" link uses.
 function routeFor(item: QueueItem): string {
   return item.kind === "gate" || item.kind === "makeup"
-    ? `/gate?ayah=${item.ayah}`
-    : `/drill?ayah=${item.ayah}`;
+    ? `/gate?ayah=${item.ayah}&session=1`
+    : `/drill?ayah=${item.ayah}&session=1`;
 }
 
 export function Home() {
