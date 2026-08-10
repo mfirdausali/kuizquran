@@ -1,0 +1,86 @@
+[
+  {
+    "verse_number": 1,
+    "page_number": 604,
+    "words": [
+      {
+        "position": 1,
+        "line_number": 3
+      },
+      {
+        "position": 2,
+        "line_number": 3
+      },
+      {
+        "position": 3,
+        "line_number": 3
+      },
+      {
+        "position": 4,
+        "line_number": 3
+      }
+    ]
+  },
+  {
+    "verse_number": 2,
+    "page_number": 604,
+    "words": [
+      {
+        "position": 1,
+        "line_number": 3
+      },
+      {
+        "position": 2,
+        "line_number": 3
+      }
+    ]
+  },
+  {
+    "verse_number": 3,
+    "page_number": 604,
+    "words": [
+      {
+        "position": 1,
+        "line_number": 3
+      },
+      {
+        "position": 2,
+        "line_number": 3
+      },
+      {
+        "position": 3,
+        "line_number": 4
+      },
+      {
+        "position": 4,
+        "line_number": 4
+      }
+    ]
+  },
+  {
+    "verse_number": 4,
+    "page_number": 604,
+    "words": [
+      {
+        "position": 1,
+        "line_number": 4
+      },
+      {
+        "position": 2,
+        "line_number": 4
+      },
+      {
+        "position": 3,
+        "line_number": 4
+      },
+      {
+        "position": 4,
+        "line_number": 4
+      },
+      {
+        "position": 5,
+        "line_number": 4
+      }
+    ]
+  }
+]

@@ -39,3 +39,23 @@ and 15 respectively) before being committed.
 Neither surah has an authored MCQ bank or mental model — none exists yet, and
 none is invented here. The compiler handles that (`meta.distractorsAuthored`
 / `meta.hasMentalModel` are both `false` for these two), not this directory.
+
+## `12-geometry.json`, `103-geometry.json`, `112-geometry.json`
+
+Mushaf page number per verse and line number per word (build-plan step 4 —
+BUILD-PLAN.md line 77: "geometry data landed at step 3–4"). Fetched
+2026-08-10 via:
+
+```
+curl "https://api.quran.com/api/v4/verses/by_chapter/<N>?words=true&word_fields=line_number,char_type_name&fields=page_number&per_page=300"
+```
+
+then reshaped to `[{verse_number, page_number, words: [{position, line_number}]}]`,
+dropping the API's trailing `char_type_name: "end"` word (the ayah-number
+marker glyph, already excluded from the `-verses.json` files' word counts —
+14/15/1777 unchanged). Each surah's word/verse counts were cross-checked
+against the corresponding `-verses.json` file before being committed;
+`buildCorpus.ts` hard-fails at compile time on any remaining per-ayah
+mismatch rather than silently mis-mapping a line number onto the wrong word.
+
+Numbers only — no Arabic text in these files.

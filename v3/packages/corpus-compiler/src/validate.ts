@@ -198,6 +198,20 @@ export function validateCorpus(
           : `${missCount}/${corpus.distractors.length} (${pct}%) distractors are valid inflections not attested verbatim in the mushaf — flagged for reviewer (${missingFromQuran.length} distinct forms). ${outOfSurah} distractors are out-of-surah by design.`,
   });
 
+  // 6b. geometry coverage — soft (a surah without vendored geometry yet is
+  //     expected, per edge case #63's degraded mode, not a defect). When
+  //     geometry IS present, buildCorpus already guarantees every row is
+  //     non-null (it throws on any gap at construction time), so this is a
+  //     reporting fact, not a second enforcement point.
+  checks.push({
+    name: "mushaf geometry (page/line)",
+    severity: "soft",
+    pass: true,
+    detail: corpus.meta.hasGeometry
+      ? "vendored geometry present — every verse has a page, every word has a line"
+      : "no vendored geometry for this surah yet — page/line are null (expected)",
+  });
+
   // 7. connections == ayahCount - 1 (hard).
   checks.push({
     name: "connections = ayahCount - 1",

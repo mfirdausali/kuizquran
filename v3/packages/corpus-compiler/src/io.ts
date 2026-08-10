@@ -15,7 +15,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { RawMcqItem, RawMentalModel, RawVerse } from "./types.ts";
+import type { RawGeometryVerse, RawMcqItem, RawMentalModel, RawVerse } from "./types.ts";
 import { parseQac, type QacData } from "./parseQac.ts";
 import { buildCorpus } from "./buildCorpus.ts";
 import type { CorpusJson } from "./types.ts";
@@ -54,6 +54,9 @@ export interface LoadedInputs {
   verses: RawVerse[];
   mcqItems: RawMcqItem[];
   mentalModel?: RawMentalModel;
+  /** Vendored mushaf geometry — undefined when this surah has none yet
+   * (build-plan step 4). */
+  geometry?: RawGeometryVerse[];
   qac: QacData;
   generatedFrom: string[];
 }
@@ -69,15 +72,17 @@ export function loadInputs(surah: number): LoadedInputs {
   const verses = readJson<RawVerse[]>(versesPath);
   const mcqItems = readJsonIfExists<RawMcqItem[]>(resolve(DATA_DIR, `${surah}-mcq-items.json`)) ?? [];
   const mentalModel = readJsonIfExists<RawMentalModel>(resolve(DATA_DIR, `${surah}-mental-model.json`));
+  const geometry = readJsonIfExists<RawGeometryVerse[]>(resolve(DATA_DIR, `${surah}-geometry.json`));
   const qac = parseQac(QAC_PATH);
 
   const generatedFrom = [
     `v3/packages/corpus-compiler/data/raw/${surah}-verses.json`,
     ...(mcqItems.length > 0 ? [`v3/packages/corpus-compiler/data/raw/${surah}-mcq-items.json`] : []),
     ...(mentalModel ? [`v3/packages/corpus-compiler/data/raw/${surah}-mental-model.json`] : []),
+    ...(geometry ? [`v3/packages/corpus-compiler/data/raw/${surah}-geometry.json`] : []),
     "v3/packages/corpus-compiler/data/raw/quran-morphology.txt (QAC v0.4)",
   ];
-  return { surah, verses, mcqItems, mentalModel, qac, generatedFrom };
+  return { surah, verses, mcqItems, mentalModel, geometry, qac, generatedFrom };
 }
 
 /** Build the corpus object from freshly-loaded inputs. */
@@ -89,6 +94,7 @@ export function buildFromInputs(inp: LoadedInputs): CorpusJson {
     verses: inp.verses,
     mcqItems: inp.mcqItems,
     mentalModel: inp.mentalModel,
+    geometry: inp.geometry,
     morph,
     curatedThreads: extras.curatedThreads,
     sceneBeatLabels: extras.sceneBeatLabels,

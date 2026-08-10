@@ -23,10 +23,12 @@ export interface Verse {
   surah: number;
   ayah: number;
   text_uthmani: string;
-  /** Mushaf page — geometry merge lands in build-plan step 4. */
+  /** Mushaf page — geometry merge (build-plan step 4). Null when this
+   * surah has no vendored geometry yet (meta.hasGeometry false). An ayah
+   * spanning a page break (edge case #10) uses its FIRST page here; the
+   * line drill reads word-level Word.line instead, since a per-verse line
+   * number is not well-defined once an ayah crosses a line boundary. */
   page: number | null;
-  /** Mushaf line — geometry merge lands in build-plan step 4. */
-  line: number | null;
 }
 
 export interface Gloss {
@@ -53,6 +55,9 @@ export interface Word {
   act: number | null;
   /** Scene image cue from the mental model's act. */
   sceneImage: string | null;
+  /** Mushaf line within its page — geometry merge (build-plan step 4). Null
+   * when this surah has no vendored geometry yet (meta.hasGeometry false). */
+  line: number | null;
 }
 
 export interface Distractor {
@@ -120,7 +125,22 @@ export interface CorpusMeta {
   distractorsAuthored: boolean;
   /** True when this surah has an authored mental model (acts / scene beats). */
   hasMentalModel: boolean;
+  /** True when vendored mushaf geometry (page/line) exists for this surah —
+   * build-plan step 4. A surah without it compiles with page/line all null
+   * rather than crashing (edge case #63: "geometry missing for new surah"). */
+  hasGeometry: boolean;
+  /** Corpus JSON shape version (build-plan step 4 / edge case #28). Bumped
+   * whenever a field is added/removed/renamed on any of the six tables. */
+  schemaVersion: number;
+  /** Version of the canonicalization + hashing spec (build-plan step 4 /
+   * edge case #26). Bumped whenever hash inputs change; carried on every
+   * per-ayah hash row too, so a spec change is detectable per-row. */
+  hashSpecVersion: number;
 }
+
+/** Corpus JSON shape version — bump on any structural change to the six
+ * tables (build-plan step 4 / edge case #28). */
+export const SCHEMA_VERSION = 1;
 
 export interface CorpusJson {
   meta: CorpusMeta;
@@ -181,4 +201,16 @@ export interface WordMorph {
   lemma: string | null;
   root: string | null;
   class: WordClass | null;
+}
+
+// ---- Geometry (mushaf page/line — build-plan step 4) ----
+
+export interface RawGeometryWord {
+  position: number;
+  line_number: number;
+}
+export interface RawGeometryVerse {
+  verse_number: number;
+  page_number: number;
+  words: RawGeometryWord[];
 }

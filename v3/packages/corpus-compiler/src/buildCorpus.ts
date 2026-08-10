@@ -17,6 +17,7 @@
 import type {
   CorpusJson,
   Distractor,
+  RawGeometryVerse,
   RawMcqItem,
   RawMentalModel,
   RawVerse,
@@ -25,10 +26,12 @@ import type {
   WordMorph,
   WordRef,
 } from "./types.ts";
+import { SCHEMA_VERSION } from "./types.ts";
 import { buildConnections } from "./connections.ts";
 import { buildLookAlikes, type CuratedThread } from "./lookalikes.ts";
 import { ayahToAct, buildSceneBeats } from "./sceneBeats.ts";
 import { mapPrdRank } from "./prdRank.ts";
+import { HASH_SPEC_VERSION } from "./hash.ts";
 
 export interface BuildInputs {
   surah: number;
@@ -43,6 +46,9 @@ export interface BuildInputs {
   curatedThreads?: CuratedThread[];
   /** Scene-beat labels for this surah's acts (empty for surahs without one). */
   sceneBeatLabels?: Record<number, string>;
+  /** Vendored mushaf geometry (page/line) — undefined when this surah has
+   * none yet (build-plan step 4; edge case #63's degraded mode). */
+  geometry?: RawGeometryVerse[];
   generatedFrom: string[];
 }
 
@@ -68,13 +74,44 @@ export function buildCorpus(inp: BuildInputs): CorpusJson {
     if (m.root) rootByText.set(item.correct, m.root);
   }
 
+  // ---- geometry (mushaf page/line — build-plan step 4) ----
+  // Optional, like mcqItems/mentalModel: a surah without vendored geometry
+  // compiles with page/line all null (edge case #63's degraded mode), not a
+  // hard failure. When geometry IS supplied, every ayah's word-geometry
+  // count must match the ayah's actual word count exactly — a mismatch
+  // means the geometry source disagrees with the verse source about word
+  // boundaries, and zipping them positionally under that disagreement would
+  // silently mis-map line numbers onto the wrong words (the same class of
+  // bug E-01 names for atom keys: fail loud, not silent).
+  const geometryByAyah = new Map<number, RawGeometryVerse>();
+  if (inp.geometry) {
+    for (const g of inp.geometry) geometryByAyah.set(g.verse_number, g);
+    for (const v of verses) {
+      const g = geometryByAyah.get(v.verse_number);
+      if (!g) {
+        throw new Error(`geometry missing for surah ${surah} ayah ${v.verse_number}`);
+      }
+      if (g.words.length !== v.words.length) {
+        throw new Error(
+          `geometry/word-count mismatch: surah ${surah} ayah ${v.verse_number} has ` +
+            `${v.words.length} word(s) but geometry has ${g.words.length}`,
+        );
+      }
+    }
+  }
+  const hasGeometry = inp.geometry !== undefined;
+  const lineOf = (ayah: number, position: number): number | null => {
+    if (!hasGeometry) return null;
+    const g = geometryByAyah.get(ayah)!;
+    return g.words.find((w) => w.position === position)?.line_number ?? null;
+  };
+
   // ---- verses ----
   const versesOut: Verse[] = verses.map((v) => ({
     surah,
     ayah: v.verse_number,
     text_uthmani: v.text_uthmani.trim(),
-    page: null, // geometry merge lands in build-plan step 4
-    line: null,
+    page: hasGeometry ? geometryByAyah.get(v.verse_number)!.page_number : null,
   }));
 
   // ---- words ----
@@ -94,6 +131,7 @@ export function buildCorpus(inp: BuildInputs): CorpusJson {
         gloss: { en: w.translation, ms: null, ja: null },
         act: act ? act.act : null,
         sceneImage: act ? act.sceneImage : null,
+        line: lineOf(v.verse_number, w.position),
       });
     }
   }
@@ -146,6 +184,9 @@ export function buildCorpus(inp: BuildInputs): CorpusJson {
       droppedCollisions,
       distractorsAuthored: mcqItems.length > 0,
       hasMentalModel: mentalModel !== undefined,
+      hasGeometry,
+      schemaVersion: SCHEMA_VERSION,
+      hashSpecVersion: HASH_SPEC_VERSION,
     },
     verses: versesOut,
     words: wordsOut,
