@@ -144,13 +144,20 @@ describe("applyOverrides — disable", () => {
   });
 });
 
-describe("applyOverrides — custom (stored, not generation-wired this phase)", () => {
-  it("passes custom rows through untouched, and leaves the corpus unpatched by them", () => {
-    const custom = override({ ayah: 4, position: null, field: "custom", payload: { prompt: "who spoke?", options: ["Yaqub", "Yusuf"], correct: "Yaqub" } });
-    const { customs, corpus: patched } = applyOverrides(corpus, [custom]);
-    expect(customs).toEqual([custom]);
-    expect(patched.words).toEqual(corpus.words);
-    expect(patched.distractors).toEqual(corpus.distractors);
+describe("DEFECTS.md#B1 — the `custom` override kind is deleted, not merely unresolved", () => {
+  it("overrides.ts never references \"custom\" (structural, so a future regression fails loud)", () => {
+    const content = readFileSync(resolve(HERE, "..", "src", "overrides.ts"), "utf8");
+    const codeOnly = content
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split("\n")
+      .map((line) => line.replace(/\/\/.*$/, ""))
+      .join("\n");
+    expect(codeOnly.includes("custom"), 'overrides.ts must never reference "custom"').toBe(false);
+  });
+
+  it("OverrideResolution has no customs field to accumulate an unresolved kind into", () => {
+    const resolution = applyOverrides(corpus, []);
+    expect("customs" in resolution).toBe(false);
   });
 });
 
