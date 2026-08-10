@@ -10,7 +10,7 @@ SHELL := /bin/bash
 V2      := v2
 API     := v2/api
 
-.PHONY: help setup dev dev-web dev-api test test-web test-api build clean doctor
+.PHONY: help setup dev dev-web dev-api test test-web test-api build clean doctor golden-log
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -69,3 +69,6 @@ doctor: ## Check the harness is sane
 clean: ## Remove build output and caches
 	rm -rf $(V2)/dist $(V2)/node_modules/.vite
 	cd $(API) && php artisan optimize:clear
+
+golden-log: ## Regenerate v3's golden log + oracle from pinned v2 (human-reviewed diff only — see v3/fixtures/golden-log/README.md)
+	cd $(V2) && TZ=UTC node_modules/.bin/vite-node ../v3/scripts/gen-golden-log.ts
