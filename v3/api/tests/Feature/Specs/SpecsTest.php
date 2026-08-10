@@ -5,6 +5,7 @@ namespace Tests\Feature\Specs;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
@@ -43,7 +44,7 @@ class SpecsTest extends TestCase
         ])->assertStatus(401);
     }
 
-    public function test_creating_a_spec_with_no_specId_starts_a_new_lineage_at_version_1(): void
+    public function test_creating_a_spec_with_no_spec_id_starts_a_new_lineage_at_version_1(): void
     {
         $response = $this->postJson('/api/specs', [
             'surah' => 12, 'siteKey' => '12:ayah:4', 'lane' => 's1', 'payload' => ['prompt' => 'x'],
@@ -54,7 +55,7 @@ class SpecsTest extends TestCase
         $this->assertNotNull($response->json('spec.specId'));
     }
 
-    public function test_editing_an_existing_specId_creates_a_new_row_at_version_plus_1_never_updates_in_place(): void
+    public function test_editing_an_existing_spec_id_creates_a_new_row_at_version_plus_1_never_updates_in_place(): void
     {
         $headers = $this->adminHeaders();
         $v1 = $this->postJson('/api/specs', [
@@ -137,10 +138,10 @@ class SpecsTest extends TestCase
         ], $this->adminHeaders())->assertStatus(422);
     }
 
-    public function test_editing_a_nonexistent_specId_fails(): void
+    public function test_editing_a_nonexistent_spec_id_fails(): void
     {
         $this->postJson('/api/specs', [
-            'specId' => (string) \Illuminate\Support\Str::uuid(), 'surah' => 12,
+            'specId' => (string) Str::uuid(), 'surah' => 12,
             'siteKey' => '12:ayah:4', 'lane' => 's1', 'payload' => [],
         ], $this->adminHeaders())->assertStatus(422);
     }

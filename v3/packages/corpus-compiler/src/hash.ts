@@ -78,3 +78,94 @@ export function ayahAdminHash(distractors: Distractor[]): string {
   };
   return sha256Hex(JSON.stringify(payload));
 }
+
+// ---- Override-aware hashing (DEFECTS.md#B3's actual trigger) ----
+//
+// The two functions above hash the BASELINE compiled corpus — they never
+// move when an override lands, so pairing them with a verification row
+// alone does not fix B3 ("a qari signs ayah 5, an admin then overrides its
+// gloss, the row still reads verified"). These compose the same
+// implementation with an override-resolved view of the ayah's qari/admin-
+// tier fields. A minimal, LOCAL override resolver — not an import of
+// engine/src/overrides.ts#applyOverrides, since corpus-compiler and
+// packages/engine are separate packages with no shared-types layer yet.
+// Both resolve "latest wins" via the identical (createdAt, id) rule
+// DEFECTS.md#B4 fixed, so the two cannot silently diverge in a way a test
+// wouldn't catch (packages/engine/test/b4-override-ties.test.ts covers the
+// engine's own copy).
+
+/** The hash-relevant subset of a Laravel `overrides` row — never the full
+ *  wire shape (no `note`/`editorId`, irrelevant to what gets hashed). */
+export interface HashOverride {
+  ayah: number;
+  position: number | null;
+  field: "gloss" | "distractor" | "group" | "disable";
+  payload: unknown;
+  createdAt: number;
+  id: number;
+}
+
+function latestPerKey(overrides: HashOverride[], field: HashOverride["field"]): Map<string, HashOverride> {
+  const sorted = overrides
+    .filter((o) => o.field === field)
+    .sort((a, b) => a.createdAt - b.createdAt || a.id - b.id);
+  const latest = new Map<string, HashOverride>();
+  for (const o of sorted) {
+    if (o.position == null) continue;
+    latest.set(`${o.ayah}:${o.position}`, o);
+  }
+  return latest;
+}
+
+/** Qari tier, override-aware: a `gloss` override for `lang: "en"` replaces
+ *  that word's EN gloss before hashing. An `ms` override never touches the
+ *  hash (v3-D15: ms excluded from hash v1). Overrides for a different ayah
+ *  are ignored (defensive — callers should already filter by ayah). */
+export function ayahQariHashWithOverrides(
+  verse: Verse,
+  words: Word[],
+  sceneBeatLabel: string | null,
+  overrides: HashOverride[],
+): string {
+  const ayah = verse.ayah;
+  const glossLatest = latestPerKey(
+    overrides.filter((o) => o.ayah === ayah),
+    "gloss",
+  );
+  const patchedWords = words.map((w) => {
+    const ov = glossLatest.get(`${w.ayah}:${w.position}`);
+    if (!ov) return w;
+    const payload = ov.payload as { lang?: string; text?: string } | null;
+    if (payload?.lang !== "en" || typeof payload.text !== "string") return w;
+    return { ...w, gloss: { ...w.gloss, en: payload.text } };
+  });
+  return ayahQariHash(verse, patchedWords, sceneBeatLabel);
+}
+
+/** Admin tier, override-aware: a `distractor` override REPLACES the full
+ *  distractor set for that (ayah, position) — matching engine/src/
+ *  overrides.ts#applyOverrides's own "full replacement set, not a merge"
+ *  semantics for the same field kind. */
+export function ayahAdminHashWithOverrides(distractors: Distractor[], overrides: HashOverride[]): string {
+  // Ayah identity comes only from the baseline distractor rows themselves
+  // (this function's signature carries no separate ayah param, matching
+  // ayahAdminHash's own). An empty baseline array has no ayah to scope
+  // to — fail safe by applying NO overrides rather than risking a
+  // cross-ayah leak, rather than guessing from the override list.
+  const ayah = distractors[0]?.ayah;
+  const distractorLatest = latestPerKey(
+    ayah === undefined ? [] : overrides.filter((o) => o.ayah === ayah),
+    "distractor",
+  );
+  const replacedPositions = new Set(distractorLatest.keys());
+  const kept = distractors.filter((d) => !replacedPositions.has(`${d.ayah}:${d.position}`));
+  const added: Distractor[] = [];
+  for (const ov of distractorLatest.values()) {
+    const payload = ov.payload as { distractors?: Array<Omit<Distractor, "surah" | "ayah" | "position">> } | null;
+    if (!Array.isArray(payload?.distractors)) continue;
+    for (const d of payload.distractors) {
+      added.push({ ...d, surah: kept[0]?.surah ?? 0, ayah: ov.ayah, position: ov.position! });
+    }
+  }
+  return ayahAdminHash([...kept, ...added]);
+}

@@ -5,6 +5,8 @@ use App\Http\Controllers\Auth\PasswordResetController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\EventsController;
 use App\Http\Controllers\OverridesController;
+use App\Http\Controllers\SpecsController;
+use App\Http\Controllers\VerificationsController;
 use Illuminate\Support\Facades\Route;
 
 // v2-D03 (inherited)/v2-D18/step 13. Bearer-token (Sanctum personal access
@@ -23,6 +25,11 @@ Route::post('/reset-password', [PasswordResetController::class, 'reset'])
 // Build-plan step 15: public read (v2-D21/D55 — every client needs these
 // to build correct questions, including an anonymous device).
 Route::get('/overrides', [OverridesController::class, 'index']);
+// Public read (GATE-A frontier — the admin console's not-yet-built worklist
+// view and any future public transparency page both need this un-gated).
+Route::get('/verifications', [VerificationsController::class, 'index']);
+// Public read (build-plan step 16's question compiler consumes this).
+Route::get('/specs', [SpecsController::class, 'index']);
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/auth/register', [AuthController::class, 'register']);
@@ -41,4 +48,10 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Build-plan step 15: override write path (DEFECTS.md#B1's own gate).
     Route::post('/overrides', [OverridesController::class, 'store'])->middleware('admin');
+
+    // Build-plan step 15: verification write path (DEFECTS.md#B3 / v3-D22).
+    Route::post('/verifications', [VerificationsController::class, 'store'])->middleware('admin');
+
+    // Build-plan step 15: spec write path (v3-D33).
+    Route::post('/specs', [SpecsController::class, 'store'])->middleware('admin');
 });
