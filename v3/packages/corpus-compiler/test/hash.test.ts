@@ -8,9 +8,12 @@ import { describe, expect, it } from "vitest";
 import {
   HASH_SPEC_VERSION,
   ayahAdminHash,
+  ayahAdminHashWithOverrides,
   ayahQariHash,
+  ayahQariHashWithOverrides,
   canonicalizeText,
   contentHash16,
+  type HashOverride,
 } from "../src/hash.ts";
 import type { Distractor, Verse, Word } from "../src/types.ts";
 
@@ -103,5 +106,89 @@ describe("tiered per-ayah hashes (v3-D13 / DEFECTS.md#B3)", () => {
   it("HASH_SPEC_VERSION is a stable positive integer (edge case #26)", () => {
     expect(Number.isInteger(HASH_SPEC_VERSION)).toBe(true);
     expect(HASH_SPEC_VERSION).toBeGreaterThan(0);
+  });
+});
+
+describe("*WithOverrides — DEFECTS.md#B3's actual trigger: an override changes the EFFECTIVE hash", () => {
+  // B3's own words: "A qari signs ayah 5, an admin then overrides its
+  // gloss, the row still reads verified." The tiered hash alone (above)
+  // isn't the fix by itself — the qari-tier hash must be computed over the
+  // OVERRIDE-PATCHED gloss, or an override can never move it. These
+  // functions are that composition: the SAME hash.ts implementation
+  // (v3-D08: one hash implementation), applied to override-resolved
+  // fields, using the same latest-wins-per-key semantics
+  // engine/src/overrides.ts#applyOverrides already established (kept
+  // minimal and duplicated here, not imported — corpus-compiler and
+  // packages/engine are separate packages with no shared-types layer yet;
+  // both resolve overrides via the identical (createdAt, id) latest-wins
+  // rule DEFECTS.md#B4 fixed, so the two implementations cannot silently
+  // diverge in a way a test wouldn't catch).
+
+  const glossOverride = (position: number, text: string, createdAt: number, id: number): HashOverride => ({
+    ayah: 1,
+    position,
+    field: "gloss",
+    payload: { lang: "en", text },
+    createdAt,
+    id,
+  });
+  const distractorOverride = (position: number, text: string, createdAt: number, id: number): HashOverride => ({
+    ayah: 1,
+    position,
+    field: "distractor",
+    payload: { distractors: [{ text, rank: 1, prd_rank: "synonym", src_type: "semantic", why: "override" }] },
+    createdAt,
+    id,
+  });
+
+  it("a gloss override changes the qari-tier hash — this IS B3's fix", () => {
+    const v = verse("PLACEHOLDER");
+    const words = [word("original-gloss")];
+    const baseline = ayahQariHash(v, words, null);
+    const overridden = ayahQariHashWithOverrides(v, words, null, [glossOverride(1, "corrected-gloss", 100, 1)]);
+    expect(overridden).not.toBe(baseline);
+  });
+
+  it("no overrides for this ayah -> identical to the un-overridden hash (backward compatible)", () => {
+    const v = verse("PLACEHOLDER");
+    const words = [word("gloss")];
+    expect(ayahQariHashWithOverrides(v, words, null, [])).toBe(ayahQariHash(v, words, null));
+  });
+
+  it("a distractor override changes the admin-tier hash, never the qari-tier hash", () => {
+    const v = verse("PLACEHOLDER");
+    const words = [word("gloss")];
+    const dists = [distractor("baseline-foil")];
+    const override = distractorOverride(1, "overridden-foil", 100, 1);
+    expect(ayahAdminHashWithOverrides(dists, [override])).not.toBe(ayahAdminHash(dists));
+    expect(ayahQariHashWithOverrides(v, words, null, [override])).toBe(ayahQariHash(v, words, null));
+  });
+
+  it("(createdAt, id) latest-wins per position (DEFECTS.md#B4's rule, applied here too)", () => {
+    const v = verse("PLACEHOLDER");
+    const words = [word("gloss")];
+    const older = glossOverride(1, "first-correction", 100, 1);
+    const newer = glossOverride(1, "second-correction", 100, 2); // same createdAt, higher id wins
+    const onlyOlder = ayahQariHashWithOverrides(v, words, null, [older]);
+    const both = ayahQariHashWithOverrides(v, words, null, [older, newer]);
+    const onlyNewer = ayahQariHashWithOverrides(v, words, null, [newer]);
+    expect(both).toBe(onlyNewer);
+    expect(both).not.toBe(onlyOlder);
+  });
+
+  it("an override for a DIFFERENT ayah never affects this ayah's hash", () => {
+    const v = verse("PLACEHOLDER");
+    const words = [word("gloss")];
+    const baseline = ayahQariHash(v, words, null);
+    const otherAyahOverride: HashOverride = { ayah: 2, position: 1, field: "gloss", payload: { lang: "en", text: "x" }, createdAt: 1, id: 1 };
+    expect(ayahQariHashWithOverrides(v, words, null, [otherAyahOverride])).toBe(baseline);
+  });
+
+  it("an MS-language gloss override never affects the hash (v3-D15: ms excluded from hash v1)", () => {
+    const v = verse("PLACEHOLDER");
+    const words = [word("gloss")];
+    const baseline = ayahQariHash(v, words, null);
+    const msOverride: HashOverride = { ayah: 1, position: 1, field: "gloss", payload: { lang: "ms", text: "terjemahan" }, createdAt: 1, id: 1 };
+    expect(ayahQariHashWithOverrides(v, words, null, [msOverride])).toBe(baseline);
   });
 });
