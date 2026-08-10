@@ -434,3 +434,52 @@ the CI-time property proven at step 12), per-user advisory locks,
 dead-letter quarantine, and late-arrival refold. These require running,
 scheduling, and testing an actual second server process — a distinct
 follow-up, not a continuation of this run's Laravel-only diff.
+
+---
+
+## Ratified 2026-08-10 (past midnight) — build-plan step 14 continued: fold-runner core
+
+### v3-D32 — fold-runner's PURE core built now; DB adapter/scheduling/advisory-locks/dead-letter-queue deferred
+
+Continuing step 14 (v3-D31 scoped out the Node fold-runner entirely). This
+run scaffolds `v3/worker/fold-runner` (its own package, per CLAUDE.md's
+"Where things go") and builds the part of it that is genuinely testable
+without a live deployment target:
+
+- `src/canonicalOrder.ts` — v3-D09's `(ts, deviceId, deviceSeq, uuid)`
+  order, proven ARRIVAL-ORDER INVARIANT (any shuffle of the same event set
+  canonical-orders to the identical sequence, across 15 seeds) — this is
+  the fold-runner's own version of the fix DEFECTS.md#B5 names for the
+  client side (`v2/src/db/eventLog.ts:113`'s dropped `seq`); the server has
+  the identical problem from the network-arrival-order direction.
+- `src/fold.ts` — `foldEvents()` composes `canonicalOrder` with the pure
+  engine's own `rebuild()` (v3-D08: the fold-runner calls the engine, it
+  never re-derives). Proven arrival-order-invariant end-to-end (folding a
+  shuffled log matches folding the canonical one, byte-identical, across
+  15 seeds) — packages/engine's own `golden-log-parity.test.ts` proves
+  `rebuild()` is correct over an ALREADY-canonical log; this proves the
+  composition survives however the server actually received the events.
+- `src/determinism.ts` — `compareAtomCaches()` (key-by-key AtomState
+  equality, ANY divergence reported, never silently ignored — WIREFRAME.md
+  §16: "it must be 100%") and `foldDeterminismCheck()` (re-fold from
+  scratch, compare against a supplied live cache — the check's actual
+  shape, DB-free).
+- `database/migrations/2026_08_10_223540_create_atom_cache_table.php` (in
+  `v3/api`) — schema only. Laravel OWNS the table (mirrors `AtomState`
+  field-for-field, plus `engine_version`/`computed_at`) but this migration
+  writes nothing to it — no PHP code path inserts a row yet, consistent
+  with v3-D08 (PHP never computes the fold).
+
+Mutation-checked: dropping `ts` from `canonicalOrder`'s sort key turns the
+"orders primarily by ts" test red (confirmed, then reverted).
+
+**Still explicitly deferred**: the DB adapter (reading real `events` /
+writing real `atom_cache` rows — needs a Postgres client and connection
+strategy, a live-deployment decision, not testable in this sandbox anyway
+per BUILD-PLAN.md's own "Exit: both checks green nightly in STAGING"), the
+CLI/scheduling wiring (cron vs queue worker, a Forge hosting decision under
+v3-D18), per-user advisory locks (Postgres-specific — sqlite, this repo's
+dev DB, has no equivalent to test against), dead-letter quarantine, and
+late-arrival refold triggering. `fold_determinism_check` as a genuinely
+*nightly, staging-run* job — as opposed to the pure comparison primitive
+proven here — needs all of the above first.

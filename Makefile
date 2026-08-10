@@ -12,6 +12,7 @@ API     := v2/api
 API_V3  := v3/api
 CORPUS_COMPILER := v3/packages/corpus-compiler
 ENGINE  := v3/packages/engine
+FOLD_RUNNER := v3/worker/fold-runner
 
 .PHONY: help setup dev dev-web dev-api dev-api3 test test-web test-api test-api3 test-v3 build clean doctor golden-log compile-corpus
 
@@ -40,6 +41,7 @@ setup: ## First run: install deps, create .env, key, migrate
 	cd $(API_V3) && php artisan migrate --force
 	cd $(CORPUS_COMPILER) && npm install
 	cd $(ENGINE) && npm install
+	cd $(FOLD_RUNNER) && npm install
 	@echo ""
 	@echo "✓ setup complete. Run: make dev"
 
@@ -69,9 +71,10 @@ test-api: ## PHPUnit (v2/api)
 test-api3: ## PHPUnit (v3/api — build-plan step 13)
 	cd $(API_V3) && php artisan test
 
-test-v3: ## vitest (v3 packages: corpus-compiler, engine)
+test-v3: ## vitest (v3 packages: corpus-compiler, engine, worker/fold-runner)
 	cd $(CORPUS_COMPILER) && npm test
 	cd $(ENGINE) && npm test
+	cd $(FOLD_RUNNER) && npm test
 
 build: ## Type-check + build the SPA (must pass; see B9)
 	cd $(V2) && npm run build
