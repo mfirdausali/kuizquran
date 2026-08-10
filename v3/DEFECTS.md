@@ -18,7 +18,7 @@ auto-merge — and `RUNNING.md` designates this workflow the sole auto-merge gat
 **Fixed 2026-08-10:** `|| true` removed; `--passWithNoTests=false`. Closed first
 because every later fix is only as trustworthy as the gate that admits it.
 
-## B7 — admin privilege escalation (M3, `AUTH-`)
+## B7 — admin privilege escalation (M3, `AUTH-`) ✅ CLOSED (build-plan step 13)
 
 `AuthController::register()` sets any email with **no ownership proof**;
 `EnsureIsAdmin.php:19-24` trusts that string; `MustVerifyEmail` is commented out
@@ -30,7 +30,14 @@ registers** and become admin. Live path on a product about to take payments.
 *Closes when:* email verification ships and a test asserts an unverified email
 cannot pass `EnsureIsAdmin`.
 
-## B8 — dead-token wedge (M3, `AUTH-`)
+**Fixed 2026-08-10:** `v3/api`'s `User` model implements `MustVerifyEmail` for
+real; `EnsureIsAdmin` (`v3/api/app/Http/Middleware/EnsureIsAdmin.php`) now
+requires `hasVerifiedEmail()` **and** allowlist membership — an unverified
+claim of an `ADMIN_EMAILS` address is refused regardless. Closing test:
+`tests/Feature/Auth/AdminAccessTest.php::test_unverified_admin_email_is_forbidden`
+(mutation-checked: reverting the `hasVerifiedEmail()` clause turns it red).
+
+## B8 — dead-token wedge (M3, `AUTH-`) — partially closed (build-plan step 13)
 
 `auth.ts:51-52` — `ensureDevice()` returns early if *any* token exists, and
 `clearToken()` is never called on a 401 anywhere in `src/`. A revoked token
@@ -38,6 +45,15 @@ permanently disables sync; the only recovery is hand-clearing localStorage.
 
 *Closes when:* a 401 interceptor clears the token and re-mints, proven by a test
 that revokes server-side and asserts recovery.
+
+**Partial fix 2026-08-10:** the backend half now exists —
+`PasswordResetController::reset()` revokes every one of the user's existing
+Sanctum tokens (`$user->tokens()->delete()`) and mints a fresh one in the same
+response, so a password reset recovers a wedged device without hand-clearing
+storage (`tests/Feature/Auth/PasswordResetTest.php`). **Still open:** the
+actual defect is `auth.ts:51-52` in the frontend (`apps/web`), which does not
+exist yet — build-plan step 17 (M5). This entry stays open until that
+interceptor ships; do not mark B8 closed on this fix alone.
 
 ## B1 — the `custom` override is a loaded no-op (M3)
 

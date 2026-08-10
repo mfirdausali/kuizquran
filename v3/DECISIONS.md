@@ -221,3 +221,36 @@ cycling), and `selection_determinism_check` remain open step-11 work for a
 future run. `assembleQueue`/`floorQueue` are NOT yet Site-aware (they still
 operate on raw ayah numbers) — that integration is part of the deferred
 work too, not done here.
+
+---
+
+## Ratified 2026-08-10 (later night) — build-plan step 13 execution decision
+
+### v3-D28 — Auth email links target the API directly until apps/web exists
+Build-plan step 13 (Laravel skeleton + Sanctum + password reset + email
+verification) lands before `apps/web` (step 17, M5) — there is no frontend
+route to link an email to yet. Two different link shapes were needed:
+
+- **Email verification** — the signed link points straight at
+  `GET /api/email/verify/{id}/{hash}` (named route `verification.verify`,
+  Laravel's own default `VerifyEmail` notification, unmodified). This is a
+  read-only confirm action, so a bare JSON response from a clicked link is
+  a genuinely working (if unstyled) end state today, not a placeholder.
+- **Password reset** — cannot be a bare link; it needs a form. The
+  notification's URL is built by `AppServiceProvider::boot()` via
+  `ResetPassword::createUrlUsing()` against `config('app.frontend_url')`
+  (env `FRONTEND_URL`, default `http://localhost:3000`), pointing at
+  `/reset-password?token=..&email=..`. This route does not exist yet and
+  the link 404s until M5 — expected, not a bug. The reset action itself is
+  fully exercised today via `POST /api/reset-password` directly
+  (`tests/Feature/Auth/PasswordResetTest.php`), independent of that page.
+
+When M5 builds `apps/web`, it owns building `/reset-password` to match this
+contract (`token`, `email` query params) — no backend change implied.
+
+Also ratified in the same commit: `v2-D03` (anonymous-first identity,
+account adoption via `register()`) is **not superseded**, only re-implemented
+in `v3/api` per `v3-D08`; `EnsureIsAdmin` now requires
+`hasVerifiedEmail() && allowlist` (closes `DEFECTS.md#B7`); a password reset
+revokes every existing Sanctum token and mints one fresh (backend half of
+`DEFECTS.md#B8`, frontend interceptor still open — see that entry).

@@ -9,10 +9,11 @@ SHELL := /bin/bash
 
 V2      := v2
 API     := v2/api
+API_V3  := v3/api
 CORPUS_COMPILER := v3/packages/corpus-compiler
 ENGINE  := v3/packages/engine
 
-.PHONY: help setup dev dev-web dev-api test test-web test-api test-v3 build clean doctor golden-log compile-corpus
+.PHONY: help setup dev dev-web dev-api dev-api3 test test-web test-api test-api3 test-v3 build clean doctor golden-log compile-corpus
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -31,6 +32,12 @@ setup: ## First run: install deps, create .env, key, migrate
 	cd $(API) && php artisan migrate --force
 	cd $(V2) && npm install
 	@[ -f $(V2)/.env ] || (cp $(V2)/.env.example $(V2)/.env && echo "→ created $(V2)/.env")
+	@# v3-D08: v3's own Laravel app, separate from v2/api above (build-plan step 13).
+	cd $(API_V3) && composer install
+	cd $(API_V3) && mkdir -p bootstrap/cache storage/framework/{cache,sessions,views} storage/logs
+	@[ -f $(API_V3)/.env ] || (cp $(API_V3)/.env.example $(API_V3)/.env && echo "→ created $(API_V3)/.env")
+	@grep -q '^APP_KEY=base64' $(API_V3)/.env || (cd $(API_V3) && php artisan key:generate)
+	cd $(API_V3) && php artisan migrate --force
 	cd $(CORPUS_COMPILER) && npm install
 	cd $(ENGINE) && npm install
 	@echo ""
@@ -48,13 +55,19 @@ dev-web: ## Run only the SPA (:5273)
 dev-api: ## Run only the API (:8000)
 	cd $(API) && php artisan serve --port=8000
 
-test: test-web test-api test-v3 ## Run every suite
+dev-api3: ## Run only v3's API (:8001) — no frontend consumes it yet (M5)
+	cd $(API_V3) && php artisan serve --port=8001
+
+test: test-web test-api test-api3 test-v3 ## Run every suite
 
 test-web: ## vitest (v2)
 	cd $(V2) && npm test
 
-test-api: ## PHPUnit
+test-api: ## PHPUnit (v2/api)
 	cd $(API) && php artisan test
+
+test-api3: ## PHPUnit (v3/api — build-plan step 13)
+	cd $(API_V3) && php artisan test
 
 test-v3: ## vitest (v3 packages: corpus-compiler, engine)
 	cd $(CORPUS_COMPILER) && npm test
@@ -73,10 +86,14 @@ doctor: ## Check the harness is sane
 		&& echo "APP_KEY  ✓" || echo "APP_KEY  ✗  — run make setup"
 	@grep -q '^ADMIN_EMAILS=' $(API)/.env 2>/dev/null \
 		&& echo "ADMIN_EMAILS ✓" || echo "ADMIN_EMAILS ✗ — admin console will 403"
+	@[ -f $(API_V3)/.env ] && echo "v3/api/.env ✓" || echo "v3/api/.env ✗  — run make setup"
+	@grep -q '^APP_KEY=base64' $(API_V3)/.env 2>/dev/null \
+		&& echo "v3/api APP_KEY  ✓" || echo "v3/api APP_KEY  ✗  — run make setup"
 
 clean: ## Remove build output and caches
 	rm -rf $(V2)/dist $(V2)/node_modules/.vite
 	cd $(API) && php artisan optimize:clear
+	cd $(API_V3) && php artisan optimize:clear
 
 golden-log: ## Regenerate v3's golden log + oracle via v3's own engine (human-reviewed diff only — see v3/fixtures/golden-log/README.md)
 	cd $(V2) && TZ=UTC node_modules/.bin/vite-node ../v3/scripts/gen-golden-log.ts
