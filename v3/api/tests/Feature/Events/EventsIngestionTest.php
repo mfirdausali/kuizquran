@@ -6,6 +6,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Log;
+use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 /**
@@ -100,16 +101,22 @@ class EventsIngestionTest extends TestCase
 
     public function test_two_different_users_may_independently_use_the_same_client_uuid(): void
     {
+        // Sanctum::actingAs (not a manually-set Bearer header) is required
+        // here: within ONE test method, the auth guard resolves and caches
+        // its user on the FIRST authenticated request and does not
+        // re-resolve from a changed Authorization header on later requests
+        // in the same method — a test-harness quirk, not a production bug
+        // (a real HTTP request is always freshly resolved). actingAs sets
+        // the guard's resolved user directly, sidestepping it.
         $a = User::factory()->create();
-        $tokenA = $a->createToken('device')->plainTextToken;
         $b = User::factory()->create();
-        $tokenB = $b->createToken('device')->plainTextToken;
         $body = ['events' => [['id' => 'shared-uuid', 'type' => 'session_start', 'ts' => 1]]];
 
-        $this->postJson('/api/events', $body, ['Authorization' => 'Bearer '.$tokenA])
-            ->assertOk()->assertJson(['accepted' => 1, 'ignored' => 0]);
-        $this->postJson('/api/events', $body, ['Authorization' => 'Bearer '.$tokenB])
-            ->assertOk()->assertJson(['accepted' => 1, 'ignored' => 0]);
+        Sanctum::actingAs($a);
+        $this->postJson('/api/events', $body)->assertOk()->assertJson(['accepted' => 1, 'ignored' => 0]);
+
+        Sanctum::actingAs($b);
+        $this->postJson('/api/events', $body)->assertOk()->assertJson(['accepted' => 1, 'ignored' => 0]);
 
         $this->assertDatabaseCount('events', 2);
     }

@@ -3,6 +3,7 @@
 use App\Http\Controllers\Auth\EmailVerificationController;
 use App\Http\Controllers\Auth\PasswordResetController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\EventsController;
 use Illuminate\Support\Facades\Route;
 
 // v2-D03 (inherited)/v2-D18/step 13. Bearer-token (Sanctum personal access
@@ -28,4 +29,8 @@ Route::middleware('auth:sanctum')->group(function () {
         ->name('verification.verify');
     Route::post('/email/verification-notification', [EmailVerificationController::class, 'resend'])
         ->middleware('throttle:6,1');
+
+    // Build-plan step 14: ingestion + cursored pull.
+    Route::post('/events', [EventsController::class, 'store']);
+    Route::get('/events', [EventsController::class, 'index']);
 });

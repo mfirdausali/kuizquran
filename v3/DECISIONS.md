@@ -381,3 +381,56 @@ selection determinism, not the review-scheduler's internal representation.
 Widening those two functions to emit `Site` instead of raw ayah numbers is
 real, lower-stakes follow-on work for whenever M4 or a UI consumer actually
 needs it.
+
+---
+
+## Ratified 2026-08-10 (near midnight) — build-plan step 14 scope
+
+### v3-D31 — Step 14 scope for this run: Laravel-side ingestion + pull only; Node fold-runner deferred
+
+Build-plan step 14's full M3 ships list is large: "events table PK
+(user_id, uuid), frozen wire columns, cap log-only-then-enforced, pull
+protocol cursored on server ingest-sequence (late-arrival safe); Node
+fold-runner sidecar (sole server-side fold) + atom_cache (engine_version) +
+fold_determinism_check + selection-check nightly harness + per-user
+advisory locks + dead-letter quarantine + late-arrival refold." This run
+ships the first half only — a genuinely separate Node.js service
+(`v3/worker/fold-runner`, per CLAUDE.md's own "Where things go") is a
+substantially different, larger body of infrastructure work than extending
+the Laravel app already scaffolded at step 13.
+
+**What landed**, in `v3/api`:
+
+- `events` table (migration `2026_08_10_222411_create_events_table`) — one
+  column per DrillEvent wire field frozen at step 10 (v3-D10); `id` is a
+  server-assigned autoincrement INGEST SEQUENCE (the pull cursor, not a
+  claim about matching BUILD-PLAN's literal "PK (user_id, uuid)" wording
+  byte-for-byte — practically, a bigint autoincrement `id` doubles as the
+  cursor a composite string PK couldn't offer, while `unique(user_id,
+  uuid)` still gives the idempotency guarantee that wording names); `uuid`
+  is the client-stamped idempotency key, unique PER USER (v2-D18's
+  contract, carried forward).
+- `POST /api/events` — idempotent batch ingest (`insertOrIgnore` on the
+  unique `(user_id, uuid)` constraint), `user_id` always from the Sanctum-
+  authenticated caller, never the request body (regression-tested). "Cap
+  log-only-then-enforced": `config('events.daily_cap')` (default 2000) —
+  crossing it logs a warning, never rejects a batch. No PHP-side hashing or
+  engine logic (v3-D08).
+- `GET /api/events?since=&limit=` — the pull protocol, cursored on the
+  server `id`, never `ts`. `test/Feature/Events/EventsPullTest.php`'s
+  decisive case: an event with an OLD `ts`, ingested SECOND (server
+  ingest-sequence), still appears on a client's next pull past its
+  last-seen cursor — mutation-checked by switching the query to cursor on
+  `ts` instead, which turns two tests red (confirmed, then reverted).
+
+**Explicitly deferred, not forgotten**: the Node fold-runner sidecar
+(`v3/worker/fold-runner`, TypeScript, importing `packages/engine` — the
+SOLE server-side fold, per v3-D08), `atom_cache` (engine_version-tagged),
+`fold_determinism_check` (nightly re-fold + byte-compare against
+`atom_cache` — WIREFRAME.md §16 calls this "the single best idea in the
+spec... build it first" for the ADMIN CONSOLE, which itself is M8, much
+later), the nightly `selection_determinism_check` harness (as opposed to
+the CI-time property proven at step 12), per-user advisory locks,
+dead-letter quarantine, and late-arrival refold. These require running,
+scheduling, and testing an actual second server process — a distinct
+follow-up, not a continuation of this run's Laravel-only diff.

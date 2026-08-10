@@ -4,6 +4,7 @@ namespace Tests\Feature\Events;
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 /**
@@ -85,16 +86,24 @@ class EventsPullTest extends TestCase
 
     public function test_pull_is_scoped_to_the_authenticated_user_only(): void
     {
-        [, $tokenA] = $this->actingUser();
-        [, $tokenB] = $this->actingUser();
-        $this->postJson('/api/events', ['events' => [['id' => 'mine', 'type' => 'session_start', 'ts' => 1]]], ['Authorization' => 'Bearer '.$tokenA])->assertOk();
-        $this->postJson('/api/events', ['events' => [['id' => 'theirs', 'type' => 'session_start', 'ts' => 1]]], ['Authorization' => 'Bearer '.$tokenB])->assertOk();
+        // Sanctum::actingAs, not manually-set Bearer headers — see
+        // EventsIngestionTest's matching test for why (a test-harness guard-
+        // caching quirk, not a production bug).
+        [$a] = $this->actingUser();
+        [$b] = $this->actingUser();
 
-        $response = $this->getJson('/api/events', ['Authorization' => 'Bearer '.$tokenA])->assertOk();
+        Sanctum::actingAs($a);
+        $this->postJson('/api/events', ['events' => [['id' => 'mine', 'type' => 'session_start', 'ts' => 1]]])->assertOk();
+
+        Sanctum::actingAs($b);
+        $this->postJson('/api/events', ['events' => [['id' => 'theirs', 'type' => 'session_start', 'ts' => 1]]])->assertOk();
+
+        Sanctum::actingAs($a);
+        $response = $this->getJson('/api/events')->assertOk();
         $this->assertSame(['mine'], array_column($response->json('events'), 'id'));
     }
 
-    public function test_nextCursor_does_not_advance_when_nothing_new_is_pulled(): void
+    public function test_next_cursor_does_not_advance_when_nothing_new_is_pulled(): void
     {
         [, $token] = $this->actingUser();
         $headers = ['Authorization' => 'Bearer '.$token];
@@ -107,7 +116,7 @@ class EventsPullTest extends TestCase
         $this->assertSame($cursor, $second->json('nextCursor'));
     }
 
-    public function test_limit_caps_the_page_and_reports_hasMore(): void
+    public function test_limit_caps_the_page_and_reports_has_more(): void
     {
         [, $token] = $this->actingUser();
         $headers = ['Authorization' => 'Bearer '.$token];
