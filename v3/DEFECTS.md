@@ -55,7 +55,7 @@ actual defect is `auth.ts:51-52` in the frontend (`apps/web`), which does not
 exist yet — build-plan step 17 (M5). This entry stays open until that
 interceptor ships; do not mark B8 closed on this fix alone.
 
-## B1 — the `custom` override is a loaded no-op (M3)
+## B1 — the `custom` override is a loaded no-op ✅ CLOSED (build-plan step 15)
 
 `Admin.tsx:311` ships a free-text `{prompt, options[], correct}` editor; Laravel
 validates `'payload' => ['required','array']` and **nothing inside it**;
@@ -66,6 +66,17 @@ anyone builds the renderer. An admin can type Arabic into `correct` today.
 
 *Closes by deletion:* v3 has no `custom` field. `POST` rejects `kind=custom`
 forever; existing rows are archived with no serving path.
+
+**Fixed 2026-08-10:** `overrides.ts`'s `OverrideField` union, its `case
+"custom"` branch, and `OverrideResolution.customs` are deleted (not
+carried through unresolved) — `overrides.test.ts`'s structural test proves
+the string `"custom"` no longer appears in `overrides.ts` at all.
+`v3/api`'s new `OverridesController::store()` validates `field` against a
+closed 4-member set that has never included `custom`, returning 422 —
+mutation-tested (re-admitting `custom` to the set turns the closing test
+red, confirmed, reverted). No existing rows to archive (v3 is greenfield,
+v3-D23) — the "archived with no serving path" half is vacuously satisfied
+by there being no `custom` column or serving path ever built.
 
 ## B2 — React decides the grading rung (M2) ✅ CLOSED (build-plan step 8)
 

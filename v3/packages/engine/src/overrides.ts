@@ -11,9 +11,15 @@
 // `gloss`/`distractor`/`group` overrides are corpus-data patches, resolved
 // here. `disable` is exposed as a plain list — filtering "which items to
 // show" is the APP layer's concern (Test.tsx/Drill.tsx), not the engine's.
-// `custom` is passed through unresolved (v2-D55): a wholly custom question
-// needs new render branches in Drill/Test, real UI work no phase has needed
-// yet.
+//
+// DEFECTS.md#B1, closed at build-plan step 15: a `custom` field ONCE
+// existed here (v2-D55, "passed through unresolved") but is DELETED, not
+// merely unresolved — `Admin.tsx:311` shipped a free-text
+// `{prompt, options[], correct}` editor with zero payload validation
+// (an admin could type Arabic into `correct`), rows accumulated with no
+// renderer ever reading them, and they would have become learner-visible
+// retroactively the moment anyone built one. v3 has no `custom` kind; the
+// Laravel write path (`OverridesController::store`) rejects it forever.
 //
 // `group` (DATA-1, ROADMAP Phase 7) went from "stored, not wired" (v2-D55) to
 // resolved: `applyOverrides` now stamps every member position of a group with
@@ -23,16 +29,16 @@
 
 import type { Corpus, CorpusDistractor, CorpusWord, GlossLang } from "./types.ts";
 
-export type OverrideField = "gloss" | "distractor" | "group" | "disable" | "custom";
+export type OverrideField = "gloss" | "distractor" | "group" | "disable";
 
-/** Mirrors the Laravel `question_overrides` row (Appendix A §D). Append-only:
- *  a correction is a NEW row with a later `createdAt`, never an edit in place. */
+/** Mirrors the Laravel `overrides` row. Append-only: a correction is a NEW
+ *  row with a later `createdAt`, never an edit in place. */
 export interface QuestionOverride {
   id?: number;
   surah: number;
   ayah: number;
-  /** null = ayah-wide (a `custom` question, or a `disable` covering every
-   *  position's questions of `questionType`). */
+  /** null = ayah-wide (a `disable` covering every position's questions of
+   *  `questionType`). */
   position: number | null;
   questionType: string;
   field: OverrideField;
@@ -57,8 +63,6 @@ export interface OverrideResolution {
   /** Raw `group` override rows (every row seen, for the editor's audit list —
    *  `corpus.words[].groupPositions` carries the RESOLVED latest-wins effect). */
   groups: QuestionOverride[];
-  /** Raw `custom` override rows — same deferral as `groups`. */
-  customs: QuestionOverride[];
 }
 
 interface GlossPayload {
@@ -118,7 +122,6 @@ export function applyOverrides(corpus: Corpus, overrides: QuestionOverride[]): O
   const disableLatest = new Map<string, QuestionOverride>();
   const groupLatest = new Map<string, QuestionOverride>();
   const groups: QuestionOverride[] = [];
-  const customs: QuestionOverride[] = [];
 
   const sorted = overrides
     .filter((o) => o.surah === corpus.meta.surah)
@@ -144,9 +147,6 @@ export function applyOverrides(corpus: Corpus, overrides: QuestionOverride[]): O
         if (o.position != null && isGroupPayload(o.payload)) {
           groupLatest.set(`${o.ayah}:${o.position}`, o);
         }
-        break;
-      case "custom":
-        customs.push(o);
         break;
     }
   }
@@ -199,7 +199,6 @@ export function applyOverrides(corpus: Corpus, overrides: QuestionOverride[]): O
     corpus: { ...corpus, words, distractors },
     disabled,
     groups,
-    customs,
   };
 }
 

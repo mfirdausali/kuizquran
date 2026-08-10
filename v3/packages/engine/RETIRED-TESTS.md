@@ -85,3 +85,21 @@ model landing at build-plan step 11, not a resurrection of this code.
 
 Honest gap: no v3 equivalent verifies gloss-language fallback for an S4-shaped
 item, because there is no S4 item generator left to test.
+
+## DEFECTS.md#B1 — `custom` override kind, retired at build-plan step 15
+
+Not a whole-file retirement; one test in `test/overrides.test.ts`.
+
+- `applyOverrides — custom (stored, not generation-wired this phase) > passes custom rows through untouched, and leaves the corpus unpatched by them` —
+  retired. B1 closes by DELETION (DEFECTS.md's own words: "v3 has no
+  `custom` field"), not by continuing to pass a `custom` row through
+  unresolved — so a test asserting that pass-through behavior is testing a
+  shape that no longer exists. Replaced by two tests in the same file: a
+  structural grep proving `overrides.ts` never references `"custom"`
+  again, and a type-shape check that `OverrideResolution` has no `customs`
+  field to accumulate an unresolved kind into.
+
+Honest gap: none. B1's DEFECTS.md description names zero legitimate use
+this kind ever served ("no renderer reads it") — there is no surviving
+behavior to re-specify elsewhere, unlike the ladder/bridge/chain and
+glossLang retirements above.
