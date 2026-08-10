@@ -190,3 +190,34 @@ spec-driven question compiler lands and a spec actually declares a
 `gradeClass`, re-verify every entry against that real usage before trusting
 it further — this decision is a placeholder built to be correct-looking,
 not battle-tested.
+
+---
+
+## Ratified 2026-08-10 (later night) — build-plan step 11 execution decision
+
+### v3-D27 — Step 11 scope for this run: Site model's wire-relevant subset only
+Build-plan step 10 (the DrillEvent wire freeze) names `siteKey` and
+`visitOrdinal` as frozen fields, but neither concept existed until step 11
+(Site model). Full step 11 per BUILD-PLAN.md's M2 ships list is large:
+"Site/ledger/admit (4 clauses + minimum-entropy floor, per-locale stats,
+overrides-aware ledger)/rotation/per-device visitOrdinal" — the `admit()`
+4-clause admissibility predicate, `ResourceLedger`, and lane rotation
+(`lapPerm`/`stride`) are a real, separate body of selection-engine work
+(WIREFRAME.md §23 Q4), not required to FREEZE A SCHEMA.
+
+This run implements only what step 10 actually needs to stop guessing:
+`v3/packages/engine/src/site.ts` — `Site` type, `siteKey()`, the TOTAL
+`siteToAtomKey()` mapping (WIREFRAME.md's own "seam's atom key is
+connection:n"), `expand()` (the exact by-construction E-08 closure
+WIREFRAME.md §23 Q3 describes — a seam at a range's last ayah is never
+constructed), and `nextVisitOrdinal()` (WIREFRAME.md §23 Q2's
+"max(recorded) + 1" rule).
+
+**Explicitly deferred, not forgotten:** `admit(variant, fibre, ctx)`'s 4
+clauses (supply/`ResourceLedger`, option-set distinctness, prompt
+uniqueness across the fibre, the fallback answer-width ladder), lane
+rotation (`lapPerm` hash-permutation, `stride(N)` integer-arithmetic
+cycling), and `selection_determinism_check` remain open step-11 work for a
+future run. `assembleQueue`/`floorQueue` are NOT yet Site-aware (they still
+operate on raw ayah numbers) — that integration is part of the deferred
+work too, not done here.

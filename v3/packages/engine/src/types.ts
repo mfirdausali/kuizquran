@@ -1,6 +1,8 @@
 // Engine types — pure data, no DOM. The corpus subset mirrors the six-table
 // shape emitted by packages/corpus-compiler (public/corpus.json).
 
+import type { GradeClass } from "./gradeClass.ts";
+
 export type WordClass = "N" | "V" | "P";
 
 export interface Gloss {
@@ -256,4 +258,51 @@ export interface DrillEvent {
    *  (v2-D14's optional nudge) — recorded for the audit trail; a tap-gated,
    *  never-automatic action, same spirit as gate_demote. */
   sentToReviews?: boolean;
+
+  // ---- Build-plan step 10: the wire frozen ONCE, complete (v3-D10) ----
+  // "positional answer" is `position` + `choice` above, already present —
+  // B6's fix (surface-equivalence-AT-POSITION) already made that pair the
+  // frozen answer shape; nothing new is added for it here.
+
+  /** `site.ts#siteKey()` of the Site this event's item was served from —
+   *  `${surah}:ayah|seam:${n}`. Set for events tied to a served question;
+   *  absent for pure evidence events (interruption, session_start, ...). */
+  siteKey?: string;
+  /** `site.ts#nextVisitOrdinal()`'s output, stamped AT EMIT TIME (WIREFRAME.md
+   *  §23 Q2 — "record the ordinal, don't derive it"). Immune to sync/merge
+   *  reordering; a bug report replays from the log alone. */
+  visitOrdinal?: number;
+  /** Stable per-device identifier (v3-D09's canonical order:
+   *  `(ts, deviceId, deviceSeq, uuid)`). Stamped by the sync layer (M6),
+   *  which does not exist yet — optional until then. */
+  deviceId?: string;
+  /** Per-device monotonic sequence, assigned at emit (v3-D09) — NOT the
+   *  same field as the legacy `seq` above, which is arrival-order and the
+   *  exact bug (DEFECTS.md#B5) this field exists to replace. */
+  deviceSeq?: number;
+  /** IANA timezone active when this event was created (Absolute A: `tz` is
+   *  always passed in, never read from the machine). Lets a fold reproduce
+   *  the exact day-boundary the client saw, regardless of where the fold
+   *  itself later runs. */
+  tz?: string;
+  /** Content hash (corpus-compiler step 4's 16-hex `corpusHash`) of the
+   *  corpus this event was answered against — pins provenance so a later
+   *  corpus recompile can never retroactively reinterpret a historical
+   *  event under different content. */
+  corpusHash?: string;
+  /** Gloss language active for this event (v2-D27). */
+  locale?: GlossLang;
+  /** Denormalized spec snapshot (WIREFRAME.md "hard problem 1" — the event
+   *  carries VALUES, never a spec-id POINTER, so the fold never
+   *  dereferences anything that could later change or be deleted).
+   *  Provenance/audit only; `rebuild.ts` must never read this field — the
+   *  already-resolved `rung`/`gradeClass` are what grading reads. Loosely
+   *  typed because M4's spec system (build-plan step 16) hasn't defined a
+   *  concrete spec shape yet; the FIELD SLOT is frozen now, its inner
+   *  shape is not. */
+  specSnapshot?: Record<string, unknown>;
+  /** The GradeClass (`gradeClass.ts`, v3-D11) this event's rung was
+   *  resolved from, via `gradeClassToWire()` — carried alongside the
+   *  already-resolved `rung`, never instead of it. */
+  gradeClass?: GradeClass;
 }

@@ -1,7 +1,8 @@
 // Pure event constructors. The append-only event log (apps/web/db/eventLog.ts)
 // stamps `seq` on write; the engine only shapes events. No IO here.
 
-import type { DrillEvent, EventType, Rung, TestItemKind } from "./types.ts";
+import type { DrillEvent, EventType, GlossLang, Rung, TestItemKind } from "./types.ts";
+import type { GradeClass } from "./gradeClass.ts";
 
 export interface MakeEventArgs {
   /** Stable client id (uuid). If omitted, the app shell stamps one on append. */
@@ -30,6 +31,17 @@ export interface MakeEventArgs {
   score?: number;
   total?: number;
   sentToReviews?: boolean;
+  // Build-plan step 10: the wire frozen ONCE, complete (v3-D10) — see
+  // DrillEvent's own field comments for what each means.
+  siteKey?: string;
+  visitOrdinal?: number;
+  deviceId?: string;
+  deviceSeq?: number;
+  tz?: string;
+  corpusHash?: string;
+  locale?: GlossLang;
+  specSnapshot?: Record<string, unknown>;
+  gradeClass?: GradeClass;
 }
 
 export function makeEvent(a: MakeEventArgs): DrillEvent {
@@ -54,5 +66,14 @@ export function makeEvent(a: MakeEventArgs): DrillEvent {
   if (a.score !== undefined) e.score = a.score;
   if (a.total !== undefined) e.total = a.total;
   if (a.sentToReviews !== undefined) e.sentToReviews = a.sentToReviews;
+  if (a.siteKey !== undefined) e.siteKey = a.siteKey;
+  if (a.visitOrdinal !== undefined) e.visitOrdinal = a.visitOrdinal;
+  if (a.deviceId !== undefined) e.deviceId = a.deviceId;
+  if (a.deviceSeq !== undefined) e.deviceSeq = a.deviceSeq;
+  if (a.tz !== undefined) e.tz = a.tz;
+  if (a.corpusHash !== undefined) e.corpusHash = a.corpusHash;
+  if (a.locale !== undefined) e.locale = a.locale;
+  if (a.specSnapshot !== undefined) e.specSnapshot = a.specSnapshot;
+  if (a.gradeClass !== undefined) e.gradeClass = a.gradeClass;
   return e;
 }
