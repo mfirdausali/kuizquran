@@ -78,7 +78,7 @@ clean: ## Remove build output and caches
 	rm -rf $(V2)/dist $(V2)/node_modules/.vite
 	cd $(API) && php artisan optimize:clear
 
-golden-log: ## Regenerate v3's golden log + oracle from pinned v2 (human-reviewed diff only — see v3/fixtures/golden-log/README.md)
+golden-log: ## Regenerate v3's golden log + oracle via v3's own engine (human-reviewed diff only — see v3/fixtures/golden-log/README.md)
 	cd $(V2) && TZ=UTC node_modules/.bin/vite-node ../v3/scripts/gen-golden-log.ts
 
 compile-corpus: ## Compile the v3 corpus for surahs 12, 103, 112 (build-plan step 3)

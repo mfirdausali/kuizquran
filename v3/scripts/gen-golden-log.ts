@@ -1,11 +1,20 @@
-// Generates the v3 golden log + its oracle fold, cut from the pinned v2 SHA
-// (c34f5c3 — see v3/CLAUDE.md). Run with TZ=UTC pinned (see the Makefile
-// target) because v2/src/engine/src/daybound.ts:23 reads local-date getters
-// (the exact leak INVARIANTS.md Absolute A names) — the oracle is only
-// reproducible if every run pins the same TZ. That dependency is itself one
-// of the fixture's triggers (see fixtures/golden-log/README.md).
+// Generates the v3 golden log + its oracle fold. Run with TZ=UTC pinned (see
+// the Makefile target) because daybound.ts's local-date getters (the exact
+// leak INVARIANTS.md Absolute A names — build-plan step 8 fixes it) make the
+// fold TZ-dependent — the oracle is only reproducible if every run pins the
+// same TZ. That dependency is itself one of the fixture's triggers (see
+// fixtures/golden-log/README.md).
 //
-// Reads v2 (frozen) read-only via relative import; writes only under v3/.
+// build-plan step 7 (E-01): this script originally folded through v2's
+// (frozen, unfixed) engine — correct up through step 6, since the oracle
+// then committed was step 6's own pre-E-01 parity target. Now that v3 has
+// its own surah-keyed engine (v3/packages/engine, step 5 port + step 7
+// keying), regenerating from v2 would silently produce an oracle that does
+// NOT reflect the keying fix — so this script now folds through v3's OWN
+// engine. `events.json` itself is unaffected (DrillEvent already carries
+// `surah` on every event; only the FOLD's key shape changes) — only
+// `oracle.json` changes shape when this next runs.
+//
 // No Quranic Arabic anywhere: DrillEvent.choice is never populated, because
 // rebuild()/applyEvent() never read it — the fold only depends on
 // type/ts/surah/ayah/rung/correct/pretest/structured/to/stepKind.
@@ -14,10 +23,10 @@ import { writeFileSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-import { makeEvent } from "../../v2/src/engine/src/events.ts";
-import { rebuild } from "../../v2/src/engine/src/rebuild.ts";
-import { DEFAULT_DAY_CONFIG } from "../../v2/src/engine/src/daybound.ts";
-import type { DrillEvent } from "../../v2/src/engine/src/types.ts";
+import { makeEvent } from "../packages/engine/src/events.ts";
+import { rebuild } from "../packages/engine/src/rebuild.ts";
+import { DEFAULT_DAY_CONFIG } from "../packages/engine/src/daybound.ts";
+import type { DrillEvent } from "../packages/engine/src/types.ts";
 
 if (process.env.TZ !== "UTC") {
   throw new Error("gen-golden-log must run with TZ=UTC pinned (see Makefile target golden-log)");
