@@ -5,10 +5,12 @@
   "type": "module",
   "description": "The sole server-side fold (v3-D08). Pure canonical-order + fold + determinism-compare logic here; a DB adapter for a live deployment is a separate, deferred follow-up (see DECISIONS.md v3-D32).",
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
+    "typescript": "^5.9.3",
     "vitest": "^2.1.9"
   }
 }

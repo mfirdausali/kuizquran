@@ -14,7 +14,7 @@ CORPUS_COMPILER := v3/packages/corpus-compiler
 ENGINE  := v3/packages/engine
 FOLD_RUNNER := v3/worker/fold-runner
 
-.PHONY: help setup dev dev-web dev-api dev-api3 test test-web test-api test-api3 test-v3 build clean doctor golden-log compile-corpus
+.PHONY: help setup dev dev-web dev-api dev-api3 test test-web test-api test-api3 test-v3 typecheck-v3 build clean doctor golden-log compile-corpus
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -71,10 +71,21 @@ test-api: ## PHPUnit (v2/api)
 test-api3: ## PHPUnit (v3/api — build-plan step 13)
 	cd $(API_V3) && php artisan test
 
-test-v3: ## vitest (v3 packages: corpus-compiler, engine, worker/fold-runner)
+test-v3: typecheck-v3 ## vitest (v3 packages: corpus-compiler, engine, worker/fold-runner)
 	cd $(CORPUS_COMPILER) && npm test
 	cd $(ENGINE) && npm test
 	cd $(FOLD_RUNNER) && npm test
+
+typecheck-v3: ## tsc --noEmit across the v3 node packages
+	@# Until 2026-08-11 none of these packages depended on `typescript`, so
+	@# `npx tsc` silently resolved to macOS's TeX `tsc` and exited 0 without
+	@# typechecking ANYTHING — every "typecheck clean" claim before that date
+	@# was a false pass. `typescript` is now a real devDependency in each
+	@# package; keep it that way, and keep this target wired into test-v3 so
+	@# a type error fails the suite instead of hiding.
+	cd $(CORPUS_COMPILER) && npm run -s typecheck
+	cd $(ENGINE) && npm run -s typecheck
+	cd $(FOLD_RUNNER) && npm run -s typecheck
 
 build: ## Type-check + build the SPA (must pass; see B9)
 	cd $(V2) && npm run build

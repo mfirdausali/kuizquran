@@ -3,12 +3,14 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "v3 pure engine — verbatim-or-documented port of v2/src/engine (build-plan step 5). See RETIRED-TESTS.md for the ladder/bridge/chain attic boundary (v3-D25).",
+  "description": "v3 pure engine \u2014 verbatim-or-documented port of v2/src/engine (build-plan step 5). See RETIRED-TESTS.md for the ladder/bridge/chain attic boundary (v3-D25).",
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
+    "typescript": "^5.9.3",
     "vitest": "^2.1.9"
   }
 }

@@ -5,26 +5,28 @@ import { assembleQueue } from "../src/scheduler.ts";
 import { DEFAULT_DAY_CONFIG } from "../src/daybound.ts";
 
 const DAY = 86_400_000;
-function local(y: number, mo: number, d: number, h: number): number {
-  return new Date(y, mo - 1, d, h, 0, 0, 0).getTime();
+// UTC wall clock — matches DEFAULT_DAY_CONFIG.tz, which every test here passes.
+// A machine-local constructor would make these assertions offset-dependent.
+function atUtc(y: number, mo: number, d: number, h: number): number {
+  return Date.UTC(y, mo - 1, d, h, 0, 0, 0);
 }
 const wordCounts = new Map<number, number>([[4, 15], [5, 12], [6, 20]]);
 
 function encoded(ref: number, opts: Partial<AtomState> = {}): AtomState {
-  return { ...initAtom(12, "ayah", ref), encoded: true, gatePassed: true, strength: 60, stability: 4, lastRetrieval: local(2026, 7, 10, 8), ...opts };
+  return { ...initAtom(12, "ayah", ref), encoded: true, gatePassed: true, strength: 60, stability: 4, lastRetrieval: atUtc(2026, 7, 10, 8), ...opts };
 }
 
 describe("assembleQueue (FR3 order)", () => {
-  const now = local(2026, 7, 14, 8);
+  const now = atUtc(2026, 7, 14, 8);
 
   it("gates come before new Learn, and Learn is blocked while a gate is due", () => {
     // ayah 4 encoded yesterday, gate due today (not passed) → blocks unlock.
-    const gated = scheduleGate({ ...initAtom(12, "ayah", 4), encoded: true }, local(2026, 7, 13, 20), DEFAULT_DAY_CONFIG);
+    const gated = scheduleGate({ ...initAtom(12, "ayah", 4), encoded: true }, atUtc(2026, 7, 13, 20), DEFAULT_DAY_CONFIG);
     const q = assembleQueue({
       surah: 12,
       atoms: [gated],
       now,
-      lastActiveDay: local(2026, 7, 13, 8),
+      lastActiveDay: atUtc(2026, 7, 13, 8),
       wordCounts,
       cfg: { day: DEFAULT_DAY_CONFIG, learnCandidates: [5], budgetMin: 8 },
     });
@@ -40,7 +42,7 @@ describe("assembleQueue (FR3 order)", () => {
       surah: 12,
       atoms: [encoded(4)],
       now,
-      lastActiveDay: local(2026, 7, 13, 8),
+      lastActiveDay: atUtc(2026, 7, 13, 8),
       wordCounts,
       cfg: { day: DEFAULT_DAY_CONFIG, learnCandidates: [5, 6], budgetMin: 8 },
     });
@@ -51,14 +53,14 @@ describe("assembleQueue (FR3 order)", () => {
   });
 
   it("ranks a due connection above an equal-risk ayah (connection weighted up)", () => {
-    const t = local(2026, 7, 8, 8); // decayed a few days
+    const t = atUtc(2026, 7, 8, 8); // decayed a few days
     const ayah: AtomState = { ...encoded(4), lastRetrieval: t, stability: 3 };
     const conn: AtomState = { ...initAtom(12, "connection", 4), encoded: true, gatePassed: true, strength: 60, stability: 3, lastRetrieval: t };
     const q = assembleQueue({
       surah: 12,
       atoms: [ayah, conn],
       now,
-      lastActiveDay: local(2026, 7, 13, 8),
+      lastActiveDay: atUtc(2026, 7, 13, 8),
       wordCounts,
       cfg: { day: DEFAULT_DAY_CONFIG, budgetMin: 8, connectionWeight: 1.5 },
     });
@@ -68,12 +70,12 @@ describe("assembleQueue (FR3 order)", () => {
 
   it("a missed day produces make-up items that are never dropped by the budget", () => {
     // gate came due on a skipped day; user returns two days later with a tight budget.
-    const gated = scheduleGate({ ...initAtom(12, "ayah", 4), encoded: true }, local(2026, 7, 12, 20), DEFAULT_DAY_CONFIG);
+    const gated = scheduleGate({ ...initAtom(12, "ayah", 4), encoded: true }, atUtc(2026, 7, 12, 20), DEFAULT_DAY_CONFIG);
     const q = assembleQueue({
       surah: 12,
       atoms: [gated],
-      now: local(2026, 7, 15, 8), // returned after missing the 14th
-      lastActiveDay: local(2026, 7, 13, 8),
+      now: atUtc(2026, 7, 15, 8), // returned after missing the 14th
+      lastActiveDay: atUtc(2026, 7, 13, 8),
       wordCounts,
       cfg: { day: DEFAULT_DAY_CONFIG, budgetMin: 0.1 }, // absurdly tight
     });
@@ -82,12 +84,12 @@ describe("assembleQueue (FR3 order)", () => {
   });
 
   it("session is always finishable: mandatory items present even at budget 0", () => {
-    const gated = scheduleGate({ ...initAtom(12, "ayah", 4), encoded: true }, local(2026, 7, 13, 20), DEFAULT_DAY_CONFIG);
+    const gated = scheduleGate({ ...initAtom(12, "ayah", 4), encoded: true }, atUtc(2026, 7, 13, 20), DEFAULT_DAY_CONFIG);
     const q = assembleQueue({
       surah: 12,
       atoms: [gated],
       now,
-      lastActiveDay: local(2026, 7, 13, 8),
+      lastActiveDay: atUtc(2026, 7, 13, 8),
       wordCounts,
       cfg: { day: DEFAULT_DAY_CONFIG, budgetMin: 0 },
     });

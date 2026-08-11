@@ -57,8 +57,13 @@ describe("geometry merge (build-plan step 4)", () => {
       // geometry intentionally omitted
     });
     expect(corpus.meta.hasGeometry).toBe(false);
-    expect(corpus.verses[0].page).toBeNull();
-    expect(corpus.words[0].line).toBeNull();
+    // Assert the rows exist before indexing them: under `noUncheckedIndexedAccess`
+    // a bare `[0]` is possibly-undefined, and a non-null `!` would silently pass
+    // if a regression ever emptied these arrays. This way that regression fails loudly.
+    expect(corpus.verses).toHaveLength(1);
+    expect(corpus.words).toHaveLength(1);
+    expect(corpus.verses[0]?.page).toBeNull();
+    expect(corpus.words[0]?.line).toBeNull();
   });
 
   it("hard-fails loudly on a geometry/word-count mismatch per ayah, rather than silently mis-mapping", () => {

@@ -12,43 +12,45 @@ import {
 } from "../src/gate.ts";
 import { DEFAULT_DAY_CONFIG } from "../src/daybound.ts";
 
-function local(y: number, mo: number, d: number, h: number): number {
-  return new Date(y, mo - 1, d, h, 0, 0, 0).getTime();
+// UTC wall clock — matches DEFAULT_DAY_CONFIG.tz, which every test here passes.
+// A machine-local constructor would make these assertions offset-dependent.
+function atUtc(y: number, mo: number, d: number, h: number): number {
+  return Date.UTC(y, mo - 1, d, h, 0, 0, 0);
 }
 
 describe("day-1 cold gate (FR3 / invariant #9)", () => {
   const cfg = DEFAULT_DAY_CONFIG;
 
   it("scheduling a gate sets it due at the NEXT learning-day start", () => {
-    const encodedAt = local(2026, 7, 14, 20); // evening
+    const encodedAt = atUtc(2026, 7, 14, 20); // evening
     const a = scheduleGate({ ...initAtom(12, "ayah", 4), encoded: true }, encodedAt, cfg);
     // next learning-day begins at 2026-07-15 04:30
-    expect(a.gateDueAt).toBe(local(2026, 7, 15, 4) + 30 * 60_000);
+    expect(a.gateDueAt).toBe(atUtc(2026, 7, 15, 4) + 30 * 60_000);
     expect(a.gatePassed).toBe(false);
   });
 
   it("gate is not due same day, is due next day", () => {
-    const encodedAt = local(2026, 7, 14, 20);
+    const encodedAt = atUtc(2026, 7, 14, 20);
     const a = scheduleGate({ ...initAtom(12, "ayah", 4), encoded: true }, encodedAt, cfg);
     expect(gateDue(a, encodedAt)).toBe(false); // same evening
-    expect(gateDue(a, local(2026, 7, 15, 8))).toBe(true); // next morning
+    expect(gateDue(a, atUtc(2026, 7, 15, 8))).toBe(true); // next morning
   });
 
   it("a pass marks gatePassed; a fail re-arms for the following day", () => {
-    const encodedAt = local(2026, 7, 14, 20);
+    const encodedAt = atUtc(2026, 7, 14, 20);
     let a = scheduleGate({ ...initAtom(12, "ayah", 4), encoded: true }, encodedAt, cfg);
-    const attempt = local(2026, 7, 15, 8);
+    const attempt = atUtc(2026, 7, 15, 8);
     const passed = applyGateResult(a, true, attempt, cfg);
     expect(passed.gatePassed).toBe(true);
     a = applyGateResult(a, false, attempt, cfg);
     expect(a.gatePassed).toBe(false);
-    expect(a.gateDueAt).toBe(local(2026, 7, 16, 4) + 30 * 60_000); // next day
+    expect(a.gateDueAt).toBe(atUtc(2026, 7, 16, 4) + 30 * 60_000); // next day
   });
 
   it("unlock is blocked while any cold gate is due, permitted once passed", () => {
-    const encodedAt = local(2026, 7, 14, 20);
+    const encodedAt = atUtc(2026, 7, 14, 20);
     const a = scheduleGate({ ...initAtom(12, "ayah", 4), encoded: true }, encodedAt, cfg);
-    const nextMorning = local(2026, 7, 15, 8);
+    const nextMorning = atUtc(2026, 7, 15, 8);
     expect(unlockPermitted([a], nextMorning, 12)).toBe(false); // gate due, not passed
     const passed = applyGateResult(a, true, nextMorning, cfg);
     expect(unlockPermitted([passed], nextMorning, 12)).toBe(true);
@@ -56,9 +58,9 @@ describe("day-1 cold gate (FR3 / invariant #9)", () => {
 
   // v2-D07 unlock tolerance.
   it("a mode-scoped tolerance permits unlock with pending gates within the band", () => {
-    const encodedAt = local(2026, 7, 14, 20);
+    const encodedAt = atUtc(2026, 7, 14, 20);
     const a = scheduleGate({ ...initAtom(12, "ayah", 4), encoded: true }, encodedAt, cfg);
-    const nextMorning = local(2026, 7, 15, 8);
+    const nextMorning = atUtc(2026, 7, 15, 8);
     // Steady-style strict (default 0): blocked.
     expect(unlockPermitted([a], nextMorning, 12, 0)).toBe(false);
     // Sprint-style tolerance (1 pending gate tolerated): permitted.
@@ -66,10 +68,10 @@ describe("day-1 cold gate (FR3 / invariant #9)", () => {
   });
 
   it("tolerance is a ceiling: 2 pending gates still blocks a tolerance of 1", () => {
-    const encodedAt = local(2026, 7, 14, 20);
+    const encodedAt = atUtc(2026, 7, 14, 20);
     const a = scheduleGate({ ...initAtom(12, "ayah", 4), encoded: true }, encodedAt, cfg);
     const b = scheduleGate({ ...initAtom(12, "ayah", 5), encoded: true }, encodedAt, cfg);
-    const nextMorning = local(2026, 7, 15, 8);
+    const nextMorning = atUtc(2026, 7, 15, 8);
     expect(unlockPermitted([a, b], nextMorning, 12, 1)).toBe(false);
   });
 });
@@ -82,13 +84,13 @@ describe("gate forgiveness ladder (v2-D08)", () => {
   });
 
   it("gateFails increments on each fail and resets on a pass", () => {
-    const encodedAt = local(2026, 7, 14, 20);
+    const encodedAt = atUtc(2026, 7, 14, 20);
     let a = scheduleGate({ ...initAtom(12, "ayah", 4), encoded: true }, encodedAt, cfg);
     for (let i = 1; i <= 3; i++) {
-      a = applyGateResult(a, false, local(2026, 7, 14 + i, 8), cfg);
+      a = applyGateResult(a, false, atUtc(2026, 7, 14 + i, 8), cfg);
       expect(a.gateFails).toBe(i);
     }
-    const passed = applyGateResult(a, true, local(2026, 7, 18, 8), cfg);
+    const passed = applyGateResult(a, true, atUtc(2026, 7, 18, 8), cfg);
     expect(passed.gateFails).toBe(0);
   });
 
@@ -107,7 +109,7 @@ describe("gate forgiveness ladder (v2-D08)", () => {
       ...initAtom(12, "ayah", 4),
       encoded: true,
       gatePassed: false,
-      gateDueAt: local(2026, 7, 15, 8),
+      gateDueAt: atUtc(2026, 7, 15, 8),
       gateFails: DEMOTE_OFFER_AFTER_FAILS,
       strength: 22,
     };

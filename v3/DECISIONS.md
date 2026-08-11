@@ -575,3 +575,75 @@ CODE permanently; `buildQuestion` structurally refuses an `"rc"` lane
 deferred — it has no caller until the workbench itself (build-plan step
 25, M8), so building it now would be untested surface with no consumer to
 validate it against.
+
+---
+
+## Ratified 2026-08-11 — build-plan step 16 COMPLETE + a verification-integrity fix
+
+### v3-D36 — All five templatable lanes have kernels; step 16's remaining gaps are named, not silent
+
+Supersedes v3-D35's "deferred" list, which is now stale. `Spec['lane']` is
+`s1 | cloze | junction | locate | reorder` — every lane WIREFRAME §23 Q1 names
+except `rc`, which is permanently CODE (the DATA/CODE table keeps
+`reconstruct.ts`'s state machine untemplated; `buildQuestion` structurally
+refuses it, tested via `@ts-expect-error`). Each kernel carries a full-corpus
+byte-parity sweep against its `test.ts` oracle, and each was mutation-checked.
+
+Two departures from naive "total parity", both disclosed in code comments and
+test names rather than hidden:
+
+- **`buildReorder` returns null where legacy `reorderItem` would overrun.**
+  Legacy takes no corpus and never bounds-checks, so it happily emits ayah
+  numbers past `ayahCount`; the kernel cannot, because `OrderTilesItem.tiles`
+  is `Face[]` and a Face past the end has no text to resolve. Parity is
+  therefore asserted over 109 of 111 runs on the Yusuf fixture, with the 2
+  boundary runs asserting the null instead. This matches junction's E-08
+  closure and is deliberate.
+- **`buildReorder` emits tiles in reading order, not shuffled.** Display
+  shuffling is the UI's concern (the same rule every other generator follows).
+
+### v3-D37 — Two REAL gaps in step 16, recorded so step 18 cannot trip on them silently
+
+Found by an adversarial completeness review, verified by hand. Neither blocks
+step 18, but both were undocumented, which is the actual defect:
+
+1. **The lane set diverges between two modules.** `variant.ts` declares
+   `Lane = "s1" | "cloze" | "junction"` and `selection.ts` iterates exactly
+   that `LANES` constant — so `selectFor` can only ever CHOOSE 3 lanes, while
+   `buildQuestion` can BUILD 5. `locate`/`reorder` are unreachable through the
+   selection path. The reason is real (v3-D30: both need data not derivable
+   from a `Site` — `pool` and `count` respectively), but the divergence itself
+   was never written down. Whoever wires step 18 must decide whether `Lane`
+   unifies at 3 or 5.
+2. **`sequenceFill` has zero producers inside the compiler.** It is RC's shape,
+   and RC is permanently CODE, so it is populated via `reconstruct.ts` rather
+   than `buildQuestion`. That is the intended architecture — but "one of the
+   four closed render shapes is never produced by any kernel" was not stated
+   anywhere, and reads as an omission until you know why.
+
+Also outstanding against M4's literal DoD: **`explain()` is not built.**
+Deferring it remains right (its only consumer is the §22b workbench at step 25),
+but M4 cannot be called complete against its own text while it is missing — it
+is hereby tracked as an M8 precondition, not silently dropped.
+
+### v3-D38 — `tsc` was never installed; every "typecheck clean" claim before 2026-08-11 was a false pass
+
+None of the three v3 node packages depended on `typescript`. On macOS `npx tsc`
+therefore resolved to the **TeX** `tsc` binary, which prints "This is not the
+tsc command you are looking for" and **exits 0** — so every typecheck in this
+build's history silently verified nothing. This is a verification-integrity
+failure, not a code failure: running the real compiler afterwards found the
+engine and fold-runner genuinely clean, but it also surfaced two real
+strict-mode errors in `corpus-compiler/test/geometry.test.ts` that had been
+invisible (possibly-undefined array indexing under `noUncheckedIndexedAccess`).
+
+Fixed: `typescript` is now a real devDependency in all three packages, each has
+a `typecheck` script, and `make test-v3` depends on a new `typecheck-v3` target
+so a type error fails the suite. `corpus-compiler` also gained the `@types/node`
+its own tsconfig required. The geometry test now asserts array length before
+indexing rather than using `!`, so a regression that empties those arrays fails
+loudly instead of passing.
+
+**Lesson worth keeping:** a verification step that cannot fail is worse than no
+verification step, because it manufactures false confidence. Any future "X is
+clean" claim in this build should be accompanied by evidence that X can fail.
