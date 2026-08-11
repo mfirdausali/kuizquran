@@ -354,7 +354,16 @@ kills all animation under `prefers-reduced-motion`. Both live callers
 (`InlineDemo`, `FirstRecall`) pair the reveal with `role="status"` text, so the
 contract holds today by caller discipline rather than by construction. A future
 caller that omits the text would be colour-alone for a reduced-motion
-deuteranope. Worth closing when the session loop (currently a stub) lands.
+deuteranope.
+
+**UPDATE (session loop landed).** This prediction came true immediately.
+`SessionIsland` — the third live caller, and the one a learner actually spends
+their time in — shipped a colour-only verdict with no paired text. Fixed: it
+now renders a `role="status"` line ("Correct." / "Not quite — try again.")
+alongside the reveal. The contract is still caller discipline rather than
+construction, so a FOURTH caller can reintroduce this; closing it properly means
+moving the text inside the card, which is a change to the locked render layer
+and wants its own decision.
 
 ---
 

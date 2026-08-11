@@ -148,4 +148,37 @@ test.describe("A · landing -> onboarding -> first session", () => {
       "the session emits session_start",
     ).toBe(true);
   });
+
+  test("the verdict is never colour alone — a reduced-motion user gets TEXT", async ({
+    page,
+  }) => {
+    // WIREFRAME section 15, "never colour alone". `optionStateClass` justifies
+    // the colour by pointing at the locked `shake` animation as the second
+    // signal — but `prefers-reduced-motion` kills that animation, leaving
+    // colour as the ONLY signal for a reduced-motion deuteranope.
+    //
+    // LAUNCH-CHECKLIST predicted this would break the day a new caller landed,
+    // and it did: SessionIsland shipped colour-only. A unit test over the card
+    // cannot catch it, because the defect is in what the CALLER renders beside
+    // the card — so it is asserted here, in the browser, with reduced motion on.
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await completeOnboarding(page);
+    await page.goto("/session");
+
+    const drill = page.getByTestId("session-drill");
+    await expect(drill).toBeVisible({ timeout: 15_000 });
+
+    const options = drill.locator("button, [role='button']");
+    await expect(options.first()).toBeVisible();
+    await options.first().click();
+
+    // A live region carrying the verdict in WORDS. Asserted by role rather than
+    // exact wording: the copy may change, the requirement may not.
+    const status = page.locator('[role="status"]');
+    await expect(status.first()).toBeVisible({ timeout: 10_000 });
+    expect(
+      ((await status.first().textContent()) ?? "").trim().length,
+      "the verdict must be announced as text, not colour alone",
+    ).toBeGreaterThan(0);
+  });
 });

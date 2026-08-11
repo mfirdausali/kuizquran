@@ -146,6 +146,13 @@ describe("the pending predicate", () => {
 });
 
 describe("#110 — chunking ships FIRST", () => {
+  // 20s, not the default 5s. This test appends 450 events through the REAL
+  // append path (one transaction each, deviceSeq allocated per row), which is
+  // genuinely slow and got slower under parallel suite load — it went red once
+  // in a full `make test` run and passed three times in isolation. An
+  // intermittently-red test is worse than a slow one: it trains everyone to
+  // re-run rather than read, which is how a real failure gets dismissed. The
+  // budget is raised; not one assertion is weakened.
   it("splits 450 pending events into 200 / 200 / 50, in deviceSeq order", async () => {
     const server = makeServer();
     installFetch(server);
@@ -167,7 +174,7 @@ describe("#110 — chunking ships FIRST", () => {
     expect(server.posts[2]![0]!.id).toBe("e-0400");
 
     expect(await countPending()).toBe(0);
-  });
+  }, 20_000);
 
   it("never sends more than OUTBOX_BATCH_MAX in one request", async () => {
     const server = makeServer();

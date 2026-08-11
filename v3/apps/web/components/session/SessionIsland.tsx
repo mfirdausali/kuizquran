@@ -251,9 +251,28 @@ export function SessionIsland({ surah }: SessionIslandProps) {
         surah={surah}
       />
       {reveal ? (
-        <button type="button" className="btn" onClick={onContinue}>
-          Continue
-        </button>
+        <>
+          {/*
+            NEVER COLOUR ALONE (WIREFRAME §15), and this caller is why the rule
+            needs restating. `optionStateClass` says colour is not the only
+            signal because `.option.is-err` also carries the locked `shake`
+            animation — but `prefers-reduced-motion` KILLS that animation. For a
+            reduced-motion deuteranope, colour would then be the only signal
+            left, and right and wrong become indistinguishable.
+
+            LAUNCH-CHECKLIST predicted exactly this: the contract "holds today by
+            caller discipline rather than by construction... worth closing when
+            the session loop (currently a stub) lands." This is that caller, so
+            this is that text. `role="status"` announces it to a screen reader
+            without stealing focus mid-drill.
+          */}
+          <p className="caption" role="status">
+            {run?.lastTap?.correct ? "Correct." : "Not quite — try again."}
+          </p>
+          <button type="button" className="btn" onClick={onContinue}>
+            Continue
+          </button>
+        </>
       ) : null}
     </div>
   );
