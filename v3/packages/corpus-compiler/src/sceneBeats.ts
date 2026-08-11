@@ -31,6 +31,27 @@ export const YUSUF_SCENE_BEAT_LABELS: Record<number, string> = {
   19: "A true story, and a lesson for those who reflect.",
 };
 
+/**
+ * Authored one-line scene-beat labels for surah 67 (Al-Mulk), keyed by act
+ * number. HUMAN-AUTHORED CONTENT — Firdaus writes these, never an agent.
+ *
+ * A scene-beat label is a one-line human reading of what a passage of scripture
+ * MEANS. That is interpretation, and generating it automatically would be
+ * authoring religious commentary under a human's name. BUILD-PLAN puts this in
+ * the same category as the Malay gloss and the qari review: human-only.
+ *
+ * EMPTY IS SAFE, AND IS WHY THIS SHIPS EMPTY. `buildSceneBeats` falls back to
+ * `TODO: author scene-beat label for act N`, and `content-freeze.mjs` FAILS on
+ * any label starting with "TODO" — so an unauthored surah cannot pass the gate
+ * that guards qari booking. The gate stays closed until a human fills this in.
+ *
+ * Fill in alongside `data/raw/67-mental-model.json`; the act numbers must match.
+ * See `v3/docs/AL-MULK-SCENE-BEATS.md`.
+ */
+export const MULK_SCENE_BEAT_LABELS: Record<number, string> = {
+  // Act numbers here must match `acts[].act` in 67-mental-model.json.
+};
+
 /** Expand an "a-b" or "a" ayahRange string into an explicit ayah list. */
 export function expandRange(range: string): number[] {
   const m = /^(\d+)\s*-\s*(\d+)$/.exec(range.trim());

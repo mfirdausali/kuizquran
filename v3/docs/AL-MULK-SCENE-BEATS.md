@@ -28,16 +28,54 @@ Surah 12 passes. 103 and 112 are atomic (short enough not to need a mental
 model). **67 is the only gap**, and it is the surah you ratified as Q3's answer
 (v3-D59).
 
-## How to fill it in
+## How to fill it in — TWO files, not one
 
-1. Open `v3/packages/corpus-compiler/data/raw/67-mental-model.SCAFFOLD.json`.
-2. Replace every `"TODO"`. The structure mirrors
-   `12-mental-model.json`, which is your own authored work and the best
-   reference for tone and length.
-3. Rename it to `67-mental-model.json`. **The compiler only reads that exact
-   name** — the `.SCAFFOLD.` infix is deliberate, so placeholder text can never
-   be compiled into a shipped corpus by accident.
-4. Recompile 67, then re-run the freeze gate.
+This is the part the first version of this brief got wrong. The **acts** and the
+**labels** live in different places, and writing only the first would compile to
+TODO placeholders and fail the gate.
+
+### 1. The acts — `data/raw/67-mental-model.SCAFFOLD.json`
+
+Replace every `"TODO"`. The structure mirrors `12-mental-model.json`, which is
+your own authored work and the best reference for tone and length. Then rename
+it to `67-mental-model.json` — **the compiler only reads that exact name**, and
+the `.SCAFFOLD.` infix is what stops placeholder text compiling by accident.
+
+### 2. The labels — `src/sceneBeats.ts#MULK_SCENE_BEAT_LABELS`
+
+The one-line label a learner actually sees is NOT taken from the mental model.
+`buildSceneBeats` reads it from a table keyed by act number, exactly like
+`YUSUF_SCENE_BEAT_LABELS` directly above it. Fill in one line per act; the act
+numbers must match `acts[].act` in the JSON.
+
+The table is already wired through `io.ts` and **verified end to end**: a probe
+label compiled into `output/67/corpus.json` and the freeze gate reported "all
+authored (no TODO placeholders)", then the probe was reverted. Before that fix,
+`io.ts` returned `{}` for every surah but 12 — you could have written all thirty
+labels and the compiler would have silently ignored every one.
+
+### 3. Recompile and re-check
+
+```bash
+cd v3/packages/corpus-compiler && npm run compile -- 67
+node v3/scripts/content-freeze.mjs
+```
+
+## ONE THING TO EXPECT: your QA signature goes STALE
+
+Recompiling changes the corpus hash. The freeze gate binds your signed QA sample
+to a specific hash, so the moment 67 recompiles you will see:
+
+```
+surah 67: QA sample was taken against corpus 2ed7175147595241,
+          current is <new> — STALE
+```
+
+That is the gate working, not breaking. Scene beats are *macro* content and do
+not touch a single distractor, so the 34 items you signed are unchanged in
+substance — but the gate cannot know that from a hash alone, and a gate that
+guessed would be worthless. Expect to re-sign against the new hash. Worth
+knowing BEFORE you write, so it is not a surprise afterwards.
 
 ## The scaffold's act divisions are a STARTING POINT, not a claim
 

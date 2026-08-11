@@ -20,7 +20,7 @@ import { parseQac, type QacData } from "./parseQac.ts";
 import { buildCorpus } from "./buildCorpus.ts";
 import { buildPool, type PoolEntry } from "./foilKernels.ts";
 import type { CorpusJson } from "./types.ts";
-import { YUSUF_SCENE_BEAT_LABELS } from "./sceneBeats.ts";
+import { MULK_SCENE_BEAT_LABELS, YUSUF_SCENE_BEAT_LABELS } from "./sceneBeats.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url)); // .../packages/corpus-compiler/src
 export const PKG_ROOT = resolve(HERE, ".."); // .../v3/packages/corpus-compiler
@@ -46,6 +46,16 @@ function curatedExtrasFor(surah: number): {
 } {
   if (surah === 12) {
     return { curatedThreads: [], sceneBeatLabels: YUSUF_SCENE_BEAT_LABELS };
+  }
+  // Surah 67 (Al-Mulk). Wired BEFORE the labels are written, deliberately: with
+  // the plumbing missing, a human could author every label in
+  // MULK_SCENE_BEAT_LABELS and the compiler would still emit TODO placeholders,
+  // because this function returned `{}` for every surah but 12. That is a
+  // silent no-op on authored human work — the worst way to waste someone's
+  // afternoon. Empty today, and safe empty: the freeze gate fails on TODO
+  // labels, so nothing ships unauthored.
+  if (surah === 67) {
+    return { curatedThreads: [], sceneBeatLabels: MULK_SCENE_BEAT_LABELS };
   }
   return { curatedThreads: [], sceneBeatLabels: {} };
 }
