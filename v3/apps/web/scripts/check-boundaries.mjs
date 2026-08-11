@@ -199,8 +199,17 @@ const PRE_RECALL_OPT_OUT = "@allow-identity-capture";
 // a capture helper added beside `commitOnboarding`, would be identity capture
 // on a pre-recall surface with no markup anywhere near a view. Covering the
 // views but not the module that serves them is covering the symptom.
+//
+// `components/sections/` joined this list with the landing-page refactor, for
+// the same reason `lib/onboarding/` did: the clause must cover the file an
+// email field would actually be typed into. Before the refactor that was
+// `app/page.tsx`; afterwards the page holds no markup at all and every field on
+// the pre-recall surface would be added to a section module instead. A clause
+// naming only the page would have kept passing while the surface it guards
+// moved out from under it.
 const PRE_RECALL = [
   /^app\/page\.tsx$/,
+  /^components\/sections\//,
   /^app\/\(onboarding\)\//,
   /^components\/onboarding\//,
   /^lib\/onboarding\//,
@@ -360,10 +369,22 @@ for (const f of files) {
 // surfaces and not the whole app: an admin console or a defect note may
 // legitimately discuss tajwid, and a checker that fired there would be a
 // checker people learn to route around.
+//
+// `components/sections/` and `lib/i18n/` were ADDED when the landing page was
+// refactored into a composition root with one module per §18 section. That
+// refactor MOVED every landing sentence's render site out of `app/page.tsx`,
+// and a scope that still named only the page would have been guarding an empty
+// file: the page now holds a switch and no prose, while the eight section
+// modules hold all of the markup a claim could be typed into. Leaving the scope
+// unchanged would have turned a structural refactor into a silent removal of
+// the v3-D19 check — green gate, no coverage, which is this build's documented
+// failure mode.
 const CLAIM_SCOPE = [
   /^app\/page\.tsx$/,
   /^lib\/landing\//,
+  /^lib\/i18n\//,
   /^components\/landing\//,
+  /^components\/sections\//,
   /^components\/demo\//,
   /^lib\/demo\//,
   /^app\/\(onboarding\)\//,
@@ -488,7 +509,44 @@ if (claimPatterns && dischargePatterns) {
 // This is the same construction as clause 10 (a price literal outside
 // lib/pricing.ts): the constants test alone stays green while a template
 // hardcodes a second copy beside it.
-const LANDING_MARKUP = ["app/page.tsx"];
+//
+// The eight §18 section modules are listed BY NAME rather than by a directory
+// pattern. `components/sections/` is where landing markup lives, so a prefix
+// match would be the tempting choice — but a named list fails loudly the day a
+// ninth section is added without being registered here, whereas a prefix match
+// would silently absorb it. The clause is about a list somebody must keep
+// current, and a list that maintains itself cannot report that it wasn't.
+const LANDING_MARKUP = [
+  "app/page.tsx",
+  "components/sections/Mechanism.tsx",
+  "components/sections/Plan.tsx",
+  "components/sections/Objections.tsx",
+  "components/sections/Proof.tsx",
+  "components/sections/Pricing.tsx",
+];
+// A named entry that no longer exists means the clause is silently guarding
+// nothing — the same rot ENTITLEMENT_ALLOWLIST is checked for above.
+for (const entry of LANDING_MARKUP) {
+  if (!files.some((f) => rel(f) === entry)) {
+    violations.push(
+      `LANDING_MARKUP names ${entry}, which does not exist. Clause 12 is not ` +
+        `guarding that file; remove the stale entry or restore the file.`,
+    );
+  }
+}
+// Every section module must be covered. A new file under components/sections/
+// that clause 12 does not name is landing markup nobody is checking for prose.
+for (const f of files) {
+  const r = rel(f);
+  if (!/^components\/sections\/.+\.tsx$/.test(r)) continue;
+  if (r.endsWith(".test.tsx")) continue;
+  if (!LANDING_MARKUP.includes(r)) {
+    violations.push(
+      `${r}: a landing section module that clause 12 does not name. Add it to ` +
+        `LANDING_MARKUP, or its prose is invisible to the v3-D19 claim check.`,
+    );
+  }
+}
 // A JSX text node: `>` … `<` with no braces, holding 4+ words with a lowercase
 // run — i.e. a sentence, not a `<span>Monthly</span>` label. Attribute values
 // are not matched (they sit inside the tag, before the `>`).

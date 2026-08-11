@@ -53,12 +53,15 @@ const OUTPUT = path.join(V3, "packages/corpus-compiler/output");
 // THE LAUNCH SURAH SET
 // ---------------------------------------------------------------------------
 // BUILD-PLAN: "Scope = ALL launch-serving surahs (12 + 112 + 103 + second
-// surah), including seam renders". The second surah is Q3, still OPEN in
-// BUILD-PLAN's own open-questions list ("Al-Mulk or a Juz Amma batch"), so it
-// cannot be enumerated here. That is itself reported — an unanswered scope
-// question is a freeze blocker, because a surah added after the freeze is a
-// surah the qari did not sign.
-const LAUNCH_SURAHS = [12, 103, 112];
+// surah), including seam renders".
+//
+// Q3 — the second surah — was ANSWERED on 2026-08-11: AL-MULK (67), ratified by
+// Firdaus and recorded as v3-D59. It is vendored, compiled (30 ayat, 333 words,
+// pages 562-564) and offered in onboarding, so the launch set is now closed and
+// enumerable. Until that answer existed this list could not include it, and the
+// open question was itself reported as a freeze blocker — correctly, because a
+// surah added after the freeze is a surah the qari did not sign.
+const LAUNCH_SURAHS = [12, 67, 103, 112];
 
 // v3-D21: ATOMIC is <= 8 ayat and renders NO PANEL — "at 3-8 ayat the list is
 // already the macro view". So "scene beats authored for every launch surah"
@@ -393,13 +396,25 @@ function checkCorpusFrozen(corpora) {
   // freeze: a surah chosen after the freeze is a surah the qari did not sign,
   // and #176 is precisely that failure ("launch gate scoped to Yusuf while
   // first screens serve 112/103/second surah").
+  //
+  // Detection is by the ANSWER, not the absence of the question: the question
+  // text stays in BUILD-PLAN as a record (struck through), so grepping for it
+  // would report OPEN forever. An answered Q3 carries an explicit ANSWERED
+  // marker naming the decision entry, which is also what makes this greppable
+  // by a human doing the same audit by hand.
   const plan = readFileSync(path.join(V3, "docs/BUILD-PLAN.md"), "utf8");
-  if (/Q3 \(blocks M1 scope/.test(plan)) {
+  const q3Answered = /Q3[^\n]*\*\*ANSWERED[^\n]*v3-D59/.test(plan);
+  if (!q3Answered) {
     evidence.push(
       "BUILD-PLAN Q3 (launch surah set — Al-Mulk vs a Juz Amma batch) is still listed OPEN. " +
         "The freeze scope cannot be final while the surah list is not (edge case #176).",
     );
     met = false;
+  } else {
+    evidence.push(
+      "BUILD-PLAN Q3 ANSWERED (v3-D59): the launch set is 12 + 67 + 103 + 112, all four compiled " +
+        "and enumerated by LAUNCH_SURAHS above.",
+    );
   }
 
   return criterion("Corpus + specs frozen", met, evidence);

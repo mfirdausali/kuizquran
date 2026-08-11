@@ -1313,3 +1313,53 @@ gitignored per v3-D52 and absent on a clean checkout). A sacred-text assertion
 that fires on real corpus bytes is worse than none: the next person to see it
 red will assume a stale pool and wave it through — on the one test in this repo
 that must never be waved through.
+
+---
+
+## 2026-08-11 — the QA sample is SIGNED; one real blocker remains
+
+### v3-D62 — Firdaus signed all 216 QA items, having been shown all 216
+
+Every item in all four samples (12: 178, 67: 34, 103: 2, 112: 2) was displayed
+in full — answer, all five foils, and any mechanical flag — and approved.
+`signedBy: "Firdaus"`, `reviewerRole: qari`, `displayedInFull: true`, each
+sample stamped against the CURRENT corpus hash.
+
+The sequence that got here is worth keeping, because it is the argument for the
+gate existing at all:
+
+1. A blanket "all sound" was declined while only 10 of 216 items had been shown.
+   Not on authority grounds — Firdaus is the named qari (v3-D22) and his
+   authorisation is real — but because a signature records an OBSERVATION, and
+   no authorisation makes an unseen foil seen.
+2. Of those first 10, he REJECTED two, which produced v3-D60: kernel foils that
+   were the same word three times under different diacritics. 44% of Al-Mulk's
+   option sets and 60% of Al-Ikhlas's were affected. 101 compiler tests, a suite
+   written specifically to judge foil QUALITY, and three rounds of my own
+   verification had all passed it.
+3. Fixing it changed the corpus, so the sampler redrew and his 10 verdicts no
+   longer mapped onto any current coordinate. Carrying them across would have
+   attributed judgements he never made about foils he never saw.
+4. All 216 were then displayed and approved. That signature is now worth
+   something precisely because the first one was declined.
+
+### v3-D63 — Q3's answer flows into the gate; one blocker survives, and it is real
+
+`content-freeze.mjs`'s LAUNCH_SURAHS was `[12, 103, 112]` with a comment saying
+Q3 could not be enumerated while open. Q3 is answered (v3-D59), so the list is
+now `[12, 67, 103, 112]` and BUILD-PLAN's Q3 entry carries an explicit ANSWERED
+marker. Detection changed from "is the question present" to "is the ANSWER
+present" — the question text stays as a record, so grepping for it would report
+OPEN forever.
+
+Adding Al-Mulk to the gate immediately surfaced a blocker that had been INVISIBLE
+while it was outside the launch set: **surah 67 is 30 ayat, therefore not ATOMIC
+(v3-D21's <=8 threshold), therefore it OWES a macro panel — and it has zero
+scene beats.** 12/103/112 all pass (Yusuf has 19 authored beats; the other two
+are atomic and owe none).
+
+Status: 4 of 5 M9 criteria MET. The gate stays CLOSED on authored narrative
+content for Al-Mulk, which is human work — BUILD-PLAN budgets it in days and
+names Firdaus or a hired writer. This is the correct outcome: broadening the
+launch set added a real obligation rather than a formality, and the gate found
+it the moment the scope changed.

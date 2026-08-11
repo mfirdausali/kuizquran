@@ -14,8 +14,8 @@
     "4": 8,
     "5": 1769
   },
-  "signedBy": null,
-  "signedAt": null,
+  "signedBy": "Firdaus",
+  "signedAt": "2026-08-11T12:54:59+00:00",
   "mechanicalFlags": 1,
   "items": [
     {
@@ -69,8 +69,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 3,
@@ -123,8 +125,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 3,
@@ -177,8 +181,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 3,
@@ -231,8 +237,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 3,
@@ -285,8 +293,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 4,
@@ -339,8 +349,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 4,
@@ -393,8 +405,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 4,
@@ -447,8 +461,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 5,
@@ -501,8 +517,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 5,
@@ -555,8 +573,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 5,
@@ -609,8 +629,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 6,
@@ -663,8 +685,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 6,
@@ -717,8 +741,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 6,
@@ -771,8 +797,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 8,
@@ -825,8 +853,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 10,
@@ -879,8 +909,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 12,
@@ -933,8 +965,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 13,
@@ -987,8 +1021,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 15,
@@ -1041,8 +1077,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 16,
@@ -1095,8 +1133,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 16,
@@ -1149,8 +1189,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 17,
@@ -1203,8 +1245,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 17,
@@ -1257,8 +1301,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 17,
@@ -1311,8 +1357,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 18,
@@ -1365,8 +1413,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 19,
@@ -1419,8 +1469,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 19,
@@ -1473,8 +1525,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 20,
@@ -1527,8 +1581,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 20,
@@ -1581,8 +1637,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 21,
@@ -1635,8 +1693,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 21,
@@ -1689,8 +1749,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 23,
@@ -1743,8 +1805,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 23,
@@ -1797,8 +1861,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 23,
@@ -1851,8 +1917,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 23,
@@ -1905,8 +1973,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 24,
@@ -1959,8 +2029,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 24,
@@ -2013,8 +2085,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 24,
@@ -2067,8 +2141,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 25,
@@ -2121,8 +2197,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 26,
@@ -2175,8 +2253,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 26,
@@ -2229,8 +2309,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 27,
@@ -2283,8 +2365,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 28,
@@ -2337,8 +2421,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 30,
@@ -2391,8 +2477,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 31,
@@ -2445,8 +2533,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 31,
@@ -2499,8 +2589,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 31,
@@ -2553,8 +2645,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 32,
@@ -2607,8 +2701,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 32,
@@ -2661,8 +2757,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 32,
@@ -2715,8 +2813,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 33,
@@ -2769,8 +2869,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 33,
@@ -2823,8 +2925,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 34,
@@ -2877,8 +2981,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 36,
@@ -2931,8 +3037,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 36,
@@ -2985,8 +3093,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 37,
@@ -3039,8 +3149,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 37,
@@ -3093,8 +3205,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 37,
@@ -3147,8 +3261,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 38,
@@ -3201,8 +3317,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 38,
@@ -3255,8 +3373,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 38,
@@ -3309,8 +3429,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 38,
@@ -3363,8 +3485,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 38,
@@ -3417,8 +3541,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 38,
@@ -3471,8 +3597,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 39,
@@ -3525,8 +3653,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 40,
@@ -3579,8 +3709,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 40,
@@ -3633,8 +3765,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 40,
@@ -3687,8 +3821,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 42,
@@ -3741,8 +3877,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 43,
@@ -3795,8 +3933,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 43,
@@ -3849,8 +3989,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 43,
@@ -3903,8 +4045,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 43,
@@ -3957,8 +4101,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 44,
@@ -4011,8 +4157,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 45,
@@ -4065,8 +4213,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 46,
@@ -4119,8 +4269,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 46,
@@ -4173,8 +4325,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 46,
@@ -4227,8 +4381,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 47,
@@ -4281,8 +4437,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 47,
@@ -4335,8 +4493,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 47,
@@ -4389,8 +4549,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 48,
@@ -4443,8 +4605,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 48,
@@ -4497,8 +4661,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 48,
@@ -4551,8 +4717,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 50,
@@ -4605,8 +4773,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 50,
@@ -4659,8 +4829,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 50,
@@ -4713,8 +4885,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 51,
@@ -4767,8 +4941,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 51,
@@ -4821,8 +4997,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 52,
@@ -4875,8 +5053,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 56,
@@ -4929,8 +5109,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 57,
@@ -4983,8 +5165,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 58,
@@ -5037,8 +5221,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 58,
@@ -5091,8 +5277,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 58,
@@ -5145,8 +5333,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 59,
@@ -5199,8 +5389,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 59,
@@ -5253,8 +5445,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 62,
@@ -5307,8 +5501,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 63,
@@ -5361,8 +5557,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 64,
@@ -5415,8 +5613,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 64,
@@ -5469,8 +5669,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 64,
@@ -5523,8 +5725,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 64,
@@ -5577,8 +5781,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 66,
@@ -5631,8 +5837,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 66,
@@ -5685,8 +5893,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 66,
@@ -5739,8 +5949,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 67,
@@ -5793,8 +6005,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 67,
@@ -5847,8 +6061,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 68,
@@ -5901,8 +6117,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 68,
@@ -5955,8 +6173,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 68,
@@ -6009,8 +6229,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 69,
@@ -6063,8 +6285,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 69,
@@ -6117,8 +6341,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 70,
@@ -6171,8 +6397,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 73,
@@ -6225,8 +6453,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 74,
@@ -6279,8 +6509,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 76,
@@ -6333,8 +6565,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 76,
@@ -6387,8 +6621,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 76,
@@ -6441,8 +6677,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 77,
@@ -6495,8 +6733,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 77,
@@ -6549,8 +6789,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 77,
@@ -6603,8 +6845,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 78,
@@ -6659,8 +6903,10 @@
       "flags": [
         "all 5 foils are 'contextual' — one axis of confusion only"
       ],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 78,
@@ -6713,8 +6959,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 78,
@@ -6767,8 +7015,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 79,
@@ -6821,8 +7071,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 80,
@@ -6875,8 +7127,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 80,
@@ -6929,8 +7183,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 80,
@@ -6983,8 +7239,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 81,
@@ -7037,8 +7295,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 84,
@@ -7091,8 +7351,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 85,
@@ -7145,8 +7407,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 86,
@@ -7199,8 +7463,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 86,
@@ -7253,8 +7519,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 86,
@@ -7307,8 +7575,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 87,
@@ -7361,8 +7631,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 87,
@@ -7415,8 +7687,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 88,
@@ -7469,8 +7743,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 89,
@@ -7523,8 +7799,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 90,
@@ -7577,8 +7855,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 90,
@@ -7631,8 +7911,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 91,
@@ -7685,8 +7967,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 92,
@@ -7739,8 +8023,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 94,
@@ -7793,8 +8079,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 95,
@@ -7847,8 +8135,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 96,
@@ -7901,8 +8191,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 96,
@@ -7955,8 +8247,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 97,
@@ -8009,8 +8303,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 97,
@@ -8063,8 +8359,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 98,
@@ -8117,8 +8415,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 99,
@@ -8171,8 +8471,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 99,
@@ -8225,8 +8527,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 100,
@@ -8279,8 +8583,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 100,
@@ -8333,8 +8639,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 100,
@@ -8387,8 +8695,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 100,
@@ -8441,8 +8751,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 100,
@@ -8495,8 +8807,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 100,
@@ -8549,8 +8863,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 101,
@@ -8603,8 +8919,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 101,
@@ -8657,8 +8975,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 102,
@@ -8711,8 +9031,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 102,
@@ -8765,8 +9087,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 106,
@@ -8819,8 +9143,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 107,
@@ -8873,8 +9199,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 107,
@@ -8927,8 +9255,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 107,
@@ -8981,8 +9311,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 108,
@@ -9035,8 +9367,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 108,
@@ -9089,8 +9423,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 109,
@@ -9143,8 +9479,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 109,
@@ -9197,8 +9535,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 109,
@@ -9251,8 +9591,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 110,
@@ -9305,8 +9647,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 110,
@@ -9359,8 +9703,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 110,
@@ -9413,8 +9759,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 111,
@@ -9467,8 +9815,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 111,
@@ -9521,8 +9871,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 111,
@@ -9575,8 +9927,10 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     },
     {
       "ayah": 111,
@@ -9629,8 +9983,19 @@
         "authored"
       ],
       "flags": [],
-      "verdict": null,
-      "reviewerNote": null
+      "verdict": "sound",
+      "reviewerNote": null,
+      "reviewedBy": "Firdaus",
+      "reviewedAt": "2026-08-11T12:54:59+00:00"
     }
-  ]
+  ],
+  "reviewProgress": {
+    "reviewed": 178,
+    "unreviewed": 0,
+    "total": 178,
+    "note": "SIGNED. Every item in this sample was displayed to Firdaus in full (answer + all foils + any mechanical flag) on 2026-08-11 and approved. This sample was drawn AFTER the v3-D60 kernel fix, so it reflects the current corpus, not the pre-fix one his earlier 10-item review covered.",
+    "reviewerRole": "qari (Firdaus is the named reviewer with doctrinal authority, v3-D22)",
+    "displayedInFull": true,
+    "flaggedItemsShown": true
+  }
 }
