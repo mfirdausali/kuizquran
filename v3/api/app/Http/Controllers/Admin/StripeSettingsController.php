@@ -126,10 +126,33 @@ class StripeSettingsController extends Controller
 
         $uniqueModes = array_values(array_unique($modes));
 
+        // PAY-1 / M7's exit criterion, surfaced where it is actionable.
+        //
+        // `ReplaySuiteTest` refuses to pass over an empty fixture set and reports
+        // INCOMPLETE instead, because a green suite over zero cases is exactly
+        // v3-D50's failure on the revenue path. Configuring credentials is the
+        // step that unblocks recording those fixtures, so the count belongs on
+        // this screen rather than only in a terminal.
+        $fixtureDir = base_path('../fixtures/stripe');
+        $fixtures = is_dir($fixtureDir) ? glob($fixtureDir.'/*.json') : [];
+        $fixtureCount = is_array($fixtures) ? count($fixtures) : 0;
+
         return response()->json([
             'fields' => $fields,
             'configured' => ! in_array(false, array_column($fields, 'present'), true),
             'mode' => count($uniqueModes) === 1 ? $uniqueModes[0] : null,
+            'replaySuite' => [
+                'fixtureCount' => $fixtureCount,
+                'green' => $fixtureCount > 0,
+                'blocker' => $fixtureCount > 0
+                    ? null
+                    : 'No recorded Stripe events. The replay suite reports INCOMPLETE '
+                        .'rather than passing over zero cases. Record fixtures with '
+                        .'`stripe listen` + `stripe trigger` once test-mode keys exist — '
+                        .'see v3/fixtures/stripe/README.md. Do NOT hand-write payloads: '
+                        .'the suite exists to prove the handlers parse what Stripe '
+                        .'actually sends.',
+            ],
             // Mixing a live secret with a test publishable key (or vice versa)
             // fails at the worst possible moment — first real payment.
             'mixedModes' => count($uniqueModes) > 1,

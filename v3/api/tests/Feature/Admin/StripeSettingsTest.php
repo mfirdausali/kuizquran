@@ -165,6 +165,30 @@ class StripeSettingsTest extends TestCase
         $this->assertSame($before, AdminAudit::count());
     }
 
+    /**
+     * PAY-1 surfaced on the screen where it is actionable.
+     *
+     * The replay suite reports INCOMPLETE over an empty fixture set rather than
+     * passing vacuously (v3-D50 on the revenue path). Whoever is configuring
+     * credentials is exactly the person who can then record fixtures, so the
+     * blocker belongs here and not only in a terminal.
+     */
+    public function test_reports_the_replay_suite_blocker(): void
+    {
+        $response = $this->getJson('/api/admin/stripe');
+
+        $response->assertOk()
+            ->assertJsonPath('replaySuite.green', false)
+            ->assertJsonPath('replaySuite.fixtureCount', 0);
+
+        // The blocker must NAME the fix, not merely report red.
+        $blocker = $response->json('replaySuite.blocker');
+        $this->assertIsString($blocker);
+        $this->assertStringContainsString('stripe trigger', $blocker);
+        // And it must warn against the tempting wrong fix.
+        $this->assertStringContainsString('hand-write', $blocker);
+    }
+
     /** The whole surface sits behind the admin gate, like every sibling route. */
     public function test_requires_admin(): void
     {
