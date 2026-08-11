@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildQuestion, type Spec } from "../src/buildQuestion.ts";
-import { vocabItem } from "../src/test.ts";
+import { clozeItem, vocabItem } from "../src/test.ts";
 import type { Corpus } from "../src/types.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -78,6 +78,48 @@ describe("buildQuestion — s1 lane (build-plan step 16's first parity-fenced ke
     // @ts-expect-error — "rc" is deliberately NOT a member of Spec['lane'];
     // reconstruct.ts's sequencing state machine is never templated.
     const spec: Spec = { lane: "rc", site: { kind: "ayah", surah: 12, ayah: 4 } };
+    expect(buildQuestion(corpus, spec)).toBeNull();
+  });
+});
+
+describe("buildQuestion — cloze lane (parity target: test.ts#clozeItem)", () => {
+  it("byte-parity: option texts and the correct text exactly match clozeItem for the same ayah", () => {
+    const spec: Spec = { lane: "cloze", site: { kind: "ayah", surah: 12, ayah: 4 } };
+    const item = buildQuestion(corpus, spec);
+    const legacy = clozeItem(corpus, 4);
+
+    expect(item).not.toBeNull();
+    if (item!.shape !== "choice") throw new Error("unreachable");
+    expect(item!.options.map((f) => f.text)).toEqual(legacy.options);
+    expect(item!.options[item!.correctIndex]!.text).toBe(legacy.correct);
+  });
+
+  it("byte-parity holds across every ayah in the fixture corpus", () => {
+    for (const v of corpus.verses) {
+      const spec: Spec = { lane: "cloze", site: { kind: "ayah", surah: 12, ayah: v.ayah } };
+      const item = buildQuestion(corpus, spec);
+      const legacy = clozeItem(corpus, v.ayah);
+      expect(item).not.toBeNull();
+      if (item!.shape !== "choice") throw new Error("unreachable");
+      expect(item!.options.map((f) => f.text), `ayah ${v.ayah}`).toEqual(legacy.options);
+    }
+  });
+
+  it("options are Arabic script (the blank is filled with a word, not a gloss)", () => {
+    const spec: Spec = { lane: "cloze", site: { kind: "ayah", surah: 12, ayah: 4 } };
+    const item = buildQuestion(corpus, spec);
+    if (item!.shape !== "choice") throw new Error("unreachable");
+    for (const opt of item!.options) {
+      expect(opt.script).toBe("arabic");
+      expect(opt.from.kind).toBe("distractor");
+    }
+    // The correct option is the target WORD itself, not a distractor row —
+    // its Face still carries real provenance, just a different CorpusRef kind.
+    expect(item!.options[item!.correctIndex]!.from.kind).toBe("word");
+  });
+
+  it("cloze is ayah-only, matching variant.ts's own admissibility rule", () => {
+    const spec: Spec = { lane: "cloze", site: { kind: "seam", surah: 12, ayah: 4 } };
     expect(buildQuestion(corpus, spec)).toBeNull();
   });
 });
