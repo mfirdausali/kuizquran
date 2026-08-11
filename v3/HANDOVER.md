@@ -40,6 +40,13 @@ test fixture**, not the frozen corpus the qari would sign.
 | Drill corpus (§A-note) | stale test fixture | **unchanged** — still the defect |
 | B6 guard | mutation survivor | **closed 2026-08-12** — see Spot-check 2's closure note |
 
+> **CORRECTED 2026-08-12 (later).** The "Drill corpus (§A-note)" row above is
+> now stale: `lib/corpus/load.ts` was repointed at the compiled corpus this
+> run — see DECISIONS.md v3-D76. Step 20 moves from PARTIAL to DONE and the
+> §A-note defect below is CLOSED. Left the row above unedited (this document's
+> own convention per v3-D64: correct forward, don't rewrite history) and the
+> correction lives here and at each affected row.
+
 ---
 
 # A. The 32 steps
@@ -69,7 +76,7 @@ verify something, the row says so and names it.
 | 17 | App shell + design system + client islands | **DONE** | 14 routes build; `shell.test.ts` 43 tests; IDB islands `append`/`writeLock`/`state` tested. |
 | 18 | **Quiz loop + full session lifecycle** | **DONE** (was NOT BUILT) | `lib/session/run.ts` + `SessionIsland`. A learner completes a drill and every tap appends — proven by e2e in a real browser, on disk. Commit-before-paint is structural: `lastTap` is the only source of `reveal`, and the only way to get `lastTap` is to await `append`. Resume derives from the fold, so a reload re-derives what is due. Exposed two shipped defects: v3-D70 (`writeLock.acquire()` never granted — writing was impossible) and v3-D71 (the default surah was unstaged — dead end one tap after enrolling). |
 | 19 | Macro panel, ring, progress table, plan calendar | **DONE for single-surah** | `/progress` and `/home` are wired and learner-reachable (v3-D74). **Multi-surah is NOT built and this is deliberate**: `readChoices()` returns a singular `surah` and there is no enrollment list, so rendering rows for un-enrolled surahs would fabricate an enrollment. Both routes render the one real enrollment and name the plural case. |
-| 20 | Continuous drill: range + mushaf page | **PARTIAL** | `/drill` is the one **real** learner surface — `DrillPicker` renders live. **But `lib/corpus/load.ts` reads `packages/engine/test/fixtures/`, and `AVAILABLE_SURAHS = [12]`.** See §A-note. |
+| 20 | Continuous drill: range + mushaf page | **DONE (2026-08-12)** | `/drill` is a **real** learner surface — `DrillPicker` renders live. `lib/corpus/load.ts` now reads `packages/corpus-compiler/output/` (the frozen, hashed artifact) and `AVAILABLE_SURAHS = [12, 67, 103, 112]` — the full launch set. The mushaf page picker, previously disabled by the stale fixture's `page: null`, is now live against real geometry. See DECISIONS.md v3-D76 and the corrected §A-note. |
 | 21 | Sync outbox + pull + merge preserving deviceSeq | **DONE** | B5 mutation-verified by me today: 5 tests RED + boundary clause 7 fires. Chunking at 200 proven. |
 | 22 | Onboarding (7 screens) + dashboard + ayah detail | **DONE** | 7 screens real and committing. `/home` and `/surah/[surah]/[ayah]` are both wired (v3-D74). v3-D75: `SessionGate` linked un-enrolled learners to `/onboarding`, a 404 — `(onboarding)` is a route group with no URL segment, so it is `/start`. Now a shared `ONBOARDING_HREF`. |
 | 23 | Entitlements + Stripe + paywall + PDPA | **PARTIAL** | State machine, 4 states, guarded transitions, HMAC verify, idempotency index — all tested. **PAY-1 open: zero replay fixtures**, 2 tests deliberately INCOMPLETE. |
@@ -112,10 +119,17 @@ stub route. Check line numbers before reading a grep hit as "still a stub".
 | 31 | *(post-launch)* Social behind flags | **NOT BUILT** | Correct — post-launch by construction. |
 | 32 | *(post-launch)* Learning-science + recommender | **NOT BUILT** | Correct — post-launch by construction. |
 
-### A-note — the drill corpus defect (the most consequential finding)
+### A-note — the drill corpus defect (the most consequential finding) — **CLOSED 2026-08-12**
 
-`/drill` is the **only** route where a learner reaches Quranic text through the
-real engine. It loads from the wrong place:
+> **Fixed.** `lib/corpus/load.ts` now reads `packages/corpus-compiler/output/`
+> and `AVAILABLE_SURAHS = [12, 67, 103, 112]`. `check-boundaries.mjs` clause 13
+> now fails the build if any production file references
+> `packages/engine/test/fixtures` again — mutation-verified: reverting the fix
+> fails the clause naming the exact line. See DECISIONS.md v3-D76. The
+> description below is preserved as the historical record of the defect.
+
+`/drill` was **the only route where a learner reached Quranic text through the
+real engine, and it loaded from the wrong place:**
 
 ```
 lib/corpus/load.ts:44  export const AVAILABLE_SURAHS: readonly number[] = [12];
@@ -608,21 +622,22 @@ the long pole and waits on no code.
 
 ## Engineering — in dependency order
 
-> **2026-08-12: E1, E3, E4 and E5 below are DONE — this table is otherwise as
-> originally written and is stale on those four rows.** E3 (session lifecycle)
-> and E5 (service worker) landed in `feat(v3): the session loop` and
+> **2026-08-12: E1, E2, E3, E4 and E5 below are DONE — this table is otherwise
+> as originally written and is stale on those five rows.** E3 (session
+> lifecycle) and E5 (service worker) landed in `feat(v3): the session loop` and
 > `feat(v3): wire the five stub routes + service worker`; E4 (stub routes) landed
 > in the same service-worker commit; E1 (this spot-check's B6 fix) landed
-> immediately after, in the commit this note is part of. **Do not trust this
-> table's dependency ordering at face value — re-derive current status from
-> `git log` and the repo per NIGHTLY.md's own rule, the same way this note was
-> produced**, rather than assuming E2/E6–E10 are still accurately described
-> either (they were not re-verified when this note was added).
+> immediately after; E2 (the drill corpus loader) landed in the nightly run this
+> note is part of — see DECISIONS.md v3-D76. **Do not trust this table's
+> dependency ordering at face value — re-derive current status from `git log`
+> and the repo per NIGHTLY.md's own rule, the same way this note was
+> produced**, rather than assuming E6–E10 are still accurately described either
+> (they were not re-verified when this note was added).
 
 | # | Item | Effort | Note |
 |---|---|---|---|
 | E1 | ~~**Fix the B6 sweep.**~~ **DONE 2026-08-12** — see Spot-check 2's closure note above. Engine suite 417/417 (was 391). | hours | closed |
-| E2 | **Repoint the drill corpus loader at `output/`** (§A-note), stage the artifacts, widen `AVAILABLE_SURAHS`, and **add a CI clause asserting no learner-reachable route reads `test/fixtures/`.** | days | Must land before any sign-off, or the qari certifies content learners never see |
+| E2 | ~~**Repoint the drill corpus loader at `output/`**~~ **DONE 2026-08-12** — `lib/corpus/load.ts` reads `packages/corpus-compiler/output/`, `AVAILABLE_SURAHS` widened to `[12, 67, 103, 112]`, `check-boundaries.mjs` clause 13 added and mutation-verified. See DECISIONS.md v3-D76. | — | closed |
 | E3 | ~~**Build the session lifecycle — step 18.**~~ **DONE** — see the 2026-08-12 completion-pass section above (`lib/session/run.ts`). | — | closed |
 | E4 | ~~**Fill the stub routes**~~ **DONE** — `/home`, `/progress`, `/library`, `/surah/*` wired per the 2026-08-12 completion-pass section, though `/home`/`/library`/`/progress` still carry an honest in-page StubNote for the multi-surah gap (not a stub route — check line number). | — | closed |
 | E5 | ~~**Service worker + manifest.**~~ **DONE** — `public/sw.js` + `ServiceWorkerRegistrar`, offline-after-one-visit verified in a real browser per the completion-pass section. | — | closed |

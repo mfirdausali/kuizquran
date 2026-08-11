@@ -68,10 +68,16 @@ afterEach(cleanup);
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WEB = resolve(HERE, "..");
 
-/** THE SURAH THIS ROUTE CAN ACTUALLY SERVE TODAY. `lib/corpus/load.ts` exports
- *  AVAILABLE_SURAHS = [12] and reads this exact file — so a test against 12 is
- *  a test against what the route really renders, and a test against 112 would
- *  be a test against the null branch. */
+/** A REAL, complete corpus for surah 12 — 111 ayat, matching what the route
+ *  serves for that surah. Read from the engine's own fixture rather than the
+ *  compiled artifact `lib/corpus/load.ts` actually reads in production
+ *  (`packages/corpus-compiler/output/12/corpus.json`, gitignored per v3-D52):
+ *  this suite drives the ISLANDS directly (see the header note above), never
+ *  the route or `loadCorpus` itself, so it needs real, non-authored Arabic
+ *  bytes at a stable, always-present path — not the frozen build artifact a
+ *  clean checkout may not have compiled yet. `test/corpus-load.test.ts` is
+ *  what pins that the ROUTE reads the compiled corpus; this file does not
+ *  need to duplicate that. */
 const corpus: Corpus = JSON.parse(
   readFileSync(resolve(WEB, "../../packages/engine/test/fixtures/12.json"), "utf8"),
 );

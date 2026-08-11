@@ -1779,3 +1779,87 @@ Honest gaps the agents reported and I did not close:
   honestly rather than hiding it; the thinness itself is unfixed.
 - Al-Mulk scene beats (human), Stripe replay fixtures (needs a real test-mode
   account), and the 7-night window (needs live staging).
+
+---
+
+## 2026-08-12 — build-plan step 20 completion: the drill corpus loader, HANDOVER's §A-note fix
+
+### v3-D76 — `lib/corpus/load.ts` now reads the FROZEN corpus, not the engine's unhashed test fixture
+
+HANDOVER.md's own re-audit named this "the most consequential finding": every
+learner-reachable route `lib/corpus/load.ts` backs — `/drill`, `/plan`,
+`/progress`, `/progress/list`, `/surah/[surah]`, `/surah/[surah]/[ayah]`,
+`/workbench` — read `packages/engine/test/fixtures/12.json` at request time.
+That file is the engine's own unit-test fixture: cut before v3-D60's
+near-duplicate-foil fix (so it still contained the three-spellings-of-one-word
+defect Firdaus rejected), carrying no `hashSpecVersion`, and never once
+touched by the content-freeze gate or a qari signature. A learner on any of
+those routes was served content the tiered-hash chain of custody (v3-D13/
+v3-D22) cannot certify, because the served bytes were never the bytes hashed.
+
+**Verified, not assumed**, before writing a line of the fix: compiled all four
+launch surahs (`npm run compile -- 12|67|103|112` — `Makefile#compile-corpus`
+was itself missing 67, a real staleness, now fixed) and diff'd the compiled
+`meta` against the stale fixture — different `generatedFrom` provenance,
+different distractor counts (12: 8877 vs the fixture's 8880 — the fixture
+predates v3-D60's redraw), and `hashSpecVersion` present (`1`) on the compiled
+artifact, absent entirely on the fixture.
+
+**Fixed**, `apps/web/lib/corpus/load.ts`: `OUTPUT_ROOT` now points at
+`packages/corpus-compiler/output`, the same artifact `stage-corpus.mjs` already
+stages for client islands and `content-freeze.mjs` already hashes.
+`AVAILABLE_SURAHS` widens from `[12]` to `[12, 67, 103, 112]` — the exact
+`LAUNCH_SURAHS` set `content-freeze.mjs` enumerates — with 12 kept first so
+every caller defaulting to `AVAILABLE_SURAHS[0]` (`/plan`, `/progress`,
+`/drill`) is unchanged. `output/` stays gitignored (v3-D52); a checkout that
+has not run `make compile-corpus` still degrades to `loadCorpus` returning
+`null`, exactly as before — nothing about the graceful-degradation contract
+changed, only what it degrades FROM.
+
+**A standing guard, not just a one-time fix**: `check-boundaries.mjs` clause
+13 fails the build if any file under `app/`, `components/` or `lib/` (outside
+`.test.ts(x)`) references `packages/engine/test/fixtures` again. Mutation-
+verified: reverting `load.ts` to the old path makes the clause fail, naming
+the exact file and line; reverting the mutation makes it pass again. Scoped to
+production code only — the many `test/*.test.tsx` files that legitimately read
+the engine fixture as a source of real, non-authored Arabic bytes for driving
+components directly (never through `loadCorpus`) are correctly untouched by
+this clause; INVARIANTS.md Absolute B is what makes that a legitimate use in
+the first place.
+
+**One real, welcome side effect**: the mushaf PAGE picker on `/drill`
+(WIREFRAME §13) was correctly, visibly disabled because the stale fixture
+carried `page: null` for all 111 of Yusuf's verses. The compiled corpus has
+real geometry (`page: 235` for 12:1, matching the compiler's own "Yusuf spans
+pages 235–248"), so the page picker is now genuinely usable — no code in
+`lib/drill/sites.ts` or `components/drill/DrillPicker.tsx` changed; it was
+already written to activate the moment real geometry arrived.
+
+**Two test files updated deliberately, not silently**: `test/library.test.tsx`
+had a test literally titled "does not claim a full experience for any surah in
+this build" — its own docstring said this must change deliberately the day the
+two corpus loaders' sets stop being disjoint. They just did (112/103/67 are now
+both practisable AND detailed); the test now asserts the NEW fact — every
+surah but 12 gets the full-experience status, 12 alone stays browse-only,
+named explicitly rather than derived from the constants it is supposed to be
+checking. `test/ayah-detail.test.tsx`'s header comment claimed "a test against
+12 is a test against what the route really renders" — no longer true (that
+suite drives components directly from the engine fixture, which is legitimate
+per Absolute B, but is no longer what the ROUTE serves) — corrected to say so.
+
+**Not done, and out of scope for this fix**: the per-surah/combined-load views
+on `/progress` and multi-surah enrollment on `/home`/`/library` remain
+StubNotes. Before this fix their blocker was misdescribed as "only one corpus
+compiled"; the real blocker, now that four are compiled, is that
+`meta.onboardingChoices.surah` is a single number with no enrollment list — a
+product decision (a real enrollment model), not a wiring job. Both routes'
+header comments are corrected to name the real blocker rather than the
+now-stale one, so the next run does not waste time discovering AVAILABLE_SURAHS
+already widened without checking why the multi-surah view still doesn't
+render.
+
+**Verified**: `apps/web` — 659 vitest passing (was 548 at the last audited
+total; +111 reflects tests landed in intervening commits plus 8 new in
+`test/corpus-load.test.ts`), typecheck clean, `npm run gates` green (boundaries
+now 164 files / 13 clauses), `npm run build` exit 0 (17 routes). Full repo
+`make build`/`make test` run and reported in this run's NIGHTLY report.

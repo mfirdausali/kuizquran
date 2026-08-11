@@ -135,8 +135,9 @@ determinism-check: ## Run BOTH determinism checks on demand against committed fi
 nightly-window: ## Report the 7-consecutive-green-nights streak with its evidence (exit 0 only when satisfied)
 	cd $(API_V3) && TZ=UTC php artisan nightly:window
 
-compile-corpus: ## Compile the v3 corpus for surahs 12, 103, 112 (build-plan step 3)
+compile-corpus: ## Compile the v3 corpus for the launch set 12, 67, 103, 112 (build-plan steps 3 + Q3/v3-D59)
 	cd $(CORPUS_COMPILER) && npm run compile -- 12
+	cd $(CORPUS_COMPILER) && npm run compile -- 67
 	cd $(CORPUS_COMPILER) && npm run compile -- 103
 	cd $(CORPUS_COMPILER) && npm run compile -- 112
 

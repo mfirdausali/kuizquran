@@ -22,12 +22,14 @@
 // The RANGE picker works for any surah the corpus loader can serve.
 //
 // The MUSHAF PAGE picker requires per-verse page geometry. `CorpusVerse.page`
-// is a live field and the compiler populates it (Yusuf spans pages 235–248),
-// but the corpus this app currently LOADS — `packages/engine/test/fixtures/
-// 12.json` — carries `page: null` for all 111 verses. So the page picker is
-// correctly, visibly unavailable here until `lib/corpus/load.ts` is repointed
-// at compiled output. It degrades to an explanation rather than a crash
-// (edge case #63) and NO page map is invented to fill the gap.
+// is a live field and the compiler populates it (Yusuf spans pages 235–248).
+// `lib/corpus/load.ts` now reads that compiled artifact (it used to read
+// `packages/engine/test/fixtures/12.json`, which carries `page: null` for all
+// 111 verses), so the page picker is genuinely available for every surah in
+// `AVAILABLE_SURAHS` once `make compile-corpus` has run. On a checkout that
+// has not run it, `loadCorpus` returns null and this route degrades to an
+// explanation rather than a crash (edge case #63) — NO page map is ever
+// invented to fill the gap.
 
 import { loadCorpus, AVAILABLE_SURAHS } from "@/lib/corpus/load";
 import { DrillPicker } from "@/components/drill/DrillPicker";

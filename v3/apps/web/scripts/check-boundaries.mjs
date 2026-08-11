@@ -568,6 +568,43 @@ for (const f of files) {
   });
 }
 
+// --- Clause 13: NO LEARNER-REACHABLE ROUTE READS THE ENGINE'S TEST FIXTURE. ---
+//
+// HANDOVER.md's §A-note ("the most consequential finding"): `lib/corpus/load.ts`
+// used to read `packages/engine/test/fixtures/12.json` at request time — the
+// engine's own UNFROZEN test data, cut before v3-D60's foil-dedup fix and
+// carrying no `hashSpecVersion`. A learner on `/drill`, `/plan`, `/progress`,
+// `/surah/[surah]` or `/workbench` was served content the content-freeze gate
+// and the qari's tiered sign-off (v3-D13/v3-D22) can never certify, because the
+// bytes served were never the bytes hashed. Fixed by repointing
+// `lib/corpus/load.ts` at `packages/corpus-compiler/output/` (see that file).
+//
+// This clause is the standing guard: production code (app/, components/, lib/)
+// must never reference the engine's test-fixtures path again, so the same
+// defect cannot quietly return the next time a route needs "some real corpus
+// data" and reaches for the nearest fixture instead of the compiled artifact.
+// Scoped to app/components/lib (not the whole repo) so it never fires on the
+// many legitimate `test/*.test.tsx` files that deliberately read the engine
+// fixture as a source of REAL, non-authored Arabic bytes for driving
+// components directly — that is INVARIANTS.md Absolute B's sacred-text rule
+// working as intended, not the defect this clause guards against.
+const ENGINE_FIXTURE_PATH = /packages\/engine\/test\/fixtures/;
+for (const f of files.filter((f) => /^(app|components|lib)\//.test(rel(f)))) {
+  const r = rel(f);
+  if (r.endsWith(".test.ts") || r.endsWith(".test.tsx")) continue;
+  const src = stripComments(read(f));
+  src.split("\n").forEach((line, i) => {
+    if (ENGINE_FIXTURE_PATH.test(line)) {
+      violations.push(
+        `${r}:${i + 1}: reads the engine's test fixture from production code. ` +
+          `Learner-reachable routes must serve the FROZEN compiled corpus via ` +
+          `lib/corpus/load.ts, never packages/engine/test/fixtures — see ` +
+          `HANDOVER.md's §A-note and DECISIONS.md's step-20 completion entry.`,
+      );
+    }
+  });
+}
+
 if (violations.length > 0) {
   console.error(`\n✗ boundaries gate FAILED — ${violations.length} violation(s)\n`);
   for (const v of violations) console.error(`   ✗  ${v}`);
@@ -577,5 +614,6 @@ if (violations.length > 0) {
 
 console.log(
   `boundaries: OK — ${files.length} files checked (idb/client, sacred-text, ` +
-    `engine-decision, egress, recall-before-identity, entitlement, pricing, v3-D19 claims).`,
+    `engine-decision, egress, recall-before-identity, entitlement, pricing, v3-D19 claims, ` +
+    `no-engine-fixture-in-production).`,
 );

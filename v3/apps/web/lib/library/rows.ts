@@ -14,30 +14,29 @@
 // today and the page cannot be honest without it.
 //
 // ---------------------------------------------------------------------------
-// AVAILABILITY IS PER-SURFACE, NOT PER-SURAH — THE FACT THE STUB MISSED
+// AVAILABILITY IS PER-SURFACE, NOT PER-SURAH — WHAT THE STUB GOT WRONG
 // ---------------------------------------------------------------------------
-// There are two corpus loaders and they serve DISJOINT sets:
+// There are two corpus loaders, and they used to serve DISJOINT sets by
+// accident rather than by design:
 //
 //   `lib/corpus/staged.ts#CLIENT_SURAHS`  = [112, 103, 67]  — staged into
 //        `public/corpus/`, fetched by the browser. This is what /session
-//        drills, so these three are the surahs a learner can actually PRACTISE.
+//        drills, so these three are the surahs a learner can PRACTISE.
 //
-//   `lib/corpus/load.ts#AVAILABLE_SURAHS` = [12]            — read from disk on
-//        the server. This is what /surah/N renders its macro panel and ayah
-//        facts from, so surah 12 is the only one with a populated surah PAGE.
+//   `lib/corpus/load.ts#AVAILABLE_SURAHS` = [12, 67, 103, 112] — read from
+//        disk on the server, from the FROZEN compiled corpus (HANDOVER.md's
+//        §A-note fix). This is what /surah/N renders its macro panel and ayah
+//        facts from.
 //
-// The consequence is uncomfortable and worth stating plainly: for 112, 103 and
-// 67, `/surah/N` renders "no compiled corpus is available for this surah yet",
-// because `loadCorpus` returns null for anything outside AVAILABLE_SURAHS. The
-// stub library shipped exactly one link, to `/surah/112`, and that link landed
-// on that empty state. Listing all four without saying so would have multiplied
-// one dead end into three while looking more finished.
+// 112, 103 and 67 are therefore now BOTH practisable and detailed — a full
+// experience. Surah 12 stays server-only ON PURPOSE: it is 3.4 MB compiled,
+// and `scripts/stage-corpus.mjs` deliberately never ships it to a browser, so
+// it alone remains browse-only.
 //
 // So a row does not carry a single "available" boolean. It carries what the
 // learner can do with that surah TODAY, on each surface, and the page prints
-// it. Nothing here is disabled: all four routes render a real page, and three
-// of the four are genuinely practisable — marking those "unavailable" because
-// the SERVER loader lacks them would be a lie in the opposite direction.
+// it — which is what turns "surah 12 is different" from a silent asymmetry
+// into an honestly labelled one.
 //
 // ---------------------------------------------------------------------------
 // WHY THIS IS BUILD-TIME DATA AND NOT A MANIFEST FETCH (E-07)

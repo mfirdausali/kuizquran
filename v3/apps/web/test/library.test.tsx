@@ -36,7 +36,7 @@ import { commitOnboarding } from "@/lib/onboarding/choices";
 import { DB_NAME, openDb, resetDbForTests, writeLock } from "@/lib/idb";
 import { CLIENT_SURAHS } from "@/lib/corpus/staged.ts";
 import { AVAILABLE_SURAHS } from "@/lib/corpus/load.ts";
-import { libraryRows } from "@/lib/library/rows.ts";
+import { libraryRows, STATUS_BROWSE_ONLY, STATUS_READY } from "@/lib/library/rows.ts";
 
 // Without this, each render is APPENDED to the same document and the second
 // test onward sees two copies of the nav — which surfaces as "found multiple
@@ -132,14 +132,30 @@ describe("the library says WHICH surface is ready for each surah", () => {
     expect(rows.find((r) => r.surah === 112)!.practisable).toBe(true);
   });
 
-  it("does not claim a full experience for any surah in this build", () => {
-    // Today no surah is BOTH drillable and backed by a server corpus: the two
-    // loaders serve disjoint sets. If that ever changes this test should be
-    // updated deliberately — it exists so the change is noticed rather than
-    // silently absorbed into a row that overpromises.
-    for (const row of libraryRows()) {
-      expect(row.practisable && row.detailed).toBe(false);
+  it("marks a full experience ONLY for a surah both loaders actually serve", () => {
+    // This test used to assert NO surah was both practisable and detailed,
+    // because `lib/corpus/load.ts#AVAILABLE_SURAHS` served only surah 12 (the
+    // engine's stale test fixture) while `CLIENT_SURAHS` served 112/103/67 —
+    // two disjoint sets by accident of what had been wired, not by design.
+    //
+    // `lib/corpus/load.ts` now reads the FROZEN compiled corpus for the whole
+    // launch set (HANDOVER.md's §A-note fix), so 112/103/67 are staged for the
+    // browser AND readable by the server loader — a full experience, honestly.
+    // Surah 12 stays server-only BY DESIGN (it is 3.4 MB and
+    // `scripts/stage-corpus.mjs` deliberately never ships it to a browser), so
+    // it alone must still read browse-only. Named per-surah, not derived from
+    // the constants, so a future accidental widening or narrowing of either
+    // loader is caught here rather than silently absorbed.
+    const rows = libraryRows();
+    for (const row of rows) {
+      const expectFull = row.surah !== 12;
+      expect(
+        row.practisable && row.detailed,
+        `surah ${row.surah}: practisable=${row.practisable} detailed=${row.detailed}`,
+      ).toBe(expectFull);
     }
+    expect(rows.find((r) => r.surah === 12)!.status).toBe(STATUS_BROWSE_ONLY);
+    expect(rows.find((r) => r.surah === 112)!.status).toBe(STATUS_READY);
   });
 });
 

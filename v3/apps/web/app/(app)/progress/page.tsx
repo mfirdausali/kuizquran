@@ -25,18 +25,22 @@
 // same engine functions the scheduler uses.
 //
 // NOT landed, and deliberately still a StubNote: the PER-SURAH breakdown and
-// the COMBINED LOAD view. Those are §10's "one genuine v3 extension", and they
-// are blocked on data rather than on code. `lib/corpus/load.ts` serves exactly
-// one surah — `AVAILABLE_SURAHS = [12]` — because the only complete corpus in
-// the repo is the engine's own fixture; `packages/corpus-compiler/output/` is
-// gitignored (v3-D52), so a fresh checkout has nothing else to load.
+// the COMBINED LOAD view. Those are §10's "one genuine v3 extension", and the
+// blocker is no longer the corpus — `lib/corpus/load.ts` now reads the FROZEN
+// compiled artifact for the whole launch set (`AVAILABLE_SURAHS = [12, 67,
+// 103, 112]`, HANDOVER.md's §A-note fix) — it is the ENROLLMENT MODEL.
+// `meta.onboardingChoices.surah` is a single number, there is no enrollment
+// list, and there is no enroll event type, so this page (like `/home` and
+// `/library`) has exactly one real enrollment to report on regardless of how
+// many corpora are compiled.
 //
-// A "per-surah breakdown" over one surah renders one row, and a "combined load"
-// combines one curve. Both would be multi-surah views wearing the costume of
-// one: true, green, and constraining nothing — this build's documented
-// vacuous-verification failure mode, in UI form. `splitBudget()` (E-02/E-06's
-// closed fix) is built and waiting; what is missing is a second compiled
-// corpus, not a mechanism. So the section says what it is waiting for.
+// A "per-surah breakdown" over one enrolled surah renders one row, and a
+// "combined load" combines one curve. Both would be multi-surah views wearing
+// the costume of one: true, green, and constraining nothing — this build's
+// documented vacuous-verification failure mode, in UI form. `splitBudget()`
+// (E-02/E-06's closed fix) is built and waiting; what is missing is a real
+// multi-enrollment model, a product decision HANDOVER.md names as "a real
+// decision, not a wiring job." So the section says what it is waiting for.
 
 import Link from "next/link";
 
