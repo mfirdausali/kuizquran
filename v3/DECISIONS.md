@@ -1363,3 +1363,78 @@ content for Al-Mulk, which is human work — BUILD-PLAN budgets it in days and
 names Firdaus or a hired writer. This is the correct outcome: broadening the
 launch set added a real obligation rather than a formality, and the gate found
 it the moment the scope changed.
+
+---
+
+## 2026-08-11 — a commit-hygiene failure of mine, recorded because the log cannot show it
+
+### v3-D64 — The landing refactor is buried in commit ab6b986 and is unattributable
+
+An adversarial verifier caught this, and it is my error, not an agent's.
+
+Commit `ab6b986` is titled *"QA sample SIGNED (216 items); Q3 flows into the
+freeze gate"*. Its message describes only the QA signing and the freeze gate.
+But its diff also contains **11 files of the nexura-pattern landing refactor** —
+`app/page.tsx` (+271), five new `components/sections/` modules,
+`components/ui/{Button,Container}.tsx`, `lib/cn.ts`, `lib/i18n/dictionaries.ts`,
+and a 60-line widening of `check-boundaries.mjs`.
+
+Cause: I ran `git add -A` while a concurrent workflow agent was mid-write in the
+same tree. I had done exactly this safely many times by checking
+`git diff --cached --stat` for frozen-tree violations — but that check answers
+"did I touch v1/v2/engine", not "is everything staged actually mine to describe".
+
+Consequences, stated plainly:
+- The refactor cannot be reverted independently of the QA signatures.
+- Anyone reading the log for "when did the landing page change shape" finds
+  nothing.
+- The commit message is not false, but it is materially incomplete, which for a
+  record is nearly as bad.
+
+Not rewritten: `ab6b986` is already pushed to `main`, and rewriting shared
+history to tidy a message is a worse trade than an honest correction. This entry
+IS the correction, and the refactor's own findings are recorded in v3-D65 so
+they are not lost with it.
+
+**The rule going forward:** before `git add -A`, check `git status` against what
+you actually did, not only against what is forbidden.
+
+### v3-D65 — The landing refactor: 5 of 8 sections, and the gate hole it closed
+
+Taken from the reference project (`toniwin/web/nexura-clone`): the composition
+root, one module per section, a `Container`/`Button` primitive pair, a single
+`cn()` helper, and a locale-dictionary scaffold. **Deliberately NOT taken:**
+Tailwind (the reference is Tailwind-based; `iman-ui.css` is byte-gated and the
+design plan rejected Tailwind as fighting a locked system — verified absent from
+`package.json`, postcss config, and every new file's classNames) and
+`@opennextjs/cloudflare` (different deploy target).
+
+**Only 5 of 8 sections were extracted, and stopping was correct.** Extracting
+hero, demo and footer turned three tests red — `shell`, `landing-page` and
+`attribution` each read `app/page.tsx` AS A FILE to verify a property of the
+route (that it has a real `<h1>`; that `InlineDemo` comes from neutral
+`components/demo/` and so has not forked from onboarding; that the
+`/attribution` link exists, since a page linked from nowhere discharges no
+v3-D24 obligation). Moving that evidence into modules those tests do not read
+would leave all three passing against whatever the root happened to contain —
+the ninth vacuous verification. Three extractions were reverted rather than
+three tests weakened.
+
+**It also closed a real gate hole.** Extracting sections moved landing markup
+out of the one file `check-boundaries.mjs` clause 11 (v3-D19: no tajwid claim,
+no replace-a-teacher claim) scanned. The verifier proved the hole by the INVERSE
+mutation — removing `components/sections/` from the claim scope while leaving a
+forbidden claim on disk — and got `boundaries: OK, EXIT 0`. Clause scope is now
+widened; both directions bite.
+
+### v3-D66 — The 1551 floor was real; a verifier's 1504 was a misread
+
+The adversarial verifier reported `make test` at 1504, below the 1551 floor, and
+correctly refused to waive it. Re-derived by hand: 255 v2 + 47 v2/api + **194**
+v3/api + 101 corpus-compiler + 391 engine + 15 fold-runner + 548 apps/web =
+**1551**, exit 0. The 194 was read as 147. `make test` does not print the v3/api
+count in the same format as the vitest suites, which is what made it misreadable
+— worth fixing if the number is ever used as a gate.
+
+Recorded because the verifier did the right thing with the information it had:
+it flagged a floor breach rather than assuming its own arithmetic was wrong.
