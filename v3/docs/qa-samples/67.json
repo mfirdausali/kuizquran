@@ -1,0 +1,1861 @@
+{
+  "surah": 67,
+  "corpusHash": "2ed7175147595241",
+  "generatedAt": 1786451813154,
+  "totalCoordinates": 333,
+  "totalDistractorRows": 1665,
+  "pct": 10,
+  "sampled": 34,
+  "distractorOrigin": {
+    "authored": 0,
+    "kernel": 1665
+  },
+  "kernelYield": {
+    "5": 333
+  },
+  "signedBy": null,
+  "signedAt": null,
+  "mechanicalFlags": 2,
+  "items": [
+    {
+      "ayah": 2,
+      "position": 2,
+      "correct": "خَلَقَ",
+      "glossEn": "created",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "أُلْقِىَ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "وَلَقَدْ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "أُلْقُوا۟",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "ءَأَمِنتُم",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "ءَامَنَّا",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [
+        "all 5 foils are 'contextual' — one axis of confusion only"
+      ],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 2,
+      "position": 5,
+      "correct": "لِيَبْلُوَكُمْ",
+      "glossEn": "that He may test you",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "بَلَىٰ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "عَلَيْكُمْ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "وَكُلُوا۟",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "بَل",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "لَوْ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [
+        "all 5 foils are 'contextual' — one axis of confusion only"
+      ],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 2,
+      "position": 6,
+      "correct": "أَيُّكُمْ",
+      "glossEn": "which of you",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "أَبِيكُمْ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "عَلَيْكُم",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "يَأْتِيكُم",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "بِكُم",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "لَكُمُ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 3,
+      "position": 12,
+      "correct": "تَفَـٰوُتٍۢ ۖ",
+      "glossEn": "fault",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "تَفُورُ",
+          "prdRank": "suffix-variant",
+          "srcType": "visual",
+          "why": "orthographic neighbour (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "فَوْجٌۭ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "سَمَـٰوَٰتٍۢ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "ٱلْمَوْتَ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "فَوْقَهُمْ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 3,
+      "position": 15,
+      "correct": "هَلْ",
+      "glossEn": "can",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "أَهْلِ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "أَهْلَكَنِىَ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "ءَأَمِنتُم",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "ءَامَنَّا",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "أَحْسَنُ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 4,
+      "position": 9,
+      "correct": "وَهُوَ",
+      "glossEn": "while it",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "هُوَ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "فَهُوَ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "وَهِىَ",
+          "prdRank": "suffix-variant",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "رَأَوْهُ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "وُجُوهُ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 6,
+      "position": 7,
+      "correct": "ٱلْمَصِيرُ",
+      "glossEn": "the destination",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "أَلَمْ",
+          "prdRank": "suffix-variant",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "بَصِيرٌ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "ٱلطَّيْرُ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "ٱلْعِيرُ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "ٱلْعِلْمُ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 7,
+      "position": 4,
+      "correct": "سَمِعُوا۟",
+      "glossEn": "they will hear",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "أَجْمَعُوٓا۟",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "سَمِعَتْ",
+          "prdRank": "suffix-variant",
+          "srcType": "semantic",
+          "why": "same root (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "نَسْمَعُ",
+          "prdRank": "synonym",
+          "srcType": "semantic",
+          "why": "same root (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "أَدْعُوٓا۟",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "رَجَعُوٓا۟",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 7,
+      "position": 8,
+      "correct": "تَفُورُ",
+      "glossEn": "boils up",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "تَفَـٰوُتٍۢ ۖ",
+          "prdRank": "suffix-variant",
+          "srcType": "visual",
+          "why": "orthographic neighbour (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "غَفُورٌۭ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "وَنُفُورٍ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "ٱلْغَفُورُ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "فَوْجٌۭ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 8,
+      "position": 4,
+      "correct": "ٱلْغَيْظِ ۖ",
+      "glossEn": "rage",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "ٱلْغَيْبِ",
+          "prdRank": "suffix-variant",
+          "srcType": "visual",
+          "why": "orthographic neighbour (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "بِٱلْغَيْبِ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "ٱلْغَفُورُ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "أَلَا",
+          "prdRank": "suffix-variant",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "أَلَمْ",
+          "prdRank": "suffix-variant",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 8,
+      "position": 9,
+      "correct": "سَأَلَهُمْ",
+      "glossEn": "(will) ask them",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "رِحَالِهِمْ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "لَهُم",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "ٱللَّهُ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "أَهْلِهِمْ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "إِلَيْهِم",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 9,
+      "position": 14,
+      "correct": "أَنتُمْ",
+      "glossEn": "you (are)",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "وَأَنتُمْ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "أَنتَ",
+          "prdRank": "suffix-variant",
+          "srcType": "visual",
+          "why": "orthographic neighbour (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "كُنتُم",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "أَمِنتُم",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "ءَأَمِنتُم",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 9,
+      "position": 18,
+      "correct": "كَبِيرٍۢ",
+      "glossEn": "great",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "كَبِيرًۭا",
+          "prdRank": "suffix-variant",
+          "srcType": "visual",
+          "why": "orthographic neighbour (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "كَبِيرُهُمْ",
+          "prdRank": "suffix-variant",
+          "srcType": "semantic",
+          "why": "same root (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "ٱلْخَبِيرُ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "خَيْرٌ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "بَصِيرٌ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 11,
+      "position": 5,
+      "correct": "ٱلسَّعِيرِ",
+      "glossEn": "(of) the Blaze",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "ٱلْعِيرُ",
+          "prdRank": "look-alike-verse",
+          "srcType": "visual",
+          "why": "orthographic neighbour (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "وَٱلْعِيرَ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "ٱلطَّيْرُ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "ٱلسَّمْعَ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "ٱلْبَشِيرُ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 12,
+      "position": 6,
+      "correct": "لَهُم",
+      "glossEn": "for them",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "لَهُۥ",
+          "prdRank": "look-alike-verse",
+          "srcType": "visual",
+          "why": "orthographic neighbour (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "لَهُۥٓ",
+          "prdRank": "look-alike-verse",
+          "srcType": "visual",
+          "why": "orthographic neighbour (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "هُمْ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "سَأَلَهُمْ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "قَبْلِهِمْ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 13,
+      "position": 2,
+      "correct": "قَوْلَكُمْ",
+      "glossEn": "your speech",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "لَكُمُ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "نَقُولُ",
+          "prdRank": "synonym",
+          "srcType": "semantic",
+          "why": "same root (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "لَّعَلَّكُمْ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "بِأَهْلِكُمْ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "فَقُولُوا۟",
+          "prdRank": "synonym",
+          "srcType": "semantic",
+          "why": "same root (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 15,
+      "position": 5,
+      "correct": "ٱلْأَرْضَ",
+      "glossEn": "the earth",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "وَٱلْأَرْضِ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "أَلَا",
+          "prdRank": "suffix-variant",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "إِلَّا",
+          "prdRank": "suffix-variant",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "أَرْضًۭا",
+          "prdRank": "synonym",
+          "srcType": "semantic",
+          "why": "same root (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "وَٱلْأَبْصَـٰرَ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 15,
+      "position": 12,
+      "correct": "رِّزْقِهِۦ ۖ",
+      "glossEn": "His provision",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "يَرْزُقُكُمْ",
+          "prdRank": "synonym",
+          "srcType": "semantic",
+          "why": "same root (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "تُرْزَقَانِهِۦٓ",
+          "prdRank": "synonym",
+          "srcType": "semantic",
+          "why": "same root (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "فَوْقَهُمْ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "ءَأَمِنتُم",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "ءَامَنَّا",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 16,
+      "position": 6,
+      "correct": "يَخْسِفَ",
+      "glossEn": "He will cause to swallow",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "يُوسُفَ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "بِيُوسُفَ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "لَيُوسُفُ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "يَخْشَوْنَ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "ءَأَمِنتُم",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 16,
+      "position": 8,
+      "correct": "ٱلْأَرْضَ",
+      "glossEn": "the earth",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "وَٱلْأَرْضِ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "أَلَا",
+          "prdRank": "suffix-variant",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "إِلَّا",
+          "prdRank": "suffix-variant",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "أَرْضًۭا",
+          "prdRank": "synonym",
+          "srcType": "semantic",
+          "why": "same root (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "وَٱلْأَبْصَـٰرَ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 17,
+      "position": 10,
+      "correct": "فَسَتَعْلَمُونَ",
+      "glossEn": "Then you would know",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "تَعْلَمُونَ",
+          "prdRank": "synonym",
+          "srcType": "semantic",
+          "why": "same root (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "تَعْلَمُوٓا۟",
+          "prdRank": "synonym",
+          "srcType": "semantic",
+          "why": "same root (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "يَعْلَمُونَ",
+          "prdRank": "synonym",
+          "srcType": "semantic",
+          "why": "same root (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "ٱلظَّـٰلِمُونَ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "عِلْمٍ",
+          "prdRank": "synonym",
+          "srcType": "semantic",
+          "why": "same root (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 17,
+      "position": 11,
+      "correct": "كَيْفَ",
+      "glossEn": "how",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "فَكَيْفَ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "لَطِيفٌۭ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "نَكِيرِ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "ٱللَّطِيفُ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "ءَأَمِنتُم",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 19,
+      "position": 13,
+      "correct": "بِكُلِّ",
+      "glossEn": "(is) of every",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "كُلَّ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "بِكُمُ",
+          "prdRank": "suffix-variant",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "تَأْكُلُ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "كُلَّمَآ",
+          "prdRank": "synonym",
+          "srcType": "semantic",
+          "why": "same root (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "وَكُلُوا۟",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 20,
+      "position": 9,
+      "correct": "دُونِ",
+      "glossEn": "besides",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "دُونِهِۦٓ",
+          "prdRank": "suffix-variant",
+          "srcType": "visual",
+          "why": "orthographic neighbour (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "تَرَوْنَ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "تَكُونَ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "تَدَّعُونَ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "وَنُفُورٍ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 21,
+      "position": 10,
+      "correct": "فِى",
+      "glossEn": "in",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "فِيهِ",
+          "prdRank": "look-alike-verse",
+          "srcType": "visual",
+          "why": "orthographic neighbour (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "لَفِى",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "فِيهَا",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "ءَأَمِنتُم",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "ءَامَنَّا",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 21,
+      "position": 12,
+      "correct": "وَنُفُورٍ",
+      "glossEn": "and aversion",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "تَفُورُ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "غَفُورٌۭ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "ٱلْغَفُورُ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "دُونِ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "فَوْجٌۭ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 22,
+      "position": 1,
+      "correct": "أَفَمَن",
+      "glossEn": "Then is he who",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "فَمَن",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "مَنْ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "أَمَّن",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "لَمِنَ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "وَمَن",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 23,
+      "position": 11,
+      "correct": "مَّا",
+      "glossEn": "(is) what",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "مِمَّا",
+          "prdRank": "look-alike-verse",
+          "srcType": "visual",
+          "why": "orthographic neighbour (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "أَمَّآ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "بِمَآ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "بِمَا",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "فَمَا",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 24,
+      "position": 1,
+      "correct": "قُلْ",
+      "glossEn": "Say",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "قُلْنَ",
+          "prdRank": "look-alike-verse",
+          "srcType": "visual",
+          "why": "orthographic neighbour (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "أَقُل",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "وَقُلْنَ",
+          "prdRank": "synonym",
+          "srcType": "semantic",
+          "why": "same root (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "نَعْقِلُ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "وَقُلْنَا",
+          "prdRank": "synonym",
+          "srcType": "semantic",
+          "why": "same root (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 24,
+      "position": 2,
+      "correct": "هُوَ",
+      "glossEn": "He",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "فَهُوَ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "وَهُوَ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "ءَأَمِنتُم",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "ءَامَنَّا",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "أَحْسَنُ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 25,
+      "position": 6,
+      "correct": "كُنتُمْ",
+      "glossEn": "you are",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "كُنتَ",
+          "prdRank": "suffix-variant",
+          "srcType": "visual",
+          "why": "orthographic neighbour (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "أَنتُمْ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "أَمِنتُم",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "وَأَنتُمْ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "ءَأَمِنتُم",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 27,
+      "position": 7,
+      "correct": "كَفَرُوا۟",
+      "glossEn": "disbelieved",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "كَـٰفِرُونَ",
+          "prdRank": "suffix-variant",
+          "srcType": "visual",
+          "why": "orthographic neighbour (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "ٱلْكَـٰفِرُونَ",
+          "prdRank": "synonym",
+          "srcType": "semantic",
+          "why": "same root (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "كُفُوًا",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "يَرَوْا۟",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "وَخَرُّوا۟",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 30,
+      "position": 5,
+      "correct": "مَآؤُكُمْ",
+      "glossEn": "your water",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "بِمَآءٍۢ",
+          "prdRank": "synonym",
+          "srcType": "semantic",
+          "why": "same root (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "أُنَبِّئُكُم",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "ٱلسَّمَآءَ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "مَا",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "بِكُمُ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 30,
+      "position": 8,
+      "correct": "يَأْتِيكُم",
+      "glossEn": "could bring you",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "يَأْتِيكُمَا",
+          "prdRank": "suffix-variant",
+          "srcType": "visual",
+          "why": "orthographic neighbour (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "يَأْتِى",
+          "prdRank": "suffix-variant",
+          "srcType": "semantic",
+          "why": "same root (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "يَأْتِكُمْ",
+          "prdRank": "look-alike-verse",
+          "srcType": "visual",
+          "why": "orthographic neighbour (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "يَأْتِيَنِى",
+          "prdRank": "suffix-variant",
+          "srcType": "visual",
+          "why": "orthographic neighbour (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "يَأْتِ",
+          "prdRank": "suffix-variant",
+          "srcType": "semantic",
+          "why": "same root (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    }
+  ]
+}

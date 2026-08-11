@@ -1,0 +1,129 @@
+{
+  "surah": 103,
+  "corpusHash": "2391cae50f7c4a4a",
+  "generatedAt": 1786451813075,
+  "totalCoordinates": 14,
+  "totalDistractorRows": 70,
+  "pct": 10,
+  "sampled": 2,
+  "distractorOrigin": {
+    "authored": 0,
+    "kernel": 70
+  },
+  "kernelYield": {
+    "5": 14
+  },
+  "signedBy": null,
+  "signedAt": null,
+  "mechanicalFlags": 0,
+  "items": [
+    {
+      "ayah": 2,
+      "position": 4,
+      "correct": "خُسْرٍ",
+      "glossEn": "loss",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "لَّخَـٰسِرُونَ",
+          "prdRank": "synonym",
+          "srcType": "semantic",
+          "why": "same root (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "ءَامَنُوا۟",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "إِلَّا",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "إِنَّ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "بِٱلصَّبْرِ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 3,
+      "position": 2,
+      "correct": "ٱلَّذِينَ",
+      "glossEn": "those who",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "ٱلَّذِى",
+          "prdRank": "suffix-variant",
+          "srcType": "visual",
+          "why": "orthographic neighbour (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "ٱلَّذِىٓ",
+          "prdRank": "suffix-variant",
+          "srcType": "visual",
+          "why": "orthographic neighbour (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "لِّلَّذِينَ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "وَلِلَّذِينَ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "ٱلدِّينُ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    }
+  ]
+}

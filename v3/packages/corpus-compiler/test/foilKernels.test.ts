@@ -11,6 +11,7 @@
 // surah 12's AUTHORED baseline rather than a number chosen by hand.
 
 import { describe, expect, it } from "vitest";
+import { readdirSync } from "node:fs";
 import { buildCorpus } from "../src/buildCorpus.ts";
 import { buildPool, compareCandidates, FoilSet, gradeKey, generateFoils } from "../src/foilKernels.ts";
 import { buildFromInputs, buildFoilPool, loadInputs } from "../src/io.ts";
@@ -188,8 +189,27 @@ describe("D51 — kernels fill the surahs that shipped zero distractors", () => 
     // Structural: a kernel can only emit a `surface` that came from the pool,
     // and the pool is built from compiled corpus words. Assert the invariant
     // directly against the union of all vendored surahs' word forms.
+    // The pool is EVERY compiled surah, read from the manifest — not a
+    // hardcoded list. When Al-Mulk (67) was added as the Q3 launch surah, a
+    // hardcoded [12, 103, 112] made this test fail on 18 foils that were
+    // perfectly legitimate Al-Mulk word forms: the kernel had correctly widened
+    // its pool and the test had not. A sacred-text assertion that cries wolf on
+    // real corpus bytes is worse than none — the next person to see it red will
+    // assume the pool is stale again and wave it through, on the one test in
+    // this repo that must never be waved through.
+    // Derived from the VENDORED raw inputs, which are the real source of the
+    // pool — not from output/, which is gitignored (v3-D52) and absent on a
+    // clean checkout.
+    const rawDir = new URL("../data/raw/", import.meta.url);
+    const vendoredSurahs = readdirSync(rawDir)
+      .map((f) => /^(\d+)-verses\.json$/.exec(f)?.[1])
+      .filter((s): s is string => Boolean(s))
+      .map(Number)
+      .sort((a, b) => a - b);
+    expect(vendoredSurahs.length).toBeGreaterThanOrEqual(3);
+
     const poolKeys = new Set<string>();
-    for (const surah of [12, 103, 112]) {
+    for (const surah of vendoredSurahs) {
       for (const w of corpusOf(surah).words) poolKeys.add(gradeKey(w.text_uthmani));
     }
     for (const surah of [103, 112]) {

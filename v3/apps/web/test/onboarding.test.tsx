@@ -399,10 +399,17 @@ describe("screen 5 — the surahs actually offered", () => {
     }
   });
 
-  it("does NOT offer the wireframe's default, because it is not compiled", () => {
-    // §17 names Al-Mulk. This asserts the DIVERGENCE is deliberate and stays
-    // visible: the day 67 compiles, this test fails and someone must decide to
-    // offer it — which is exactly the review moment that should happen.
+  it("offers the wireframe's default IFF it is compiled", () => {
+    // §17 names Al-Mulk. The invariant is the biconditional, not either side:
+    // offering a surah with no corpus strands the learner, and compiling one
+    // without offering it hides work that is ready.
+    //
+    // This test did its job. It was written to FAIL the day 67 compiled, so a
+    // human would have to decide rather than drift into offering it — and on
+    // 2026-08-11 it failed for exactly that reason. Firdaus answered
+    // BUILD-PLAN Q3 with Al-Mulk, 67 was vendored and compiled, and it is now
+    // in OFFERED_SURAHS. The assertion below is unchanged; only the title and
+    // this comment moved, because the WORLD changed, not the rule.
     const manifestPath = resolve(
       HERE,
       "../../../packages/corpus-compiler/output/manifest.json",

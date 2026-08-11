@@ -53,6 +53,16 @@ export interface OfferedSurah {
 export const OFFERED_SURAHS: readonly OfferedSurah[] = [
   { surah: 112, name: "Al-Ikhlas", ayahCount: 4 },
   { surah: 103, name: "Al-Asr", ayahCount: 3 },
+  // Al-Mulk — WIREFRAME §17's own named default, and BUILD-PLAN Q3's answer
+  // (ratified by Firdaus 2026-08-11). Vendored from the Quran.com API and
+  // compiled the same day: 30 ayat, 333 words, pages 562-564, cross-checked
+  // against QAC's independent 30/333 count before being committed.
+  //
+  // It is listed here because the test that guarded this gap ("does NOT offer
+  // the wireframe's default, because it is not compiled") was written to FAIL
+  // the day 67 compiled, precisely so a human would decide rather than drift
+  // into offering it. This is that decision.
+  { surah: 67, name: "Al-Mulk", ayahCount: 30 },
   { surah: 12, name: "Yusuf", ayahCount: 111 },
 ];
 

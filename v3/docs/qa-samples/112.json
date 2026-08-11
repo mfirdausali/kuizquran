@@ -1,0 +1,129 @@
+{
+  "surah": 112,
+  "corpusHash": "6c1902db4982288e",
+  "generatedAt": 1786451813110,
+  "totalCoordinates": 15,
+  "totalDistractorRows": 75,
+  "pct": 10,
+  "sampled": 2,
+  "distractorOrigin": {
+    "authored": 0,
+    "kernel": 75
+  },
+  "kernelYield": {
+    "5": 15
+  },
+  "signedBy": null,
+  "signedAt": null,
+  "mechanicalFlags": 0,
+  "items": [
+    {
+      "ayah": 1,
+      "position": 2,
+      "correct": "هُوَ",
+      "glossEn": "He",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "فَهُوَ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "وَهُوَ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "أَحَدٌ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "قُلْ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "كُفُوًا",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    },
+    {
+      "ayah": 4,
+      "position": 5,
+      "correct": "أَحَدٌۢ",
+      "glossEn": "any [one]",
+      "foils": [
+        {
+          "rank": 1,
+          "text": "أَحَدَنَا",
+          "prdRank": "suffix-variant",
+          "srcType": "semantic",
+          "why": "same root (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 2,
+          "text": "أَحَدُكُمَا",
+          "prdRank": "suffix-variant",
+          "srcType": "semantic",
+          "why": "same root (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 3,
+          "text": "أَحَدُهُمَآ",
+          "prdRank": "suffix-variant",
+          "srcType": "semantic",
+          "why": "same root (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 4,
+          "text": "وَٰحِدٍۢ",
+          "prdRank": "class-neighbor",
+          "srcType": "phonetic",
+          "why": "rhyme / skeleton match (derived)",
+          "origin": "kernel"
+        },
+        {
+          "rank": 5,
+          "text": "قُلْ",
+          "prdRank": "class-neighbor",
+          "srcType": "contextual",
+          "why": "same-surah word (derived)",
+          "origin": "kernel"
+        }
+      ],
+      "origins": [
+        "kernel"
+      ],
+      "flags": [],
+      "verdict": null,
+      "reviewerNote": null
+    }
+  ]
+}

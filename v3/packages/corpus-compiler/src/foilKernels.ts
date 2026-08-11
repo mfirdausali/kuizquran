@@ -71,6 +71,35 @@ export function gradeKey(text: string): string {
   return text.normalize("NFC").split(TATWEEL).join("");
 }
 
+/**
+ * A COARSER key than `gradeKey`, used ONLY to keep an option bank's foils
+ * visibly distinct from one another. Strips harakat, tanwin and the small
+ * Quranic annotation marks on top of what `gradeKey` removes.
+ *
+ * WHY THIS IS NOT `gradeKey`, and must never replace it: v3-D12 keeps harakat
+ * DISTINCT for grading on purpose, because two words differing only in
+ * vowelling ARE different words and folding them together would grade a wrong
+ * vowelling as correct — edge case #45 calls that "worse than B6". So grading
+ * stays strict; only DISPLAY SELECTION is loosened.
+ *
+ * The defect this exists to fix, measured on the real corpora before the fix:
+ * 67:17 p12 and 67:28 p11 each drew `خَيْرٌ`, `خَيْرٌۭ` and `خَيْرُ` — the same
+ * word three times, differing only in final diacritic — so a bank showing 5
+ * foils offered the learner 3 real choices. 44% of surah 67's option sets and
+ * 60% of 112's were affected. A learner cannot use a distinction they cannot
+ * see at tile size, so those slots were spent without buying difficulty.
+ *
+ * Applied to KERNEL output only. Surah 12's authored bank has the same pattern
+ * in 291 sets, but that is human-written content and rewriting it is a content
+ * decision, not a compiler one — it is reported for review, never silently
+ * altered.
+ */
+const DISPLAY_STRIPPED = /[ً-ْٰۖ-ۭ]/g;
+
+export function displayKey(text: string): string {
+  return gradeKey(text).replace(DISPLAY_STRIPPED, "").replace(/\s+/g, " ").trim();
+}
+
 /** One candidate word form available to the kernels, keyed by grading key. */
 export interface PoolEntry {
   /** Grading key (engine equivalence) — the accumulator's identity. */
@@ -112,11 +141,30 @@ export function buildPool(wordsBySurah: Map<number, Word[]>): Map<string, PoolEn
  */
 export class FoilSet {
   private readonly targetKey: string;
+  private readonly targetDisplayKey: string;
+  private readonly enforceDisplayDistinctness: boolean;
   private readonly seen = new Set<string>();
+  private readonly seenDisplay = new Set<string>();
   private readonly rows: ScoredCandidate[] = [];
 
-  constructor(targetSurface: string) {
+  /**
+   * @param enforceDisplayDistinctness KERNEL output only. Authored banks are
+   *   exempt, and the reason is pedagogical, not technical: surah 12's authors
+   *   deliberately use case-ending (iʿrāb) minimal pairs — the target's own
+   *   stem under a different final vowel, e.g. nominative vs genitive vs
+   *   tanwīn. Telling those apart IS Quranic competence, and grading keeps
+   *   them distinct on purpose (v3-D12). Applying the display rule to authored
+   *   rows deleted them wholesale and pushed 100+ surah-12 coordinates below
+   *   the 4-distractor hard floor — caught by validate.ts, not by me.
+   *
+   *   A KERNEL, by contrast, has no such intent: when it emits `خَيْرٌ`,
+   *   `خَيْرٌۭ` and `خَيْرُ` into one bank it has simply spent three slots on
+   *   one word, and the learner sees fewer real choices than the bank claims.
+   */
+  constructor(targetSurface: string, enforceDisplayDistinctness = false) {
     this.targetKey = gradeKey(targetSurface);
+    this.targetDisplayKey = displayKey(targetSurface);
+    this.enforceDisplayDistinctness = enforceDisplayDistinctness;
   }
 
   /** Offer a candidate. Returns true iff it was admitted. */
@@ -124,7 +172,24 @@ export class FoilSet {
     const key = gradeKey(c.surface);
     if (key === this.targetKey) return false; // #7
     if (this.seen.has(key)) return false; // #9
+
+    // DISPLAY DISTINCTNESS. Two foils identical once harakat are stripped are
+    // one distractor occupying two slots: the bank claims 5 choices and offers
+    // fewer. Rejected at admission so the NEXT candidate gets the slot, rather
+    // than filtered afterwards where the bank would simply end up short.
+    //
+    // Also rejects a foil that is display-equal to the TARGET. gradeKey already
+    // stops an exact grade-collision (#7), but a foil differing from the answer
+    // only by a vowel mark is unreadable as a distinct option at tile size and
+    // reads as a trick rather than a test.
+    const dkey = displayKey(c.surface);
+    if (this.enforceDisplayDistinctness) {
+      if (dkey === this.targetDisplayKey) return false;
+      if (this.seenDisplay.has(dkey)) return false;
+    }
+
     this.seen.add(key);
+    this.seenDisplay.add(dkey);
     this.rows.push(c);
     return true;
   }
@@ -351,8 +416,10 @@ export function generateFoils(target: Word, ctx: KernelContext, limit = 5): Scor
   scored.sort(compareCandidates);
   const ordered = scored.map((s) => s.c);
 
-  // The accumulator is the ONLY way a candidate becomes output.
-  const set = new FoilSet(target.text_uthmani);
+  // The accumulator is the ONLY way a candidate becomes output. `true` turns on
+  // display-distinctness, which is a KERNEL-only rule — see the FoilSet
+  // constructor for why authored banks are exempt.
+  const set = new FoilSet(target.text_uthmani, true);
   for (const c of ordered) {
     if (set.size >= limit) break;
     set.admit(c);

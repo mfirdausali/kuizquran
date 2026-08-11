@@ -1243,3 +1243,73 @@ states; D50 a testsuite dir on one machine only; D53 a rule enforced by prose;
 a trailing-\b regex letting every real identifier through; and now this). The
 pattern is stable enough to name: **a test that passes tells you about the test.
 Mutate the thing, or you have learned nothing.**
+
+---
+
+## Ratified 2026-08-11 by Firdaus — BUILD-PLAN Q3 answered, and a kernel defect he caught
+
+### v3-D59 — Q3: the second revenue surah is AL-MULK (67)
+
+BUILD-PLAN Q3 ("Launch surah set — the fixed floor is 12 + 112 + 103; is the
+revenue-path second surah Al-Mulk or a Juz Amma batch?") is CLOSED: Al-Mulk.
+This also matches WIREFRAME §17's own named default, so onboarding no longer
+diverges from the spec.
+
+Vendored from the Quran.com API using the EXACT commands `data/raw/README.md`
+documents, reshaped to the same schema, with completeness guards asserted
+before writing. **30 ayat, 333 words, pages 562-564.** Two independent
+confirmations: WIREFRAME already recorded Al-Mulk as "narrative-adjacent, 333
+words", and QAC morphology independently yields 30/333. Zero words missing an
+English translation. 1665 kernel-generated distractors; compile PASS.
+
+A test guarding this exact gap ("does NOT offer the wireframe's default,
+because it is not compiled") was written to FAIL the day 67 compiled, so a
+human would decide rather than drift into offering it. It failed on schedule.
+This entry is the decision it demanded; its assertion is unchanged.
+
+### v3-D60 — Kernel foils must be DISPLAY-distinct; authored foils must not be
+
+Firdaus reviewed the QA sample and rejected a real defect I had not caught:
+67:17 p12 and 67:28 p11 each drew `خَيْرٌ`, `خَيْرٌۭ` and `خَيْرُ` — the same
+word three times, differing only in final diacritic. A bank claiming 5 foils
+offered 3 real choices. Measured before the fix: 44% of Al-Mulk's option sets
+and 60% of Al-Ikhlas's were affected.
+
+`displayKey()` strips harakat/tanwin on top of `gradeKey()`'s NFC+tatweel fold,
+and `FoilSet` rejects a candidate that collides with a sibling — or the target —
+under it.
+
+**It applies to KERNEL output ONLY, and that exemption is the important half.**
+My first attempt applied it to authored banks too. `validate.ts` caught it
+immediately: 100+ surah-12 coordinates fell below the 4-distractor hard floor,
+because surah 12's authors deliberately use case-ending (iʿrāb) minimal pairs —
+`ءَايَـٰتُ` / `ءَايَـٰتٌ` / `ءَايَـٰتٍ`, the same stem under different final
+vowels. Telling those apart IS Quranic competence, and v3-D12 keeps them
+distinct for grading on purpose. A kernel emitting three spellings of one word
+has no such intent; an author choosing three case endings does.
+
+Result: kernel surahs (103/112/67) now have ZERO near-duplicate sets; surah 12
+keeps all 291 of its deliberate pairs; no coordinate anywhere is below the
+floor. 67:17 p12 went from three slots on one word to five distinct rhyming
+forms.
+
+**Worth recording about the process:** a human reviewer reading a 2-item sample
+found a defect that 101 compiler tests, a foil-kernel test suite written
+specifically to judge foil QUALITY, and my own three-way verification had all
+missed. The mechanical checks asked "is this foil attested, non-duplicate under
+grading, and non-identical to the answer?" — all true. They could not ask "would
+a learner see three tiles as one word?" That is the gap human review exists to
+close, and it is an argument for the M9 QA sample being a gate rather than a
+formality.
+
+### v3-D61 — A sacred-text test that cried wolf
+
+Adding surah 67 turned `foilKernels.test.ts`'s "every kernel foil is real corpus
+bytes" RED on 18 foils — all legitimate Al-Mulk word forms. The kernel had
+correctly widened its pool; the test had a hardcoded `[12, 103, 112]`.
+
+Fixed to derive the pool from the VENDORED RAW INPUTS (not `output/`, which is
+gitignored per v3-D52 and absent on a clean checkout). A sacred-text assertion
+that fires on real corpus bytes is worse than none: the next person to see it
+red will assume a stale pool and wave it through — on the one test in this repo
+that must never be waved through.
