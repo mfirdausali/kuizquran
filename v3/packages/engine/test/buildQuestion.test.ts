@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildQuestion, type Spec } from "../src/buildQuestion.ts";
-import { clozeItem, vocabItem } from "../src/test.ts";
+import { clozeItem, junctionTestItem, vocabItem } from "../src/test.ts";
 import type { Corpus } from "../src/types.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -122,5 +122,50 @@ describe("buildQuestion — cloze lane (parity target: test.ts#clozeItem)", () =
   it("cloze is ayah-only, matching variant.ts's own admissibility rule", () => {
     const spec: Spec = { lane: "cloze", site: { kind: "seam", surah: 12, ayah: 4 } };
     expect(buildQuestion(corpus, spec)).toBeNull();
+  });
+});
+
+describe("buildQuestion — junction lane (parity target: test.ts#junctionTestItem)", () => {
+  it("byte-parity: option texts and the correct text exactly match junctionTestItem for the same seam", () => {
+    const spec: Spec = { lane: "junction", site: { kind: "seam", surah: 12, ayah: 4 } };
+    const item = buildQuestion(corpus, spec);
+    const legacy = junctionTestItem(corpus, 4);
+
+    expect(item).not.toBeNull();
+    if (item!.shape !== "choice") throw new Error("unreachable");
+    expect(item!.options.map((f) => f.text)).toEqual(legacy.options);
+    expect(item!.options[item!.correctIndex]!.text).toBe(legacy.correct);
+  });
+
+  it("byte-parity holds across every seam in the fixture corpus (ayah 1..ayahCount-1)", () => {
+    for (let ayah = 1; ayah < corpus.meta.ayahCount; ayah++) {
+      const spec: Spec = { lane: "junction", site: { kind: "seam", surah: 12, ayah } };
+      const item = buildQuestion(corpus, spec);
+      const legacy = junctionTestItem(corpus, ayah);
+      expect(item).not.toBeNull();
+      if (item!.shape !== "choice") throw new Error("unreachable");
+      expect(item!.options.map((f) => f.text), `seam ${ayah}`).toEqual(legacy.options);
+    }
+  });
+
+  it("junction is seam-only, matching variant.ts's own admissibility rule", () => {
+    const spec: Spec = { lane: "junction", site: { kind: "ayah", surah: 12, ayah: 4 } };
+    expect(buildQuestion(corpus, spec)).toBeNull();
+  });
+
+  it("the last ayah's seam is never constructible (E-08, site.ts#expand's own by-construction closure) — null, never a crash", () => {
+    const spec: Spec = { lane: "junction", site: { kind: "seam", surah: 12, ayah: corpus.meta.ayahCount } };
+    expect(() => buildQuestion(corpus, spec)).not.toThrow();
+    expect(buildQuestion(corpus, spec)).toBeNull();
+  });
+
+  it("every option Face carries real word provenance, Arabic script", () => {
+    const spec: Spec = { lane: "junction", site: { kind: "seam", surah: 12, ayah: 4 } };
+    const item = buildQuestion(corpus, spec);
+    if (item!.shape !== "choice") throw new Error("unreachable");
+    for (const opt of item!.options) {
+      expect(opt.script).toBe("arabic");
+      expect(opt.from.kind).toBe("word");
+    }
   });
 });
