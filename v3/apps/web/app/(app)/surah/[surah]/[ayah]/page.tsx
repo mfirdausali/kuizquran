@@ -35,20 +35,37 @@
 //     `wordGloss` falls back ms → en → the word itself, which is the chain
 //     every gloss consumer must honour rather than reading `.en` directly).
 //
-// STILL OPEN:
-//   - The bridge: where this ayah sits in the surah's structure (step 7 / M5).
-//   - Per-ayah stats — half-life, decay since last review, time-on-task (§15).
-//     These are LOG-DERIVED and so must arrive in a client island, never from
-//     this server component (edge case #72). They also must arrive as DATA from
-//     the engine: a half-life computed in this JSX would be clause 5's
-//     violation and DEFECTS.md#B2's shape.
+// THE BRIDGE AND THE STATS NOW LAND HERE, and the two "STILL OPEN" notes this
+// header used to carry are gone because both dependencies had already shipped:
+//
+//   - POSITION reuses the macro pipeline the SIBLING ROUTE already drives —
+//     `macroFactsFor()` on the server, `MacroPanelIsland` on the client. The
+//     one genuinely new thing is `highlight`: a COORDINATE that flags which
+//     mark is current. It is NOT a filtered `nodes` array, and the distinction
+//     is edge case #90 exactly — filtering the graph down to the current ayah
+//     would strip every seam, and connection atoms are ~40% of a short surah's
+//     memory graph. The learner is shown the whole map with one mark ringed,
+//     which is what "the same macro picture at a closer zoom" has to mean.
+//
+//   - HOW WELL YOU HOLD IT is `AyahStatsIsland`. Log-derived, so it is a
+//     CLIENT island and never this server component (edge case #72): an RSC has
+//     no IndexedDB, would paint 0% and "—", and production React keeps that
+//     markup after the client hydrates the truth. Every figure it prints
+//     (half-life, next review, time on task) arrives from
+//     `lib/progress/rows.ts` as a finished STRING — a half-life computed in
+//     this JSX would be clause 5's violation and DEFECTS.md#B2's shape.
+//
+// `now` is captured ONCE here and handed to the island, the same arrangement
+// /progress/list uses, so every figure in one render decays to the same instant.
 
 import { notFound } from "next/navigation";
 import { loadCorpus } from "@/lib/corpus/load.ts";
+import { macroFactsFor } from "@/lib/macro/facts.ts";
 import { ayahWords, wordGloss } from "@engine/corpus.ts";
 import { buildFace } from "@engine/faces.ts";
 import { FaceText } from "@/components/quiz/FaceText";
-import { StubNote } from "@/components/shell/StubNote";
+import { MacroPanelIsland } from "@/components/macro/MacroPanelIsland";
+import { AyahStatsIsland } from "@/components/progress/AyahStatsIsland";
 
 function parseSurah(raw: string): number | null {
   if (!/^\d{1,3}$/.test(raw)) return null;
@@ -58,7 +75,21 @@ function parseSurah(raw: string): number | null {
 
 /** Ayah numbers are 1-based and the longest surah has 286. The upper bound is
  *  a cheap sanity check only — the real bound is this surah's ayahCount, which
- *  is a CORPUS fact and is checked when the corpus loads (step 6). */
+ *  is a CORPUS fact.
+ *
+ *  SO /surah/112/200 IS NOT A 404, AND THAT IS DELIBERATE (it was previously
+ *  implicit, which is a different thing). 200 passes this check, `buildFace`
+ *  returns null for the coordinate, and the page renders "Surah 112 has no ayah
+ *  200" — a real answer that names the surah and the number the learner asked
+ *  for. A notFound() here would be a worse page: it cannot say WHICH of the two
+ *  segments was wrong, and the same blank 404 would cover "surah 900" (a
+ *  genuinely malformed request, caught above) and "ayah 200 of a 4-ayah surah"
+ *  (a plausible mistake, or a stale bookmark from before an enrolment changed).
+ *
+ *  The bound is not enforced HERE because enforcing it would require the corpus,
+ *  and the corpus is not always available on this route — a null corpus would
+ *  then 404 every ayah of a surah this build cannot serve, turning a designed
+ *  "no corpus" state into a dead link. */
 function parseAyah(raw: string): number | null {
   if (!/^\d{1,3}$/.test(raw)) return null;
   const n = Number(raw);
@@ -81,6 +112,19 @@ export default async function AyahPage({
   const corpus = await loadCorpus(surah);
   const verseFace = corpus ? buildFace(corpus, { kind: "verse", ayah }) : null;
   const words = corpus ? ayahWords(corpus, ayah) : [];
+
+  // Corpus-derived and learner-INVARIANT, so it is computed here on the server
+  // and crosses into the island as a plain serialisable object. The NODES are
+  // log-derived and per-learner, so the island builds them after hydration —
+  // the same split the sibling route makes, for the same #72 reason.
+  const facts = corpus === null ? null : macroFactsFor(corpus);
+  const ayahCount = corpus?.meta.ayahCount ?? 0;
+
+  // Read ONCE, here at the boundary, and passed down. Every figure in one
+  // render then decays to the same instant; a clock read per figure would let
+  // the half-life and the next-review disagree about what day it is. The engine
+  // itself never calls a clock (INVARIANTS.md Absolute A).
+  const now = Date.now();
 
   return (
     <div className="screen">
@@ -151,17 +195,37 @@ export default async function AyahPage({
           </section>
         ) : null}
 
-        <section className="card" aria-labelledby="bridge-h">
-          <div className="card-header">
-            <h2 id="bridge-h" style={{ margin: 0, fontSize: 12, fontWeight: 600 }}>
-              POSITION
-            </h2>
-          </div>
-          <StubNote step="step 7 (M5), WIREFRAME §4">
-            The bridge — this ayah&apos;s place in the surah&apos;s structure,
-            the same macro picture at a closer zoom.
-          </StubNote>
-        </section>
+        {/* ---- POSITION: THE BRIDGE (§4) ----------------------------------
+            The island renders its own <section>/<h2> chrome, and it returns
+            NULL for an ATOMIC surah (v3-D21) — so a 3-ayah surah correctly
+            shows no panel here, with no skeleton flash for a panel that will
+            never appear. At that size the ayah list on the surah page already
+            IS the macro view.
+
+            `highlight` is a COORDINATE. `nodes` is never narrowed to it: the
+            full 2N-1 graph is built and one mark is flagged, because a filtered
+            graph is a graph with no seams (#90). */}
+        {facts === null ? (
+          <section className="card" aria-labelledby="bridge-h">
+            <div className="card-header">
+              <h2 id="bridge-h" style={{ margin: 0, fontSize: 12, fontWeight: 600 }}>
+                POSITION
+              </h2>
+            </div>
+            <p className="stub-note">
+              No compiled corpus is available for surah {surah} in this build,
+              so this ayah&apos;s place in the structure is not being drawn
+              (DEFECTS.md#E-07).
+            </p>
+          </section>
+        ) : (
+          <MacroPanelIsland
+            surah={surah}
+            ayahCount={ayahCount}
+            facts={facts}
+            highlight={{ kind: "ayah", ayah }}
+          />
+        )}
 
         <section className="card" aria-labelledby="hold-h">
           <div className="card-header">
@@ -169,11 +233,16 @@ export default async function AyahPage({
               HOW WELL YOU HOLD IT
             </h2>
           </div>
-          <StubNote step="step 10 (M5), WIREFRAME §10 + §15">
-            Half-life, decay since your last review, and cumulative
-            time-on-task. These are the same numbers the scheduler uses —
-            nothing here is decorative.
-          </StubNote>
+          {corpus === null ? (
+            // Never a table of fabricated zeros for a surah we hold no text
+            // for. A designed state, the same one /progress/list paints.
+            <p className="stub-note">
+              No corpus is available for surah {surah} in this build, so there
+              is nothing to measure against.
+            </p>
+          ) : (
+            <AyahStatsIsland corpus={corpus} ayah={ayah} now={now} />
+          )}
         </section>
       </div>
     </div>

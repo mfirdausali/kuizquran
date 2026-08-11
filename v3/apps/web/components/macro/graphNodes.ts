@@ -69,6 +69,37 @@ export interface SeamNode extends GraphNodeBase {
 
 export type GraphNode = AyahNode | SeamNode;
 
+/**
+ * WHICH MARK IS "YOU ARE HERE" — the ayah detail route's bridge (WIREFRAME §4).
+ *
+ * A coordinate, not a filtered array. Filtering the graph down to one ayah on
+ * the detail page would strip the seam nodes and reintroduce edge case #90 —
+ * connection atoms are ~40% of a short surah's graph, and the whole point of
+ * showing the map at a closer zoom is that the learner sees the joints they
+ * have to cross to get here. So the full graph is always built and exactly one
+ * mark is FLAGGED.
+ *
+ * `null` (the surah route) means no mark is current — not "ayah 0".
+ */
+export type HighlightRef = { kind: "ayah"; ayah: number } | null;
+
+/**
+ * Is this node the current one?
+ *
+ * A SEAM IS NEVER THE HIGHLIGHT, even the seam leaving the current ayah. The
+ * route is `/surah/S/A` — the learner is looking at an ayah, and marking the
+ * joint after it as "you are here" would claim they are at a junction they may
+ * never have drilled. One coordinate, one mark.
+ *
+ * Exported and tested rather than inlined in JSX so the rule is stated once:
+ * a component that re-derived "am I current?" beside its markup is the shape
+ * check-boundaries clause 5 exists to prevent.
+ */
+export function isHighlighted(node: GraphNode, highlight: HighlightRef): boolean {
+  if (highlight === null) return false;
+  return node.kind === "ayah" && node.ayah === highlight.ayah;
+}
+
 /** The five states a learner actually experiences. "Not started" is `learn`
  *  with `encoded: false` — heatmap.ts:31 already draws that distinction and a
  *  learner feels it as a different thing from "Learning".

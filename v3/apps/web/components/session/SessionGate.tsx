@@ -17,6 +17,7 @@ import Link from "next/link";
 
 import { readChoices } from "@/lib/onboarding/choices";
 import { SessionIsland } from "@/components/session/SessionIsland";
+import { ONBOARDING_HREF } from "@/lib/onboarding/surahs";
 
 type State =
   | { kind: "loading" }
@@ -50,7 +51,11 @@ export function SessionGate() {
     return (
       <p className="caption">
         You haven&apos;t started a surah yet.{" "}
-        <Link href="/onboarding">Choose one</Link> to begin.
+        {/* `/onboarding` is NOT a route: the `(onboarding)` route group
+            contributes no URL segment, so onboarding lives at `/start`. The
+            link here pointed at a 404 — a learner with no enrollment was sent
+            from the one screen that noticed to a page that does not exist. */}
+        <Link href={ONBOARDING_HREF}>Choose one</Link> to begin.
       </p>
     );
   }

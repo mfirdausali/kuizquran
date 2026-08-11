@@ -25,20 +25,27 @@
 // four is a retention-honesty violation, not a warning.
 
 import type { MacroFacts } from "./facts.ts";
-import type { GraphNode } from "./graphNodes.ts";
+import type { GraphNode, HighlightRef } from "./graphNodes.ts";
 import { RingDiagram } from "./RingDiagram.tsx";
 
 export interface MacroPanelProps {
   surah: number;
   facts: MacroFacts;
   nodes: GraphNode[];
+  /** "You are here", for the ayah detail route's bridge (WIREFRAME §4).
+   *
+   *  A COORDINATE, NEVER A FILTERED `nodes`. The detail page shows the SAME
+   *  full graph as the surah page and flags one mark, because filtering to the
+   *  current ayah would drop every seam — and a bridge that hides the joints is
+   *  a bridge that hides ~40% of a short surah's memory graph (#90). */
+  highlight?: HighlightRef;
 }
 
 /** The panel's heading id, exported so the page and the tests refer to the
  *  same string rather than to two copies of it. */
 export const MACRO_HEADING_ID = "macro-h";
 
-export function MacroPanel({ surah, facts, nodes }: MacroPanelProps) {
+export function MacroPanel({ surah, facts, nodes, highlight = null }: MacroPanelProps) {
   // ---- ATOMIC: NO PANEL. Not hidden, not collapsed, not "no structure
   // available" — ABSENT. v3-D21: "ATOMIC surahs get no panel — at 3-8 ayat the
   // list is already the macro view."
@@ -60,7 +67,13 @@ export function MacroPanel({ surah, facts, nodes }: MacroPanelProps) {
         <span className="caption">{titleFor(facts)}</span>
       </div>
 
-      <RingDiagram surah={surah} nodes={nodes} layout={facts.layout} idPrefix={`macro-${surah}`} />
+      <RingDiagram
+        surah={surah}
+        nodes={nodes}
+        layout={facts.layout}
+        idPrefix={`macro-${surah}`}
+        highlight={highlight}
+      />
 
       {/* The archetype-specific reading of the same graph. */}
       {facts.archetype === "RING" && facts.ring ? <RingLegend facts={facts} /> : null}

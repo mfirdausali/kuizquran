@@ -43,11 +43,18 @@
 
 import type { Corpus } from "@engine/types.ts";
 
-/** Surahs staged into `public/corpus/` by `scripts/stage-corpus.mjs`. This
- *  list and that script's CLIENT_SURAHS are the same decision written twice;
- *  the test asserts they agree, so a surah added to one and not the other
- *  fails rather than 404s at runtime. */
-export const CLIENT_SURAHS: readonly number[] = [112, 103, 67];
+/** Surahs staged into `public/corpus/` by `scripts/stage-corpus.mjs`.
+ *
+ *  DEFINED IN `staged.ts`, not here, and re-exported so existing importers are
+ *  unchanged. The reason is the `"use client"` directive at the top of this
+ *  file: it makes this module a client boundary, and a Server Component that
+ *  imports a constant across that boundary receives a client-reference proxy
+ *  rather than the array. `/library` is a Server Component that needs this
+ *  list, and reading it from here failed the production prerender with
+ *  "CLIENT_SURAHS.includes is not a function" while tsc, the boundary gate and
+ *  the jsdom tests all stayed green. See `staged.ts` for the full account. */
+export { CLIENT_SURAHS } from "./staged.ts";
+import { CLIENT_SURAHS } from "./staged.ts";
 
 /** The surah screen 2 and the landing demo reconstruct (WIREFRAME §17 / §18).
  *  Named once, here, so no surface hardcodes the number in its own JSX. */

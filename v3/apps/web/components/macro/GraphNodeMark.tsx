@@ -32,9 +32,19 @@ const AYAH_R = 4.5;
  *  edge case #82's floor met WITHOUT changing the painted radius, the same
  *  trick .tile-hit uses for the locked .tile. */
 const HIT_R = 11;
+/** The "you are here" ring, outside the disc so the disc's radius (and so its
+ *  visual weight, which reads as importance) is unchanged. */
+const CURRENT_R = 7;
 
 export interface GraphNodeMarkProps {
   mark: PlacedMark;
+  /** "You are here" on the ayah detail route (§4). PURELY DECORATIVE here, and
+   *  deliberately so: this element is aria-hidden, so the ring drawn around the
+   *  current disc reaches nobody using a screen reader. The fact itself is
+   *  carried by RingDiagram's link list ("…, you are here") and by the <desc>.
+   *  This is the same division of labour the stage dot already has — the shape
+   *  is the paint, the words are the meaning (#87). */
+  current?: boolean;
 }
 
 /**
@@ -44,7 +54,7 @@ export interface GraphNodeMarkProps {
  * ring's text alternative is this list, documented as such — not aria-labels
  * bolted onto <circle> elements."
  */
-export function GraphNodeMark({ mark }: GraphNodeMarkProps) {
+export function GraphNodeMark({ mark, current = false }: GraphNodeMarkProps) {
   const { node, x, y, rotate } = mark;
   const fill = STAGE_FILL[node.stage];
   // A node with no encoding yet is drawn hollow rather than filled: "not
@@ -72,7 +82,23 @@ export function GraphNodeMark({ mark }: GraphNodeMarkProps) {
   }
 
   return (
-    <g aria-hidden="true" className="graph-node">
+    <g aria-hidden="true" className={current ? "graph-node graph-node--current" : "graph-node"}>
+      {/* "You are here": a SEPARATE outer ring, never a change to the disc's
+          own fill or radius. The fill carries the STAGE, and overloading it
+          with position would make a carried ayah and a current ayah look like
+          the same fact — the exact conflation #87 is about. Drawn first so the
+          stage disc paints on top of it. */}
+      {current ? (
+        <circle
+          className="graph-current"
+          cx={round(x)}
+          cy={round(y)}
+          r={CURRENT_R}
+          fill="none"
+          stroke="var(--text-primary)"
+          strokeWidth={0.9}
+        />
+      ) : null}
       <circle
         cx={round(x)}
         cy={round(y)}
@@ -91,4 +117,4 @@ function round(v: number): number {
   return Math.round(v * 100) / 100;
 }
 
-export { AYAH_R, HIT_R, STAGE_FILL };
+export { AYAH_R, HIT_R, CURRENT_R, STAGE_FILL };

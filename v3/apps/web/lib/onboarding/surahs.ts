@@ -33,6 +33,20 @@
  *  the data catches up — see the header for why it is not offered today. */
 export const WIREFRAME_DEFAULT_SURAH = 67;
 
+/**
+ * WHERE A LEARNER WITH NO ENROLLMENT IS SENT.
+ *
+ * The `(onboarding)` route group contributes no URL segment, so the seven
+ * screens live at `/start`. `/onboarding` is NOT a route and never was —
+ * `SessionGate` linked there and 404'd every learner who reached it without an
+ * enrollment, i.e. exactly the learner that screen exists to rescue.
+ *
+ * It is named here, beside the rest of onboarding's facts, for the same reason
+ * `OFFERED_SURAHS` is: a route spelled inline in two components is a route that
+ * can be right in one and wrong in the other, and it was.
+ */
+export const ONBOARDING_HREF = "/start";
+
 export interface OfferedSurah {
   surah: number;
   /** The surah's NAME is Latin metadata, not Quranic text. */

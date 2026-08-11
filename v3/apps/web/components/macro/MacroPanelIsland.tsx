@@ -45,12 +45,16 @@ import { getAllEvents } from "@/lib/idb/read.ts";
 import { useLogState } from "@/lib/idb/useLogState.ts";
 
 import type { MacroFacts } from "./facts.ts";
-import { buildGraphNodes } from "./graphNodes.ts";
+import { buildGraphNodes, type HighlightRef } from "./graphNodes.ts";
 import { MacroPanel, MACRO_HEADING_ID } from "./MacroPanel.tsx";
 
 export interface MacroPanelIslandProps {
   surah: number;
   ayahCount: number;
+  /** "You are here" — set by the ayah detail route (§4), omitted by the surah
+   *  route. Passed straight through: the island builds the FULL graph either
+   *  way and never narrows `ayahCount` to the current ayah (#90). */
+  highlight?: HighlightRef;
   /** Corpus-derived and learner-invariant, so it crosses the boundary as a
    *  plain serialisable object rather than being recomputed on the client. */
   facts: MacroFacts;
@@ -60,7 +64,13 @@ export interface MacroPanelIslandProps {
   now?: number;
 }
 
-export function MacroPanelIsland({ surah, ayahCount, facts, now }: MacroPanelIslandProps) {
+export function MacroPanelIsland({
+  surah,
+  ayahCount,
+  facts,
+  now,
+  highlight = null,
+}: MacroPanelIslandProps) {
   const selector = useCallback(() => getAllEvents(), []);
   const state = useLogState(selector, (rows) => rows.length === 0, [surah]);
 
@@ -88,7 +98,7 @@ export function MacroPanelIsland({ surah, ayahCount, facts, now }: MacroPanelIsl
   const at = now ?? Date.now();
   const nodes = buildGraphNodes(surah, ayahCount, rebuild(events), at);
 
-  return <MacroPanel surah={surah} facts={facts} nodes={nodes} />;
+  return <MacroPanel surah={surah} facts={facts} nodes={nodes} highlight={highlight} />;
 }
 
 /** The card chrome, shared by the skeleton and the failure states so they

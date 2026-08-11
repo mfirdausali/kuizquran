@@ -122,6 +122,9 @@ function stripMorphology(word) {
 
 const staged = [];
 const missing = [];
+/** The surah numbers actually written this run. Feeds `public/corpus/staged.json`
+ *  — see the note above that file's write, below. */
+const stagedSurahs = [];
 
 mkdirSync(PUBLIC_CORPUS, { recursive: true });
 
@@ -151,7 +154,32 @@ for (const surah of CLIENT_SURAHS) {
   const payload = slim(parsed);
   writeFileSync(path.join(PUBLIC_CORPUS, `${surah}.json`), JSON.stringify(payload));
   staged.push(`${surah} (${verses} ayat, ${words} words, ${payload.distractors?.length ?? 0} distractors)`);
+  stagedSurahs.push(surah);
 }
+
+// ---------------------------------------------------------------------------
+// THE PRECACHE MANIFEST — public/corpus/staged.json
+// ---------------------------------------------------------------------------
+// `public/sw.js` must precache the staged corpora so a learner who opens the
+// app on a plane has ayat to drill. It needs to know WHICH surahs those are.
+//
+// A hardcoded `[112, 103, 67]` inside sw.js would be the THIRD copy of that
+// list (after `lib/corpus/client.ts#CLIENT_SURAHS` and this script's own), and
+// the two existing copies already have a test binding them together precisely
+// because they drifted once: 103 was offered by onboarding but never staged,
+// and every learner who accepted the default hit a dead end. A third copy
+// re-opens exactly that failure, one layer further from anyone looking.
+//
+// So the list is EMITTED, not re-declared. And it is emitted from `staged`,
+// not from `CLIENT_SURAHS`: this file records what was actually WRITTEN to
+// disk this run, so a `install`-time `addAll` cannot fail on a surah the
+// compiler never produced. On a clean checkout with no `output/`, this is `[]`
+// — the shell still precaches, the corpora simply are not there to cache, and
+// the consuming surfaces render their designed unavailable state (edge #91).
+writeFileSync(
+  path.join(PUBLIC_CORPUS, "staged.json"),
+  JSON.stringify({ surahs: stagedSurahs }),
+);
 
 if (staged.length > 0) console.log(`corpus staged → public/corpus: ${staged.join(", ")}`);
 if (missing.length > 0) {

@@ -292,6 +292,37 @@ export function rowAtomKey(surah: number, kind: RowKind, ref: number): string {
   return atomKey(surah, kind === "seam" ? "connection" : "ayah", ref);
 }
 
+/**
+ * THE ONE ROW for one ayah — the ayah detail route's "how well you hold it".
+ *
+ * WHY THIS IS HERE AND NOT A `.find()` IN THE ISLAND. The id format
+ * (`${surah}:${kind}:${ayah}`) is this module's own invention, written in
+ * exactly one place above. An island reaching in with a hand-built template
+ * literal would be a second copy of that format — and atom.ts already says what
+ * a hand-built key costs: "a lookup miss, not a type error". The row would come
+ * back `undefined`, the island would render its empty state, and the learner
+ * would be told "Not started" for an ayah they have carried for weeks. Silent,
+ * plausible, and wrong: the same shape as every defect in DEFECTS.md.
+ *
+ * Returns `undefined` for an ayah outside the surah — the caller renders a
+ * designed state, never a fabricated zero.
+ */
+export function ayahRow(rows: readonly ProgressRow[], ayah: number): ProgressRow | undefined {
+  return rows.find((r) => r.kind === "ayah" && r.ayah === ayah);
+}
+
+/** The SEAM leaving this ayah — `ayah → ayah+1`, or `undefined` at the last
+ *  ayah, where `expand()` never constructs one (E-08, by construction).
+ *
+ *  Edge case #90 at the single-ayah zoom: an ayah detail page that reported
+ *  only the ayah's own strength would tell a learner they hold 12:4 at 90%
+ *  while the joint out of it sits at 0% — which is exactly the "you know 3, you
+ *  know 4, you cannot go 3→4" failure v3-D03 exists to model. The joint is the
+ *  half of the graph a per-ayah view is most likely to drop. */
+export function seamRowFrom(rows: readonly ProgressRow[], ayah: number): ProgressRow | undefined {
+  return rows.find((r) => r.kind === "seam" && r.ayah === ayah);
+}
+
 // ---------------------------------------------------------------------------
 // SORTING AND SEARCHING — also decisions, also not in the view
 // ---------------------------------------------------------------------------

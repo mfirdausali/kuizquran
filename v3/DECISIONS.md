@@ -1702,3 +1702,80 @@ A learner can now complete a session in a real browser and the taps reach the
 log — proven by e2e, on disk, across the full walk. Five stub routes remain
 (`/home`, `/library`, `/progress`, `/surah/[surah]`, `/surah/[surah]/[ayah]`),
 there is still no service worker, and the 7-night window still cannot start.
+
+---
+
+## 2026-08-12 — the five stub routes, the service worker, and a false mutation claim
+
+### v3-D73 — a test comment claimed a mutation result that was not true
+
+`e2e/airplane-mode.test.ts`'s "/api is NEVER answered from cache" test carried a
+header documenting three earlier vacuous versions of itself and asserting of the
+fourth: "mutation testing confirms they do [fail]."
+
+I ran that mutation. **Deleting `if (url.pathname.startsWith("/api/")) return;`
+from `sw.js` entirely leaves all 9 tests in the file GREEN.**
+
+The reason is structural and worth knowing before anyone "simplifies" the
+worker: the /api early-return is DEFENCE IN DEPTH, not the load-bearing guard.
+What actually keeps /api out of the cache is that the cache-first branch is an
+ALLOWLIST (`/_next/static/`, `/corpus/`, `/fonts/`), so an /api GET falls
+through every branch and is never stored. Both guards must fail together.
+
+Measured, not assumed: removing the early-return AND widening the static branch
+to `true` **does** turn the test red. So the test is NOT vacuous — it proves the
+RULE holds — but it does not pin the early-return specifically, and no test in
+this repo does. The comment now says exactly that.
+
+The lesson is narrower than the previous ten incidents and sharper for it: a
+test can be genuinely load-bearing while a *claim written about* it is false.
+This build's discipline has been "mutate the code"; this adds "and re-mutate
+when you inherit someone else's claim that they did." The agent that wrote it
+had honestly mutated versions 1-3 of its own test — the note simply outlived the
+evidence for it.
+
+### v3-D74 — the five stub routes are wired
+
+`/home`, `/progress`, `/library`, `/surah/[surah]/[ayah]` and a service worker,
+built by five isolated agents and merged here. 94 new tests (1718 → 1812), 40/40
+e2e, typecheck clean, boundary and locked-CSS gates pass, `make build` clean.
+
+**M5's exit criterion now passes.** `public/sw.js` + `ServiceWorkerRegistrar`
+mean one online visit then a cold offline drill works — verified in a real
+browser, with a plain reload serving the route rather than a fallback page. This
+was structurally impossible yesterday (there was no service worker at all).
+
+Two self-reported surviving mutants were both genuinely CLOSED by the agents
+that found them, and I re-ran both to confirm rather than take their word:
+dropping the `kind === "ayah"` guard from `ayahRow` and collapsing the `pending`
+branch into the empty state (edge case #73 — painting "Not started" at a learner
+who may be carrying the ayah) each turn a test red now.
+
+`app/api/e2e-cache-probe/route.ts` ships in the production bundle deliberately:
+`check-boundaries.mjs` skips `public/`, so sw.js has no static enforcement, and
+the only way to prove "never cache /api" is a route Next really serves that a
+broken worker could really cache. It reads nothing, writes nothing, takes no
+input and returns a constant.
+
+### v3-D75 — a 404 on the product's main path, found by an agent working elsewhere
+
+`SessionGate` (which I wrote yesterday) linked an un-enrolled learner to
+`/onboarding`. That route DOES NOT EXIST — `(onboarding)` is a route group and
+contributes no URL segment, so onboarding lives at `/start`. Every learner who
+reached /session without an enrollment was sent from the one screen that noticed
+to a 404.
+
+Now a shared `ONBOARDING_HREF` constant, so the two cannot drift again.
+
+### What is still not done
+
+Honest gaps the agents reported and I did not close:
+- **Multi-surah is not built** on `/home` or `/progress`. `readChoices()` returns
+  a singular `surah`; there is no enrollment list. Rendering rows for surahs a
+  learner never enrolled in would be a fabricated enrollment, so both routes
+  render the one real enrollment and name the plural case in a trimmed note.
+- `AVAILABLE_SURAHS` is still `[12]`, so `/surah/112`, `/surah/103` and
+  `/surah/67` render the "no compiled corpus" state. `/library` now LABELS that
+  honestly rather than hiding it; the thinness itself is unfixed.
+- Al-Mulk scene beats (human), Stripe replay fixtures (needs a real test-mode
+  account), and the 7-night window (needs live staging).

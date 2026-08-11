@@ -1,10 +1,19 @@
 // The ROOT layout. Build-plan step 17, plan §B/§C.
 //
-// It does four things and no more: the document, the two stylesheets in the
-// one order that works, the Amiri preload, and the viewport/PWA metadata.
+// It does five things and no more: the document, the two stylesheets in the
+// one order that works, the Amiri preload, the viewport/PWA metadata, and the
+// service worker registration.
 // The tab bar is NOT here — it belongs to the (app) route group, because the
 // landing page (v3-D14: "/" is a real stateless page) must not show learner
 // navigation to someone who has not started.
+//
+// THE REGISTRAR IS IN THE ROOT LAYOUT, NOT THE (app) GROUP, and that placement
+// is load-bearing. The surfaces a cold offline launch actually lands on are
+// the landing page (edge case #92: "offline serves cached '/'") and onboarding
+// — both OUTSIDE the (app) group. Registering only inside the authenticated
+// app would leave exactly the two routes that need a cached shell without one.
+// It renders null and swallows every failure, so a browser that refuses
+// service workers is unaffected; see the component's own header.
 //
 // STYLESHEET ORDER IS LOAD-BEARING.
 //   1. ./iman-ui.css  — LOCKED. Byte-gated by scripts/check-locked-css.mjs
@@ -29,6 +38,7 @@
 
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
+import { ServiceWorkerRegistrar } from "@/components/shell/ServiceWorkerRegistrar";
 import "./iman-ui.css";
 import "./iman-ext.css";
 
@@ -36,7 +46,9 @@ export const metadata: Metadata = {
   title: "Iman Quiz",
   description: "Memorise the Quran, and keep what you memorise.",
   // v3-D14 / edge case #92: the installed app opens on the DASHBOARD, not the
-  // marketing page. The manifest itself is M10's; this is the metadata half.
+  // marketing page. The manifest that declares that `start_url` now exists —
+  // `app/manifest.ts`, served by Next at /manifest.webmanifest and linked from
+  // every document automatically. This is the metadata half beside it.
   applicationName: "Iman Quiz",
 };
 
@@ -73,7 +85,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           crossOrigin="anonymous"
         />
       </head>
-      <body>{children}</body>
+      <body>
+        <ServiceWorkerRegistrar />
+        {children}
+      </body>
     </html>
   );
 }

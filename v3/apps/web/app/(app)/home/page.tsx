@@ -14,16 +14,34 @@
 // island for the reason this file's header gives — they are log-derived, and a
 // server render has no log.
 //
-// STILL OPEN (they need the engine wired to the log, which is not this step):
-//   - Per-surah rows with independent schedules and DUE COUNTS. These must
-//     arrive as DATA from the engine; band and strength comparisons may NEVER
-//     appear in this JSX — check-boundaries.mjs clause 5 enforces it
-//     (DEFECTS.md#B2). Until `assembleQueue` runs against rebuilt atoms there is
-//     no honest due count to show, and a fabricated one is the exact
-//     retention-honesty violation the whole boundary exists to prevent.
-//   - The Continue CTA. Deliberately absent in the zero state (§12) — and
-//     absent everywhere else in this build too, because "Continue" that starts
-//     nothing is worse than no button.
+// NOW LANDED — the due count and the route into today's work.
+//
+// The note that stood here said a due count had to wait because "until
+// `assembleQueue` runs against rebuilt atoms there is no honest due count to
+// show". `lib/session/run.ts` now runs exactly that pipeline for the session
+// loop, so the number exists. What made it safe to show is that /home takes it
+// from THE SAME assembly the session will serve (`assembleFor`), rather than
+// from a second, cheaper approximation beside it — a dashboard that says "5
+// due" and then hands over a session of 3 is the dishonesty the boundary
+// exists to prevent, and two assemblies is the shape in which that happens.
+//
+// The count is DECIDED in `lib/home/queue.ts` and arrives here as a written
+// sentence. It could not be computed in this tree even by accident:
+// check-boundaries.mjs clause 5 matches the TOKEN `assembleQueue`, so the
+// import line alone would fail the build (DEFECTS.md#B2).
+//
+// The CTA honours §12 rather than its wording. §12's rule is that there is no
+// "Continue" when there is nothing to continue — so the CTA renders only when
+// the queue is non-empty, and it names what it STARTS ("Start today's
+// session") rather than saying "Continue", which describes nothing.
+//
+// STILL OPEN:
+//   - MULTI-surah rows. WIREFRAME §1 says MY SURAHS is plural with N
+//     independent schedules, but the enrollment this build writes is SINGULAR
+//     (`readChoices()` returns one `surah`), and there is no enrollment list to
+//     read. Listing surahs a learner never enrolled in would be a fabricated
+//     enrollment, which is worse than a short list, so what ships is the one
+//     real enrollment rendered honestly.
 //   - The recommender card proper (build-plan step 30 — last, and deliberately
 //     so). MySurahs' zero state stands in with the honest subset: the surahs
 //     this build can actually teach.
@@ -32,6 +50,7 @@ import { MySurahs } from "@/components/home/MySurahs";
 import { DeviceReset } from "@/components/home/DeviceReset";
 import { StubNote } from "@/components/shell/StubNote";
 import { SyncStatus } from "@/components/shell/SyncStatus";
+import { TodaySession } from "@/components/home/TodaySession";
 
 export default function HomePage() {
   return (
@@ -41,6 +60,22 @@ export default function HomePage() {
           <h1>Home</h1>
           <p className="caption">Your surahs, and what is due today.</p>
         </header>
+
+        {/* TODAY comes FIRST. The dashboard's job is to answer "what do I do
+            now", and an enrolled learner should not have to read past their
+            history to find it. */}
+        <section className="card" aria-labelledby="today-h">
+          <div className="card-header">
+            <h2 id="today-h" style={{ margin: 0, fontSize: 12, fontWeight: 600 }}>
+              TODAY
+            </h2>
+          </div>
+          {/* The due count and the CTA. A client island for the reason this
+              file's header gives — the schedule is derived from the LOG, and a
+              server render has no log, so an RSC would paint "nothing due" to
+              a learner who has four items (#72). */}
+          <TodaySession />
+        </section>
 
         <section className="card" aria-labelledby="my-surahs-h">
           <div className="card-header">
@@ -70,10 +105,11 @@ export default function HomePage() {
           <DeviceReset />
         </section>
 
-        <StubNote step="step 22 → M6/M7, WIREFRAME §1">
-          Per-surah rows with due counts and the Continue CTA. Both wait on the
-          engine running against the rebuilt log — a due count invented in this
-          view would be the exact dishonesty the boundary exists to prevent.
+        <StubNote step="step 30, WIREFRAME §1">
+          MULTIPLE surahs, each with its own schedule. The enrollment this build
+          writes holds one surah, so TODAY shows the one that is real rather
+          than listing surahs nobody enrolled in. The recommender card is step
+          30; MySurahs&apos; zero state stands in with the honest subset.
         </StubNote>
       </div>
     </div>

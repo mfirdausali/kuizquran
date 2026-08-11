@@ -45,6 +45,35 @@ const nextConfig = {
     },
   },
 
+  // THE SERVICE WORKER MUST NEVER BE HTTP-CACHED.
+  //
+  // A worker is the one asset a user cannot evict by reloading: once the
+  // browser has a cached copy of `/sw.js`, that copy keeps controlling every
+  // navigation, and a bad worker becomes effectively permanent for that
+  // learner. `no-cache, no-store, must-revalidate` means the browser
+  // revalidates the SCRIPT against the network every time, so a fixed worker
+  // can always replace a broken one. `updateViaCache: "none"` at the
+  // registration site (components/shell/ServiceWorkerRegistrar.tsx) asks for
+  // the same guarantee from the other side; both are cheap and the cost of
+  // getting this wrong is a bricked install with no user-side remedy.
+  //
+  // The Content-Type is explicit because a worker served as anything other
+  // than JavaScript is rejected outright by the registration — a failure that
+  // surfaces as "no offline support" with no error anyone would connect to a
+  // header. Recipe from node_modules/next/dist/docs/01-app/02-guides/
+  // progressive-web-apps.md §8.
+  async headers() {
+    return [
+      {
+        source: "/sw.js",
+        headers: [
+          { key: "Content-Type", value: "application/javascript; charset=utf-8" },
+          { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
+        ],
+      },
+    ];
+  },
+
   webpack: (config) => {
     config.resolve.alias = {
       ...config.resolve.alias,

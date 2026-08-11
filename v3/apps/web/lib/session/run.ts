@@ -121,24 +121,48 @@ function machineFor(c: Corpus, surah: number, q: QueueItem, strength: number): R
 }
 
 /**
- * Start (or RESUME) today's session.
- *
- * Resume is not a separate code path, which is the point: the queue is derived
- * from the FOLD of the event log, so a reload re-derives whatever is still due
- * and picks up where the learner left off (edge case #93). A session held only
- * in React state dies on refresh; this one cannot, because it was never the
- * source of truth.
- *
- * `session_start` is emitted only when this is genuinely a new session — a
- * resume that re-emitted it would reset the duration origin and make every
- * reload look like a fresh sitting.
+ * What one assembly of today's queue produced, plus the fold it was produced
+ * FROM. The atoms come back with the queue because every caller that wants a
+ * queue also wants a strength out of the same fold, and folding twice invites
+ * the two to disagree.
  */
-export async function startSession(input: StartInput, c: Corpus): Promise<StartResult> {
-  const { surah, now, tz } = input;
+export interface AssembledQueue {
+  readonly queue: readonly QueueItem[];
+  readonly atoms: ReturnType<typeof rebuild>;
+  /** The log this queue was assembled from, canonically ordered. */
+  readonly prior: Awaited<ReturnType<typeof getEventsForSurah>>;
+}
 
-  if (!Array.isArray(c.words) || c.words.length === 0) {
-    return { ok: false, unavailable: "no-corpus" };
-  }
+/**
+ * ASSEMBLE TODAY'S QUEUE — read-only, and the single place it happens.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS IS EXTRACTED RATHER THAN RE-IMPLEMENTED BY THE DASHBOARD
+ * ---------------------------------------------------------------------------
+ * `/home` has to state a DUE COUNT, and a due count is only honest if it is the
+ * count of the very items the session will actually serve. Two assemblies —
+ * one for the dashboard's number and one for the drill — is exactly the shape
+ * in which they drift, and the day they disagree the dashboard is lying about
+ * the product's core promise. So there is ONE assembly, and both callers take
+ * it. `lib/onboarding/pass.ts` was extracted for the same reason and its header
+ * makes the same argument.
+ *
+ * It APPENDS NOTHING. `startSession` owns the `session_start` write; a
+ * dashboard that merely looked at its own queue must not fabricate a session
+ * the learner never opened, which is why the write stayed on the other side of
+ * this seam rather than moving into it.
+ *
+ * Returns `null` when the corpus cannot produce anything — the caller
+ * distinguishes that from "nothing due", because a learner cannot tell a
+ * missing corpus from a finished day out of one shared empty state.
+ */
+export async function assembleFor(
+  input: { surah: number; now: number },
+  c: Corpus,
+): Promise<AssembledQueue | null> {
+  const { surah, now } = input;
+
+  if (!Array.isArray(c.words) || c.words.length === 0) return null;
 
   const prior = await getEventsForSurah(surah);
   const atomsMap = rebuild(prior);
@@ -163,6 +187,31 @@ export async function startSession(input: StartInput, c: Corpus): Promise<StartR
     wordCounts,
     cfg: { learnCandidates: learnCandidatesFor(c, atomsMap) },
   });
+
+  return { queue, atoms: atomsMap, prior };
+}
+
+/**
+ * Start (or RESUME) today's session.
+ *
+ * Resume is not a separate code path, which is the point: the queue is derived
+ * from the FOLD of the event log, so a reload re-derives whatever is still due
+ * and picks up where the learner left off (edge case #93). A session held only
+ * in React state dies on refresh; this one cannot, because it was never the
+ * source of truth.
+ *
+ * `session_start` is emitted only when this is genuinely a new session — a
+ * resume that re-emitted it would reset the duration origin and make every
+ * reload look like a fresh sitting.
+ */
+export async function startSession(input: StartInput, c: Corpus): Promise<StartResult> {
+  const { surah, now, tz } = input;
+
+  const assembled = await assembleFor({ surah, now }, c);
+  if (!assembled) {
+    return { ok: false, unavailable: "no-corpus" };
+  }
+  const { queue, atoms: atomsMap, prior } = assembled;
 
   if (queue.length === 0) {
     return { ok: false, unavailable: "nothing-due" };

@@ -27,7 +27,7 @@
 import Link from "next/link";
 import type { MacroLayout } from "./facts.ts";
 import { place } from "./geometry.ts";
-import { summarize, type GraphNode } from "./graphNodes.ts";
+import { isHighlighted, summarize, type GraphNode, type HighlightRef } from "./graphNodes.ts";
 import { GraphNodeMark } from "./GraphNodeMark.tsx";
 
 export interface RingDiagramProps {
@@ -36,9 +36,23 @@ export interface RingDiagramProps {
   layout: MacroLayout;
   /** Distinguishes the two id-scopes when more than one diagram is on a page. */
   idPrefix?: string;
+  /** "You are here" on the ayah detail route (§4). OPTIONAL and `null` by
+   *  default, so the surah route and every existing test render unchanged.
+   *
+   *  NEVER COLOUR ALONE (#87) applies to this too, and it is the reason the
+   *  highlight is not only a ring on a circle: the current mark's link text
+   *  says so IN WORDS, and the <desc> names the ayah the map is centred on. A
+   *  learner who cannot see the ring outline still learns where they are. */
+  highlight?: HighlightRef;
 }
 
-export function RingDiagram({ surah, nodes, layout, idPrefix = "ring" }: RingDiagramProps) {
+export function RingDiagram({
+  surah,
+  nodes,
+  layout,
+  idPrefix = "ring",
+  highlight = null,
+}: RingDiagramProps) {
   const { marks, segments, viewBox } = place(nodes, layout);
   const summary = summarize(nodes);
   const titleId = `${idPrefix}-t`;
@@ -49,9 +63,14 @@ export function RingDiagram({ surah, nodes, layout, idPrefix = "ring" }: RingDia
   const stageSentence = summary.byStage
     .map((s) => `${s.count} ${s.label.toLowerCase()}`)
     .join(", ");
+  // The "you are here" sentence is APPENDED rather than woven in, so the
+  // existing aggregate sentence is byte-identical when there is no highlight
+  // and the surah route's assertions keep meaning what they meant.
+  const hereSentence = highlight === null ? "" : ` You are on ayah ${highlight.ayah}.`;
   const desc =
     `Surah ${surah}. ${summary.ayahCount} ${summary.ayahCount === 1 ? "ayah" : "ayat"}, ` +
-    `${summary.seamCount} ${summary.seamCount === 1 ? "joint" : "joints"}. ${stageSentence}.`;
+    `${summary.seamCount} ${summary.seamCount === 1 ? "joint" : "joints"}. ${stageSentence}.` +
+    hereSentence;
 
   return (
     <div className="graph">
@@ -81,7 +100,11 @@ export function RingDiagram({ surah, nodes, layout, idPrefix = "ring" }: RingDia
           ))}
         </g>
         {marks.map((mark) => (
-          <GraphNodeMark key={mark.node.atomKey} mark={mark} />
+          <GraphNodeMark
+            key={mark.node.atomKey}
+            mark={mark}
+            current={isHighlighted(mark.node, highlight)}
+          />
         ))}
       </svg>
 
@@ -99,7 +122,9 @@ export function RingDiagram({ surah, nodes, layout, idPrefix = "ring" }: RingDia
         <ul>
           {nodes.map((node) => (
             <li key={node.atomKey}>
-              <Link href={hrefFor(node)}>{labelFor(node)}</Link>
+              <Link href={hrefFor(node)} aria-current={isHighlighted(node, highlight) ? "page" : undefined}>
+                {labelFor(node, isHighlighted(node, highlight))}
+              </Link>
             </li>
           ))}
         </ul>
@@ -116,14 +141,18 @@ function hrefFor(node: GraphNode): string {
 }
 
 /** The accessible name of a mark. Carries the reference, the KIND AS A WORD,
- *  the stage AS A WORD and the number — never a colour. */
-function labelFor(node: GraphNode): string {
+ *  the stage AS A WORD and the number — never a colour.
+ *
+ *  `current` appends "you are here" IN WORDS. On the detail route the ring
+ *  outline around the current disc is a purely visual cue, and a purely visual
+ *  cue is exactly what #87 forbids as the sole carrier of a fact. */
+function labelFor(node: GraphNode, current = false): string {
   const ref =
     node.kind === "seam"
       ? `Joint ${node.surah}:${node.from}→${node.to}`
       : `Ayah ${node.surah}:${node.ayah}`;
   const value = node.encoded ? `${node.strengthPct}%` : "not started";
-  return `${ref}, ${node.stageLabel}, ${value}`;
+  return `${ref}, ${node.stageLabel}, ${value}${current ? ", you are here" : ""}`;
 }
 
 /** A not-yet-started seam is drawn in the neutral border colour rather than
