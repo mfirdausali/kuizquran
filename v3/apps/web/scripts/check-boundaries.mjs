@@ -112,6 +112,59 @@ for (const f of files.filter((f) => /^(app|components)\//.test(rel(f)))) {
   });
 }
 
+// --- Clause 6: SINGLE EGRESS. Only lib/sync/apiFetch.ts calls fetch() at /api. ---
+// DEFECTS.md#B8's frontend half is an interceptor that clears a dead token and
+// re-mints. An interceptor is only a guarantee if it cannot be bypassed, and a
+// second, un-wrapped `fetch("/api/...")` is EXACTLY how B8 comes back: that
+// call would carry a dead token, 401 forever, and never clear anything.
+//
+// Mirrors clause 3 (indexedDB.open appears only in lib/idb/db.ts), which is the
+// proven pattern here. apiFetch.ts is the one exemption, and it earns it: its
+// mint call MUST bypass the interceptor, because a 401 from the mint endpoint
+// triggering a mint is the re-mint loop, directly.
+const EGRESS_EXEMPT = new Set(["lib/sync/apiFetch.ts"]);
+for (const f of files) {
+  const r = rel(f);
+  if (EGRESS_EXEMPT.has(r) || r.endsWith(".test.ts") || r.endsWith(".test.tsx")) continue;
+  const src = stripComments(read(f));
+  src.split("\n").forEach((line, i) => {
+    // A fetch whose target mentions /api — literal, template, or via a base
+    // constant that ends in the path.
+    if (/\bfetch\s*\(\s*[`"'][^`"']*\/api\//.test(line)) {
+      violations.push(
+        `${r}:${i + 1}: raw fetch() to /api. All API egress goes through ` +
+          `lib/sync/apiFetch.ts, or the 401 interceptor (DEFECTS.md#B8) is bypassable.`,
+      );
+    }
+  });
+}
+
+// --- Clause 7: NO OMIT-DESTRUCTURING IN THE SYNC MERGE. ---
+// DEFECTS.md#B5 is one line: `const { seq: _drop, ...rest } = e`. The merge
+// dropped a field and log order became arrival order. The v3 rule is not "omit
+// the right fields" — it is that the merge has NO OMIT LIST AT ALL, so this
+// clause makes the GESTURE unwritable rather than merely tested-against.
+//
+// Scoped to lib/sync/ because that is where a merge lives. schema.ts's `toWire`
+// legitimately uses this shape to strip the local-only `syncedAt`, and it is
+// the SINGLE place allowed to know which fields are local — every other module
+// calls it rather than re-implementing the strip.
+const OMIT_DESTRUCTURE = /const\s*\{\s*[A-Za-z_$][\w$]*\s*:\s*_[\w$]*\s*,\s*\.\.\./;
+for (const f of files.filter((f) => rel(f).startsWith("lib/sync/"))) {
+  const r = rel(f);
+  if (r.endsWith(".test.ts")) continue;
+  const src = stripComments(read(f));
+  src.split("\n").forEach((line, i) => {
+    if (OMIT_DESTRUCTURE.test(line)) {
+      violations.push(
+        `${r}:${i + 1}: omit-destructuring in the sync island — this is ` +
+          `DEFECTS.md#B5's literal syntax. The merge preserves every wire ` +
+          `field; use lib/idb/schema.ts#toWire to strip local-only fields.`,
+      );
+    }
+  });
+}
+
 if (violations.length > 0) {
   console.error(`\n✗ boundaries gate FAILED — ${violations.length} violation(s)\n`);
   for (const v of violations) console.error(`   ✗  ${v}`);

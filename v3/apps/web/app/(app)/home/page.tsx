@@ -23,6 +23,7 @@
 import Link from "next/link";
 import { LogSummary } from "@/components/home/LogSummary";
 import { StubNote } from "@/components/shell/StubNote";
+import { SyncStatus } from "@/components/shell/SyncStatus";
 
 export default function HomePage() {
   return (
@@ -41,6 +42,11 @@ export default function HomePage() {
           </div>
           {/* The log-derived line. A client island, exhaustively three-stated. */}
           <LogSummary />
+          {/* #103's quiet "N pending" indicator (build-plan step 21 / M6). A
+              PASSIVE OBSERVER: it reads a count, it never triggers or awaits a
+              flush, and no session path reads it. Three-stated like every other
+              log read, so a not-yet-read count paints a skeleton, never `0`. */}
+          <SyncStatus />
           <Link href="/library" className="btn hit">
             Browse the library
           </Link>

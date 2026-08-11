@@ -26,9 +26,12 @@ export const DB_VERSION = 1;
  * The two types are kept distinct precisely so they are never conflated:
  * `DrillEvent` is what crosses the wire, `LocalEventRow` is what sits on disk.
  *
- * The outbox that drains this is M6/step 21 (sync-builder's job, which owns
- * B5's actual fix). M5 ships the FIELD and its INDEX only — so that the index
- * exists before there is data to migrate — and nothing else.
+ * The outbox that drains it shipped in M6/step 21 and lives in `lib/sync/`,
+ * where `syncedAt == null` means PENDING (v3-D51). Note there is deliberately
+ * NO `by_syncedAt` index and there should not be: IndexedDB cannot index
+ * `null`, so such an index would hold exactly the SYNCED rows and omit the
+ * pending ones — the opposite of what an outbox needs. The drain scans
+ * `by_deviceSeq` instead.
  */
 export type LocalEventRow = DrillEvent & { syncedAt?: number | null };
 
@@ -41,7 +44,28 @@ export type MetaKey =
   | "glossLang"
   | "tz"
   | "writerId"
-  | "writerHeartbeatAt";
+  | "writerHeartbeatAt"
+  // --- build-plan step 21 (M6, sync). No DB_VERSION bump: `meta` is
+  // `{key: string}`-keyed and un-indexed, so a new key needs no migration. ---
+  /** The pull cursor: the SERVER INGEST SEQUENCE (`id`) of the last event
+   *  merged, never a `ts` (v3-D31 / edge case #132). Lives here rather than in
+   *  localStorage because it MUST advance in the same IndexedDB transaction
+   *  that writes the events it describes — localStorage cannot participate in
+   *  one, and a crash between the two would advance the cursor past events
+   *  never written, which is permanent silent loss. */
+  | "pullCursor"
+  /** Which server identity `pullCursor` belongs to. A cursor is meaningless
+   *  across users (`GET /api/events` is `where('user_id', $userId)`), so a
+   *  changed identity resets the cursor to 0. */
+  | "pullCursorIdentity"
+  /** PERFORMANCE HINT ONLY, never a correctness boundary: the smallest
+   *  deviceSeq that might still be pending. It may be wrong-LOW (costing a
+   *  longer scan) but is only ever advanced to a value proven to have nothing
+   *  pending below it, so it can never be wrong-HIGH (costing an event). A
+   *  full scan is the fallback whenever it is absent. This is the crucial
+   *  difference from a high-water sync cursor, which WOULD lose the
+   *  out-of-order rows a retried append re-submits. */
+  | "outboxLowWater";
 
 export interface MetaRow {
   key: MetaKey;

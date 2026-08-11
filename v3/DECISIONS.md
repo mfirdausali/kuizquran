@@ -932,3 +932,103 @@ The pattern across v3-D38, D45, D49 and now D50 is one thing: **verification
 that runs on the author's machine is not verification.** The tsc binary, the
 stage-label test, the encoded guard and this directory all passed locally while
 being broken or vacuous in the repo.
+
+### v3-D51 — The outbox's pending marker is a FLAG ON THE ROW, drained by scanning `by_deviceSeq`
+
+`syncedAt == null` is "pending". Not a high-water cursor, not a second store.
+
+A **high-water cursor** (`lastSyncedDeviceSeq`) is fatal and was rejected on that
+basis: a retried `RetryableAppendError` re-submits an **older, already-allocated**
+deviceSeq (`append.ts:148-150` deliberately reuses it), so that row sits *below*
+the mark and is never sent. Silent permanent loss. A **separate outbox store**
+means two stores, two transactions, and a crash window between them.
+
+The flag's failure mode is the benign one: a crash after the POST but before the
+flag-write leaves rows pending, so they are **re-sent** — and re-sent is free,
+because the uuid is the server's idempotency key (`insertOrIgnore` over
+`unique(user_id, uuid)`). There is no failure mode that loses an event, because
+a row is only marked synced **after** a 2xx that included it.
+
+**There is no `by_syncedAt` index, and there should not be.** IndexedDB cannot
+index `null` — a record whose indexed value is null/undefined is simply not in
+the index — so such an index would contain exactly the SYNCED rows and omit the
+pending ones, the opposite of what an outbox needs. `DB_VERSION` stays 1. The
+drain scans the `by_deviceSeq` compound index (already ordered exactly as the
+outbox wants to drain), bounded below by an `outboxLowWater` hint in `meta`.
+
+That hint is a **performance optimization and never a correctness boundary**: it
+is only advanced to a value proven to have nothing pending below it, so it can be
+wrong-LOW (costing a scan) but never wrong-HIGH (costing an event), and its
+absence means a full scan. That asymmetry is the whole difference from the
+rejected cursor design.
+
+Three `MetaKey` values were added (`pullCursor`, `pullCursorIdentity`,
+`outboxLowWater`). No migration: `meta` is `{key: string}`-keyed and un-indexed.
+
+### v3-D52 — The merge has NO OMIT LIST, and clause 7 makes B5's syntax unwritable
+
+DEFECTS.md#B5 is one line: `const { seq: _drop, ...rest } = e`. v3 already removed
+the *foundation* of that bug (the events store is keyed on the uuid, not an
+autoincrement arrival counter), but B5 is reproducible by three other mechanisms:
+dropping `deviceSeq` (every foreign device collapses into one uuid-ordered
+bucket), dropping `deviceId` (two devices interleave as one stream), and the
+invisible one — a row with an `undefined` member of the `by_ts` compound keyPath
+is **not indexed at all** and vanishes from every canonical read.
+
+So the rule is not "omit the right fields". It is that `merge.ts` has **no omit
+list anywhere**: the merged row is `{...wireEvent, syncedAt}`, and `syncedAt` is
+the only local field written. The legacy `seq` is **copied as provenance, never
+re-derived and never stripped** — stripping is B5's gesture, re-deriving is B5's
+bug. `check-boundaries.mjs` clause 7 greps `lib/sync/` for the destructure-with-
+omit shape and fails the build, so the gesture is unwritable rather than merely
+tested-against. Clause 6 does the same for raw `fetch()` at `/api`, which is how
+B8's interceptor stays un-bypassable.
+
+**#50 (existing id, divergent payload): KEEP THE LOCAL ROW and alert.** Never
+silently drop, never silently overwrite. The local row is what this learner's
+device observed and what its atoms were folded from; overwriting it with a
+foreign payload would retroactively change history the learner already saw. One
+poisoned uuid must not stop the rest of the page merging — that is #110's wedge
+in a different costume.
+
+**The digest normalizes "absent" and "null" to the same thing.**
+`EventsController::toWire()` emits a field only `if ($value !== null)`, so every
+round-tripped event loses its explicit nulls. A naive `JSON.stringify` digest
+would report a divergence on EVERY round-tripped event and #50's alert would fire
+constantly — the fastest possible way to train everyone to ignore it.
+
+### v3-D53 — A 401 re-mint RESETS the pull cursor, and SPLITS server-side history
+
+DEFECTS.md#B8's wedge is a **conjunction**: `ensureDevice()` returns early if
+*any* token exists **and** nothing ever clears the token. Either half alone is
+survivable, so the fix breaks both — `hasLiveToken()` is "exists AND not marked
+dead", and the 401 path clears the token *before* any await.
+
+**Mutation testing found the first half was inert as originally written.** When
+"mark dead" and "clear" were the same action, removing the dead-marker changed no
+observable behaviour (the token was gone anyway), so the mutation *"restore v2's
+early-return on any-token-exists"* SURVIVED — v3-D49's pattern exactly, a guard
+whose test cannot distinguish the two states it guards. Splitting `markTokenDead()`
+from `clearToken()` made each half independently observable, and both mutations
+now go red.
+
+**Three redundant brakes** stop a permanently-401ing server minting users forever:
+retry-once carried *in the call* (a parameter, not module state, so it cannot leak
+across calls); a **single-flight mint** (N concurrent 401s otherwise mint N users
+and N-1 silently orphan their events under abandoned accounts — a data-loss bug
+wearing an auth costume); and a cooldown after a failed mint. `POST
+/api/auth/anonymous` is **exempt from the interceptor** — a 401 from the mint
+endpoint triggering a mint is the loop, directly.
+
+**The cursor resets on every identity change.** `GET /api/events` is
+`where('user_id', $userId)`, so a cursor is meaningless across users; a fresh
+anonymous user's ingest sequence starts at 0, and a carried-over cursor would skip
+their entire history forever. That is the one genuinely unrecoverable state in the
+pull path, so when in doubt, RESET (re-pulling is merely slow).
+
+**Accepted and flagged, not hidden:** the outbox is NOT reset, so pending events
+re-push under the new identity while already-synced ones stay with the old — a
+re-mint **splits a learner's server-side history across two anonymous users**. The
+local log stays complete and correct (invariant #2 makes it truth), so nothing the
+learner sees breaks. Reunification is the account-adoption merge job, M6's other
+half, not step 21.

@@ -1,0 +1,116 @@
+/**
+ * @vitest-environment jsdom
+ */
+
+// The "N pending" indicator — edge case #103.
+//
+//     | 103 | Outbox growth offline-for-days | fe | invisible risk | quiet
+//       'N pending' indicator; NEVER BLOCKS A SESSION | M6 |
+//
+// TWO PROPERTIES, and each has its own mutation:
+//
+//   1. SKELETONS ARE NEVER ZEROS (#73). While the count is still being read
+//      the component must paint a SKELETON, never "0 waiting". Painting a
+//      number the app has not established is the same retention-honesty
+//      violation as "0 ayat due" shown to a learner who has four. The
+//      mutation: make `pending` render `0`.
+//   2. IT NEVER BLOCKS. It is a PASSIVE OBSERVER — it must never trigger a
+//      flush. The mutation: have it call pushOutbox() on mount. Asserted by
+//      spying on the network: a passive indicator makes no requests at all.
+
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import { IDBFactory } from "fake-indexeddb";
+import { append } from "@/lib/idb/append";
+import { openDb, resetDbForTests } from "@/lib/idb/db";
+import { writeLock } from "@/lib/idb/writeLock";
+import { SyncStatus } from "@/components/shell/SyncStatus";
+
+const CTX = { now: 1_700_000_000_000, tz: "UTC" };
+
+beforeEach(async () => {
+  globalThis.indexedDB = new IDBFactory();
+  resetDbForTests();
+  writeLock.forceForTests({ role: "writer" });
+  vi.unstubAllGlobals();
+});
+
+/** Append at fixture COORDINATES. No Arabic, ever. */
+async function appendEvents(n: number) {
+  for (let i = 0; i < n; i++) {
+    await append(
+      { type: "tap", ts: CTX.now + i, surah: 112, ayah: 1, rung: "S1", id: `e-${i}` },
+      CTX,
+    );
+  }
+}
+
+describe("#73 — skeletons are never zeros", () => {
+  it("paints a SKELETON, not a digit, before the count is read", () => {
+    render(<SyncStatus />);
+    // Synchronously after mount the read has not resolved. The accessible
+    // name says we are checking; there is NO number on screen.
+    expect(screen.getByText(/checking what still needs to sync/i)).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/\d/);
+  });
+});
+
+describe("the three states the count can be in", () => {
+  it("says ALL SYNCED when nothing is pending (the designed zero-state)", async () => {
+    await openDb();
+    render(<SyncStatus />);
+    await waitFor(() => expect(screen.getByText(/all synced/i)).toBeTruthy());
+  });
+
+  it("reports the pending COUNT when rows are waiting", async () => {
+    await appendEvents(3);
+    render(<SyncStatus />);
+    await waitFor(() => expect(screen.getByText(/3 waiting to sync/i)).toBeTruthy());
+  });
+
+  it("distinguishes 'cannot sync' from 'waiting' — different facts, different numbers", async () => {
+    await appendEvents(2);
+    render(<SyncStatus cannotSync={1} />);
+    await waitFor(() => expect(screen.getByText(/2 waiting to sync/i)).toBeTruthy());
+    // A quarantined event is NOT folded into the pending count: "waiting" and
+    // "cannot" must never share a number, or an unsyncable event looks like a
+    // transient backlog forever.
+    expect(screen.getByText(/1 cannot sync/i)).toBeTruthy();
+  });
+
+  it("surfaces #50 divergences as a review count", async () => {
+    await appendEvents(1);
+    render(<SyncStatus divergences={2} />);
+    await waitFor(() => expect(screen.getByText(/2 need review/i)).toBeTruthy());
+  });
+});
+
+describe("#103 — it NEVER blocks and never flushes", () => {
+  it("makes NO network request of its own", async () => {
+    const fetchSpy = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchSpy);
+    await appendEvents(2);
+
+    render(<SyncStatus />);
+    await waitFor(() => expect(screen.getByText(/2 waiting to sync/i)).toBeTruthy());
+
+    // A PASSIVE OBSERVER. If this component ever triggers or awaits a flush,
+    // it stops being free to render mid-session — which is exactly what #103
+    // forbids.
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("renders a calm, non-blocking message when the log cannot be read", async () => {
+    // A broken store must not produce a modal, a thrown render, or alarm. The
+    // local log is truth and nothing is lost — only the COUNT is unavailable.
+    vi.stubGlobal("indexedDB", {
+      open: () => {
+        throw new DOMException("nope", "InvalidStateError");
+      },
+    });
+    resetDbForTests();
+    render(<SyncStatus />);
+    await waitFor(() => expect(screen.getByText(/sync status unavailable/i)).toBeTruthy());
+    expect(screen.getByText(/your work is saved on this device/i)).toBeTruthy();
+  });
+});

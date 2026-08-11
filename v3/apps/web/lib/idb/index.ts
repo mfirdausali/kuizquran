@@ -4,10 +4,12 @@
 //
 //   Corpus is server. Log is client. Skeletons are never zeros.
 //
-// NOT built here, deliberately: the outbox / sync / mergeFromServer. That is
-// build-plan step 21, milestone M6, assigned to the sync-builder role which
-// "owns B5's actual fix". `syncedAt` exists in the schema so the field is in
-// place before there is data to migrate — and nothing else.
+// NOT built here, deliberately: the outbox / sync / mergeFromServer. Those
+// shipped in build-plan step 21 (M6) and live in `lib/sync/`, which owns B5's
+// actual fix and B8's frontend half. They are a SEPARATE island that builds on
+// this one — this module stays the truth store and knows nothing about the
+// network. `syncedAt` is defined here (it is a property of a stored row) and is
+// interpreted there (`syncedAt == null` means pending).
 
 export { DB_NAME, DB_VERSION, canonicalKey, compareCanonical, toWire } from "./schema.ts";
 export type {

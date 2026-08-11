@@ -53,12 +53,12 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 1097 total, typechecks first. 255 v2 vitest + 47 v2/api + 71 v3/api
-             # + 72 corpus-compiler + 391 engine + 15 fold-runner + 246 apps/web.
+make test    # 1176 total, typechecks first. 255 v2 vitest + 47 v2/api + 77 v3/api
+             # + 72 corpus-compiler + 391 engine + 15 fold-runner + 319 apps/web.
              # NOTE (v3-D50): v3/api/tests/Unit/.gitkeep is LOAD-BEARING — phpunit.xml
              # names a Unit suite and PHPUnit hard-fails if the dir is missing, which
              # silently took all 71 v3/api tests out of `make test` for a full day.
-             # Steps 1-20 complete. Next: step 21 (sync outbox/pull/merge, closes B5).
+             # Steps 1-21 complete (step 21 closed B5 AND B8). Next: step 22.
 make build   # must pass — CI no longer tolerates failure (B9)
 make doctor  # what's missing
 ```

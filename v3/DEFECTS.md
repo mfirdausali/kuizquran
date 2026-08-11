@@ -37,7 +37,7 @@ claim of an `ADMIN_EMAILS` address is refused regardless. Closing test:
 `tests/Feature/Auth/AdminAccessTest.php::test_unverified_admin_email_is_forbidden`
 (mutation-checked: reverting the `hasVerifiedEmail()` clause turns it red).
 
-## B8 — dead-token wedge (M3, `AUTH-`) — partially closed (build-plan step 13)
+## B8 — dead-token wedge ✅ CLOSED (build-plan step 21)
 
 `auth.ts:51-52` — `ensureDevice()` returns early if *any* token exists, and
 `clearToken()` is never called on a 401 anywhere in `src/`. A revoked token
@@ -54,6 +54,35 @@ storage (`tests/Feature/Auth/PasswordResetTest.php`). **Still open:** the
 actual defect is `auth.ts:51-52` in the frontend (`apps/web`), which does not
 exist yet — build-plan step 17 (M5). This entry stays open until that
 interceptor ships; do not mark B8 closed on this fix alone.
+
+**Closed 2026-08-11 (build-plan step 21).** v3 has no v2-shaped `ensureDevice()`
+to repair — `apps/web` contained no `fetch`, no `Bearer` and no token handling at
+all — so the defect is **prevented by construction**. `lib/sync/apiFetch.ts` is
+the SOLE egress to `/api/*` (clause 6 greps for a second one), and on a 401 it
+clears the token FIRST, mints via the unauthenticated `POST /api/auth/anonymous`,
+and retries exactly once with the new token.
+
+The wedge is a CONJUNCTION and both halves are broken (v3-D53): `hasLiveToken()`
+is "exists AND not marked dead", never "a token string exists". **Mutation testing
+found that half inert as first written** — because clearing and marking were the
+same action, restoring v2's early-return SURVIVED. Splitting `markTokenDead()`
+from `clearToken()` made each half independently observable; both mutations now go
+red, including a test that a PRESENT-but-dead token is never ATTACHED to a
+request.
+
+Three redundant brakes prevent a re-mint loop (retry-once as a call parameter,
+single-flight mint, post-failure cooldown), each with a call-COUNT assertion
+rather than a "it terminated" assertion.
+
+Closing tests, both layers: `apps/web/lib/sync/auth.test.ts` (14 tests — asserts
+the STORED TOKEN CHANGED and that the retry carried the NEW token, not merely
+that a request succeeded) and `v3/api/tests/Feature/Auth/TokenRevocationTest.php`
+(6 tests — revokes server-side with `$user->tokens()->delete()` and proves the
+real 401, so the client's stub is a faithful model rather than a fiction).
+Mutations run and observed RED: remove `clearToken()`, restore v2's early-return,
+remove the retry-once brake, remove the single-flight mint, route the mint through
+the interceptor, un-authenticate `/events`, replace `insertOrIgnore` with
+`insert`, and drop the pull's `user_id` scoping.
 
 ## B1 — the `custom` override is a loaded no-op ✅ CLOSED (build-plan step 15)
 
@@ -141,7 +170,7 @@ stable across runs.
 regardless of input array order (both directions tested) and across 5
 repeated runs on a same-millisecond fixture.
 
-## B5 — `mergeFromServer` drops `seq` (M6)
+## B5 — `mergeFromServer` drops `seq` ✅ CLOSED (build-plan step 21)
 
 `db/eventLog.ts:113` — `const { seq: _drop, ...rest } = e`, so IndexedDB assigns
 a fresh local `seq` and **log order becomes arrival order**. Two devices with
@@ -149,6 +178,39 @@ byte-identical event sets would order differently.
 
 *Closes when:* merge preserves `deviceSeq` and a two-device test yields identical
 folds regardless of arrival order.
+
+**Fixed 2026-08-11:** `apps/web/lib/sync/merge.ts` preserves the wire VERBATIM —
+the merged row is `{...wireEvent, syncedAt}` and the module has **no omit list at
+all** (v3-D52). `check-boundaries.mjs` clause 7 greps `lib/sync/` for the
+destructure-with-omit shape, so B5's literal syntax is now unwritable rather than
+merely tested-against (violation probe run: gate exits 1, then 0 once removed).
+
+Closing test: `apps/web/lib/sync/merge.test.ts` — two devices, byte-identical
+event sets, 15 seeded arrival orders, asserting BOTH (1) a byte-identical log
+order read back through the `by_ts` index and (2) an identical AtomsMap. The fold
+uses the **real** rule: the fold-runner's own `canonicalOrder` and the engine's
+own `rebuild`, compared key-by-key with the fold-runner's own
+`compareAtomCaches` — never a reimplementation.
+
+**The fixture is the test, and mutation testing rewrote it twice.** It carries
+(a) ts collisions ACROSS devices, (b) deviceSeq contradicting ts order within a
+device, (c) overlapping deviceSeq ranges across devices (#49), and (d) slips
+interleaved with successes on the same ayah at colliding ts. Property (d) was
+added *because the mutation table caught the suite lying*: with an all-correct
+fixture the AtomsMap assertion survived the deviceSeq-dropping mutation, since
+`update()` is order-insensitive for a run of correct retrievals sharing a
+millisecond. The fold assertion was also re-based onto an INDEPENDENT ORACLE (the
+fold of the original fixture in canonical order) rather than mere self-consistency
+across shuffles — a merge that damages all interleavings identically passes a
+self-consistency check while being genuinely wrong.
+
+Mutations run, all observed RED then reverted byte-identically: drop `deviceSeq`
+(B5 verbatim), drop `deviceId`, stamp a synthetic arrival-order `deviceSeq`,
+ts-only sort in the canonical read, canonical tuple reordered to
+`(ts, deviceSeq, deviceId, uuid)`, and the assertion-removal probe. **Assertions
+(1) and (2) are each independently load-bearing** — the ts-only-sort and
+tuple-reorder mutations are caught by (1) only, and are the reason (1) is
+non-negotiable.
 
 ## B6 — string-match grading (M2) ✅ CLOSED (build-plan step 8)
 
