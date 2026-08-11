@@ -29,8 +29,15 @@ interface StripeField {
   setVia: string;
 }
 
+interface ReplaySuite {
+  fixtureCount: number;
+  green: boolean;
+  blocker: string | null;
+}
+
 interface StripeSettings {
   fields: StripeField[];
+  replaySuite?: ReplaySuite;
   configured: boolean;
   mode: "live" | "test" | null;
   mixedModes: boolean;
@@ -165,6 +172,19 @@ export function StripeSettingsPanel() {
           re-read.
         </p>
       </section>
+
+      {data.replaySuite && !data.replaySuite.green ? (
+        // PAY-1 / M7's exit criterion, shown where it is actionable. The replay
+        // suite reports INCOMPLETE over an empty fixture set rather than passing
+        // vacuously (v3-D50 on the revenue path), and whoever is configuring
+        // credentials is exactly the person who can then record fixtures.
+        <section className="card">
+          <p style={{ margin: 0, fontWeight: 600 }}>
+            Replay suite is red — {data.replaySuite.fixtureCount} recorded events
+          </p>
+          <p className="caption">{data.replaySuite.blocker}</p>
+        </section>
+      ) : null}
 
       <section className="card">
         <div className="card-header">
