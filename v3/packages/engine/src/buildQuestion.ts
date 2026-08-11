@@ -2,10 +2,10 @@
 // buildQuestion(spec, ctx) -> RenderItem | null." DoD (BUILD-PLAN.md M4):
 // byte-parity re-expression of the existing generators (reconstruct.ts +
 // test.ts's 6 builders) under FROZEN B6 semantics. This file ships the
-// FIRST parity-fenced kernel (s1 — see test/buildQuestion.test.ts's
-// full-corpus sweep against test.ts#vocabItem); cloze/junction/locate/
-// reorder kernels land in follow-on work, same explicit-flag discipline as
-// v3-D27/v3-D28/v3-D33.
+// s1 and cloze kernels (see test/buildQuestion.test.ts's full-corpus
+// sweeps against test.ts#vocabItem/clozeItem); junction/locate/reorder
+// kernels land in follow-on work, same explicit-flag discipline as
+// v3-D27/v3-D28/v3-D33/v3-D35.
 //
 // "rc" is deliberately NOT buildable here — WIREFRAME's own DATA/CODE
 // table keeps reconstruct.ts's sequencing state machine as CODE, never
@@ -15,13 +15,14 @@
 
 import type { Corpus, GlossLang } from "./types.ts";
 import type { Site } from "./site.ts";
-import { ayahWords } from "./corpus.ts";
+import { ayahWords, distractorsFor } from "./corpus.ts";
 import { buildFace } from "./faces.ts";
 import type { CorpusRef } from "./corpusRef.ts";
 import type { RenderItem } from "./render.ts";
 
 export type Spec =
-  | { lane: "s1"; site: Site; lang?: GlossLang };
+  | { lane: "s1"; site: Site; lang?: GlossLang }
+  | { lane: "cloze"; site: Site };
 
 function buildS1(corpus: Corpus, site: Site, lang: GlossLang): RenderItem | null {
   if (site.kind !== "ayah") return null;
@@ -57,6 +58,31 @@ function buildS1(corpus: Corpus, site: Site, lang: GlossLang): RenderItem | null
   return { shape: "choice", prompt, options, correctIndex: 0 };
 }
 
+/** Byte-parity with options.ts#pickOptions at strength=0 (Learn band:
+ *  count=4, maxRank=4), the exact spec test.ts#clozeItem calls with. */
+function buildCloze(corpus: Corpus, site: Site): RenderItem | null {
+  if (site.kind !== "ayah") return null;
+  const words = ayahWords(corpus, site.ayah);
+  if (words.length === 0) return null;
+  const target = words[Math.floor(words.length / 2)] ?? words[0]!;
+
+  const correctFace = buildFace(corpus, { kind: "word", ayah: site.ayah, position: target.position });
+  if (!correctFace) return null;
+
+  const eligible = distractorsFor(corpus, site.ayah, target.position).filter(
+    (d) => d.rank <= 4 && d.text !== correctFace.text,
+  );
+  const options = [correctFace];
+  for (const d of eligible) {
+    const face = buildFace(corpus, { kind: "distractor", ayah: site.ayah, position: target.position, rank: d.rank });
+    if (!face) continue;
+    options.push(face);
+    if (options.length === 4) break;
+  }
+
+  return { shape: "choice", prompt: correctFace, options, correctIndex: 0 };
+}
+
 /** The one pure function. Returns null for any spec/corpus combination
  *  that can't produce a real, corpus-grounded question — never throws,
  *  never fabricates. */
@@ -64,6 +90,8 @@ export function buildQuestion(corpus: Corpus, spec: Spec): RenderItem | null {
   switch (spec.lane) {
     case "s1":
       return buildS1(corpus, spec.site, spec.lang ?? "en");
+    case "cloze":
+      return buildCloze(corpus, spec.site);
     default:
       // Any lane without a kernel yet (cloze/junction/locate/reorder —
       // follow-on work) or "rc" (WIREFRAME's DATA/CODE split — reconstruct.ts's

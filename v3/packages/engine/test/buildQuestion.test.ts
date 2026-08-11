@@ -111,10 +111,11 @@ describe("buildQuestion — cloze lane (parity target: test.ts#clozeItem)", () =
     if (item!.shape !== "choice") throw new Error("unreachable");
     for (const opt of item!.options) {
       expect(opt.script).toBe("arabic");
-      expect(opt.from.kind).toBe("distractor");
     }
-    // The correct option is the target WORD itself, not a distractor row —
-    // its Face still carries real provenance, just a different CorpusRef kind.
+    // Distractor options carry distractor provenance; the correct option is
+    // the target WORD itself, not a distractor row — different CorpusRef
+    // kind, but every option's Face still carries real provenance.
+    item!.options.slice(1).forEach((opt) => expect(opt.from.kind).toBe("distractor"));
     expect(item!.options[item!.correctIndex]!.from.kind).toBe("word");
   });
 

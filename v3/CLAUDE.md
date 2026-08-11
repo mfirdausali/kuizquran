@@ -53,7 +53,7 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 255 v2 vitest + v3 vitest (432 as of build-plan step 16 in progress: 52 corpus-compiler + 365 engine + 15 fold-runner) + 47 v2/api PHPUnit + 71 v3/api PHPUnit
+make test    # 255 v2 vitest + v3 vitest (436 as of build-plan step 16 in progress, s1+cloze kernels: 52 corpus-compiler + 369 engine + 15 fold-runner) + 47 v2/api PHPUnit + 71 v3/api PHPUnit
 make build   # must pass — CI no longer tolerates failure (B9)
 make doctor  # what's missing
 ```
