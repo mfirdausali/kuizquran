@@ -1,21 +1,44 @@
 # HANDOVER.md — iman.app v3, final audit
 
-**Audited 2026-08-11** against `v3/docs/BUILD-PLAN.md`'s 32-step corrected build
-order, read in full. Every verdict below was produced by running a command or
-reading a file in this repo on the audit date, never from a docblock's claim.
+**Audited 2026-08-11.** **Re-audited 2026-08-11 (later, after the step-30
+engineering landed)** against `v3/docs/BUILD-PLAN.md`'s 32-step corrected build
+order. Every verdict below was produced by running a command or reading a file
+in this repo, never from a docblock's claim.
 
 **Everything below is reproducible.** Section E gives the commands.
+
+> **Re-audit note — the tree is UNCOMMITTED.** A concurrent agent landed the
+> step-30 engineering (determinism runners, an artisan schedule, the night
+> ledger, a Playwright suite) as **working-tree changes that are not committed**:
+> 9 modified files and 14 untracked paths at re-audit time. Everything this
+> document credits to step 30 lives in that uncommitted tree. **If it is
+> reverted or lost, steps 14 and 30 return to NOT BUILT.** Per v3-D64's
+> commit-hygiene rule this audit committed nothing; the tree is left for the
+> merger.
 
 ---
 
 ## The one-sentence answer
 
 The **substrate is real and the gates are honest**; the **product is not
-assembled**. Steps 1–17 and 19–26 and 29 have genuine, mutation-verified
-capability behind them, but the single surface that makes this a learning app —
-a session a learner can complete — does not exist, and the only Arabic a
-learner can reach today is served from a **stale engine test fixture**, not the
-frozen corpus the qari would sign.
+assembled**. Steps 1–17, 19–26, 29 and now the *engineering* half of 30 have
+genuine, mutation-verified capability behind them, but the single surface that
+makes this a learning app — a session a learner can complete — does not exist,
+and the only Arabic a learner can reach today is served from a **stale engine
+test fixture**, not the frozen corpus the qari would sign.
+
+### What changed since the first audit
+
+| | First audit | Now (verified by running it) |
+|---|---|---|
+| Nightly scheduler | none — `routes/console.php` registered only `inspire` | **exists**; `schedule:list` prints `determinism:check both --trigger=schedule`, 03:00 UTC |
+| Determinism checks | libraries only, never monitors | **run green as monitors**; `make determinism-check` exits 0 |
+| 7-night window | could not start | **startable but NOT STARTED** — `nightly:window` exits 1, "NOT DECLARED", streak 0/7 |
+| Playwright e2e | did not exist | **exists and passes** — 34 tests, ran here in 29s |
+| Test total | 1551 (floor, zero margin) | **1614** (+63 margin) |
+| Step 27 (scene beats) | surah 67 has 0 | **unchanged** — gate still exits 1 |
+| Drill corpus (§A-note) | stale test fixture | **unchanged** — still the defect |
+| B6 guard | mutation survivor | **still a survivor** — re-confirmed today |
 
 ---
 
@@ -40,7 +63,7 @@ verify something, the row says so and names it.
 | 11 | Site + admit + rotation + per-device visitOrdinal | **DONE** | `site.ts`, `rotation.ts`, `selection.ts` in the 391. |
 | 12 | selection_determinism_check | **DONE** | In-suite, snapshot-based, varying seeds. |
 | 13 | Laravel skeleton + auth + password reset + mail | **DONE** | 194 passing v3/api tests; `PasswordResetController`, `EmailVerificationController`, `MustVerifyEmail` real. |
-| 14 | Ingestion + pull + fold-runner + atom_cache + fold check | **PARTIAL** | Pure core proven (15 fold-runner tests, arrival-order invariance). **No DB adapter, no scheduler** — `worker/fold-runner/package.json` says so in its own `description`; `routes/console.php` registers nothing. The check cannot run nightly against anything. (v3-D32) |
+| 14 | Ingestion + pull + fold-runner + atom_cache + fold check | **PARTIAL** (improved) | Pure core proven — fold-runner now **53 tests** (was 15). **Scheduler now exists** (see step 30). Runners green: `make determinism-check` → both checks `"severity":"green"`, exit 0. **Still no live DB adapter for real server logs** — `package.json`'s `description` still defers it (v3-D32). Verified honest: `php artisan determinism:check fold` (DB path, empty DB) → `ERROR (exit 5) — sampler returned no learners … refusing to report green`. |
 | 15 | Specs / typed overrides (B1 dead) / tiered verifications | **PARTIAL** | Schema, controllers, any-row-matches frontier all tested. **The override→re-hash trigger is manual** — DEFECTS.md#B3 states this explicitly. |
 | 16 | Question compiler §22 + explain() | **DONE** | `buildQuestion.ts`, `render.ts` (4 closed shapes), `explain()` proven against real engine output in `workbench-explain.test.ts` (17 tests). |
 | 17 | App shell + design system + client islands | **DONE** | 14 routes build; `shell.test.ts` 43 tests; IDB islands `append`/`writeLock`/`state` tested. |
@@ -53,10 +76,10 @@ verify something, the row says so and names it.
 | 24 | Admin console + health + audit + roles | **DONE** | `/api/admin/*` routes; `SystemHealthController`, reveal-with-TTL, CSV, flags. |
 | 25 | Workbench + qari mode (TOCTOU-proof signing) | **DONE** | `/workbench` builds; `workbench-sign.test.ts` (11) + `workbench-frontier.test.ts` (15). |
 | 26 | Flag plane, all OFF | **DONE** | `FlagController` with kill/enable/ack; enable-hard ceremony + 72h auto-waive. |
-| 27 | Content ops: MS execution, scene beats, distractor QA | **PARTIAL** | `make content-freeze` exits **1** and names the blocker: **surah 67 has 0 scene beats**. MS decision (v3-D15) MET; distractor QA MET and signed against **current** hashes. |
+| 27 | Content ops: MS execution, scene beats, distractor QA | **PARTIAL** — **re-verified, unchanged** | I ran `make content-freeze` myself at re-audit: **exit 1**, `GATE CLOSED — do NOT book a booking-confirmed qari session`. Four of five criteria MET (MS decision v3-D15; distractor QA signed by Firdaus against current hashes 12/67/103/112; `hashSpecVersion 1` frozen; corpus+spec frozen, all 4 hashes match manifest). The **single** NOT MET is unchanged: `surah 67: 30 ayat, NOT atomic, and ZERO scene beats`. 103 and 112 are atomic (≤8 ayat) and owe none under v3-D21; 12 has all 19. **Human-only work — see C2.** |
 | 28 | Corpus + spec freeze → qari sessions | **HUMAN-GATED** | Corpus/spec freeze MET (all 4 hashes match manifest). Qari sessions are calendar. Gate correctly refuses to open. |
 | 29 | Landing page | **DONE** | `/` is static, server-rendered, 5 argument sections + live `InlineDemo` on 112:1; `landing-claims.test.ts` 34 tests. |
-| 30 | Launch hardening: 7 green nights, a11y, security, backup | **NOT BUILT** / **CALENDAR-GATED** | No scheduler ⇒ the 7-night window **cannot start**. No Playwright suite exists (`test/` is all vitest) despite M5 naming it a first-class deliverable. `BackupRestoreDrillCommand` exists. Human a11y pass unbooked. |
+| 30 | Launch hardening: 7 green nights, a11y, security, backup | **PARTIAL** — engineering DONE, window **NOT STARTED**, human work unbooked | **Corrects the previous NOT BUILT.** Scheduler exists: `php artisan schedule:list` → `0 3 * * * php artisan determinism:check 'both' --trigger=schedule`, next due 13h. Ledger + window command exist (`NightlyWindowLedger`, `nightly:window`), 25 nightly tests green, and I **mutation-verified** the ledger (see §B spot-check 2). **Playwright suite now exists and I ran it: 34 passed in 29s** across chromium + mobile projects. **But the 7-night clock has NOT started** — `make nightly-window` exits 1: `window started: NOT DECLARED · streak 0 of 7`. It needs `nightly:window --start` after the last engine merge, plus live staging, plus 7 real days. Human a11y (VoiceOver/NVDA) still unbooked; automated geometry a11y is covered by the e2e suite. |
 | 31 | *(post-launch)* Social behind flags | **NOT BUILT** | Correct — post-launch by construction. |
 | 32 | *(post-launch)* Learning-science + recommender | **NOT BUILT** | Correct — post-launch by construction. |
 
@@ -159,16 +182,52 @@ currently unguarded: a regression in `arabic.ts` would be caught by
 `arabic.test.ts` at unit level, but the *wiring* of it into grading is not
 pinned. Reverted byte-identically; 391/391 green.
 
+> **RE-CONFIRMED at re-audit.** I repeated this mutation independently on the
+> later tree. `src/reconstruct.ts:133` set to `choice === item.correct`, proven
+> on disk, full engine suite run: **`Test Files 43 passed (43) · Tests 391
+> passed (391)`**. **The survivor is still live.** Reverted; `git diff
+> v3/packages/engine/` empty; 391/391 green again. Nothing in the step-30 work
+> touched this. It remains the highest-value cheap fix in the repo, and it is
+> **test-only** — see D4.
+
 **Recommended fix (small, and it is a test-only change — no source edit):** add
 one case to the sweep that answers with a tatweel-injected or NFD-decomposed form
 of `expected.text_uthmani`, derived mechanically from corpus bytes at runtime —
 no Arabic literal is written, so the sacred-text rule holds. That single
 assertion turns the mutation red.
 
-> Two spot-checks, one survivor. The build's own `CLAUDE.md` warns of eight
-> shipped vacuous verifications; this is a ninth, and it is on the grading path.
-> I did not audit the other closures at this depth — **treat the remaining
-> ledger as probable-but-unproven**, and prefer the ones whose write-ups admit a
+## Spot-check 3 — the NEW night ledger (v3-D68): **genuinely closed**
+
+The step-30 work is new and unreviewed, so I mutation-tested its load-bearing
+claim: *"a night where one check never ran is not a green night."* That is the
+property which stops seven scattered green rows from being read as a streak.
+
+Mutated `api/app/Support/NightlyWindowLedger.php:183`:
+
+```php
+$green = true;              // was: $green = $missing === [];
+```
+
+**Result — RED, and precisely on the right assertion:**
+
+```
+Failed asserting that 7 is identical to 3.
+  at tests/Feature/Nightly/WindowLedgerTest.php:219
+  $this->assertSame(3, $status['streak'], 'BUILD-PLAN requires BOTH checks green nightly');
+Tests: 2 failed, 23 passed
+```
+
+The test asserts the streak stops at the night with a missing check rather than
+running through it. Reverted byte-identically (`git diff v3/api/app/Support/`
+empty); **25 passed**. **The ledger's core guarantee is real**, not a counter
+wearing a ledger's name. This is the one entry in this document I can say is
+both new and proven.
+
+> Three spot-checks across two audits: **two held (B5, the night ledger), one
+> did not (B6)**. The build's own `CLAUDE.md` warns of eight shipped vacuous
+> verifications; B6 is a ninth, and it is on the grading path. I did not audit
+> the other closures at this depth — **treat the remaining ledger as
+> probable-but-unproven**, and prefer the ones whose write-ups admit a
 > limitation (B2, B3) since those authors were already reasoning honestly.
 
 ---
@@ -220,14 +279,40 @@ and GrabPay per-method activation, and `stripe trigger` recordings vendored to
 partial-refund and dispute-won shapes the default triggers don't emit.
 **Blocks:** M7 exit, and taking money.
 
-### C5 · The 7-consecutive-green-nights window — **cannot start yet**
+### C5 · The 7-consecutive-green-nights window — **now STARTABLE, but NOT STARTED**
 
-Not merely calendar-gated: **there is nothing to run.** No DB adapter for the
-fold-runner and no scheduler entry (`routes/console.php` registers only
-`inspire`). Both determinism checks are proven as *libraries*, never as
-*monitors*. The window needs (a) that infrastructure, (b) live staging, (c) 7
-days after the **last** engine/selection merge — so any late engine change,
-including the B6 test fix, resets it.
+**This corrects the previous verdict.** It is no longer true that "there is
+nothing to run." Verified by running each:
+
+```
+make determinism-check   → both checks "severity":"green", exit 0
+php artisan schedule:list → 0 3 * * *  determinism:check 'both' --trigger=schedule
+make nightly-window      → EXIT 1: window started: NOT DECLARED, streak 0 of 7
+```
+
+The monitors, the schedule and the ledger exist and the ledger is
+mutation-verified (§B spot-check 3). **What remains is genuinely not code:**
+
+1. **A host.** The schedule is a cron entry with no machine running it. Nothing
+   invokes `schedule:run` anywhere in this repo.
+2. **Real data.** The green runs above are against the **committed fixture**.
+   The DB-fed path is honest about this — on an empty database it exits 5,
+   `refusing to report green` — but it has never seen a real server log, and no
+   DB adapter for production ingestion exists (v3-D32, step 14).
+3. **The declaration.** `nightly:window --start`, run **after the last
+   engine/selection merge**.
+4. **Seven real days.** Calendar, uncompressible.
+
+**The ordering trap is unchanged and is now the main risk:** any late engine
+change resets the streak to zero — *including the B6 test fix in D4*. Do B6
+first, then declare the window. Doing it in the other order costs a week.
+
+**Also still missing:** no operational mailer, so v3-D18's "a fold_determinism
+P1 pages by email" is not wired. A P1 is logged at error level and recorded in
+the ledger, but **nobody is paged**. `routes/console.php` names this gap in its
+own comment rather than hiding it, which is the right call — but it means the
+7-night window needs a human checking `nightly:window` daily, and BUILD-PLAN Q12
+(who carries the 3am pager) is now load-bearing rather than theoretical.
 
 ### C6 · Also human, smaller
 
@@ -239,6 +324,11 @@ the 3am pager) matters the moment C5's monitors exist.
 ---
 
 # D. The shortest honest path to launch
+
+> **Superseded in part by "WHAT IS LEFT" at the end of this document**, which is
+> the re-audited, ordered list. Items 9 and 10 below (fold-runner scheduler,
+> Playwright e2e) are **now largely done** — see step 30 and C5. The rest of
+> this section still holds.
 
 Two tracks. **Start the human track today** — it is the long pole and it does not
 wait on any engineering.
@@ -311,28 +401,42 @@ make doctor    # verifies .env, APP_KEY, ADMIN_EMAILS
 make dev       # SPA :5273, API :8000  —  `composer dev` starts the WRONG Vite
 ```
 
-### The full suite — **exit 0, 1551 passing**
+### The full suite — **exit 0, 1614 passing** (was 1551)
 
 ```bash
 cd /Users/firdaus/Documents/2026/office-mfa/kuizquran
-TZ=UTC make test
+TZ=UTC make test        # re-audit: MAKE_TEST_EXIT=0
 ```
 
-Pin `TZ=UTC` (JST machine). Verified per-package:
+Pin `TZ=UTC` (JST machine). Verified per-package by re-reading each suite's own
+summary line out of the run log:
 
-| Suite | Result |
-|---|---|
-| v2 vitest | 255 passed |
-| v2/api PHPUnit | 47 passed |
-| v3/api PHPUnit | 194 passed + **2 incomplete** (PAY-1, red by construction) |
-| corpus-compiler | 101 passed |
-| engine | 391 passed |
-| fold-runner | 15 passed |
-| apps/web | 548 passed |
-| **total** | **1551** — exactly the floor, ✓ but with **zero margin** |
+| Suite | Format | First audit | **Re-audit** |
+|---|---|---|---|
+| v2 vitest | `Tests 255 passed` | 255 | **255** |
+| v2/api PHPUnit | JSON `"tests":47` | 47 | **47** |
+| v3/api PHPUnit | `Tests: 2 incomplete, 219 passed` | 194 | **219** (+25 nightly) |
+| corpus-compiler | `Tests 101 passed` | 101 | **101** |
+| engine | `Tests 391 passed` | 391 | **391** |
+| fold-runner | `Tests 53 passed` | 15 | **53** (+38) |
+| apps/web | `Tests 548 passed` | 548 | **548** |
+| **total** | | 1551 | **1614 — floor +63** |
 
-The 2 incomplete are *not* counted in the 1551. The floor is met on the nose, so
-any test deleted anywhere drops below it — which is the intended tripwire.
+**Plus 34 Playwright e2e tests**, which are a *separate runner* and are **not**
+in the 1614 (`npm run e2e`; `make test` does not invoke them — by design, see
+`playwright.config.ts`).
+
+> **COUNTING TRAP — read before reporting a floor breach.** The v3/api suite
+> prints **PHPUnit** format (`Tests: 2 incomplete, 219 passed`), not vitest's
+> `Tests N passed (N)`. A prior verifier misread this line as 147 and reported a
+> false floor breach; the first audit read it as 194 and missed the 25 new
+> nightly tests. **Read the number immediately before the word `passed`**, and
+> note the 2 incomplete (PAY-1, red by construction) are **not** counted. Sum
+> the seven suites individually — do not trust a grep total.
+
+The floor of 1551 now has **+63 margin**, so a single deleted test no longer
+trips it. That is a weakened tripwire, not a stronger one: if you want the
+original property back, raise the floor to 1614.
 
 `make test` runs `typecheck-v3` first. Confirm `npx tsc --version` prints
 **`Version 5.9.3`**, not a TeX banner — before 2026-08-11 it silently resolved to
@@ -360,11 +464,36 @@ make compile-corpus
 make golden-log         # human-reviewed diff ONLY
 ```
 
+### The nightly plane — all four verified at re-audit
+
+```bash
+make determinism-check              # both checks vs fixtures → exit 0, green
+make nightly-window                 # EXIT 1: "NOT DECLARED", streak 0 of 7
+cd v3/api && php artisan schedule:list          # the 03:00 UTC nightly
+cd v3/api && php artisan determinism:check fold # DB path, empty DB → exit 5, honest
+```
+
+### The e2e suite — **34 passed, ran here**
+
+```bash
+cd v3/apps/web && npx playwright test --reporter=list   # 34 passed (29s)
+cd v3/apps/web && npm run e2e                           # builds first, then runs
+```
+
+Chromium is already installed locally (`~/Library/Caches/ms-playwright`); on a
+fresh machine run `npm run e2e:install` first. Note that several e2e tests
+**assert the absence** of features — `THE BREAK: /session is a stub`, `THE
+UNMET EXIT CRITERION: no service worker`. They pass *because* the gap exists, so
+**they will go red when step 18 and the service worker land.** That is intended
+(they are executable documentation of the gap), but it means a green e2e run is
+**not** evidence the product works.
+
 ### Verifying a defect closure yourself
 
 ```bash
 cd v3/apps/web && node scripts/check-boundaries.mjs   # clause 7 catches B5's syntax
 cd v3/apps/web && npx vitest run lib/sync/merge.test.ts
+cd v3/api && php artisan test --filter=Nightly        # 25 tests; ledger spot-check 3
 ```
 
 ---
@@ -399,15 +528,80 @@ and it is the single highest-value thing to build next.
 
 ## Where this document's own confidence ends
 
-- I mutation-tested **two** ledger entries. One held (B5), one did not (B6).
-  The other closures are **unproven at that depth** by me.
+- I mutation-tested **three** entries across two audits. Two held (B5, the night
+  ledger), one did not (B6, re-confirmed live today). The other closures are
+  **unproven at that depth**.
 - I did not exercise the admin console, workbench, or billing endpoints against
   a **running** server — those verdicts rest on route definitions and passing
   Pest tests, not on a live request.
 - I could not verify anything requiring live staging, a Stripe account, or
-  elapsed calendar time, because none of those exist in this repo.
-- Fonts are 2/6. I recorded this as degraded-but-non-blocking on the gate's own
-  reasoning; I did not visually confirm the fallback stacks render acceptably.
+  elapsed calendar time, because none of those exist in this repo. Every "green"
+  determinism result in this document is **against committed fixtures**, never
+  production data.
+- The Playwright suite ran on **this machine only** — one Chromium, macOS. It
+  has never run in CI, and no CI workflow invokes it.
+- Fonts are 2/6 (Amiri present; Inter ×3 and Source Serif 4 missing). Degraded
+  but non-blocking on the gate's own reasoning; I did not visually confirm the
+  fallback stacks render acceptably.
+- **The step-30 work is uncommitted** (see the header note). I reviewed and ran
+  it; I did not review its full diff line by line.
 
-**Nothing was committed.** The two mutations were reverted byte-identically and
-`git diff` was empty after each.
+**Nothing was committed by this audit.** All three mutations were reverted
+byte-identically and `git diff` was empty after each.
+
+---
+
+# WHAT IS LEFT
+
+Ordered. The two tracks run in parallel — **start the human track today**, it is
+the long pole and waits on no code.
+
+## Human / calendar — start now, nothing here is code
+
+| # | Item | Effort | Blocks |
+|---|---|---|---|
+| H1 | **Stripe MY business verification** — KYC, bank, tax, FPX + GrabPay activation. BUILD-PLAN said day 0; already late. | **weeks** | taking money; M7 exit |
+| H2 | **Author surah 67's scene beats** (30 ayat, non-atomic). The **sole** live blocker on `make content-freeze`. Firdaus or a hired writer. **Human-only — no agent may generate these.** | days | freeze gate → qari → launch |
+| H3 | **Book the qari window** provisionally ~6 weeks out ("book when M8 starts, not after it ends"). | calendar | launch |
+| H4 | **Appoint a Malay reviewer** with doctrinal authority (Q2, half-answered). Only if MS ships — **not on the launch path** (v3-D15). | — | post-launch |
+| H5 | **Answer Q12: who carries the 3am pager.** Now load-bearing — there is no mailer, so a P1 pages nobody (C5). | hours | the 7-night window |
+| H6 | **Book the human a11y pass** (VoiceOver/NVDA). Automated geometry is covered; the human pass is not. Also: security review of admin routes, Arabic visual QA. | days | launch hardening |
+
+## Engineering — in dependency order
+
+| # | Item | Effort | Note |
+|---|---|---|---|
+| E1 | **Fix the B6 sweep.** Add one sweep case answering with a tatweel-injected / NFD-decomposed form derived **mechanically from corpus bytes** (no Arabic literal — sacred-text rule holds). **Test-only, no source edit.** | hours | **DO THIS FIRST** — it is on the grading path, and doing it after the window starts resets the 7 nights |
+| E2 | **Repoint the drill corpus loader at `output/`** (§A-note), stage the artifacts, widen `AVAILABLE_SURAHS`, and **add a CI clause asserting no learner-reachable route reads `test/fixtures/`.** | days | Must land before any sign-off, or the qari certifies content learners never see |
+| E3 | **Build the session lifecycle — step 18.** Corpus loader at request time, commit-before-paint (`tx.done` awaited before paint), create/resume/summary, bfcache resume, completion celebration. The 4 render shapes are done. | **1.5–2 wks** | **The critical item.** Nothing else makes this a learning app |
+| E4 | **Fill the stub routes** — `/home`, `/progress`, `/library`, `/surah/*` against the real rebuilt log. Components largely exist. (`/plan` is already real.) | ~1 wk | `/home` is where onboarding currently dead-ends |
+| E5 | **Service worker + manifest.** None exists. Precache shell, fonts, client corpus; `start_url=/home` (#92). | ~3 days | Required before "offline" is claimable at all |
+| E6 | **Fold-runner DB adapter + staging deploy + a host running `schedule:run`.** The schedule and ledger exist; the *data* and the *machine* do not. Advisory locks, dead-letter quarantine, late-arrival refold. | ~1 wk | This is what lets the 7-night clock mean production |
+| E7 | **Operational mailer** so a P1 actually pages someone (v3-D18). | ~1 day | Or accept H5's manual daily check |
+| E8 | **Stripe replay fixtures** — vendor `stripe trigger` recordings to `v3/fixtures/stripe/` (**currently README only, zero fixtures**) incl. partial-refund and dispute-won. PAY-1 closes itself. | ~2 days | Gated on H1 clearing |
+| E9 | **Wire the e2e suite into CI**, and update the absence-asserting tests as E3/E5 land. | ~1 day | It has never run in CI |
+| E10 | **Raise the test floor to 1614**, or accept that the +63 margin means a deleted test no longer trips the tripwire. | minutes | |
+
+## Then, strictly serial — no parallelism compresses this
+
+1. `make content-freeze` **exits 0** (needs H2).
+2. **Declare the window** — `nightly:window --start`, *after* the last engine
+   merge (so after E1 and E3).
+3. **Qari sessions** — 15–25h scholar time across 12 + 67 + 103 + 112 including
+   seam renders, under the tiered hash → frontier 100% green.
+4. **7 consecutive green nights** on live staging with real data.
+5. `LAUNCH-CHECKLIST.md` all green → **launch**.
+
+**Realistic total: ~5–7 calendar weeks of engineering** (down from 6–8 — step
+30's engineering is done), then the **hard serial tail** of freeze → qari → 7
+nights. If H1 and H3 start today they run underneath the engineering; if they
+start when the code is ready, add their lead time to the end.
+
+**The three things that blow this up**, all still live:
+
+- **A late engine change resets the 7 nights** — which is exactly why E1 comes
+  first, before the window is declared.
+- **Content landing after sign-off re-buys scholar hours.**
+- **Marking a step DONE on a component no route reaches** — the failure this
+  document exists to prevent. Step 30's engineering is real; the *window* is
+  still 0 of 7, and those are not the same claim.

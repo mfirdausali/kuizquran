@@ -74,29 +74,63 @@ regenerated it.
 
 ---
 
-## 3 · `fold_determinism_check` — **BLOCKED-ON-INFRA**
+## 3 · `fold_determinism_check` — **RUNNER GREEN · BLOCKED-ON-INFRA for production data**
 
-The comparison primitive exists and is tested
-(`worker/fold-runner/test/determinism.test.ts`, 15 tests green). The System
-Health probe reads a *recorded* result and, when none exists, **throws — so the
-console renders `unknown`, never a fabricated `0`** (edge case #167,
-`SystemHealthController::foldDeterminism`).
+**What changed (v3-D67):** the check now has a *runner*, a *schedule* and a
+*ledger*. Before this, the gap was not only the missing staging host — nothing
+in the repo ran the check on **any** host, and
+`SystemHealthController::foldDeterminism` read a cache key **no line of code
+anywhere ever wrote**. That is fixed.
 
-**Missing:** a live staging host running the fold-runner nightly against real
-server logs. The check has therefore never *run* in the sense the gate means.
+Provable right now, no database and no host required:
 
-**To close:** deploy the fold-runner to staging; schedule nightly; confirm it
-writes `health:fold_determinism_check`. Requires gate 20 (hosting).
+```bash
+make determinism-check          # both checks against committed fixtures
+cd v3/api && php artisan determinism:check both --fixture
+cd v3/api && php artisan schedule:list   # shows the nightly, 03:00 UTC
+```
+
+The BUILD-PLAN taxonomy is real rather than a log string — it is the runner's
+**exit code** (`worker/fold-runner/src/severity.ts`): green 0 · **warn 3** ·
+**p1 4** · error 5. Demonstrated: the *identical* 0.0001 perturbation of a
+cached atom exits **4 (P1)** when the cached row carries the current
+engine_version and **3 (WARN)** when it carries an older one.
+
+**Still blocked:** the check runs against the **committed golden-log fixture**,
+not "sampled users' server logs". The DB-fed path (`determinism:check fold`
+without `--fixture`) is written and tested — against an empty database, where it
+correctly reports **error, not green** — but has never run against real data,
+because no such data and no host exist. Requires gate 20.
 
 ---
 
-## 4 · `selection_determinism_check` — **BLOCKED-ON-INFRA**
+## 4 · `selection_determinism_check` — **RUNNER GREEN · BLOCKED-ON-INFRA for production data**
 
-Same shape as gate 3: implemented and unit-tested; the nightly harness has no
-host. `SystemHealthController::selectionDeterminism` throws rather than
-reporting a fabricated zero.
+Same shape as gate 3, plus a defect this run found and closed (**v3-D69**):
 
-**To close:** as gate 3.
+BUILD-PLAN says this check runs "against the shuffled golden log". Measured:
+`fixtures/golden-log/events.json` holds **24 events and 0 selection-bearing
+ones** — it predates the step-10 wire freeze. `replaySelection` skips events
+without siteKey/deviceId/visitOrdinal, so a runner pointed at the golden log
+would have compared **nothing** and exited green **every night forever**.
+
+Closed by generating `fixtures/selection-log/` (36 events, 5 sites, 2 devices,
+including the two-device merge and a seam site) and by giving the runner a
+**vacuity floor**: fewer than 20 traces compared is an `error`, never a green.
+The golden log is unchanged and remains the *fold* check's fixture.
+
+```bash
+cd v3/worker/fold-runner && node_modules/.bin/vite-node bin/selection-determinism-check.ts
+#   green · 36 events · 432 traces compared across 12 seeds
+node_modules/.bin/vite-node bin/selection-determinism-check.ts -- --events ../../fixtures/golden-log/events.json
+#   exit 5 — "Refusing to report green over an empty comparison"
+```
+
+**Still blocked:** replaying selection against *production* logs needs the
+pinned corpus per event `corpusHash`, and no server-side corpus store exists
+(`selection.ts`'s own `replaySelection` header says so). The nightly proves the
+deployed code is shuffle-invariant against the committed log; it does not yet
+prove it against real logs. Requires gate 20 **and** a corpus store.
 
 ---
 
@@ -176,14 +210,43 @@ flag another operator had just killed. Now required; regression test asserts the
 
 ---
 
-## 10 · 7-consecutive-green-nights — **BLOCKED-ON-INFRA (hard serial tail)**
+## 10 · 7-consecutive-green-nights — **COUNTABLE NOW · BLOCKED-ON-INFRA (hard serial tail)**
 
 **Nothing about this is compressible.** It is 7 calendar days on live staging,
 starting only *after* the last engine/selection merge, with both determinism
 checks green nightly (a confirmed P1 resets the window; a WARN does not).
 
-Depends on gates 3, 4 and 20. **The window has not started, because the staging
-environment it runs on does not exist.**
+**What changed (v3-D68):** the window is now a **ledger**, not a wish. It was
+previously uncountable in a stronger sense than "no host" — there was no record
+of nights, no definition of the arithmetic anywhere in code, and nothing that
+ran the checks it counts. Now:
+
+```bash
+cd v3/api && php artisan nightly:window --start=<YYYY-MM-DD> --reason="engine merge <sha>"
+make nightly-window        # streak + a dated table of every night behind it
+```
+
+`nightly_check_runs` stores one **immutable row per run** — severity, raw exit
+code, and the runner's full JSON report (what it actually compared). The streak
+is *derived* from those rows, so it arrives with evidence rather than requiring
+trust — which is what edge case #169 ("7-green-nights arithmetic → contested
+gate") predicts will be needed. Exit code is the gate: 0 only when satisfied.
+
+Four rules, each tested directly and each proven by mutation (`WindowLedgerTest`,
+15 tests): both checks required per night · **a confirmed P1 resets to zero**,
+and a same-night re-run does not launder it · **a WARN does not reset** · nights
+before the declared start never count. A calendar **gap** also breaks the streak
+— a scheduler that silently stopped for three days leaves green rows a naive
+`count(green)` would happily call "4 and counting".
+
+Demonstrated end to end locally: seven fixture nights → `streak 7 of 7,
+satisfied YES`; then one corrupted-oracle night → `streak 0 of 7, last P1
+2026-08-12 (fold_determinism_check) — reset the window`.
+
+Depends on gates 3, 4 and 20. **The window has NOT started.** It starts on real
+infrastructure, on real nights, against real data — none of which exists. What
+this run delivered is the ability to *count* it honestly once it does, not the
+window itself.
 
 ---
 
@@ -386,9 +449,26 @@ PDPA exposure**, independent of backups.
 
 ## 20 · Hosting / staging environment — **BLOCKED-ON-INFRA**
 
-**Nothing is deployed.** No staging host, no Postgres, no scheduled nightly, no
-pager. This single gap blocks gates 3, 4, 10 and the Postgres half of 13 — i.e.
-it is the critical path for roughly half of everything still open.
+**Nothing is deployed.** No staging host, no Postgres, no cron running
+`schedule:run`, no pager. This single gap blocks gates 3, 4, 10 and the Postgres
+half of 13 — i.e. it is the critical path for roughly half of everything still
+open.
+
+As of v3-D67 the nightly schedule *is defined in the repo* (`routes/console.php`,
+03:00 UTC, visible via `php artisan schedule:list`) — but a Laravel schedule only
+fires if something invokes `schedule:run` every minute, and no host does. The
+gap is now precisely "one cron entry on a machine that exists", not "the
+scheduling was never written".
+
+Two named, still-open sub-gaps inside this gate:
+
+- **The pager is not wired.** v3-D18 says a `fold_determinism` P1 "pages by
+  email, not phone". `DeterminismCheckCommand` logs at error level and records
+  the P1 permanently in the ledger, but **no mail dispatch exists** — there is
+  no operational mailer configured. A P1 at 3am currently pages nobody.
+- **Per-user advisory locks remain deferred** (v3-D32, restated in v3-D70).
+  Single-flight is a run-level `Cache::lock`; sqlite has no `pg_advisory_lock`
+  to test a per-user path against.
 
 BUILD-PLAN Q12 is still open: self-managed VPS vs Forge + managed Postgres, and
 **who carries the 3am pager** when `fold_determinism` pages a P1.

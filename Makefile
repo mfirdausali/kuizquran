@@ -15,7 +15,7 @@ ENGINE  := v3/packages/engine
 FOLD_RUNNER := v3/worker/fold-runner
 WEB_V3  := v3/apps/web
 
-.PHONY: help setup dev dev-web dev-api dev-api3 test test-web test-api test-api3 test-v3 typecheck-v3 build clean doctor golden-log compile-corpus content-freeze distractor-qa
+.PHONY: help setup dev dev-web dev-api dev-api3 test test-web test-api test-api3 test-v3 typecheck-v3 build clean doctor golden-log selection-log compile-corpus content-freeze distractor-qa determinism-check nightly-window
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -121,6 +121,19 @@ clean: ## Remove build output and caches
 
 golden-log: ## Regenerate v3's golden log + oracle via v3's own engine (human-reviewed diff only — see v3/fixtures/golden-log/README.md)
 	cd $(V2) && TZ=UTC node_modules/.bin/vite-node ../v3/scripts/gen-golden-log.ts
+
+selection-log: ## Regenerate the selection-check log fixture (v3/fixtures/selection-log — see the script header)
+	cd $(V2) && TZ=UTC node_modules/.bin/vite-node ../v3/scripts/gen-selection-log.ts
+
+determinism-check: ## Run BOTH determinism checks on demand against committed fixtures (no DB needed) — proves the nightly works without waiting a night
+	@# BUILD-PLAN's gates: fold_determinism_check "runs nightly + in CI against
+	@# the shuffled golden log". This target is the CI half. Exit code carries
+	@# the verdict: 0 green/warn, non-zero p1/error.
+	cd $(FOLD_RUNNER) && node_modules/.bin/vite-node bin/fold-determinism-check.ts -- --fixture
+	cd $(FOLD_RUNNER) && node_modules/.bin/vite-node bin/selection-determinism-check.ts
+
+nightly-window: ## Report the 7-consecutive-green-nights streak with its evidence (exit 0 only when satisfied)
+	cd $(API_V3) && TZ=UTC php artisan nightly:window
 
 compile-corpus: ## Compile the v3 corpus for surahs 12, 103, 112 (build-plan step 3)
 	cd $(CORPUS_COMPILER) && npm run compile -- 12

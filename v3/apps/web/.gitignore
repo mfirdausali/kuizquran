@@ -13,6 +13,12 @@
 # testing
 /coverage
 
+# playwright (e2e) — run output only; e2e/ and playwright.config.ts are source
+/test-results/
+/playwright-report/
+/blob-report/
+/.playwright/
+
 # next.js
 /.next/
 /out/

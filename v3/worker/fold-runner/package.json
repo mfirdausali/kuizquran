@@ -6,7 +6,9 @@
   "description": "The sole server-side fold (v3-D08). Pure canonical-order + fold + determinism-compare logic here; a DB adapter for a live deployment is a separate, deferred follow-up (see DECISIONS.md v3-D32).",
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "fold-check": "vite-node bin/fold-determinism-check.ts --",
+    "selection-check": "vite-node bin/selection-determinism-check.ts --"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
