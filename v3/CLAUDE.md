@@ -53,11 +53,16 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 1431 total, typechecks first. 255 v2 vitest + 47 v2/api + 167 v3/api
-             # + 101 corpus-compiler + 391 engine + 15 fold-runner + 502 apps/web.
+make test    # 1761 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 229 v3/api + 101 corpus-compiler
+             # + 417 engine + 53 fold-runner + 659 apps/web. (v3-D77, 2026-08-12)
              # NOTE (v3-D50): v3/api/tests/Unit/.gitkeep is LOAD-BEARING.
-             # Steps 1-26 + 29 done. Remaining: 27/28 (content, human), 30 (hardening,
-             # incl. a 7-night window that is calendar time on live staging).
+             # NOTE (v3-D77): `make test`/`make build` both depend on `compile-corpus`
+             # now — do not hand-run compile-corpus first and assume that's why it's green.
+             # Steps 1-26 + 29 done. 27/28 blocked on human content/qari (HANDOVER.md C1-C4).
+             # 30's engineering is mostly done; see HANDOVER.md "WHAT IS LEFT" (E6-E10)
+             # for what's genuinely still open — re-verify against the repo, don't trust
+             # this comment's numbers past their next change.
 make build   # must pass — CI no longer tolerates failure (B9)
 make doctor  # what's missing
 ```

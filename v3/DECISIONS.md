@@ -1863,3 +1863,103 @@ total; +111 reflects tests landed in intervening commits plus 8 new in
 `test/corpus-load.test.ts`), typecheck clean, `npm run gates` green (boundaries
 now 164 files / 13 clauses), `npm run build` exit 0 (17 routes). Full repo
 `make build`/`make test` run and reported in this run's NIGHTLY report.
+
+---
+
+## Ratified 2026-08-12 — build-plan step 30: `make test`/`make build`/CI never actually verified the v3 stack from a clean checkout
+
+### v3-D77 — Two silent false-green gaps, both the same shape as v3-D38/D45/D49/D50: `compile-corpus` was never a dependency of anything, and CI never ran v3/api at all
+
+This run started by trying to determine the actual current build-plan step from
+`git log` (NIGHTLY.md's own rule). That surfaced two things worth recording on
+their own, beyond the step-30 work itself:
+
+**Finding 0 (process, not code):** the container's `git status` showed a
+**detached HEAD**, and the locally-cached `main` ref (`cab5d16`, "Phase 0
+complete") was far behind the actual checked-out commit (`055c47f`, step 20).
+`git fetch` showed `origin/main` had been force-updated to `055c47f` — the
+detached HEAD *was* current `main`, the local ref was just stale from session
+start. Resolved with `git checkout -B main origin/main`. Recorded because a
+future run hitting the same "detached HEAD, stale local main" shape should
+re-derive from `origin/main` the same way, not assume Phase 0 is really where
+the build stands — `HANDOVER.md`'s own "WHAT IS LEFT" section, not
+`NIGHTLY.md`'s "Phase 0 complete" note, was the accurate source once reached.
+
+**Finding 1 — `make test-v3` and `make build` had no `compile-corpus`
+prerequisite.** Reproduced directly: a `make setup` then `make test` with
+`packages/corpus-compiler/output/` never populated (its correct state on any
+truly clean checkout — output/ is gitignored, v3-D52) fails **10 tests across 6
+files** (`test/corpus-load.test.ts`, `test/content-freeze-gate.test.ts`,
+`lib/session/run.test.ts`, `test/home-today.test.tsx`, `test/onboarding.test.tsx`,
+`test/landing-demo.test.tsx`) — all with the identical shape, "No compiled
+corpus at .../output/…, run `make compile-corpus` first." **Worse for `make
+build`**: `stage-corpus.mjs` degrades gracefully rather than hard-failing on a
+missing `output/` (a deliberate, documented choice — a hard fail would make
+`npm run build` impossible on a fresh clone) — so `make build` reported **exit
+0** while silently shipping a build with **zero staged corpus**, the worse
+failure shape of the two: a green build that serves no real Arabic to a
+learner, with nothing in the build log forcing a human to notice.
+
+**Finding 2 — CI never ran v3/api, and never compiled the corpus before
+testing `apps/web`.** `.github/workflows/ci.yml`'s `php` job located a Laravel
+app by searching `find v2 -maxdepth 3 -name artisan` — **only `v2`**, never
+`v3`. Every one of `v3/api`'s 229 PHPUnit tests — closing tests for
+DEFECTS.md#B1/B3/B4/B7/B8, E-01, the entitlement state machine, the admin
+console, the workbench — had **never once run in CI**, since `v3/api` was
+scaffolded at build-plan step 13. Separately, the `js` job's per-project loop
+never invoked `corpus-compiler`'s `compile` script anywhere (its `package.json`
+has no `build` script, so `npm run build --if-present` there is a no-op), so
+`apps/web`'s test step would fail on **every** PR for the same reason as
+Finding 1, deterministically, regardless of loop order.
+
+**Why this matters beyond the two gaps themselves:** every "make test green" /
+"CI green" claim in this build's history (v3-D25 onward) was produced by
+running these commands on a machine that already had a stale `output/` from an
+earlier `make build`/`make compile-corpus` invocation — the same "verification
+that runs on the author's machine is not verification" pattern this file has
+now recorded four times (v3-D38 tsc, v3-D45 stage labels, v3-D49 encoded guard,
+v3-D50 the missing `tests/Unit` directory). None of those prior fixes covered
+this shape, because none of them touched the corpus-compile boundary.
+
+**Fixed:**
+- `Makefile` — `test-v3: typecheck-v3 compile-corpus` and
+  `build: compile-corpus` (was `test-v3: typecheck-v3` and `build:` with no
+  prerequisite).
+- `.github/workflows/ci.yml` — a new step, "Compile the v3 corpus (12, 67, 103,
+  112)", installs `corpus-compiler`'s deps and runs its 4 compiles **before**
+  the per-project build+test loop, so `apps/web` sees a populated `output/`
+  regardless of loop order. The `php` job is now a `strategy.matrix` over
+  `[v2/api, v3/api]` instead of a single hardcoded `find v2 …` — both apps are
+  independently located, installed and tested; `fail-fast: false` so one app's
+  failure doesn't hide the other's result.
+
+**Verified both ways, from a genuinely wiped state** (`rm -rf
+packages/corpus-compiler/output apps/web/public/corpus`, simulating a fresh
+checkout with nothing but the fixed Makefile):
+- `TZ=UTC make test` → **exit 0**, all seven suites green: v2 vitest 255, v2/api
+  PHPUnit 47, v3/api PHPUnit 229 passed + 2 incomplete (PAY-1, by design),
+  corpus-compiler 101, engine 417, fold-runner 53, apps/web 659. **1761 passing
+  total** across these seven suites (the 417/659 reflect the B6 sweep fix and
+  drill-corpus-loader work already on `main`; this run added no new test
+  files).
+- `TZ=UTC make build` → **exit 0**, log line `corpus staged → public/corpus:
+  112 (4 ayat…), 103 (3 ayat…), 67 (30 ayat…)` confirms real staging, not the
+  silent degrade Finding 1 describes.
+- CI's YAML correctness was NOT verified by an actual GitHub Actions run (no
+  push to a PR branch happened before this fix landed) — verified instead by
+  reproducing the identical failure/degrade locally against the identical
+  commands the workflow now runs (`npm ci && npm run compile -- <surah>` per
+  surah; `php artisan test` per app dir), which is the same evidence standard
+  `v3-D50`'s fix used for the `tests/Unit` gap.
+
+**Explicitly NOT done in this run, named so the next one does not re-discover
+them as new:** wiring the Playwright e2e suite (34 tests) into CI (HANDOVER.md
+item E9 — it has never run in any CI job); the fold-runner DB adapter +
+staging deploy (E6); an operational mailer so a fold-determinism P1 pages
+someone (E7); Stripe replay fixtures (E8, blocked on human Stripe account
+verification); raising the committed test-count floor to match the number
+above (E10). `v3/CLAUDE.md`'s `make test` comment and `v3/NIGHTLY.md`'s working
+method both still cite stale, much lower counts from build-plan step 3
+(`1431 total`, `255 v2 vitest + 47 PHPUnit`) predating almost this entire
+build — corrected in this commit so the next run does not re-derive current
+counts from scratch the way this one had to.

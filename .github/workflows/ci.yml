@@ -50,6 +50,26 @@ jobs:
         if: steps.detect.outputs.dirs != ''
         run: npm i -g pnpm@9 || true
 
+      - name: Compile the v3 corpus (12, 67, 103, 112)
+        # `packages/corpus-compiler/output/` is gitignored (v3-D52) — a fresh
+        # checkout has nothing there. `apps/web`'s own tests read it directly
+        # (test/corpus-load.test.ts et al.) with NO fallback to a fixture, by
+        # design (v3-D76: a fixture would keep them green after the real
+        # corpus drifted) — so without this step those tests fail on every
+        # clean checkout, and always did; nothing in CI ever compiled the
+        # corpus before this fix. `make test`/`make build` had the identical
+        # gap locally, fixed alongside this in the same commit (see
+        # DECISIONS.md). Runs before the per-project loop so apps/web sees it
+        # regardless of loop order.
+        if: steps.detect.outputs.dirs != ''
+        run: |
+          set -e
+          if [ -d v3/packages/corpus-compiler ]; then
+            cd v3/packages/corpus-compiler
+            npm ci || npm install
+            for s in 12 67 103 112; do npm run compile -- "$s"; done
+          fi
+
       - name: Build + test each JS project
         if: steps.detect.outputs.dirs != ''
         run: |
@@ -73,21 +93,27 @@ jobs:
             echo "::endgroup::"
           done
 
-  # ---- Laravel API (PHPUnit), only once v2/api exists ----
+  # ---- Laravel APIs (PHPUnit): v2/api (the working app) and v3/api (v3-D08's
+  # own app). Both are real, separately-migrated Laravel apps and both must be
+  # gated — until this fix, this job only ever searched under v2, so v3/api's
+  # entire suite (229 tests, closing DEFECTS.md#B1/B3/B4/B7/B8/E-01 among
+  # others) had never once run in CI. See DECISIONS.md for the finding. ----
   php:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: [v2/api, v3/api]
     steps:
       - uses: actions/checkout@v4
 
       - name: Locate the Laravel app
         id: has
         run: |
-          # Find an artisan file anywhere under v2 (layout may vary).
-          DIR=$(dirname "$(find v2 -maxdepth 3 -name artisan -not -path '*/vendor/*' 2>/dev/null | head -1)" 2>/dev/null)
-          if [ -n "$DIR" ] && [ -f "$DIR/artisan" ]; then
-            echo "yes=true" >> "$GITHUB_OUTPUT"; echo "dir=$DIR" >> "$GITHUB_OUTPUT"; echo "Laravel at: $DIR"
+          if [ -f "${{ matrix.dir }}/artisan" ]; then
+            echo "yes=true" >> "$GITHUB_OUTPUT"; echo "Laravel at: ${{ matrix.dir }}"
           else
-            echo "yes=false" >> "$GITHUB_OUTPUT"; echo "no Laravel app yet"
+            echo "yes=false" >> "$GITHUB_OUTPUT"; echo "no Laravel app yet at ${{ matrix.dir }}"
           fi
 
       - uses: shivammathur/setup-php@v2
@@ -97,7 +123,7 @@ jobs:
 
       - name: Composer install + test
         if: steps.has.outputs.yes == 'true'
-        working-directory: ${{ steps.has.outputs.dir }}
+        working-directory: ${{ matrix.dir }}
         env:
           # package:discover runs during composer install's post-autoload hook and
           # reads config — provide .env + a key FIRST, and skip auto-scripts on install

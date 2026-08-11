@@ -20,7 +20,16 @@ Work the **next incomplete step** of the 32-step corrected build order, end to
 end. Determine what is done by reading the repo and `git log` — never by
 guessing.
 
-**Phase 0 is COMPLETE** as of `283dab8` (harness + foundation docs).
+**Steps 1-26 and 29 are COMPLETE** as of `v3-D76`/commit `055c47f` (2026-08-12).
+Steps 27/28 are blocked on human content (scene-beat authoring, qari sessions —
+`v3/HANDOVER.md` §C names exactly what and who). Step 30's engineering is
+mostly done; its own `HANDOVER.md` "WHAT IS LEFT" table names what's still
+open. **This line goes stale fast — always re-derive from `git log` and
+`v3/HANDOVER.md`, never trust a step number written here.** (A prior version of
+this line said "Phase 0 is COMPLETE as of `283dab8`" long after steps 1-26 had
+actually landed — that staleness cost a run several hours of reconciliation
+against a detached-HEAD checkout before anything could start; see DECISIONS.md
+v3-D77 Finding 0.)
 
 Do **one step per run**, fully, rather than starting several.
 
@@ -66,9 +75,13 @@ are the baseline everywhere else.
 1. Identify the next step from `BUILD-PLAN.md` and `git log`.
 2. Write failing tests first; observe them fail.
 3. Implement the minimum that makes them pass.
-4. Run the gates: `make build`, `make test` (v2's 255 vitest + v3's growing
-   vitest suite — 23 as of build-plan step 3's corpus-compiler port — + 47
-   PHPUnit must all stay green), plus any step-specific check.
+4. Run the gates: `make build`, `make test` (both now depend on
+   `compile-corpus`, v3-D77 — no manual pre-step needed on a clean checkout).
+   1761 passing as of v3-D77 (255 v2 vitest + 47 v2/api + 229 v3/api + 101
+   corpus-compiler + 417 engine + 53 fold-runner + 659 apps/web, +2 incomplete
+   by design for PAY-1) — re-read the actual `Tests N passed` lines yourself
+   rather than trusting this number once it's had time to go stale, plus any
+   step-specific check.
 5. Commit with a message naming the step and what was verified.
 6. Push to `main`.
 

@@ -670,3 +670,25 @@ start when the code is ready, add their lead time to the end.
 - **Marking a step DONE on a component no route reaches** — the failure this
   document exists to prevent. Step 30's engineering is real; the *window* is
   still 0 of 7, and those are not the same claim.
+
+---
+
+## 2026-08-12 (later) — a fourth instance of the recurring class of bug
+
+A nightly run trying to determine "what's next" found `make test-v3`/`make
+build` had no `compile-corpus` prerequisite (fails 10 tests, or worse — for
+`build` — silently ships a corpus-less build, exit 0) and that CI's `php` job
+had **never once** run `v3/api`'s 229 tests (it only ever searched under `v2`).
+Both fixed; see DECISIONS.md v3-D77 for the full reproduction and verification
+(re-run from a genuinely wiped `output/`, both ways, both green). This is the
+same "verification that runs on the author's machine is not verification"
+shape as v3-D38/D45/D49/D50 — worth noting because it means **this document's
+own confidence-ending list above ("I did not exercise... against a running
+server") plausibly undercounts how many closures rest on local-only state that
+CI never actually checked.** Nothing else in this document was re-verified by
+that run; treat every OTHER "DONE"/"CLOSED" verdict above with the same
+caution the existing list already asks for, not more.
+
+`E9` (wire the Playwright e2e suite into CI) is still open — this fix compiles
+the corpus and runs `v3/api`, it does not add an e2e job. That remains real,
+scoped, agent-doable follow-on work, same shape as this fix.

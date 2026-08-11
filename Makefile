@@ -73,7 +73,7 @@ test-api: ## PHPUnit (v2/api)
 test-api3: ## PHPUnit (v3/api — build-plan step 13)
 	cd $(API_V3) && php artisan test
 
-test-v3: typecheck-v3 ## vitest (v3 packages: corpus-compiler, engine, worker/fold-runner, apps/web)
+test-v3: typecheck-v3 compile-corpus ## vitest (v3 packages: corpus-compiler, engine, worker/fold-runner, apps/web)
 	cd $(CORPUS_COMPILER) && npm test
 	cd $(ENGINE) && npm test
 	cd $(FOLD_RUNNER) && npm test
@@ -94,7 +94,7 @@ typecheck-v3: ## tsc --noEmit across the v3 node packages
 	@# version there, not a TeX message.
 	cd $(WEB_V3) && npm run -s typecheck
 
-build: ## Type-check + build the SPA and the v3 web app (must pass; see B9)
+build: compile-corpus ## Type-check + build the SPA and the v3 web app (must pass; see B9)
 	cd $(V2) && npm run build
 	@# Runs the prebuild gates too: locked-CSS byte-diff, font presence, and
 	@# the IDB/RSC + sacred-text boundary greps.
