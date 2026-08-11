@@ -1,0 +1,90 @@
+{
+  "title": "TODO",
+  "oneLineSpine": "TODO",
+  "acts": [
+    {
+      "act": 1,
+      "name": "TODO",
+      "ayahRange": "1-3",
+      "summary": "TODO",
+      "emotionalBeat": "TODO",
+      "sceneImage": "TODO"
+    },
+    {
+      "act": 2,
+      "name": "TODO",
+      "ayahRange": "4-6",
+      "summary": "TODO",
+      "emotionalBeat": "TODO",
+      "sceneImage": "TODO"
+    },
+    {
+      "act": 3,
+      "name": "TODO",
+      "ayahRange": "7-9",
+      "summary": "TODO",
+      "emotionalBeat": "TODO",
+      "sceneImage": "TODO"
+    },
+    {
+      "act": 4,
+      "name": "TODO",
+      "ayahRange": "10-12",
+      "summary": "TODO",
+      "emotionalBeat": "TODO",
+      "sceneImage": "TODO"
+    },
+    {
+      "act": 5,
+      "name": "TODO",
+      "ayahRange": "13-15",
+      "summary": "TODO",
+      "emotionalBeat": "TODO",
+      "sceneImage": "TODO"
+    },
+    {
+      "act": 6,
+      "name": "TODO",
+      "ayahRange": "16-18",
+      "summary": "TODO",
+      "emotionalBeat": "TODO",
+      "sceneImage": "TODO"
+    },
+    {
+      "act": 7,
+      "name": "TODO",
+      "ayahRange": "19-21",
+      "summary": "TODO",
+      "emotionalBeat": "TODO",
+      "sceneImage": "TODO"
+    },
+    {
+      "act": 8,
+      "name": "TODO",
+      "ayahRange": "22-24",
+      "summary": "TODO",
+      "emotionalBeat": "TODO",
+      "sceneImage": "TODO"
+    },
+    {
+      "act": 9,
+      "name": "TODO",
+      "ayahRange": "25-27",
+      "summary": "TODO",
+      "emotionalBeat": "TODO",
+      "sceneImage": "TODO"
+    },
+    {
+      "act": 10,
+      "name": "TODO",
+      "ayahRange": "28-30",
+      "summary": "TODO",
+      "emotionalBeat": "TODO",
+      "sceneImage": "TODO"
+    }
+  ],
+  "memoryHooks": [
+    "TODO"
+  ],
+  "pairingStrategy": "TODO"
+}
