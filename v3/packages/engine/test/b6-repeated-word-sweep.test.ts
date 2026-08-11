@@ -14,6 +14,22 @@ import type { Corpus } from "../src/types.ts";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const corpus = JSON.parse(readFileSync(resolve(HERE, "fixtures/12.json"), "utf8")) as Corpus;
 
+// Built via String.fromCodePoint, never a literal, so this file's own bytes
+// carry no Arabic-range codepoint (v3/INVARIANTS.md Absolute B) — mirrors
+// arabic.ts's own TATWEEL construction exactly.
+const TATWEEL = String.fromCodePoint(0x0640);
+
+/**
+ * Splice TATWEEL into the middle of a corpus surface form, mechanically —
+ * never a literal Arabic character. The result differs from the input at the
+ * raw-byte level (so `===` fails on it) but is byte-identical after
+ * `normalizeArabicSurface` strips the tatweel back out.
+ */
+function tatweelInject(surface: string): string {
+  const mid = Math.floor(surface.length / 2);
+  return surface.slice(0, mid) + TATWEEL + surface.slice(mid);
+}
+
 /** Every ayah with at least one normalized-surface repeat among its words. */
 function ayatWithRepeatedWords(): number[] {
   const byAyah = new Map<number, string[]>();
@@ -82,6 +98,35 @@ describe("B6 sweep: reconstruct grades every position correctly on every repeate
       }
       const r = advanceReconstruct(state, corpus, unrelated);
       expect(r.correct).toBe(false);
+    });
+
+    it(`ayah ${ayah}: a tatweel-injected form of the repeated-word answer still grades correct (proves grading NORMALIZES, not byte-compares)`, () => {
+      // v3-D12 / arabic.ts's own doc comment: "a tap that differs only in
+      // inconsequential Unicode encoding still grades correct". The prior two
+      // cases in this sweep both answer with `expected.text_uthmani`
+      // verbatim, which trivially satisfies a raw `===` too — neither
+      // exercises normalizeArabicSurface at all. This one answers with a
+      // form that DIFFERS at the raw-byte level from the corpus text, so a
+      // reversion to `choice === item.correct` (DEFECTS.md#B6's literal
+      // defect) fails this assertion while `surfaceEquals` passes it.
+      const words = corpus.words.filter((w) => w.ayah === ayah).sort((a, b) => a.position - b.position);
+      const counts = new Map<string, number>();
+      for (const w of words) {
+        const n = normalizeArabicSurface(w.text_uthmani);
+        counts.set(n, (counts.get(n) ?? 0) + 1);
+      }
+      const dupWord = words.find((w) => counts.get(normalizeArabicSurface(w.text_uthmani))! > 1)!;
+
+      let state = initReconstruct(corpus, 12, ayah, 100);
+      while (state.blankPositions[state.blankIndex] !== dupWord.position) {
+        const pos = state.blankPositions[state.blankIndex]!;
+        const w = corpus.words.find((x) => x.ayah === ayah && x.position === pos)!;
+        state = advanceReconstruct(state, corpus, w.text_uthmani).state;
+      }
+      const injected = tatweelInject(dupWord.text_uthmani);
+      expect(injected).not.toBe(dupWord.text_uthmani); // genuinely different raw bytes
+      const r = advanceReconstruct(state, corpus, injected);
+      expect(r.correct, `ayah ${ayah} position ${dupWord.position}`).toBe(true);
     });
   }
 });
