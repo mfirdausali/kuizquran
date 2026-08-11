@@ -1032,3 +1032,72 @@ re-mint **splits a learner's server-side history across two anonymous users**. T
 local log stays complete and correct (invariant #2 makes it truth), so nothing the
 learner sees breaks. Reunification is the account-adoption merge job, M6's other
 half, not step 21.
+
+---
+
+## 2026-08-11 — build-plan step 22: BLOCKED on authored content, and the blocker is correct
+
+### v3-D51 — Surah 112 has ZERO distractors, so onboarding screen 2 cannot be built honestly
+
+WIREFRAME §17 calls screen 2 — a live tap-to-reconstruct of Al-Ikhlas 112:1 with
+no account — "the single most important moment". Step 22 stopped WITHOUT
+building it. Verified independently, three ways:
+
+- `data/raw/` holds `12-mcq-items.json` (1.9 MB, 1777 authored entries with
+  human pedagogical rationale). There is NO `112-mcq-items.json` and no `103-`
+  equivalent.
+- Compiling 112 succeeds and prints its own verdict:
+  `surah 112: 4 verses, 15 words, 0 distractors, 3 connections`.
+  Control: surah 12 has 8880.
+- Driven through the REAL engine, every blank in a 112 reconstruct pass returns
+  `optionsLen=1` — a tile bank containing ONLY the correct answer, for all four
+  blanks. Surah 12 returns 3–4.
+
+A reconstruction the learner cannot fail is not a demonstration of the mechanic;
+it is a slot machine that always pays. Shipping it as the product's most
+important moment would be the vacuous-verification failure this build has
+already made four times (v3-D38/D45/D49/D50) — except shipped to a person
+instead of to CI.
+
+**Three routes existed and all were correctly refused:**
+1. *Author ~60 foils in-agent.* The existing entries carry authored pedagogical
+   reasoning about Quranic text. Generating that is content authorship about
+   sacred text — the spirit of INVARIANTS.md Absolute B, not merely its letter.
+2. *Implement foil kernels.* `buildCorpus.ts:13` states they are "intentionally
+   NOT implemented here; separate follow-on work". A compiler feature is not an
+   onboarding step.
+3. *Substitute surah 12.* Contradicts §17 (whose whole premise is "nearly every
+   target user half-knows Al-Ikhlas") and §18 (the landing demo is the same
+   112:1 reconstruction). 12:1 is also the muqatta'at opener — the opposite of
+   a half-known ayah.
+
+**This gates step 22's screen 2 AND step 29's landing demo**, which are the same
+artifact. It needs a human decision: author 112's distractors, or build the
+foil-kernel compiler feature, or consciously re-spec the demo surah.
+
+### v3-D52 — `output/` is gitignored, so a fresh clone has NO corpus at all
+
+Related and separately real: `v3/packages/corpus-compiler/.gitignore` excludes
+`output/`, nothing in CI or `make build` runs `make compile-corpus`, and
+`lib/corpus/load.ts` hardcodes `AVAILABLE_SURAHS = [12]` reading the engine's
+test fixture. So the app's corpus is a build artifact nobody builds. Whatever is
+decided about 112's distractors, the SERVING PATH needs a decision too.
+
+### v3-D53 — "Recall before identity" was decorative; it is now gate clause 8
+
+WIREFRAME §17's governing rule lived only in prose. An adversarial mutation
+placing an email capture as the FIRST element of the landing page passed every
+gate and all 319 tests.
+
+Now enforced by `check-boundaries.mjs` clause 8: identity-capture markup
+(`type=email`, `name=email`, password/username autocomplete,
+`Notification.requestPermission`) is banned on pre-recall surfaces — the landing
+page and, as they land, onboarding steps. A surface that legitimately captures
+identity AFTER recall opts out with an explicit `@allow-identity-capture`
+marker, so every exception is a visible reviewable decision rather than silent
+drift. Verified: the exact mutation that previously survived now fails the build
+with a message naming file, line, and the rule.
+
+The clause is written to be EXTENDED — `PRE_RECALL` lists the surfaces, and a
+new pre-recall route must be added to it. That is deliberate: an unlisted route
+is a hole, so the list is the thing to review when onboarding lands.

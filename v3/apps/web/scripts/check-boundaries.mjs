@@ -165,6 +165,50 @@ for (const f of files.filter((f) => rel(f).startsWith("lib/sync/"))) {
   });
 }
 
+// --- Clause 8: RECALL BEFORE IDENTITY (WIREFRAME §17's governing rule). ---
+// "No account, no email, no notification prompt until the learner has produced
+// an ayah from memory."
+//
+// This clause exists because an adversarial review proved the rule was
+// DECORATIVE: it lived only in WIREFRAME.md prose, and a mutation putting an
+// email capture as the FIRST element of the landing page passed every gate and
+// all 319 tests. A governing rule that no check enforces is a rule that erodes
+// the first time someone adds "just a quick email field" — and the erosion is
+// invisible, because nothing goes red.
+//
+// The rule is about ORDER, which a static grep cannot fully judge. So this
+// clause enforces the part that IS statically decidable and is the actual
+// failure mode: identity-capture UI must not appear in the pre-recall surfaces
+// (the landing page and any onboarding step before the recall screen). A file
+// that legitimately captures identity — the real register/sign-in surface, or
+// an onboarding step AFTER the recall — opts out with an explicit marker
+// naming why, which makes every exception a visible, reviewable decision
+// rather than a silent drift.
+const IDENTITY_CAPTURE =
+  /type=["']email["']|name=["']email["']|autoComplete=["'](?:email|username|new-password|current-password)["']|Notification\.requestPermission|type=["']password["']/;
+const PRE_RECALL_OPT_OUT = "@allow-identity-capture";
+// Pre-recall surfaces: the landing page, and onboarding steps. Extend this list
+// as onboarding lands — a new pre-recall route MUST be added here.
+const PRE_RECALL = [/^app\/page\.tsx$/, /^app\/\(onboarding\)\//, /^components\/onboarding\//];
+for (const f of files) {
+  const r = rel(f);
+  if (r.endsWith(".test.ts") || r.endsWith(".test.tsx")) continue;
+  if (!PRE_RECALL.some((re) => re.test(r))) continue;
+  const raw = read(f);
+  if (raw.includes(PRE_RECALL_OPT_OUT)) continue; // explicit, reviewable exception
+  const src = stripComments(raw);
+  src.split("\n").forEach((line, i) => {
+    if (IDENTITY_CAPTURE.test(line)) {
+      violations.push(
+        `${r}:${i + 1}: identity capture on a PRE-RECALL surface. WIREFRAME §17: ` +
+          `"no account, no email, no notification prompt until the learner has ` +
+          `produced an ayah from memory." If this surface legitimately comes ` +
+          `AFTER recall, add the marker ${PRE_RECALL_OPT_OUT} with a reason.`,
+      );
+    }
+  });
+}
+
 if (violations.length > 0) {
   console.error(`\n✗ boundaries gate FAILED — ${violations.length} violation(s)\n`);
   for (const v of violations) console.error(`   ✗  ${v}`);
