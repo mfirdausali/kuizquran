@@ -9,19 +9,27 @@
 // real number. check-boundaries.mjs clause 2 fails the build if this file ever
 // imports lib/idb without "use client".
 //
-// TODO(build-plan step 20 / M6, WIREFRAME §1): the real dashboard.
-//   - MY SURAHS: per-surah rows with independent schedules, rendered from the
-//     event log + a small MANIFEST — never N corpus fetches (edge case E-07).
-//   - The Continue CTA, and its ABSENCE in the zero state (§12): no "Continue"
-//     when there is nothing to continue.
-//   - Due counts per surah, arriving as DATA from the engine. Band and
-//     strength comparisons may NEVER appear in this JSX — check-boundaries.mjs
-//     clause 5 enforces it (DEFECTS.md#B2).
-//   - The recommender card (build-plan step 30 — last, and deliberately so).
-//   - Make-up messaging after a genuinely skipped day (resumePolicy → makeup).
+// BUILD-PLAN STEP 22 landed here: the ZERO STATE (#97), the RETURNING-AFTER-
+// WEEKS message (#98) and the DEVICE RESET enumeration (#104). Each is a client
+// island for the reason this file's header gives — they are log-derived, and a
+// server render has no log.
+//
+// STILL OPEN (they need the engine wired to the log, which is not this step):
+//   - Per-surah rows with independent schedules and DUE COUNTS. These must
+//     arrive as DATA from the engine; band and strength comparisons may NEVER
+//     appear in this JSX — check-boundaries.mjs clause 5 enforces it
+//     (DEFECTS.md#B2). Until `assembleQueue` runs against rebuilt atoms there is
+//     no honest due count to show, and a fabricated one is the exact
+//     retention-honesty violation the whole boundary exists to prevent.
+//   - The Continue CTA. Deliberately absent in the zero state (§12) — and
+//     absent everywhere else in this build too, because "Continue" that starts
+//     nothing is worse than no button.
+//   - The recommender card proper (build-plan step 30 — last, and deliberately
+//     so). MySurahs' zero state stands in with the honest subset: the surahs
+//     this build can actually teach.
 
-import Link from "next/link";
-import { LogSummary } from "@/components/home/LogSummary";
+import { MySurahs } from "@/components/home/MySurahs";
+import { DeviceReset } from "@/components/home/DeviceReset";
 import { StubNote } from "@/components/shell/StubNote";
 import { SyncStatus } from "@/components/shell/SyncStatus";
 
@@ -40,23 +48,32 @@ export default function HomePage() {
               MY SURAHS
             </h2>
           </div>
-          {/* The log-derived line. A client island, exhaustively three-stated. */}
-          <LogSummary />
+          {/* #97's zero state (leads with somewhere to go, never an empty box)
+              and #98's returning-after-weeks message. A client island,
+              exhaustively four-stated. */}
+          <MySurahs />
           {/* #103's quiet "N pending" indicator (build-plan step 21 / M6). A
               PASSIVE OBSERVER: it reads a count, it never triggers or awaits a
               flush, and no session path reads it. Three-stated like every other
               log read, so a not-yet-read count paints a skeleton, never `0`. */}
           <SyncStatus />
-          <Link href="/library" className="btn hit">
-            Browse the library
-          </Link>
         </section>
 
-        <StubNote step="step 20 (M6), WIREFRAME §1">
-          MY SURAHS rows with per-surah due counts, the Continue CTA (and its
-          absence in the zero state), make-up messaging, and the recommender
-          card. Due counts arrive from the engine as data — no band or strength
-          logic ever enters this view.
+        {/* #104: a destructive action must enumerate what it would destroy
+            BEFORE it is offered — "N surahs", not "some data". */}
+        <section className="card" aria-labelledby="device-h">
+          <div className="card-header">
+            <h2 id="device-h" style={{ margin: 0, fontSize: 12, fontWeight: 600 }}>
+              THIS DEVICE
+            </h2>
+          </div>
+          <DeviceReset />
+        </section>
+
+        <StubNote step="step 22 → M6/M7, WIREFRAME §1">
+          Per-surah rows with due counts and the Continue CTA. Both wait on the
+          engine running against the rebuilt log — a due count invented in this
+          view would be the exact dishonesty the boundary exists to prevent.
         </StubNote>
       </div>
     </div>

@@ -28,16 +28,26 @@
 // the number "12:4" beside an Arabic phrase must be its own ltr island, which
 // is what `.ltr-island` is for.
 //
-// TODO(build-plan step 20 / M6, WIREFRAME §4): the real ayah detail.
-//   - The ayah itself (the `.ayah` hero from the locked CSS — the largest type
-//     on the screen, always), from the corpus at runtime.
-//   - Word-by-word glosses, EN at launch (v3-D15: MS is excluded from hash v1
-//     and its toggle is hidden — ~11,300 glosses must be authored first).
-//   - The bridge: where this ayah sits in the surah's structure.
-//   - Per-ayah stats — half-life, decay since last review, time-on-task (§15)
-//     — all arriving from the engine as data, in a client island.
+// BUILD-PLAN STEP 22 landed the first two of these:
+//   - THE AYAH ITSELF, from the corpus at runtime, in the `.ayah` hero (the
+//     largest type on the screen, always — locked §8 rule 1).
+//   - WORD-BY-WORD GLOSSES, EN at launch (v3-D15: MS is excluded from hash v1;
+//     `wordGloss` falls back ms → en → the word itself, which is the chain
+//     every gloss consumer must honour rather than reading `.en` directly).
+//
+// STILL OPEN:
+//   - The bridge: where this ayah sits in the surah's structure (step 7 / M5).
+//   - Per-ayah stats — half-life, decay since last review, time-on-task (§15).
+//     These are LOG-DERIVED and so must arrive in a client island, never from
+//     this server component (edge case #72). They also must arrive as DATA from
+//     the engine: a half-life computed in this JSX would be clause 5's
+//     violation and DEFECTS.md#B2's shape.
 
 import { notFound } from "next/navigation";
+import { loadCorpus } from "@/lib/corpus/load.ts";
+import { ayahWords, wordGloss } from "@engine/corpus.ts";
+import { buildFace } from "@engine/faces.ts";
+import { FaceText } from "@/components/quiz/FaceText";
 import { StubNote } from "@/components/shell/StubNote";
 
 function parseSurah(raw: string): number | null {
@@ -65,6 +75,13 @@ export default async function AyahPage({
   const ayah = parseAyah(rawAyah);
   if (surah === null || ayah === null) notFound();
 
+  // `null` for a surah this build cannot serve — never a throw and never an
+  // empty corpus (see lib/corpus/load.ts for why that distinction is the whole
+  // point). A missing corpus degrades to a designed state on this one route.
+  const corpus = await loadCorpus(surah);
+  const verseFace = corpus ? buildFace(corpus, { kind: "verse", ayah }) : null;
+  const words = corpus ? ayahWords(corpus, ayah) : [];
+
   return (
     <div className="screen">
       <div className="stack">
@@ -86,14 +103,53 @@ export default async function AyahPage({
               THE AYAH
             </h2>
           </div>
-          {/* When the corpus lands, the text is painted into an element
-              carrying dir="rtl" lang="ar" — the island, never the document. */}
-          <StubNote step="step 20 (M6), WIREFRAME §4">
-            The ayah text and its word-by-word glosses, loaded from the
-            compiled corpus at runtime and rendered as an RTL island
-            (dir=&quot;rtl&quot; lang=&quot;ar&quot;) inside this LTR page.
-          </StubNote>
+          {/* The text is painted into an element carrying dir="rtl" lang="ar"
+              — the island, never the document. `FaceText` is the ONE place
+              that mapping happens, and the Face it paints was resolved from a
+              corpus coordinate by `buildFace`, so its bytes are provably the
+              compiler's. */}
+          {verseFace ? (
+            <FaceText face={verseFace} className="ayah" as="bdi" />
+          ) : (
+            <p className="stub-note">
+              {corpus === null
+                ? `No corpus is available for surah ${surah} in this build.`
+                : `Surah ${surah} has no ayah ${ayah}.`}
+            </p>
+          )}
         </section>
+
+        {words.length > 0 ? (
+          <section className="card" aria-labelledby="gloss-h">
+            <div className="card-header">
+              <h2 id="gloss-h" style={{ margin: 0, fontSize: 12, fontWeight: 600 }}>
+                WORD BY WORD
+              </h2>
+            </div>
+            {/* Each row is a mixed-direction line — Arabic beside a Latin
+                gloss — which is edge case #80's exact shape. Both sides are
+                isolated: the Arabic through FaceText's `<bdi>` + .rtl-island,
+                the reference through .ltr-island. */}
+            <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+              {words.map((word) => {
+                const face = corpus
+                  ? buildFace(corpus, { kind: "word", ayah, position: word.position })
+                  : null;
+                if (!face) return null;
+                return (
+                  <li key={word.position} className="meta-line">
+                    <FaceText face={face} as="bdi" />
+                    <span className="meta-line__sep">·</span>
+                    {/* `wordGloss` owns the ms → en → surface fallback chain.
+                        Reading `word.gloss.en` here instead would hardcode one
+                        language and silently break the day MS lands. */}
+                    <span>{wordGloss(word)}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ) : null}
 
         <section className="card" aria-labelledby="bridge-h">
           <div className="card-header">

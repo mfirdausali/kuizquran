@@ -23,6 +23,11 @@ v1/.git.bak/
 # synced build artifacts (canonical sources live elsewhere)
 **/apps/web/public/iman-ui.css
 **/apps/web/public/corpus.json
+# v3: staged by apps/web/scripts/stage-corpus.mjs from the corpus-compiler's
+# output/ tree, which is itself gitignored (v3-D52 — the corpus is a build
+# artifact). Committing a copy would create a second source of truth that
+# silently goes stale the next time the compiler runs.
+**/apps/web/public/corpus/
 
 # Laravel (v2/api, when scaffolded)
 v2/api/vendor/

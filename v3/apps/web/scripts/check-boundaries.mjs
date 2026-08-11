@@ -189,7 +189,22 @@ const IDENTITY_CAPTURE =
 const PRE_RECALL_OPT_OUT = "@allow-identity-capture";
 // Pre-recall surfaces: the landing page, and onboarding steps. Extend this list
 // as onboarding lands — a new pre-recall route MUST be added here.
-const PRE_RECALL = [/^app\/page\.tsx$/, /^app\/\(onboarding\)\//, /^components\/onboarding\//];
+//
+// `lib/onboarding/` was ADDED at build-plan step 22 and it was a real hole, not
+// a formality. The clause originally covered only `app/(onboarding)/` and
+// `components/onboarding/` — the routes and the views. But the onboarding
+// module that decides WHAT IS CAPTURED and writes it to the device lives in
+// `lib/onboarding/`, and an email or password field is not the only way to
+// break §17's rule: a `Notification.requestPermission()` in the commit path, or
+// a capture helper added beside `commitOnboarding`, would be identity capture
+// on a pre-recall surface with no markup anywhere near a view. Covering the
+// views but not the module that serves them is covering the symptom.
+const PRE_RECALL = [
+  /^app\/page\.tsx$/,
+  /^app\/\(onboarding\)\//,
+  /^components\/onboarding\//,
+  /^lib\/onboarding\//,
+];
 for (const f of files) {
   const r = rel(f);
   if (r.endsWith(".test.ts") || r.endsWith(".test.tsx")) continue;
@@ -318,6 +333,183 @@ for (const f of files) {
   });
 }
 
+// --- Clause 11: v3-D19 — NO TAJWID CLAIM, NO REPLACES-A-TEACHER CLAIM. ---
+//
+//   "The app never claims to teach tajwid or replace a teacher. CI asserts no
+//    landing or onboarding string makes either claim."          — v3-D19
+//
+// BUILD-PLAN names this a CI clause explicitly. Leaving it to prose is exactly
+// the v3-D53 failure: "recall before identity" lived only in WIREFRAME.md and an
+// adversarial review proved a landing-page email capture passed every gate and
+// all 319 tests. A governing rule no check enforces is a rule that erodes.
+//
+// The detector is `lib/landing/claims.ts#findClaims`, imported here so the GATE
+// and `test/landing-claims.test.ts` share ONE definition of "makes the claim".
+// Two checks over one definition:
+//
+//   - the TEST runs it over the runtime VALUES of `landingStrings()` — what the
+//     page will really paint, including anything assembled at render;
+//   - this CLAUSE runs it over the SOURCE of every landing/onboarding-facing
+//     file, so a claim written into JSX (rather than into the copy module,
+//     where the test would see it) still fails the build.
+//
+// Neither check subsumes the other, which is why both exist.
+//
+// SCOPE. The landing page, the copy modules, the demo, and — when it lands —
+// onboarding. v3-D19 says "landing or onboarding string", so the scope is those
+// surfaces and not the whole app: an admin console or a defect note may
+// legitimately discuss tajwid, and a checker that fired there would be a
+// checker people learn to route around.
+const CLAIM_SCOPE = [
+  /^app\/page\.tsx$/,
+  /^lib\/landing\//,
+  /^components\/landing\//,
+  /^components\/demo\//,
+  /^lib\/demo\//,
+  /^app\/\(onboarding\)\//,
+  /^components\/onboarding\//,
+];
+// The detector lives in lib/ (shared with the test) and is loaded dynamically
+// because this gate is a plain .mjs script with no TypeScript transform. Rather
+// than duplicate the patterns — the surest way to have two detectors that
+// disagree — the source is READ and the pattern literals are extracted from it.
+// A drift between the two is impossible because there is only one source text.
+const CLAIMS_SRC_PATH = path.join(ROOT, "lib/landing/claims.ts");
+let claimPatterns = null;
+let dischargePatterns = null;
+try {
+  const claimsSrc = readFileSync(CLAIMS_SRC_PATH, "utf8");
+  const extract = (constName) => {
+    const block = claimsSrc.match(
+      new RegExp(`const ${constName}:[^=]*=\\s*\\[([\\s\\S]*?)\\n\\];`),
+    );
+    if (!block) return null;
+    const out = [];
+    // Each entry is a regex literal on its own line: /.../i,
+    for (const line of block[1].split("\n")) {
+      const m = line.match(/^\s*(\/(?:[^/\\\n]|\\.)+\/[gimsuy]*)\s*,?\s*$/);
+      if (m) out.push(m[1]);
+    }
+    return out.length > 0 ? out : null;
+  };
+  const toRegex = (literals) =>
+    literals.map((lit) => {
+      const last = lit.lastIndexOf("/");
+      return new RegExp(lit.slice(1, last), lit.slice(last + 1));
+    });
+  const tajwid = extract("TAJWID_CLAIMS");
+  const teacher = extract("TEACHER_CLAIMS");
+  const memorized = extract("MEMORIZED_CLAIMS");
+  const dischargers = extract("DISCHARGERS");
+  if (!tajwid || !teacher || !memorized || !dischargers) {
+    violations.push(
+      `lib/landing/claims.ts: clause 11 could not extract its patterns. The ` +
+        `v3-D19 claim check is NOT RUNNING. Keep TAJWID_CLAIMS / TEACHER_CLAIMS ` +
+        `/ MEMORIZED_CLAIMS / DISCHARGERS as arrays of one-per-line regex literals.`,
+    );
+  } else {
+    claimPatterns = toRegex([...tajwid, ...teacher, ...memorized]);
+    dischargePatterns = toRegex(dischargers);
+  }
+} catch {
+  violations.push(
+    `lib/landing/claims.ts is missing. Clause 11 (v3-D19: no tajwid claim, no ` +
+      `replaces-a-teacher claim) cannot run without it.`,
+  );
+}
+/** The overlap rule, mirroring lib/landing/claims.ts#isDischarged. A negation
+ *  overlapping the matched span is PART OF the claim, never a denial of it. */
+function isDischargedAt(sentence, matchStart, matchEnd, dischargers) {
+  for (const discharger of dischargers) {
+    const flags = discharger.flags.includes("g") ? discharger.flags : `${discharger.flags}g`;
+    const g = new RegExp(discharger.source, flags);
+    let m;
+    while ((m = g.exec(sentence)) !== null) {
+      const start = m.index;
+      const end = m.index + m[0].length;
+      if (!(start < matchEnd && end > matchStart)) return true;
+      if (m[0].length === 0) break;
+    }
+  }
+  return false;
+}
+if (claimPatterns && dischargePatterns) {
+  for (const f of files) {
+    const r = rel(f);
+    if (r.endsWith(".test.ts") || r.endsWith(".test.tsx")) continue;
+    // The detector's OWN source names every banned phrasing, by necessity.
+    if (r === "lib/landing/claims.ts") continue;
+    if (!CLAIM_SCOPE.some((re) => re.test(r))) continue;
+    // Comments are stripped: these modules DOCUMENT the prohibition, quoting the
+    // very sentences they forbid. A gate that fires on its own rationale is the
+    // one false positive guaranteed to get the gate deleted.
+    const src = stripComments(read(f));
+    // Sentence-scoped, exactly as findClaims is — a disclaimer in one sentence
+    // must not launder a claim in the next.
+    for (const sentence of src.split(/(?<=[.!?])\s+|\n+/)) {
+      const trimmed = sentence.trim();
+      if (trimmed.length === 0) continue;
+      for (const pattern of claimPatterns) {
+        const m = trimmed.match(pattern);
+        if (!m || m.index === undefined) continue;
+        // A discharging negation must sit OUTSIDE the matched span. Several
+        // prohibited claims are negative in FORM ("no teacher needed", "never
+        // forget it"), and a blanket "the sentence contains a negation" test
+        // silently excused exactly those — the four most marketable
+        // overclaims in the whole prohibition. Mirrors
+        // lib/landing/claims.ts#isDischarged, which is where that bug was
+        // caught by its MUST_FAIL tests.
+        if (isDischargedAt(trimmed, m.index, m.index + m[0].length, dischargePatterns)) continue;
+        violations.push(
+          `${r}: v3-D19 violation — "${m[0]}". This app never claims to teach ` +
+            `tajwid or replace a teacher, and never calls cued production ` +
+            `"memorized" (WIREFRAME §21: the quiz is the daily driver; the ` +
+            `teacher is the verifier). Offending sentence: "${trimmed.slice(0, 120)}"`,
+        );
+      }
+    }
+  }
+}
+
+// --- Clause 12: LANDING COPY IS DATA, NOT JSX. ---
+//
+// Clause 11 and the claim test are only as good as their reach, and their reach
+// is "strings the copy module holds". The moment a sentence is typed directly
+// into `app/page.tsx` as a JSX text node, it is still landing copy — but a
+// reviewer scanning `lib/landing/copy.ts` will not see it, and a future
+// claim-check refinement will not cover it.
+//
+// So: the landing page's markup may not contain prose. Every sentence comes
+// from the copy module. What remains legal in the JSX is structure, class
+// names, hrefs, and short non-sentence labels — which is why the trigger is a
+// TEXT NODE containing sentence-shaped prose (several words), not any text at
+// all.
+//
+// This is the same construction as clause 10 (a price literal outside
+// lib/pricing.ts): the constants test alone stays green while a template
+// hardcodes a second copy beside it.
+const LANDING_MARKUP = ["app/page.tsx"];
+// A JSX text node: `>` … `<` with no braces, holding 4+ words with a lowercase
+// run — i.e. a sentence, not a `<span>Monthly</span>` label. Attribute values
+// are not matched (they sit inside the tag, before the `>`).
+const PROSE_TEXT_NODE = />\s*([A-Za-z][^<>{}]*?\s+[a-z]+[^<>{}]*?\s+[a-z]+[^<>{}]*?\s+[^<>{}]*?)\s*</;
+for (const f of files) {
+  const r = rel(f);
+  if (!LANDING_MARKUP.includes(r)) continue;
+  const src = stripComments(read(f));
+  src.split("\n").forEach((line, i) => {
+    const m = line.match(PROSE_TEXT_NODE);
+    if (m && m[1].trim().split(/\s+/).length >= 4) {
+      violations.push(
+        `${r}:${i + 1}: prose in the landing markup — "${m[1].trim().slice(0, 60)}". ` +
+          `Every landing sentence lives in lib/landing/copy.ts, so the v3-D19 ` +
+          `claim check (clause 11 + test/landing-claims.test.ts) can actually ` +
+          `see it. A sentence typed into JSX is invisible to both.`,
+      );
+    }
+  });
+}
+
 if (violations.length > 0) {
   console.error(`\n✗ boundaries gate FAILED — ${violations.length} violation(s)\n`);
   for (const v of violations) console.error(`   ✗  ${v}`);
@@ -325,4 +517,7 @@ if (violations.length > 0) {
   process.exit(1);
 }
 
-console.log(`boundaries: OK — ${files.length} files checked (idb/client, sacred-text, engine-decision).`);
+console.log(
+  `boundaries: OK — ${files.length} files checked (idb/client, sacred-text, ` +
+    `engine-decision, egress, recall-before-identity, entitlement, pricing, v3-D19 claims).`,
+);

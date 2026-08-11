@@ -65,11 +65,36 @@ export type MetaKey =
    *  full scan is the fallback whenever it is absent. This is the crucial
    *  difference from a high-water sync cursor, which WOULD lose the
    *  out-of-order rows a retried append re-submits. */
-  | "outboxLowWater";
+  | "outboxLowWater"
+  // --- build-plan step 22 (M6, onboarding). No DB_VERSION bump, for the same
+  // reason step 21 needed none: `meta` is `{key: string}`-keyed and un-indexed,
+  // so a new key needs no migration. ---
+  /** The four answers onboarding captures (WIREFRAME §17: gloss language,
+   *  surah, pace, optional placement priors — and nothing else). Written in
+   *  the SAME transaction as `onboardedAt`, choices first, so the stamp
+   *  `OnboardedSteer` trusts is never visible before the data it vouches for. */
+  | "onboardingChoices";
+
+/** The structured value `onboardingChoices` holds. Declared STRUCTURALLY here
+ *  rather than imported from `lib/onboarding/choices.ts`, so schema.ts stays a
+ *  leaf module — the store must not depend on the features that write to it, or
+ *  the dependency runs backwards. `choices.ts` declares the authoritative type
+ *  and assigns it into this slot, so a drift between the two is a type error at
+ *  the write site rather than a surprise at the read site. */
+export interface MetaRecordValue {
+  glossLang: string;
+  surah: number;
+  pace: string;
+  placement: { kind: string; throughAct?: number; probed?: number };
+}
 
 export interface MetaRow {
   key: MetaKey;
-  value: string | number | null;
+  /** A scalar for every key except `onboardingChoices`, which holds the small
+   *  structured record above. Kept as an explicit UNION rather than widened to
+   *  `unknown`: widening would silently un-type the eight existing scalar keys,
+   *  whose readers currently rely on `typeof value === "number"` narrowing. */
+  value: string | number | null | MetaRecordValue;
 }
 
 /** A cached atom. This store is a CACHE, never truth: it must be safe to

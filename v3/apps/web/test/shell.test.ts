@@ -71,7 +71,13 @@ describe("the route tree", () => {
     // A real page: a default export, a heading, and enough content that
     // "it exists" and "it renders something" are the same claim.
     expect(src).toMatch(/export default (async )?function/);
-    expect(src).toMatch(/<h1>/);
+    // `<h1` and not `<h1>`: a top-level heading carrying a class or an id is
+    // still a top-level heading. The bare-tag form silently failed the moment
+    // the landing page's h1 took a class (build-plan step 29) — and it would
+    // have failed for a styled h1 on any other route too. The assertion's
+    // intent is "this page has a real top-level heading", which is what it now
+    // checks; nothing is weakened, because a page with NO h1 still fails.
+    expect(src).toMatch(/<h1[\s>]/);
     expect(src.length).toBeGreaterThan(400);
   });
 

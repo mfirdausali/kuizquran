@@ -698,3 +698,340 @@
   font-size: 12px;
   color: var(--text-secondary);
 }
+
+/* ---- 9. The admin workbench (WIREFRAME §22b, build-plan step 25) ---------
+   Staff tooling, not a learner surface. It reuses `.card`, `.card-header`,
+   `.caption`, `.voice`, `.stack` and `.ltr-island` from the locked file and the
+   blocks above — rule 3 of this layer ("reuse before you invent"). What is
+   genuinely new here is a three-pane LAYOUT and a status CHIP, neither of which
+   the locked file has.
+
+   THE CHIP AND WHY IT IS NEVER COLOUR ALONE. §22b names the three states by
+   colour ("green verified, amber stale, grey unverified"), but §15's rule binds
+   here too: the dot is decoration ON TOP of a word, and `FrontierNavigator`
+   renders the word unconditionally beside it. The dot carries aria-hidden for
+   the same reason `.stage-dot` does — a screen reader must not be told about a
+   colour it cannot convey. Amber uses the locked --amber-600, which exists in
+   the token set precisely for a "needs attention, not an error" state; stale is
+   not a slip, so --coral-500 would be wrong (rule 4: coral only for slips).
+   -------------------------------------------------------------------------- */
+
+.wb-grid {
+  display: grid;
+  gap: 12px;
+  /* One column on a phone, three panes side by side once there is room. The
+     workbench is a desktop tool, but a qari checking a chip on a phone must
+     still get a usable list rather than a horizontally-scrolled table. */
+  grid-template-columns: 1fr;
+}
+@media (min-width: 900px) {
+  .wb-grid {
+    grid-template-columns: minmax(260px, 1fr) minmax(220px, 1fr) minmax(320px, 1.6fr);
+    align-items: start;
+  }
+}
+
+.wb-h {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.wb-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.wb-list--flush { gap: 0; }
+
+/* A worklist row. `--tap-min` is the shared floor from block 2 (edge case
+   #82) — a staff screen does not get a smaller target than a learner screen. */
+.wb-row {
+  display: grid;
+  grid-template-columns: auto auto auto 1fr;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: var(--tap-min);
+  padding: 6px 4px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--font-ui);
+  color: var(--text-primary);
+}
+.wb-row:hover { background: var(--surface-2); }
+.wb-row.is-selected {
+  background: var(--surface-3);
+  border-left: 2px solid var(--fill-primary);
+}
+.wb-row__ref {
+  font-weight: 600;
+  font-size: 14px;
+  min-width: 2.5ch;
+}
+.wb-row__word { font-size: 12px; color: var(--text-secondary); }
+.wb-row__note {
+  /* The note is the actionable half of the row. Truncated rather than wrapped
+     so the list stays scannable; the full text is in the row's aria-label, so
+     nothing is lost to a screen reader by the visual clipping. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-chip {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid var(--border-stronger);
+}
+.wb-chip--verified   { background: var(--teal-600); }
+.wb-chip--stale      { background: var(--amber-600); }
+.wb-chip--unverified { background: var(--text-muted); }
+
+.wb-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0;
+  border: 0;
+  padding: 0;
+}
+.wb-field input[type="number"] {
+  min-height: var(--tap-min);
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  background: var(--surface-3);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  color: var(--text-primary);
+}
+.wb-lane-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--tap-min);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.wb-section { margin-top: 12px; }
+.wb-lane { margin-top: 8px; }
+.wb-lane__name { font-weight: 600; }
+
+.wb-previews {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.wb-preview {
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  padding: 8px;
+}
+
+.wb-var {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  align-items: baseline;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--border);
+}
+.wb-var__idx {
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 8ch;
+}
+/* A dropped variant is not an error — admit() dropping 14% of s1 candidates is
+   the system working. So it is MUTED, never coral. */
+.wb-var.is-dropped { opacity: 0.65; }
+.wb-var.is-ok .wb-var__idx { color: var(--teal-800); }
+
+/* ---------------------------------------------------------------------------
+   THE LANDING PAGE (build-plan step 29, WIREFRAME §18)
+   ---------------------------------------------------------------------------
+   The only long-form READING surface in this product. Every other screen is a
+   drill, a list or a calendar; this one is paragraphs, and a 420px column of
+   14px text set for a phone drill is not a comfortable read on a laptop.
+
+   So `.landing` WIDENS the locked `.screen` rather than restyling it. That is
+   an extension in the sense rule 2 of this file allows — `.screen`'s
+   declarations keep meaning what they meant (a centered column with 16px
+   gutters); the landing variant only changes how wide the column is allowed to
+   grow, and only on this one route.
+
+   THE §8 RULES STILL BIND, and two of them are load-bearing here:
+
+     Rule 1 — "the .ayah is the largest type on every screen; nothing
+     competes." The locked `.ayah` is 22px. `.landing-h1` is therefore 20px:
+     the hero headline of a marketing page is genuinely the second-largest
+     thing on it, because the largest is the ayah inside the demo. That is not
+     a compromise — it is the page arguing its own case. The one thing a
+     visitor should be looking at is the verse they are about to rebuild.
+
+     Rule 4 — no shadows, no gradients, no border thicker than the hairline.
+     A landing page is exactly where those creep in ("just a subtle gradient on
+     the hero"). There are none here. The page is separated by SPACE and by the
+     card boundaries the design system already has.
+
+   Nothing here animates. The locked layer's global reduced-motion rule remains
+   the only motion rule in the app.
+   --------------------------------------------------------------------------- */
+
+/* The reading column. 34rem ≈ 60–70 characters at this size — the measure
+   long-form text is legible at. On a phone the `min()` collapses it back to
+   the locked 420px behaviour and nothing changes. */
+.landing {
+  max-width: min(34rem, 100%);
+  padding-bottom: 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+}
+
+/* Section rhythm. The gap above does the separating; a section is just a
+   stack. No dividers — a hairline between every section would be four more
+   borders than this page needs. */
+.landing-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.landing-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 24px;
+}
+
+/* 20px: deliberately BELOW the locked .ayah's 22px (§8 rule 1). */
+.landing-h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  color: var(--text-primary);
+}
+
+.landing-h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* Body copy is 14px — the same size as the rest of the app's text, with a
+   looser line-height because these are paragraphs and not labels. */
+.landing-body,
+.landing-lead {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+}
+.landing-lead { color: var(--text-primary); }
+
+/* The one promise §18 quotes verbatim ("we never shorten it to flatter you").
+   Set in the voice serif because it is the page's intention line — and it is
+   the ONLY .voice-register line in the body, with the hero's subhead being the
+   other. §8 rule 3 caps `.voice` at one per screen; this uses the serif token
+   directly rather than the class, so the cap is not violated by a second
+   `.voice` element. */
+.landing-promise {
+  margin: 0;
+  font-family: var(--font-voice);
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+/* Cited science. A list of sources, each naming its author and year above the
+   claim, so the claim is never floating free of who made it. */
+.landing-cites {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.landing-cites li {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 12px;
+  border-left: var(--hairline) solid var(--border-stronger);
+}
+.landing-cite-source {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.landing-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 24px;
+  border-top: var(--hairline) solid var(--border);
+}
+.landing-ethics {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+/* PRICING. Two region cards side by side where there is room, stacked where
+   there is not. Both are always present — see PricingPanel.tsx for why a
+   landing page must not geo-detect and show only one. */
+.price-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 12px;
+}
+.price-card { gap: 4px; }
+.price-row {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.price-plan {
+  font-size: 12px;
+  color: var(--text-secondary);
+  min-width: 4.5rem;
+}
+/* Tabular numerals so RM20 and RM500 line up in the same column and the eye
+   can compare them without re-reading. */
+.price-amount {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.price-per { font-size: 12px; color: var(--text-muted); }
+/* The payment rails (edge case #120 — FPX cannot recur, so it may not appear
+   beside a monthly plan). Quiet, but present: a rail a learner cannot actually
+   use is a promise broken at the checkout. */
+.price-rails { margin: 0 0 4px 4.5rem; }
+
+/* THE DEMO. It is the same card the drill uses; the only thing this adds is
+   the caption line beneath it and the honesty note after completion. */
+.demo {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.demo-caption { min-height: 2.4em; }   /* reserve the line so the bank does not
+                                          jump when the caption changes length */
+.demo-honest { color: var(--text-secondary); }

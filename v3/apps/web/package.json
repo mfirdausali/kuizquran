@@ -3,8 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3000",
-    "prebuild": "node scripts/check-locked-css.mjs && node scripts/check-fonts.mjs && node scripts/check-boundaries.mjs",
+    "dev": "node scripts/stage-corpus.mjs && next dev -p 3000",
+    "stage-corpus": "node scripts/stage-corpus.mjs",
+    "prebuild": "node scripts/check-locked-css.mjs && node scripts/check-fonts.mjs && node scripts/check-boundaries.mjs && node scripts/stage-corpus.mjs",
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",

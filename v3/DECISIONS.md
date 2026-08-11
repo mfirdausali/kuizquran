@@ -1180,3 +1180,66 @@ names the handlers read. That gap is named in `DEFECTS.md#PAY-1`.
 (KYC, days-to-weeks — BUILD-PLAN says "Stripe account from M0", so this is
 already LATE); FPX + GrabPay per-method activation; Q7 (card-only monthly vs
 Curlec; SST-inclusive?); refund policy numbers.
+
+---
+
+## 2026-08-11 — steps 22, 25, 29: onboarding, workbench, landing
+
+### v3-D56 — explain() lives APP-SIDE, not in the engine
+
+v3-D37 tracked explain() as an M8 precondition without settling where it lives.
+Settled: `v3/apps/web/lib/workbench/explain.ts`. The argument, from WIREFRAME
+§22's DATA/CODE split — CODE owns decisions, and explain() DECIDES NOTHING. It
+calls `buildQuestion`/`variants`/`admit`/`buildResourceLedger` (all already
+public) and narrates their return values.
+
+Three reasons it stays out of the engine:
+1. Its only consumer is a view, so its shape is driven by what a pane renders.
+   Putting a UI-shaped type in the engine puts un-invariant-governed English in
+   the engine's public surface.
+2. Derived must not become authoritative. Beside `buildQuestion`, some future
+   caller reads `trace.admitted` instead of calling `admit()` — two paths to one
+   judgement that can disagree. Held app-side over the public API, the module
+   has NO corpus knowledge of its own, so divergence is structurally impossible.
+3. Direct precedent: `lib/drill/sites.ts` needed a superset of `expand()` and
+   its header states the same rule.
+
+BUILD-PLAN listing explain() in M4's Ships line does not make it an engine
+module; M8's own line says "three-strength preview VIA explain()", i.e. a
+consumer.
+
+### v3-D57 — ONE demo, and the drift that proved why it matters
+
+Onboarding screen 2 (§17) and the landing demo (§18) are the SAME 112:1
+tap-to-reconstruct. They were built by two agents in one run and became TWO
+implementations — 1061 lines across `lib/demo/` + `components/demo/` and
+`lib/onboarding/` + `components/onboarding/`, sharing nothing.
+
+They had already drifted, and in the direction that matters. The engine returns
+`[correct, ...distractors]` — correct ALWAYS at index 0 — because `options.ts`
+states display order is the UI's concern. Onboarding seed-shuffled it. **The
+landing demo did not.** So on the page WIREFRAME calls "the conversion engine",
+tapping the first tile four times produced a flawless reconstruction, and the
+page would then have claimed the visitor recalled an ayah they never read.
+
+A demo that lies about memory is worse than no demo. Both surfaces now share
+one shuffle (`lib/onboarding/pass.ts#displayOrder`), seeded so a re-render never
+moves a tile under the learner's finger.
+
+### v3-D58 — Assert the OUTPUT, never the ingredient
+
+My first regression test for the above asserted `displayOrder`'s permutation
+directly. It SURVIVED reverting the demo to correct-first order — because the
+helper was still correct, it simply was no longer being called. A test of an
+ingredient cannot detect that the dish stopped using it.
+
+Rewritten to drive `startDemo`/`stepOf`/`applyTap` and assert the correctIndex
+sequence the visitor actually sees. Verified: RED against the unshuffled demo,
+green with the fix.
+
+This is the SEVENTH vacuous verification in this build (v3-D38 tsc-as-TeX; D45
+link counts not link text; D49 a guard whose test never distinguished its two
+states; D50 a testsuite dir on one machine only; D53 a rule enforced by prose;
+a trailing-\b regex letting every real identifier through; and now this). The
+pattern is stable enough to name: **a test that passes tells you about the test.
+Mutate the thing, or you have learned nothing.**
