@@ -531,3 +531,47 @@ edge corpus-compiler has never had, because:
 
 If a third consumer ever needs this resolution logic, extract a shared
 `packages/override-resolution` package then — not before.
+
+---
+
+## Ratified 2026-08-11 — build-plan step 16 execution: buildQuestion ships one kernel at a time
+
+### v3-D35 — s1 is the first parity-fenced kernel; cloze/junction/locate/reorder are explicit follow-on work
+
+BUILD-PLAN.md prices the question compiler at ~4 hard-fenced eng-weeks
+with a DoD of "byte-parity re-expression of reconstruct + the 6 test
+builders." That parity requirement is exactly why this ships incrementally
+rather than as one large, harder-to-verify diff: each kernel gets its own
+full-corpus byte-parity sweep against the EXISTING generator before the
+next one starts, so a mistake in kernel N is caught before it's buried
+under kernel N+3.
+
+**Landed:** `corpusRef.ts`/`faces.ts` (the type-level authenticity
+guarantee — see this file's own step-16 entries above), `render.ts` (the
+4 closed shapes), `buildQuestion.ts` with `Spec`'s first lane member,
+`"s1"` — proven byte-identical to `test.ts#vocabItem` across every ayah in
+the fixture corpus, with every option routed through a Face (real
+`CorpusRef` provenance) rather than a raw string. Mutation-tested: an
+inverted sibling-sort order turns the full-corpus parity test red,
+confirmed, reverted.
+
+**Explicit runtime design choice:** `buildQuestion`'s lane switch defaults
+to `return null` (graceful), not a compile-time exhaustiveness trap —
+unlike `resolveRef`'s 5-variant `CorpusRef` switch (which IS exhaustive,
+because all 5 variants are permanently closed). `Spec['lane']` will grow
+new members over several follow-on iterations, and a lane without a kernel
+YET is a legitimate, standing runtime state (not a bug to compile-error
+on) until its own kernel lands.
+
+**Deferred, not forgotten, same discipline as every prior scope cut this
+build:** `cloze` (S2 fill — parity target `test.ts#clozeItem`), `junction`
+(parity target `test.ts#junctionTestItem`, itself reusing `chain.ts#junctionItem`
+verbatim), `locate` (parity target `test.ts#locateItem` — the
+`locateChoice` shape), `reorder` (parity target `test.ts#reorderItem` —
+the `orderTiles` shape). `reconstruct.ts`'s RC pass is NOT a future kernel
+— WIREFRAME's own DATA/CODE table keeps its sequencing state machine as
+CODE permanently; `buildQuestion` structurally refuses an `"rc"` lane
+(tested). `explain()` (the admin workbench's trace tool, §22b) also
+deferred — it has no caller until the workbench itself (build-plan step
+25, M8), so building it now would be untested surface with no consumer to
+validate it against.

@@ -35,3 +35,5 @@ export * from "./variant.ts";
 export * from "./selection.ts";
 export * from "./corpusRef.ts";
 export * from "./faces.ts";
+export * from "./render.ts";
+export * from "./buildQuestion.ts";
