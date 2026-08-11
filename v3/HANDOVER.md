@@ -38,7 +38,7 @@ test fixture**, not the frozen corpus the qari would sign.
 | Test total | 1551 (floor, zero margin) | **1614** (+63 margin) |
 | Step 27 (scene beats) | surah 67 has 0 | **unchanged** — gate still exits 1 |
 | Drill corpus (§A-note) | stale test fixture | **unchanged** — still the defect |
-| B6 guard | mutation survivor | **still a survivor** — re-confirmed today |
+| B6 guard | mutation survivor | **closed 2026-08-12** — see Spot-check 2's closure note |
 
 ---
 
@@ -57,7 +57,7 @@ verify something, the row says so and names it.
 | 5 | Engine verbatim port green | **DONE** | 391 engine tests green; `RETIRED-TESTS.md` publishes the attic mapping. |
 | 6 | Golden-log fold-parity snapshot | **DONE** | `packages/engine/test/golden-log-parity.test.ts` inside the 391. |
 | 7 | E-01 surah keying, one mechanical commit | **DONE** | `atomKey(surah, kind, ref)`; `e01.test.ts` greps that no raw `kind:ref` literal survives outside `atom.ts`. |
-| 8 | B2 + B4 + B6 + tz-explicit daybound | **PARTIAL** | B2/B4 closed and tested. **B6's guard is a live survivor** — see §B. tz-explicit `daybound.ts` present. |
+| 8 | B2 + B4 + B6 + tz-explicit daybound | **DONE** (2026-08-12) | B2/B4/B6 closed and tested — B6's mutation survivor is fixed, see §B Spot-check 2's closure note. tz-explicit `daybound.ts` present. |
 | 9 | Multi-surah fixes E-02/03/05/06/08 | **DONE** | `multiSurah.ts#splitBudget`; surah-scoped `unlockPermitted`. E-05 reclassified to M6 storage with a written argument; E-08 closed by construction. |
 | 10 | DrillEvent wire freeze, once, complete | **DONE** | `engine/test/wire-freeze.test.ts`; all 11 fields present incl. `gradeClass`, `tz`, `corpusHash`, `deviceSeq`. |
 | 11 | Site + admit + rotation + per-device visitOrdinal | **DONE** | `site.ts`, `rotation.ts`, `selection.ts` in the 391. |
@@ -224,6 +224,16 @@ one case to the sweep that answers with a tatweel-injected or NFD-decomposed for
 of `expected.text_uthmani`, derived mechanically from corpus bytes at runtime —
 no Arabic literal is written, so the sacred-text rule holds. That single
 assertion turns the mutation red.
+
+> **CLOSED 2026-08-12.** Implemented exactly the recommended fix — one
+> tatweel-injected case per repeated-word ayah (26 total), built via
+> `String.fromCodePoint(0x0640)` exactly as `arabic.ts`'s own `TATWEEL`
+> constant is (no Arabic literal). Verified both directions: reverted
+> `reconstruct.ts:133` to the literal defect and reran — all 26 new cases
+> failed RED; reverted byte-identically and reran — 79/79 green (engine suite:
+> 417/417, was 391). `git blame v3/packages/engine/test/b6-repeated-word-sweep.test.ts`
+> for the commit. Step 8 is now fully DONE — the only remaining PARTIAL
+> caveat on that row (this spot-check) no longer applies.
 
 ## Spot-check 3 — the NEW night ledger (v3-D68): **genuinely closed**
 
@@ -598,13 +608,24 @@ the long pole and waits on no code.
 
 ## Engineering — in dependency order
 
+> **2026-08-12: E1, E3, E4 and E5 below are DONE — this table is otherwise as
+> originally written and is stale on those four rows.** E3 (session lifecycle)
+> and E5 (service worker) landed in `feat(v3): the session loop` and
+> `feat(v3): wire the five stub routes + service worker`; E4 (stub routes) landed
+> in the same service-worker commit; E1 (this spot-check's B6 fix) landed
+> immediately after, in the commit this note is part of. **Do not trust this
+> table's dependency ordering at face value — re-derive current status from
+> `git log` and the repo per NIGHTLY.md's own rule, the same way this note was
+> produced**, rather than assuming E2/E6–E10 are still accurately described
+> either (they were not re-verified when this note was added).
+
 | # | Item | Effort | Note |
 |---|---|---|---|
-| E1 | **Fix the B6 sweep.** Add one sweep case answering with a tatweel-injected / NFD-decomposed form derived **mechanically from corpus bytes** (no Arabic literal — sacred-text rule holds). **Test-only, no source edit.** | hours | **DO THIS FIRST** — it is on the grading path, and doing it after the window starts resets the 7 nights |
+| E1 | ~~**Fix the B6 sweep.**~~ **DONE 2026-08-12** — see Spot-check 2's closure note above. Engine suite 417/417 (was 391). | hours | closed |
 | E2 | **Repoint the drill corpus loader at `output/`** (§A-note), stage the artifacts, widen `AVAILABLE_SURAHS`, and **add a CI clause asserting no learner-reachable route reads `test/fixtures/`.** | days | Must land before any sign-off, or the qari certifies content learners never see |
-| E3 | **Build the session lifecycle — step 18.** Corpus loader at request time, commit-before-paint (`tx.done` awaited before paint), create/resume/summary, bfcache resume, completion celebration. The 4 render shapes are done. | **1.5–2 wks** | **The critical item.** Nothing else makes this a learning app |
-| E4 | **Fill the stub routes** — `/home`, `/progress`, `/library`, `/surah/*` against the real rebuilt log. Components largely exist. (`/plan` is already real.) | ~1 wk | `/home` is where onboarding currently dead-ends |
-| E5 | **Service worker + manifest.** None exists. Precache shell, fonts, client corpus; `start_url=/home` (#92). | ~3 days | Required before "offline" is claimable at all |
+| E3 | ~~**Build the session lifecycle — step 18.**~~ **DONE** — see the 2026-08-12 completion-pass section above (`lib/session/run.ts`). | — | closed |
+| E4 | ~~**Fill the stub routes**~~ **DONE** — `/home`, `/progress`, `/library`, `/surah/*` wired per the 2026-08-12 completion-pass section, though `/home`/`/library`/`/progress` still carry an honest in-page StubNote for the multi-surah gap (not a stub route — check line number). | — | closed |
+| E5 | ~~**Service worker + manifest.**~~ **DONE** — `public/sw.js` + `ServiceWorkerRegistrar`, offline-after-one-visit verified in a real browser per the completion-pass section. | — | closed |
 | E6 | **Fold-runner DB adapter + staging deploy + a host running `schedule:run`.** The schedule and ledger exist; the *data* and the *machine* do not. Advisory locks, dead-letter quarantine, late-arrival refold. | ~1 wk | This is what lets the 7-night clock mean production |
 | E7 | **Operational mailer** so a P1 actually pages someone (v3-D18). | ~1 day | Or accept H5's manual daily check |
 | E8 | **Stripe replay fixtures** — vendor `stripe trigger` recordings to `v3/fixtures/stripe/` (**currently README only, zero fixtures**) incl. partial-refund and dispute-won. PAY-1 closes itself. | ~2 days | Gated on H1 clearing |
