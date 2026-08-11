@@ -49,7 +49,23 @@ export const YUSUF_SCENE_BEAT_LABELS: Record<number, string> = {
  * See `v3/docs/AL-MULK-SCENE-BEATS.md`.
  */
 export const MULK_SCENE_BEAT_LABELS: Record<number, string> = {
+  // DRAFT — awaiting Firdaus's review. See docs/AL-MULK-SCENE-BEATS.md.
   // Act numbers here must match `acts[].act` in 67-mental-model.json.
+  1: "All dominion is in His hand — and He made death before He made life.",
+  2: "Seven flawless heavens, and a dare: look again, and again, for a crack.",
+  3: "The lamps that decorate the sky are also missiles hurled at eavesdroppers.",
+  4: "The Fire draws in its breath, boiling, almost bursting with rage.",
+  5: "'Yes, a warner came' — the condemned read out their own confession.",
+  6: "Those who fear Him unseen, when nobody is watching, have forgiveness.",
+  7: "Whisper it or shout it — the One who created you knows what is in your chest.",
+  8: "The earth was made tame; walk on its shoulders and eat, then return.",
+  9: "The same ground could swallow you — your safety was only ever on loan.",
+  10: "Look up: nothing holds the bird's spread wings but the Most Merciful.",
+  11: "Who is the army that would help you? Who would feed you if He stopped?",
+  12: "One walks fallen on his face, one walks upright — which is better guided?",
+  13: "'When is this promise?' — the taunt returns as their faces fall.",
+  14: "Even if He destroys me, who protects YOU? The case never rested on me.",
+  15: "If your water sank into the earth, who would bring it back?",
 };
 
 /** Expand an "a-b" or "a" ayahRange string into an explicit ayah list. */

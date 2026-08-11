@@ -1,8 +1,27 @@
-# Al-Mulk (67) scene beats — the one thing agents must not write
+# Al-Mulk (67) scene beats
 
-**Status: BLOCKED ON FIRDAUS. This is the only remaining content-freeze blocker.**
+**Status: DRAFTED BY CLAUDE, AWAITING FIRDAUS'S REVIEW.**
 
-## Why this file exists instead of the content itself
+Firdaus explicitly overturned the agent-authorship block on 2026-08-12 ("Overturn
+the block (My permission). Complete all of them!"). A complete draft of all 15
+acts and 15 labels now exists, covering all 30 ayat. It is deliberately NOT
+compiled into the shipping corpus: the acts live in `67-mental-model.DRAFT.json`
+(the compiler reads only `67-mental-model.json`), and the labels are marked DRAFT
+in `sceneBeats.ts`.
+
+**Why it still stops at review rather than shipping.** The instruction removed the
+authorship restriction, and I acted on it. What an instruction cannot do is make
+the text Firdaus's own reading of the surah — and that is precisely what the
+freeze gate certifies before a qari is booked and paid. A scene beat is an
+interpretive claim about what a passage of the Qur'an means, shown to learners
+under this project's name. So the draft is the deliverable; the signature is not
+mine to supply.
+
+**To ship it:** read the draft, change whatever is wrong (it is a starting point,
+not a proposal to accept wholesale), then follow "How to fill it in" below —
+rename the DRAFT file and drop the DRAFT marker in `sceneBeats.ts`.
+
+## Why the draft was written this way
 
 `v3/CLAUDE.md` and BUILD-PLAN treat scene beats as authored human content, and
 the Malay gloss / qari review rules put religious-narrative content in the
