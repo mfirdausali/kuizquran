@@ -848,3 +848,87 @@ fallback never fires — and the weight/border distinction holds regardless.)
 The token oddity in the LOCKED file is recorded here rather than fixed: the file
 is byte-gated and correctly so. If it is ever unlocked, `--stage-carry` should
 be revisited.
+
+---
+
+## Ratified 2026-08-11 — build-plan step 20: the continuous drill
+
+### v3-D47 — WIREFRAME §13's "no new engine work" claim is STALE; expand() is the successor
+
+§13 states: "`chainSteps(from, to)` already takes an arbitrary range… so 'chain a
+few ayat together' needs NO new engine work." Grep-verified false in v3:
+`chain.ts` is 34 lines containing `junctionItem` ONLY. v3-D25 atticked
+`chainSteps`, `applyChain`, `applyVictoryLapChain`, `applyWeakSeamChain`,
+`riskiestJunctions`, `weakSeamChainRange` and `junctionOutcome` as unshipped.
+§13's "two modes, already locked" table names two functions that do not exist.
+
+Step 20 therefore targets `site.ts#expand()` — v3's actual successor — and needs
+no engine change. The victory-lap mode likewise needs none: `update.ts:71`
+already reads `if (!outcome.structured) return atom;`, so an unstructured run
+logs its evidence and moves no strength. Nothing atticked was resurrected.
+
+`sitesForPage` is deliberately a SUPERSET of `expand()` and cannot be expressed
+by it: `expand(first,last)` emits seams only BETWEEN its bounds, while a page
+must also own the seam LEAVING it. That extra element is exactly edge case #38.
+
+### v3-D48 — Boundary-seam ownership: measured, not asserted (edge case #38)
+
+#38: "Adjacent page ranges orphan boundary seams (zero-emission): 13
+crossesPage seams never drilled." Rather than trust the number, it was
+reproduced: naive per-page `expand(first,last)` covers 97 of 110 Yusuf seams,
+orphaning exactly 13 — from ayat 4, 14, 22, 30, 37, 43, 52, 63, 69, 78, 86, 95,
+103. That is 12% of the surah's joints, silently undrillable.
+
+The rule — a boundary seam is owned by the range containing its FROM ayah,
+guarded by `lastAyah < ayahCount` so the terminal ayah never grows an outbound
+seam (E-08) — restores all 110 with zero duplicates.
+
+**Independently audited by the merger**, not merely by the build's own tests: a
+throwaway harness executed the SHIPPED `pagesForSurah`/`sitesForPage` over the
+real fixture and printed `SEAMS OWNED: 110, MISSING: [], DUPLICATED: [],
+TERMINAL 111: false`. (A first attempt at that audit passed the wrong argument
+shape and produced a false 13-orphan alarm — the harness was wrong, not the
+code. Worth recording: an audit that disagrees with a passing test suite is
+itself a hypothesis needing verification.)
+
+### v3-D49 — The partial-page guard's test did not bite, and the build said so
+
+Edge case: "a chain only credits atoms the learner has actually ENCODED —
+un-learned ayat are skipped, not failed, or a 7/10-ready page looks like a 30%
+failure."
+
+The build agent mutated its own work (as instructed) and found that deleting the
+`encoded` check left its test GREEN: the test helper only ever created atoms for
+encoded ayat, so "missing atom" and "atom present but not encoded" were never
+distinguished and a bare `!atom` did all the work. The helper was rewritten to
+give un-learned ayat real atoms with `encoded: false`, plus an explicit
+touched-but-never-encoded case. The mutation now kills 5 tests including the
+denominator lie ("expected 10 to be 7").
+
+This is the third instance in this build of a green test proving nothing
+(v3-D38 tsc, v3-D45 stage labels). The difference here is that the mutation
+discipline was in the brief, so the agent caught it BEFORE reporting rather than
+a reviewer catching it after. That is the process working.
+
+### v3-D50 — `make test` was BROKEN in the committed repo for a full day, and every "green" total since step 13 was overstated
+
+`v3/api/phpunit.xml` declares a `Unit` testsuite pointing at `tests/Unit`.
+PHPUnit HARD FAILS ("Test directory not found") when it is absent, and git does
+not track empty directories — so the directory existed only on the machine where
+it was hand-created (2026-08-10, step 13) and never in the repo.
+
+Consequence: `make test-api3` exited non-zero, taking down all of `make test`,
+and the v3/api suite's **71 tests never ran in any reported total** from step 13
+onward. Local runs looked green because the directory was present locally.
+
+Found by an adversarial verifier on step 20, reproduced immediately, and fixed
+with a TRACKED `tests/Unit/.gitkeep` whose contents explain why deleting it
+breaks the build. `make test` now exits 0 with all 71 running.
+
+Corrected total: **1097** (255 v2 + 47 v2/api + 71 v3/api + 72 corpus-compiler +
+391 engine + 15 fold-runner + 246 apps/web).
+
+The pattern across v3-D38, D45, D49 and now D50 is one thing: **verification
+that runs on the author's machine is not verification.** The tsc binary, the
+stage-label test, the encoded guard and this directory all passed locally while
+being broken or vacuous in the repo.

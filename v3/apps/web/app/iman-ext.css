@@ -559,3 +559,142 @@
    muted register deliberately: it is a statement about what is NOT yet here,
    which is exactly what that register already means in this app. */
 .graph-derived { width: 100%; }
+
+/* ---------------------------------------------------------------------------
+   THE DRILL PICKER (build-plan step 20, WIREFRAME §13)
+   Selecting WHAT to drill: a range of ayat or a mushaf page, plus the honest
+   preview of what that covers and what a slip costs.
+   Tap targets use --tap-min (edge case #82); nothing here animates, and the
+   locked layer's global reduced-motion rule stays the only such rule.
+   --------------------------------------------------------------------------- */
+.drill-fieldset {
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  padding: 12px;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.drill-legend {
+  padding: 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.drill-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.drill-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.drill-input {
+  min-height: var(--tap-min);     /* edge case #82 */
+  width: 5.5rem;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--text-primary);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+}
+.drill-input:disabled { opacity: 0.5; }
+
+.drill-switch,
+.drill-page {
+  min-height: var(--tap-min);     /* edge case #82 */
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  cursor: pointer;
+  text-align: left;
+}
+.drill-pages {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.drill-page-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.drill-page {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 6.5rem;
+}
+/* The selected page. aria-pressed is the source of truth, so the style keys
+   off the ATTRIBUTE rather than a class someone could forget to keep in sync. */
+.drill-page[aria-pressed="true"] {
+  border-color: var(--teal-600);
+  color: var(--teal-600);
+}
+.drill-page-n { font-weight: 600; }
+.drill-page-span { color: var(--text-secondary); }
+/* Edge case #11 — the surah shares this page with a neighbour. Labelled, never
+   silently cropped. */
+.drill-page-shared {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.drill-mode {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  align-items: baseline;
+  min-height: var(--tap-min);     /* edge case #82 */
+  padding: 4px 0;
+  cursor: pointer;
+}
+.drill-mode input { grid-row: span 2; }
+.drill-mode-name {
+  font-size: 14px;
+  color: var(--text-primary);
+}
+/* The consequence sentence. NOT muted into invisibility: this is the sentence
+   that tells a learner whether a mistake can cost them, so it is deliberately
+   as readable as the mode's own name. */
+.drill-mode-consequence {
+  grid-column: 2;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.drill-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.drill-counts {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+/* The partial-page notice. Its job is to make "skipped" read as neutral, not
+   as failure — so it takes the muted informational register, never a warning
+   colour. Un-learned ayat are not an error the learner made. */
+.drill-partial {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.drill-consequence {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}

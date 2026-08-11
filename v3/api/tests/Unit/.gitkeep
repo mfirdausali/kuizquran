@@ -1,0 +1,11 @@
+This directory is referenced by phpunit.xml's "Unit" testsuite. PHPUnit HARD
+FAILS ("Test directory ... not found") if it is absent, which takes down
+`make test-api3` and therefore all of `make test`.
+
+Git does not track empty directories, so without this file the directory
+disappears on a fresh clone and the whole v3/api suite — 71 tests — silently
+stops running. That is exactly what happened between 2026-08-10 and
+2026-08-11: local runs were green because the directory existed locally, while
+the committed repo could not run those tests at all.
+
+Delete this file only together with the "Unit" testsuite entry in phpunit.xml.
