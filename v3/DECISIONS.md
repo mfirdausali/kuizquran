@@ -1438,3 +1438,180 @@ count in the same format as the vitest suites, which is what made it misreadable
 
 Recorded because the verifier did the right thing with the information it had:
 it flagged a floor breach rather than assuming its own arithmetic was wrong.
+
+---
+
+## Ratified 2026-08-11 (late) — build-plan step 30 / M10: the nightly scheduler + window ledger
+
+### v3-D67 — The determinism checks get RUNNERS, a SCHEDULE, and a LEDGER; the 7-night window becomes startable
+
+v3-D32 built the fold-runner's pure core and deferred "the DB adapter,
+scheduling, advisory locks, dead-letter queue". LAUNCH-CHECKLIST gates 3, 4 and
+10 have since read BLOCKED-ON-INFRA with the same sentence: "**Missing:** a live
+staging host running the fold-runner nightly." That framing hid a second,
+purely-local gap — **nothing in the repo ran the checks at all**, on any host.
+`SystemHealthController::foldDeterminism()` read
+`Cache::get('health:fold_determinism_check')` and no line of code anywhere ever
+wrote that key. The dashboard's honest `unknown` (edge case #167) was permanent
+by construction, and the 7-night window could not have started even if staging
+had existed, because the thing that counts nights did not exist either.
+
+This run builds the missing half, all of which is local:
+
+- **`worker/fold-runner/src/severity.ts`** — BUILD-PLAN's taxonomy as a type
+  and an **exit code**, not a log string: green 0 · **warn 3** · **p1 4** ·
+  error 5. 1 and 2 are deliberately unused so a Node crash or a shell usage
+  error can never be decoded as a verdict. `resetsWindow()` / `countsAsGreen()`
+  encode "confirmed P1 resets the window, WARN does not" as functions.
+- **`src/foldCheck.ts`** — classifies **per row, not per run**: a divergent key
+  whose cached row carries the CURRENT engine version is a P1; one carrying a
+  DIFFERENT version is skew (WARN); one **missing a version entirely is a P1**,
+  because a half-written cache must page rather than shrug. Worst verdict wins.
+- **`src/selectionCheck.ts`** + **`bin/*.ts`** — two runnable checks whose exit
+  code is the verdict. `--fixture` makes both runnable with **no database**, so
+  a human proves the nightly works without waiting for a night.
+- **`api`: `determinism:check`, `nightly:window`**, the `nightly_check_runs` /
+  `nightly_window` tables, `NightlyWindowLedger`, and the `Schedule::command`
+  wiring in `routes/console.php`.
+
+### v3-D68 — The window is a LEDGER of nights, never a counter
+
+The obvious implementation is an integer incremented per green night and zeroed
+on a P1. It is also unauditable: when it reads 6 on launch eve, nobody can
+answer "which six nights, and what did each actually compare?" — which is
+exactly the argument edge case #169 anticipates ("7-green-nights arithmetic →
+contested gate"). So `nightly_check_runs` stores one **immutable row per run**
+(severity AND raw exit code AND the runner's full JSON report), and the streak
+is **derived** by replaying those rows. `nightly:window` prints the streak with
+a dated table of every night behind it.
+
+Four rules, each tested directly and each proven by mutation:
+
+1. **Both checks, every night.** A night with only one is a night with a
+   missing check, not a green one.
+2. **A confirmed P1 resets to zero** — restarts the day after, does not merely
+   pause. A re-run on the same night does **not** launder it: the worst
+   severity per (night, check) wins.
+3. **A WARN does not reset, and does not break the chain.** If it did, no
+   engine could be deployed inside the seven days and the gate would be
+   unreachable rather than strict.
+4. **Nights before `window_started_at` never count**, however green — that is
+   BUILD-PLAN's "starts only after the last engine/selection merge". Stamping
+   it is a human action requiring a `--reason`; no automation can know whether
+   today's merge touched selection semantics.
+
+Additionally: **a calendar gap breaks the streak.** A scheduler that silently
+stopped for three days leaves green rows a naive `count(green)` would call "4
+and counting" when the truth is "unobserved since Tuesday". An **error** night
+does not count green (it ends the run) but does not reset to zero either — it
+is unknown, and unknown is never passed (edge case #167, applied to nights).
+
+### v3-D69 — The selection check gets its OWN log; the golden log has zero selection events
+
+BUILD-PLAN says selection_determinism_check runs "against the shuffled golden
+log". Measured: `fixtures/golden-log/events.json` holds **24 events, 0 of them
+selection-bearing** — it was cut at build-plan step 2 and the selection wire
+fields were not frozen until step 10. `replaySelection` skips any event lacking
+siteKey/deviceId/visitOrdinal, so a runner pointed at the golden log would build
+an **empty trace, compare nothing, and exit green every night forever** — a
+ninth vacuous verification, shipped as a launch gate.
+
+So `fixtures/selection-log/` is generated (`scripts/gen-selection-log.ts`, 36
+events, 5 sites, 2 devices) carrying the fields the check actually reads,
+including the **two-device merge** (edge case #48: both devices number their own
+visits to one site from 1) and a **seam** site. The golden log is unchanged and
+still the FOLD's fixture. Both runners additionally enforce a **vacuity floor** —
+zero samples, zero atoms, or fewer than 20 traces is an **error**, never a green.
+
+### v3-D70 — Single-flight is a run-level cache lock; per-user advisory locks stay deferred, and this is stated rather than faked
+
+v3-D32 deferred per-user Postgres advisory locks because "sqlite, this repo's
+dev DB, has no equivalent to test against". That is still true. Rather than
+write an untestable Postgres-only path and claim it works, `determinism:check`
+single-flights at the **run** level with `Cache::lock` — the same mechanism
+`SystemHealthController::REBUILD_LOCK` already uses for the atom-cache rebuild,
+and for the same reason (edge case #168: concurrent folds interleave into a
+state neither would produce, which then reads as a P1 that never happened).
+
+What that buys: two nightlies cannot overlap. What it does **not** buy:
+protection from a nightly reading a learner's cache mid-refold. Mitigated by
+snapshotting each learner's log at an **ingest-sequence ceiling** (`events.id <=
+cursor`) so at least the log side is a consistent read. The cache side can still
+be mid-write — which is why BUILD-PLAN's word is *confirmed* P1, and why a live
+P1 should be re-run before the window is declared reset.
+
+---
+
+## 2026-08-11 — the correction that matters most: I OVERSTATED completion
+
+### v3-D67 — A learner cannot complete a session. I reported steps 18/19/22 as done. They are not.
+
+Two independent agents established this and I reproduced both halves myself:
+
+- `app/(app)/session/page.tsx` is a `StubNote`. Its own header says the render
+  layer landed but "the SESSION LIFECYCLE that feeds it is not [built], so this
+  route is still a stub."
+- **`append()` has ZERO reachable callers.** `grep -rn "append(" app/ components/`
+  returns nothing outside tests. The `events` store — invariant #2's "the event
+  log is the truth" — is never written by any user interaction that exists.
+  Onboarding writes `meta`; the demo and first-recall screens write nothing by
+  explicit design; the drill picker previews and stops.
+
+Six routes still render `StubNote`: `/home`, `/library`, `/progress`,
+`/session`, `/surah/[surah]`, `/surah/[surah]/[ayah]`.
+
+**What I said versus what is true.** I reported step 18 as "the quiz loop" and
+step 19 as "the visible memory graph", and both commits described real work —
+the four render shapes with 47 tests built from live engine output, the ring
+rendering connection atoms, the semantic progress table. All of that exists and
+is good. But COMPONENTS ARE NOT A PRODUCT. Nothing wires them into a session a
+learner can start, finish, and have recorded. I called those steps complete on
+the strength of passing tests over components, which is exactly the error this
+build has now made nine times in a different costume: **the tests were true and
+my summary was not.**
+
+HANDOVER.md, written by an agent with no stake in my earlier claims, had this
+right before I did: step 18 NOT BUILT, steps 19 and 22 PARTIAL, each with the
+stub file named. I should have read it as a correction rather than a status.
+
+**The honest state:** the engine, corpus, backend, sync layer, render components
+and gates are real and heavily verified. The application that assembles them
+into a usable product is not finished. That is a large remaining piece of work,
+not a formality, and no amount of further verification of the parts changes it.
+
+### v3-D68 — The golden log could never have failed the selection check
+
+Building the nightly runner surfaced this: `fixtures/golden-log/events.json`
+holds 24 events and **zero selection-bearing ones**. Pointing
+`selection_determinism_check` at it would have compared nothing and exited green
+every night forever — a launch gate structurally incapable of failing, guarding
+the 7-night window.
+
+Fixed with a vacuity floor: below a minimum trace count the runner returns
+`severity: "error"`, exit 5, and refuses to report green over an empty
+comparison. Mutation-verified in both directions.
+
+This is the same failure as v3-D38 (a `tsc` that was really TeX) and v3-D50 (a
+test directory that existed on one machine): a check that cannot fail is worse
+than no check, because it manufactures confidence. That is now nine instances.
+Every one was found by adversarial review or by a human, never by the passing
+suite itself.
+
+### v3-D69 — Step 30's real state: the ledger is built, the window cannot start
+
+`nightly_check_runs` + `nightly_window` + `NightlyWindowLedger`, with BUILD-PLAN's
+taxonomy as EXIT CODES (green 0, warn 3, p1 4, error 5; 1 and 2 deliberately
+unused so a Node crash cannot decode as a verdict) rather than log strings.
+Classification is per-row: a divergent key on the current engine version is P1,
+on a different version is skew (WARN), and **missing a version entirely is P1** —
+a half-written cache must page, not shrug. Mutation-verified in both directions:
+P1-counts-as-green turns 4 tests red, WARN-resets turns 2 red.
+
+Playwright: 34 tests, genuinely executed (24.8s, cold production build), not
+written-and-claimed.
+
+But the window itself CANNOT START. It counts nights on live staging that does
+not exist, and there is no service worker at all — so M5's airplane-mode exit
+criterion fails on a plain reload (`ERR_INTERNET_DISCONNECTED`). An
+already-hydrated page does keep drilling offline, which proves the local-first
+architecture underneath is sound; the missing piece is the cached shell.
