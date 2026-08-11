@@ -763,3 +763,88 @@ fully in-order attempt marks all). Mutating the reveal to `true` turns one red.
 investigation, not the end of one. This one was confidently argued, specific,
 and wrong — and its fix would have shipped a real bug. Verify the counter-example
 against what the producer can actually emit before acting on it.
+
+---
+
+## Ratified 2026-08-11 — build-plan step 19: the visible memory graph
+
+### v3-D43 — MacroFacts is a corpus-compiler emission, because v3-D21's classifier had no inputs
+
+v3-D21 defines four archetypes: ATOMIC (<=8 ayat), RING (ruku >= 4), LITANY
+(dominant rhyme >= 70% or a verbatim refrain), ARC (everything else). Building
+it exposed that **only ATOMIC was decidable**: `Corpus.meta` is
+`{surah, ayahCount, wordCount}` — no ruku count, no rhyme profile, no refrain
+data anywhere in the shipped artifact (grep-verified: the only hits are
+compile-time distractor `why` prose, which edge case #21 strips).
+
+Left alone, every non-ATOMIC surah would silently fall to ARC, and the census
+would read "ARC 26, ATOMIC 17" instead of v3-D21's measured "ARC 21, ATOMIC 17,
+RING 3, LITANY 2". That is a classifier that always returns its default while
+wearing the costume of one that classifies — and the three RING and two LITANY
+surahs, the exact five that motivated the decision, would render as ARC with
+nobody noticing, because ARC is plausible.
+
+Resolved by emitting `MacroFacts` from the corpus-compiler
+(`packages/corpus-compiler/src/macro.ts`) rather than inventing the data in the
+UI. This is a compiler change, not an engine change — `packages/engine/src/**`
+is untouched. `classify()` is written so **a missing input can never satisfy a
+rule** (absent ruku -> 0, and `0 >= 4` is false), so an unclassifiable surah
+lands on ARC carrying `authored: false`, which drives a VISIBLE "this outline is
+derived" label rather than a silent fallback. A census test over the launch
+library is what catches degeneration: disabling the RING branch fails it while
+every per-surah test still passes.
+
+### v3-D44 — Both halves of the memory graph, as one array (edge case #90)
+
+Edge case #90: "Connection atoms invisible (40% of Al-Asr's atoms) — half the
+memory graph unrendered." The fix is structural, not cosmetic:
+`buildGraphNodes()` delegates to the engine's own `expand()` and returns ONE
+ordered array of 2N-1 peers, not `nodes[] + edges[]`. A nodes/edges split makes
+seams look derivable, and a renderer that derives edges from nodes drops them at
+the first simplification.
+
+Seams read their OWN atom via `siteToAtomKey(site)` -> `connection:from`, never
+the left-hand ayah's — mutation-tested (mirroring a seam onto its neighbour's
+atom turns 2 tests red). An ineligible seam is drawn in `var(--border)` rather
+than omitted, because "invisible" and "not yet eligible" are different facts and
+#90 is about the first being mistaken for the second. E-08 closes by
+construction: `expand()` never builds a seam at ayah N, so the ring cannot close
+and there is no "remember not to close it" check to forget.
+
+### v3-D45 — Edge case #87's test bit nothing; the shipped code was right anyway
+
+An adversarial review found, and I independently reproduced, that deleting the
+stage word from `RingDiagram#labelFor` — turning "Ayah 103:1, Carrying, 95%"
+into "Ayah 103:1, 95%" — left **all 205 tests green**.
+
+The shipped code was correct: labels did carry word + number. But the nav test
+asserted link COUNT and HREFS and never link TEXT, and the #87 block tested
+`stageLabelOf()` in isolation plus the `<desc>` aggregate — so nothing pinned
+the per-mark label. That is exactly the regression #87 exists to prevent, and
+for a screen-reader or deuteranopic user it is total: the colour was never
+carrying the stage for them in the first place.
+
+Closed with one assertion over every mark's accessible name, using mixed atom
+states so a hardcoded stage word cannot satisfy it. Verified by re-applying the
+mutation: it now fails exactly one test, the one written for it.
+
+**Method note, the second time this has come up:** a green suite is evidence
+about the tests, not proof about the code. The only way to know a test bites is
+to make it fail on purpose.
+
+### v3-D46 — `--stage-carry` is coral in the locked file; lapsed differs by WEIGHT, not hue
+
+The locked `iman-ui.css` sets `--stage-carry: var(--coral-500)`, assigning coral
+to CARRY — the strongest band — while that same file's own rule reserves coral
+for "something slipped". A lapsed mark in the same family would be ONE mark to
+the ~8% of men with deuteranopia, the exact population #87 protects.
+
+The ext layer therefore defines `--stage-lapsed: var(--coral-700, ...)` and
+distinguishes lapsed by **weight and border**, which survives any colour vision.
+(A reviewer flagged the fallback chain as a risk that lapsed and carry resolve
+identically; `--coral-700` IS defined in the locked file at line 104, so the
+fallback never fires — and the weight/border distinction holds regardless.)
+
+The token oddity in the LOCKED file is recorded here rather than fixed: the file
+is byte-gated and correctly so. If it is ever unlocked, `--stage-carry` should
+be revisited.

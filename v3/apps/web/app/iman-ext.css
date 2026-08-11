@@ -286,3 +286,276 @@
   color: var(--text-secondary);
 }
 .meta-line__sep { color: var(--text-muted); }
+
+/* ---- 5. The progress table — WIREFRAME §15 ------------------------------
+   The ring's documented text alternative. A REAL <table>: the semantics are
+   the requirement, not the look, so almost nothing here is decoration.
+   -------------------------------------------------------------------------- */
+
+/* Wide content scrolls INSIDE its own container. The page body must never
+   scroll horizontally — a table that pushes the whole document sideways takes
+   the tab bar and the headings with it. */
+.table-scroll {
+  overflow-x: auto;
+  /* Momentum scrolling on iOS without which a wide table feels broken. */
+  -webkit-overflow-scrolling: touch;
+}
+
+.progress-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.progress-table th,
+.progress-table td {
+  padding: 6px 8px;
+  border-bottom: var(--hairline) solid var(--border);
+  text-align: left;
+  vertical-align: middle;
+}
+
+/* Numbers right-align and use tabular figures so columns of digits line up
+   and a strength of 9% does not sit under the 4 of 48%. */
+.progress-table .col--numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The row header carries the reference. Regular weight: <th> is a SEMANTIC
+   choice made for the screen reader, and it must not shout visually just
+   because it is markup a browser bolds by default. */
+.progress-table__ref {
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+/* An Arabic cell should not be allowed to consume the table. */
+.progress-table td.rtl-island {
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The sort control fills its header cell, so the TARGET is the whole header
+   and not the six characters of its label (edge case #82). A button, not a
+   div with a handler — it must be reachable by keyboard and announce as a
+   control. */
+.th-sort {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-height: var(--tap-min);
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-align: inherit;
+  cursor: pointer;
+}
+.col--numeric .th-sort { justify-content: flex-end; }
+
+/* The sort indicator is driven by aria-sort — the SAME attribute the screen
+   reader announces. One source of truth: a visual arrow that could disagree
+   with the announced state is worse than no arrow. */
+.progress-table th[aria-sort="ascending"] .th-sort::after { content: "\2191"; }
+.progress-table th[aria-sort="descending"] .th-sort::after { content: "\2193"; }
+.progress-table th[aria-sort="none"] .th-sort::after {
+  content: "\2195";
+  opacity: .35;
+}
+
+/* The search toolbar. A VISIBLE label — placeholder-as-label disappears the
+   moment you type and is not reliably announced. */
+.table-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.table-toolbar__label { font-size: 12px; color: var(--text-secondary); }
+.table-toolbar__input {
+  min-height: var(--tap-min);
+  padding: 6px 10px;
+  font: inherit;
+  color: var(--text-primary);
+  background: var(--surface-1);
+  border: var(--hairline) solid var(--border-stronger);
+  border-radius: var(--r-control);
+}
+
+/* A skeleton shaped like a table row, so a pending read reserves the space it
+   is about to fill rather than collapsing and then jumping. */
+.skel--row { display: block; width: 100%; height: 28px; }
+
+/* .stage-dot--lapsed — a genuine gap in the locked file, not a restyle.
+   iman-ui.css:123-127 defines dots for learn/reinforce/carry only, but
+   atom.ts has FOUR stages and `lapsed` is the one a learner most needs to
+   see.
+
+   It is differentiated by WEIGHT AND BORDER rather than by hue, and that is
+   deliberate: the locked file sets --stage-carry to coral, so a lapsed dot
+   picked from the same family would be indistinguishable from CARRY — the
+   strongest band — to exactly the deuteranopic learner edge case #87 is
+   about. A ring is a shape difference, and a shape survives any colour
+   vision. The word beside it (StageBadge) remains the real signal. */
+.stage-dot--lapsed {
+  background: var(--coral-700, var(--coral-500));
+  border: 1px solid var(--text-primary);
+  box-sizing: border-box;
+}
+
+/* ---- 6. The plan calendar — WIREFRAME §14 -------------------------------
+   The three fidelity zones. Every rule here supports a STRUCTURAL difference
+   between the zones; none of them IS the difference. Colour and opacity are
+   deliberately not used to separate the zones, because both vanish in
+   greyscale and neither reaches a screen reader.
+   -------------------------------------------------------------------------- */
+
+.zone { display: flex; flex-direction: column; gap: 8px; }
+
+.zone__head {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  color: var(--text-secondary);
+}
+
+/* The visible seam between zones. A hairline and a heading, so the drop in
+   fidelity is a PLACE ON THE PAGE rather than a gradient someone has to
+   notice. */
+.zone__seam {
+  height: 0;
+  margin: 4px 0;
+  border: 0;
+  border-top: var(--hairline) solid var(--border-stronger);
+}
+
+/* One sentence of *why*, at the boundary where the detail stops. The app
+   narrating its own limits — §10's move applied to time. */
+.zone__why { margin: 0; }
+
+.zone__trajectory { margin: 0; font-size: 14px; }
+
+.day-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 4px;
+  border-bottom: var(--hairline) solid var(--border);
+}
+.day-row:last-child { border-bottom: none; }
+
+.day-row__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* The concrete zone's item list. Its EXISTENCE is the honesty signal — the
+   estimated zone has no list at all, so there is nothing to tap open there. */
+.day-row__items {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.day-row__kinds { margin: 0; }
+
+/* An away day. Muted, never a miss: it reuses the quiet register and
+   specifically never .pill-streak, because amber is streak/consistency
+   semantics (#95) and an away day is neither a streak nor a break in one.
+   §14: the alternative teaches learners that the calendar punishes life. */
+.day-row--away { color: var(--text-muted); }
+
+/* ---- 5. The memory graph — the ring, the strip, the seams ----------------
+   Build-plan step 19. Edge cases #87, #89, #90.
+
+   There is NO SVG in the locked file at all, so the graph mark classes below
+   are new by necessity rather than by preference. Everything else on this
+   panel reuses what already exists: .card, .card-header, .stage-label,
+   .stub-note, .ltr-island, --tap-min.
+
+   ONE TOKEN, for the SVG marks. `.stage-dot--lapsed` is already defined above
+   (§4) — the dot and the SVG mark must share one source of truth for lapsed,
+   or the ring and the table will eventually disagree about what a lapsed atom
+   looks like. The SVG needs the COLOUR as a custom property (an SVG `fill`
+   cannot read a class's `background`), so the token is named here and the dot
+   rule above stays exactly as it is.
+
+   Why coral-700 and not coral-500: the locked file sets
+   `--stage-carry: var(--coral-500)`, assigning coral to CARRY — the strongest
+   band — while the same file's §8 rule 2 reserves coral for "something
+   slipped". A lapsed mark in the same shade would be ONE mark to the ~8% of
+   men with deuteranopia, which is precisely the population edge case #87 is
+   about. So lapsed differs in WEIGHT and SHAPE (a darker coral plus a border),
+   which survives any colour vision. The token oddity in the locked file is
+   flagged for a decision; the locked file itself is NOT touched.
+   -------------------------------------------------------------------------- */
+
+:root {
+  --stage-lapsed: var(--coral-700, var(--coral-500));
+}
+
+/* The diagram block: the SVG, then its always-visible text-alternative link. */
+.graph {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Scales with the card. max-width keeps a 3-ayah strip from stretching to
+   fill a desktop card and turning two joints into two metres of hairline. */
+.graph-svg {
+  width: 100%;
+  max-width: 320px;
+  height: auto;
+  display: block;
+  overflow: visible;              /* the 11-unit hit circles exceed the box */
+}
+
+/* The ring's documented text alternative (§15). Never a hover, never a modal
+   — a sighted learner on a phone reads the list more easily than the ring. */
+.graph-alt {
+  margin: 0;
+  font-size: 12px;
+  text-align: center;
+}
+.graph-alt a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap-min);     /* edge case #82 */
+  color: var(--teal-600);
+}
+
+/* The archetype legend under the diagram — ring segments, litany refrain,
+   arc beats. A plain list; the diagram is the picture, this is the words. */
+.graph-legend {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.graph-legend li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.graph-legend__label { color: var(--text-primary); }
+
+/* The derived-structure honesty label (edge case #22). Reuses .stub-note's
+   muted register deliberately: it is a statement about what is NOT yet here,
+   which is exactly what that register already means in this app. */
+.graph-derived { width: 100%; }

@@ -10,8 +10,9 @@
 // the whole argument for this tab existing, and it is why the account surface
 // (§24) lost its permanent quarter of the navigation to it.
 //
-// A SERVER COMPONENT. The forecast is log-derived and arrives through client
-// islands (edge case #72).
+// A SERVER COMPONENT. The forecast is log-derived and arrives through a client
+// island (edge case #72) — a server render has no log, and a confident
+// calendar built from zero events is a worse lie than a skeleton.
 //
 // THE HONESTY MECHANIC — confidence decays with distance. Reviews are
 // generated from measured decay, so far-future days genuinely CANNOT be known.
@@ -29,22 +30,33 @@
 // still gets predictability, because the COMMITMENT is stable (~8 min/day, one
 // new ayah) even when the item list is not. Predictable effort, honest detail.
 //
-// TODO(build-plan step 11 → M5, WIREFRAME §14):
-//   - `planFor()` projected onto real dates, in the three fidelity zones
-//     above, each zone VISIBLY different so the drop in confidence is legible
-//     rather than hidden.
-//   - Fix E-06 first: `planFor()`'s etaDays uses one surah's remaining ayat
-//     against the FULL daily budget, so every surah's ETA claims the whole
-//     day. Divide the budget by active surahs.
-//   - Measured pace, active days, re-forecast every session.
-//   - PLANNED ABSENCES: any future day can be marked away — travel, exams,
-//     illness — and the forecast adjusts honestly instead of scoring it a
-//     miss. The alternative teaches learners that the calendar punishes life.
+// ---------------------------------------------------------------------------
+// SHOWN, NOT ASSERTED
+// ---------------------------------------------------------------------------
+// The legend below still exists, because naming the three zones up front is
+// useful. But a legend is an ASSERTION, and the mechanic cannot live in it.
+// The test is: COVER THE LEGEND — can you still tell the zones apart? Five
+// devices in <PlanCalendar> answer yes, and none of them is colour: the rows
+// are structurally different objects (a list, then one line, then no day rows
+// at all), the numeric precision degrades visibly, each zone says its fidelity
+// as a word, each boundary carries one sentence of why, and a hairline seam
+// makes the transition a place on the page.
+//
+// ---------------------------------------------------------------------------
+// E-06 IS CLOSED, WHICH IS WHY A FINISH DATE MAY BE SHOWN AT ALL
+// ---------------------------------------------------------------------------
+// E-06 ("planFor() gives every surah the full daily budget — every ETA lies")
+// was closed at build-plan step 9 by `multiSurah.ts#splitBudget()`. The
+// forecast builder is a CALLER of it: every `planFor` call receives a split
+// share, never the raw total. Were that not so, this page would have to omit
+// the finish clause entirely — shipping a date you know is wrong is the exact
+// failure §14 exists to prevent.
 
-import { StubNote } from "@/components/shell/StubNote";
+import { loadCorpus, AVAILABLE_SURAHS } from "@/lib/corpus/load";
+import { PlanIsland } from "@/components/plan/PlanIsland";
 
-/** The three fidelity zones, §14. Rendered as the page's own structure so the
- *  honesty mechanic is visible in the shell before the data exists. */
+/** The three fidelity zones, §14. Kept as the page's own legend — it names
+ *  what the calendar below then DEMONSTRATES structurally. */
 const ZONES = [
   {
     id: "concrete",
@@ -66,7 +78,21 @@ const ZONES = [
   },
 ] as const;
 
-export default function PlanPage() {
+/** The Steady pace budget (pace.ts). Persisting a learner's chosen mode is
+ *  M6's schema work (E-05 is explicitly a storage question, not an engine
+ *  one), so the default is used and named rather than silently assumed. */
+const STEADY_MINUTES_PER_DAY = 8;
+
+export default async function PlanPage() {
+  const surah = AVAILABLE_SURAHS[0]!;
+  const corpus = await loadCorpus(surah);
+
+  // Resolved once on the server so every zone in one render measures from the
+  // same instant. `tz` is passed explicitly down the whole chain — the engine
+  // is pure and never reads the machine's zone, and neither does this page.
+  const now = Date.now();
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
   return (
     <div className="screen">
       <div className="stack">
@@ -108,13 +134,19 @@ export default function PlanPage() {
               CALENDAR
             </h2>
           </div>
-          <StubNote step="step 11 (M5), WIREFRAME §14">
-            planFor() projected onto real dates across the three fidelity
-            zones, measured pace, re-forecast every session, and planned
-            absences — mark a day away and the forecast adjusts instead of
-            scoring it a miss. Fix E-06 first: today every surah&apos;s ETA
-            claims the whole daily budget.
-          </StubNote>
+          {corpus === null ? (
+            <p className="stub-note">
+              No corpus is available in this build, so there is nothing to plan
+              against yet.
+            </p>
+          ) : (
+            <PlanIsland
+              corpus={corpus}
+              now={now}
+              tz={tz}
+              minutesPerDay={STEADY_MINUTES_PER_DAY}
+            />
+          )}
         </section>
       </div>
     </div>

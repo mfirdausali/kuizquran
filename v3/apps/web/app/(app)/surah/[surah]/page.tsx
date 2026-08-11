@@ -29,6 +29,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { StubNote } from "@/components/shell/StubNote";
+import { StageBadge } from "@/components/progress/StageBadge";
+import { MacroPanelIsland } from "@/components/macro/MacroPanelIsland";
+import { macroFactsFor } from "@/lib/macro/facts.ts";
+import { loadCorpus } from "@/lib/corpus/load.ts";
 
 /** The Quran has 114 surahs. A segment outside that is a 404, not a clamp:
  *  quietly serving surah 1 to someone who asked for surah 900 hides the bug. */
@@ -47,6 +51,13 @@ export default async function SurahPage({
   const surah = parseSurah(rawSurah);
   if (surah === null) notFound();
 
+  // Corpus is SERVER. The classification is a build-time-derived, learner-
+  // invariant fact, so it is computed here and handed down as data — the view
+  // never asks "how many ayat?" and never compares one (v3/CLAUDE.md rule 4).
+  const corpus = await loadCorpus(surah);
+  const ayahCount = corpus?.meta.ayahCount ?? 0;
+  const facts = corpus === null ? null : macroFactsFor(corpus);
+
   return (
     <div className="screen">
       <div className="stack">
@@ -58,20 +69,27 @@ export default async function SurahPage({
           </p>
         </header>
 
-        {/* v3-D02: the macro panel is PINNED TO THE TOP, above the ayah list. */}
-        <section className="card" aria-labelledby="macro-h">
-          <div className="card-header">
-            <h2 id="macro-h" style={{ margin: 0, fontSize: 12, fontWeight: 600 }}>
-              STRUCTURE
-            </h2>
-          </div>
-          <StubNote step="step 7 (M5), WIREFRAME §3 + v3-D21">
-            The macro panel — ring, litany or arc by v3-D21 classification,
-            with connection atoms drawn as joints (edge case #90) and a flat
-            1→N strip fallback for short surahs. Its text alternative is the
-            progress list.
+        {/* v3-D02: the macro panel is PINNED TO THE TOP, above the ayah list.
+            ALWAYS VISIBLE, NEVER A GATE.
+
+            `facts` is computed HERE, on the server: it is corpus-derived and
+            learner-invariant, so it belongs in the RSC payload. The NODES are
+            log-derived and per-learner, so the island fetches them after
+            hydration — an RSC has no log and would paint 0 while the client
+            hydrates the real value (edge case #72).
+
+            An ATOMIC surah renders NOTHING here (v3-D21) — the island returns
+            null. At 3-8 ayat the ayah list below already IS the macro view,
+            provided it carries the seams (edge case #90). */}
+        {facts === null ? (
+          <StubNote step="step 19 (M5), WIREFRAME §3 + v3-D21">
+            No compiled corpus is available for this surah yet, so its
+            structure is not being classified. The macro panel appears once the
+            corpus artifact lands (DEFECTS.md#E-07).
           </StubNote>
-        </section>
+        ) : (
+          <MacroPanelIsland surah={surah} ayahCount={ayahCount} facts={facts} />
+        )}
 
         <section className="card" aria-labelledby="ayat-h">
           <div className="card-header">
@@ -83,13 +101,12 @@ export default async function SurahPage({
             <Link href={`/surah/${surah}/1`} className="row-link">
               <span>Ayah 1</span>
               {/* Never colour alone (§15): the stage carries a text label AND
-                  a number. The coloured dot is decoration on top of them, and
-                  the real values arrive from the engine as data. */}
-              <span className="stage-label">
-                <span className="stage-dot stage-dot--learn" aria-hidden="true" />
-                <span className="stage-label__name">Not started</span>
-                <span className="stage-label__value">0%</span>
-              </span>
+                  a number. Rendered through StageBadge, which is the ONLY
+                  stage renderer in the app (#87) — an inline dot here is
+                  exactly the drift that resolution exists to prevent, and
+                  progress-list.test.tsx fails the build if one reappears.
+                  The real values arrive from the engine as data. */}
+              <StageBadge stage="learn" stageLabel="Not started" strengthPct={0} />
             </Link>
           </nav>
         </section>

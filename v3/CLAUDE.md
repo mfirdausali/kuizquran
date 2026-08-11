@@ -53,9 +53,9 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 960 total, typechecks first (typecheck-v3): 255 v2 vitest + 52
-             # corpus-compiler + 391 engine + 15 fold-runner + 129 apps/web + 118 PHPUnit.
-             # Steps 1-18 complete. Next: step 19 (macro panel, ring, progress table).
+make test    # 1010 total, typechecks first (typecheck-v3): 255 v2 vitest + 72
+             # corpus-compiler + 391 engine + 15 fold-runner + 206 apps/web + 118 PHPUnit.
+             # Steps 1-19 complete. Next: step 20 (continuous drill: range + mushaf page).
 make build   # must pass — CI no longer tolerates failure (B9)
 make doctor  # what's missing
 ```

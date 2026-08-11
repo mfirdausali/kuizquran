@@ -10,23 +10,26 @@
 //      tab inside a component.
 //
 //   2. ACCESSIBLE. This is where a colour-coded ring fails hardest, and §15
-//      names five rules. Every one of them is applied in the markup below,
-//      even though the rows are still placeholders — because retro-fitting
-//      a11y onto a shipped table is how it never happens:
+//      names five rules. Every one of them is applied in the markup below:
 //
 //      - NEVER COLOUR ALONE. Every stage carries a TEXT LABEL and a NUMBER.
 //        Teal and coral are near-indistinguishable to the ~8% of men with
 //        deuteranopia. The `.stage-dot` is decoration ON TOP of the words; it
 //        is never the information itself, and it is aria-hidden so a screen
-//        reader is not told about a colour it cannot convey.
+//        reader is not told about a colour it cannot convey. It is rendered
+//        by exactly ONE component — `StageBadge` (edge case #87's own
+//        resolution), and a test scans the tree to keep it that way.
 //      - SEMANTIC <table> with real <th scope=...>, NOT a grid of <div>s — so
 //        a screen reader announces "Ayah 3, lapsed, 48%" rather than reading
-//        an undifferentiated wall of cells.
+//        an undifferentiated wall of cells. The tests query by ROLE for
+//        exactly this reason: a div grid can be made to look identical and
+//        would still pass any class-based assertion.
 //      - ARABIC IS dir="rtl" lang="ar"; UI CHROME STAYS ltr. Mixed-direction
 //        rows are the classic bug here: a reference like 12:4 sitting beside
 //        an Arabic phrase reorders unless it is its own LTR island.
-//      - TAP TARGETS >= 44px — supplied by `.row-link`/`.hit` in the EXT
-//        layer (edge case #82). The locked file is byte-gated and untouched.
+//      - TAP TARGETS >= 44px — supplied by `.row-link`/`.hit`/`.th-sort` in
+//        the EXT layer (edge case #82). The locked file is byte-gated and
+//        untouched.
 //      - RESPECT prefers-reduced-motion — the locked file already kills all
 //        animation and transition globally, so there is nothing to add and a
 //        weaker duplicate here would only invite someone to "fix" the strong
@@ -35,21 +38,52 @@
 //      And: THIS LIST IS THE RING'S DOCUMENTED TEXT ALTERNATIVE. Not
 //      aria-labels bolted onto <circle> elements — a real, navigable page.
 //
-// TODO(build-plan step 10 → M5, WIREFRAME §15): fill the rows.
-//   - Every ayah across every enrolled surah, from the engine as data.
-//   - CONNECTION ROWS too (edge case #90): connection atoms are ~40% of a
-//     short surah's memory graph and are currently unrendered — half the
-//     memory graph invisible.
-//   - Sort and search, client-side over the rebuilt atoms.
-//   - The TIME-ON-TASK column (§15): cumulative per-ayah, reported as time on
-//     task and NEVER wall-clock — interrupted latencies are discarded by
-//     design (`resume.ts`), so a learner who took a phone call must not look
-//     slower than they were. It is also the most motivating honest number the
-//     app has: "ayah 1 took you 48 seconds this week, down from 3 minutes."
+// ---------------------------------------------------------------------------
+// BOTH HALVES OF THE MEMORY GRAPH (edge case #90)
+// ---------------------------------------------------------------------------
+// The rows are built from the engine's `expand()`, which emits
+// `ayah 1, seam 1, ayah 2, …` — so CONNECTION (joint) rows are peers of ayah
+// rows rather than an afterthought. #90 is the bug where they are unrendered:
+// "connection atoms are ~40% of a short surah's memory graph", so a table of
+// ayat alone is half a memory graph wearing the costume of a whole one. The
+// `Kind` column carries the word "Joint", because after a sort by strength the
+// rows interleave and the arrow inside a reference is easy to miss.
+//
+// ---------------------------------------------------------------------------
+// THE SHAPE OF THIS ROUTE
+// ---------------------------------------------------------------------------
+// A SERVER COMPONENT that loads the CORPUS and renders a CLIENT ISLAND that
+// reads the LOG. That split is edge case #72: a server render has no
+// IndexedDB, so it would paint 0% for every atom and the client would hydrate
+// with the truth — React keeps the server's number in production and the
+// learner is shown a zero for an ayah they are carrying.
 
-import { StubNote } from "@/components/shell/StubNote";
+import { loadCorpus, AVAILABLE_SURAHS } from "@/lib/corpus/load";
+import { ProgressListIsland } from "@/components/progress/ProgressListIsland";
 
-export default function ProgressListPage() {
+/** Which surah this page lists. A query param today; when a learner can enrol
+ *  in several, this becomes the enrolment set and the table gains a surah
+ *  column (the row builder is already surah-keyed for it — E-01). */
+function parseSurah(raw: string | undefined): number {
+  const n = Number(raw);
+  return Number.isInteger(n) && AVAILABLE_SURAHS.includes(n) ? n : AVAILABLE_SURAHS[0]!;
+}
+
+export default async function ProgressListPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ surah?: string }>;
+}) {
+  const { surah: rawSurah } = await searchParams;
+  const surah = parseSurah(rawSurah);
+  const corpus = await loadCorpus(surah);
+
+  // `now` is resolved ONCE, on the server, and passed down — so every row in
+  // one render decays to the same instant. Reading a clock per row would let
+  // two rows disagree about what day it is, which is how a half-life column
+  // starts flickering between "9.4 days" and "9.3 days" mid-table.
+  const now = Date.now();
+
   return (
     <div className="screen">
       <div className="stack">
@@ -68,69 +102,16 @@ export default function ProgressListPage() {
             </h2>
           </div>
 
-          {/* A real semantic table, with the shape the finished one keeps. */}
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <caption className="sr-only">
-                Every ayah and connection you are memorising, with its stage,
-                strength, half-life and time on task.
-              </caption>
-              <thead>
-                <tr>
-                  <th scope="col" style={{ textAlign: "left" }}>
-                    Item
-                  </th>
-                  <th scope="col" style={{ textAlign: "left" }}>
-                    Stage
-                  </th>
-                  <th scope="col" style={{ textAlign: "right" }}>
-                    Strength
-                  </th>
-                  <th scope="col" style={{ textAlign: "right" }}>
-                    Half-life
-                  </th>
-                  <th scope="col" style={{ textAlign: "right" }}>
-                    Time on task
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  {/* A reference is Latin digits: an LTR island, so it never
-                      reorders beside Arabic when the real rows land. */}
-                  <th scope="row" style={{ textAlign: "left", fontWeight: 400 }}>
-                    <span className="ltr-island">112:1</span>
-                  </th>
-                  <td>
-                    {/* Never colour alone: dot (aria-hidden) + word. */}
-                    <span className="stage-label">
-                      <span
-                        className="stage-dot stage-dot--learn"
-                        aria-hidden="true"
-                      />
-                      <span className="stage-label__name">Not started</span>
-                    </span>
-                  </td>
-                  <td style={{ textAlign: "right" }}>
-                    <span className="stage-label__value">0%</span>
-                  </td>
-                  <td style={{ textAlign: "right" }}>
-                    <span className="stage-label__value">—</span>
-                  </td>
-                  <td style={{ textAlign: "right" }}>
-                    <span className="stage-label__value">—</span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          {corpus === null ? (
+            // A designed empty state, never a crash and never a table of
+            // fabricated zeros for a surah we have no text for (E-07).
+            <p className="stub-note">
+              No corpus is available for surah {surah} in this build.
+            </p>
+          ) : (
+            <ProgressListIsland corpus={corpus} now={now} />
+          )}
         </section>
-
-        <StubNote step="step 10 (M5), WIREFRAME §15">
-          Every ayah and every connection across every enrolled surah, sortable
-          and searchable, with the time-on-task column. Rows arrive from the
-          engine as data — this table never computes a band.
-        </StubNote>
       </div>
     </div>
   );
