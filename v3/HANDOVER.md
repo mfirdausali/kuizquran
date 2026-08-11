@@ -67,11 +67,11 @@ verify something, the row says so and names it.
 | 15 | Specs / typed overrides (B1 dead) / tiered verifications | **PARTIAL** | Schema, controllers, any-row-matches frontier all tested. **The override→re-hash trigger is manual** — DEFECTS.md#B3 states this explicitly. |
 | 16 | Question compiler §22 + explain() | **DONE** | `buildQuestion.ts`, `render.ts` (4 closed shapes), `explain()` proven against real engine output in `workbench-explain.test.ts` (17 tests). |
 | 17 | App shell + design system + client islands | **DONE** | 14 routes build; `shell.test.ts` 43 tests; IDB islands `append`/`writeLock`/`state` tested. |
-| 18 | **Quiz loop + full session lifecycle** | **NOT BUILT** | `app/(app)/session/page.tsx` is a `StubNote`. The 4 render shapes exist and are tested (47 tests), but **no corpus loader at request time, no commit-before-paint, no create/resume/summary/celebration**. The file documents its own absence. |
-| 19 | Macro panel, ring, progress table, plan calendar | **PARTIAL** | Components + tests exist (`macro-ring`, `plan-calendar`, `progress-list`). `/progress` and `/home` are still `StubNote` routes, so they are not learner-reachable. |
+| 18 | **Quiz loop + full session lifecycle** | **DONE** (was NOT BUILT) | `lib/session/run.ts` + `SessionIsland`. A learner completes a drill and every tap appends — proven by e2e in a real browser, on disk. Commit-before-paint is structural: `lastTap` is the only source of `reveal`, and the only way to get `lastTap` is to await `append`. Resume derives from the fold, so a reload re-derives what is due. Exposed two shipped defects: v3-D70 (`writeLock.acquire()` never granted — writing was impossible) and v3-D71 (the default surah was unstaged — dead end one tap after enrolling). |
+| 19 | Macro panel, ring, progress table, plan calendar | **DONE for single-surah** | `/progress` and `/home` are wired and learner-reachable (v3-D74). **Multi-surah is NOT built and this is deliberate**: `readChoices()` returns a singular `surah` and there is no enrollment list, so rendering rows for un-enrolled surahs would fabricate an enrollment. Both routes render the one real enrollment and name the plural case. |
 | 20 | Continuous drill: range + mushaf page | **PARTIAL** | `/drill` is the one **real** learner surface — `DrillPicker` renders live. **But `lib/corpus/load.ts` reads `packages/engine/test/fixtures/`, and `AVAILABLE_SURAHS = [12]`.** See §A-note. |
 | 21 | Sync outbox + pull + merge preserving deviceSeq | **DONE** | B5 mutation-verified by me today: 5 tests RED + boundary clause 7 fires. Chunking at 200 proven. |
-| 22 | Onboarding (7 screens) + dashboard + ayah detail | **PARTIAL** | 7 screens real and committing (`commitOnboarding` writes `meta`, one transaction). **It redirects to `/home`, which is a stub.** Ayah detail is a stub. |
+| 22 | Onboarding (7 screens) + dashboard + ayah detail | **DONE** | 7 screens real and committing. `/home` and `/surah/[surah]/[ayah]` are both wired (v3-D74). v3-D75: `SessionGate` linked un-enrolled learners to `/onboarding`, a 404 — `(onboarding)` is a route group with no URL segment, so it is `/start`. Now a shared `ONBOARDING_HREF`. |
 | 23 | Entitlements + Stripe + paywall + PDPA | **PARTIAL** | State machine, 4 states, guarded transitions, HMAC verify, idempotency index — all tested. **PAY-1 open: zero replay fixtures**, 2 tests deliberately INCOMPLETE. |
 | 24 | Admin console + health + audit + roles | **DONE** | `/api/admin/*` routes; `SystemHealthController`, reveal-with-TTL, CSV, flags. |
 | 25 | Workbench + qari mode (TOCTOU-proof signing) | **DONE** | `/workbench` builds; `workbench-sign.test.ts` (11) + `workbench-frontier.test.ts` (15). |
@@ -80,6 +80,35 @@ verify something, the row says so and names it.
 | 28 | Corpus + spec freeze → qari sessions | **HUMAN-GATED** | Corpus/spec freeze MET (all 4 hashes match manifest). Qari sessions are calendar. Gate correctly refuses to open. |
 | 29 | Landing page | **DONE** | `/` is static, server-rendered, 5 argument sections + live `InlineDemo` on 112:1; `landing-claims.test.ts` 34 tests. |
 | 30 | Launch hardening: 7 green nights, a11y, security, backup | **PARTIAL** — engineering DONE, window **NOT STARTED**, human work unbooked | **Corrects the previous NOT BUILT.** Scheduler exists: `php artisan schedule:list` → `0 3 * * * php artisan determinism:check 'both' --trigger=schedule`, next due 13h. Ledger + window command exist (`NightlyWindowLedger`, `nightly:window`), 25 nightly tests green, and I **mutation-verified** the ledger (see §B spot-check 2). **Playwright suite now exists and I ran it: 34 passed in 29s** across chromium + mobile projects. **But the 7-night clock has NOT started** — `make nightly-window` exits 1: `window started: NOT DECLARED · streak 0 of 7`. It needs `nightly:window --start` after the last engine merge, plus live staging, plus 7 real days. Human a11y (VoiceOver/NVDA) still unbooked; automated geometry a11y is covered by the e2e suite. |
+
+
+---
+
+## 2026-08-12 — state after the completion pass
+
+`make test` **1812 passing, exit 0** · `make build` exit 0 · **40/40 e2e** ·
+tsc clean · boundaries + locked-CSS gates pass.
+
+**A learner can now do the whole thing**: land, onboard, drill a session with
+every tap appended, see progress, browse the library, open an ayah, and do it
+all **offline after one online visit** (M5's exit criterion, verified in a real
+browser). None of that was true 48 hours ago.
+
+**Routes**: every one of the six former `StubNote` routes renders real content.
+`/home`, `/library` and `/progress` retain a residual `StubNote` DEEP IN THE
+PAGE naming the multi-surah gap — that is honest labelling of a real gap, not a
+stub route. Check line numbers before reading a grep hit as "still a stub".
+
+### What is genuinely left
+
+| Gap | Why it is not done | Who unblocks it |
+|---|---|---|
+| Al-Mulk scene beats | Authored human content — a scene beat is interpretation of scripture. Scaffold + brief committed (`v3/docs/AL-MULK-SCENE-BEATS.md`); only prose is missing. **The last content-freeze blocker.** | Firdaus, ~1h |
+| Stripe replay fixtures (PAY-1) | Needs a real test-mode Stripe account; business verification has calendar lead time. The suite correctly reports INCOMPLETE rather than passing over zero cases. | Firdaus, calendar |
+| 7-night window | Counts real nights on live staging, which does not exist. | infra + 7 days |
+| Multi-surah | `readChoices()` returns a singular `surah`; there is no enrollment list. Rendering rows for un-enrolled surahs would fabricate an enrollment. | a real decision, not a wiring job |
+| `AVAILABLE_SURAHS = [12]` | `/surah/112\|103\|67` render "no compiled corpus". `/library` now labels this honestly. Widening it repoints `FIXTURE_ROOT`, which `/drill`, `/progress/list`, `/plan` and `/workbench` all read. | a decision |
+| Human a11y pass | VoiceOver/NVDA, unbooked. Automated geometry a11y is covered. | Firdaus |
 | 31 | *(post-launch)* Social behind flags | **NOT BUILT** | Correct — post-launch by construction. |
 | 32 | *(post-launch)* Learning-science + recommender | **NOT BUILT** | Correct — post-launch by construction. |
 
