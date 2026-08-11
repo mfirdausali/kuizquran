@@ -523,6 +523,33 @@ describe("the corpus staging contract", () => {
     expect(DEMO_SURAH).toBe(112);
     expect(CLIENT_SURAHS).toContain(DEMO_SURAH);
   });
+
+  it("the DEFAULT surah a learner is enrolled in is staged", () => {
+    // THE DEFECT THIS CLOSES, found by the e2e suite in a real browser the day
+    // the session loop landed: `DEFAULT_SURAH` was 103 while only 112 was
+    // staged, so every learner who accepted the pre-selected default finished
+    // onboarding and hit "this surah is not available on this device yet" —
+    // a dead end on the product's main path, one tap after enrollment.
+    //
+    // No unit test caught it because they all hardcode 112. The default is the
+    // path MOST learners take, so it is the one that must be staged.
+    expect(CLIENT_SURAHS).toContain(DEFAULT_SURAH);
+  });
+
+  it("every surah onboarding can enroll a learner in is servable", () => {
+    // Enrolling someone in a surah the app cannot serve is a promise it cannot
+    // keep. Yusuf (12) is the deliberate exception: it is offered but served
+    // from the SERVER (`lib/corpus/load.ts`) because it is 3.4 MB and must
+    // never be shipped to a browser — so it is excluded here BY NUMBER rather
+    // than by a rule that would silently absorb a future mistake.
+    const clientServed = OFFERED_SURAHS.map((s) => s.surah).filter((n) => n !== 12);
+    for (const surah of clientServed) {
+      expect(
+        CLIENT_SURAHS,
+        `surah ${surah} is offered at onboarding but not staged for the client`,
+      ).toContain(surah);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

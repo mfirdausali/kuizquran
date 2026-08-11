@@ -1615,3 +1615,90 @@ not exist, and there is no service worker at all — so M5's airplane-mode exit
 criterion fails on a plain reload (`ERR_INTERNET_DISCONNECTED`). An
 already-hydrated page does keep drilling offline, which proves the local-first
 architecture underneath is sound; the missing piece is the cached shell.
+
+---
+
+## 2026-08-11 (later) — the session loop, and two defects it exposed
+
+### v3-D70 — `acquire()` never granted the lock, so writing was IMPOSSIBLE
+
+Wiring the session loop surfaced a defect that had been shipped for eight
+build-plan steps and would have made the product unusable on day one.
+
+`writeLock.acquire()` raced `navigator.locks.request` against a
+`queueMicrotask` fallback. The browser grants a lock in a LATER TASK, never
+within the current microtask checkpoint, so **the fallback always won**. Every
+tab settled as `reader`, `isWriter` was never true, and `assertWriter()` threw
+on every append. A single tab with no contention was told "the session is open
+in another tab".
+
+Why no test caught it: every one of the 10 writeLock tests used
+`forceForTests`, which sets status directly. **Not one exercised `acquire()`.**
+The seam that made the tests convenient was the seam that made them blind.
+
+Why it went unnoticed: nothing in the app called `acquire()` or `append()` at
+all (v3-D67), so a permanently-reader lock had no observable consequence. Two
+defects hid each other — the dead code path could not reveal the broken lock,
+and the broken lock would have blocked the code path the moment it existed.
+
+Fixed with a 250ms grace timer, cleared the instant the grant lands so a
+granted writer is never demoted. Three new tests drive the REAL `acquire()`
+against a Web Locks stub that grants in a later task. Mutation-verified:
+restoring `queueMicrotask` turns 2 of them red.
+
+### v3-D71 — onboarding enrolled learners in a surah the app could not serve
+
+`DEFAULT_SURAH` is 103. `CLIENT_SURAHS` was `[112]`. So **every learner who
+accepted the pre-selected default** finished onboarding, tapped into the
+session, and hit "this surah is not available on this device yet" — a dead end
+one tap after enrollment, on the product's main path.
+
+No unit test caught it because they all hardcode 112. Only the e2e walk, which
+uses the real onboarding default, exercised the enrolled surah.
+
+Fixed by staging 103 and 67 (24KB and 552KB). Yusuf (12) stays server-side at
+3.3MB. Two new tests: the default must be staged, and every `OFFERED_SURAHS`
+entry except 12 must be staged. Both fail against the old list.
+
+The rule: **anything onboarding can enroll a learner in must be servable, or
+enrolling them is a promise the app cannot keep.**
+
+### v3-D72 — the session loop itself
+
+`lib/session/run.ts`: `rebuild` → `assembleQueue` → `buildQuestion` → `append` →
+`summarizeSession`. No React, no DOM — a plain state machine over (corpus, log)
+that the route drives, so it is testable end-to-end without rendering. It lives
+in `lib/` because `check-boundaries.mjs` clause 5 forbids `assembleQueue` under
+`app/`/`components/`; the engine decides what to serve, the view never does.
+
+Resume is not a separate path: the queue derives from the FOLD of the log, so a
+reload re-derives what is still due (#93). `session_start` is emitted only for a
+genuinely new session — a resume that re-emitted it would reset the duration
+origin and make every reload look like a fresh sitting.
+
+**Commit before paint** is enforced by construction: `answerCurrent` awaits
+`append` before returning a state carrying `lastTap`, and `lastTap` is the only
+way to obtain a `reveal`. A verdict cannot reach the screen without a durable
+event behind it.
+
+Mutation-verified, 5 mutations: deleting the tap append (5 tests red), always
+`correct:true` (2), `structured:false` (2), re-emitting `session_start` (2), and
+un-awaiting the commit — **which SURVIVED three times**. The first
+commit-before-paint test read the log after awaiting and passed against
+fire-and-forget, because fake-indexeddb settles in the same microtask drain. The
+second polled in parallel and FAILED on correct code — it measured when the test
+noticed the write, not when the write happened. The third delayed every append,
+and the separately-awaited `ayah_produced` write masked the mutant. Only the
+fourth — delaying the TAP append specifically — constrains anything.
+
+That is four attempts to write one honest ordering assertion, and it is the
+tenth vacuous-verification incident in this build. The pattern is now
+unmistakable: **an assertion that is true tells you nothing until you have seen
+it fail.**
+
+### The honest state after this change
+
+A learner can now complete a session in a real browser and the taps reach the
+log — proven by e2e, on disk, across the full walk. Five stub routes remain
+(`/home`, `/library`, `/progress`, `/surah/[surah]`, `/surah/[surah]/[ayah]`),
+there is still no service worker, and the 7-night window still cannot start.

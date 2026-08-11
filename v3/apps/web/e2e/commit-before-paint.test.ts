@@ -21,22 +21,19 @@
 //   $ grep -rn "appendEvent\|\bappend(" components app --include='*.tsx'
 //   (no matches)
 //
-// The capability is real, well-designed, and tested at unit level (lib/idb/
-// append.test.ts). Nothing invokes it. The `events` object store — invariant
-// #2's "the event log is truth" — is written by NO reachable user interaction
-// in this build. Onboarding writes `meta`. The demo and first-recall screens
-// write nothing at all, by explicit design. The drill picker previews and
-// stops. /session is a stub.
+// THAT WAS TRUE UNTIL THE SESSION LOOP LANDED (v3-D67), and the header above
+// is kept because it records what a "green" suite looked like while the
+// product's core path was severed: `append()` was real, well-designed and unit
+// tested, and NOTHING INVOKED IT.
 //
-// So "does a tap survive a reload" cannot be answered by tapping, because
-// there is nothing to tap. This file answers the two questions that CAN be
-// answered honestly, and the answers are worth having:
+// Today `/session` drives `lib/session/run.ts`, which appends on every tap;
+// `e2e/first-session.test.ts` proves that in a browser, on disk. What this file
+// still guards is the OTHER half, which remains just as important:
 //
-//   1. Does the app write an event when a learner uses it end to end?  NO.
-//      Proven on disk, after a full onboarding walk plus every interaction the
-//      drill picker offers. This is the same finding as first-session.test.ts's
-//      stub assertion, arrived at from the storage side rather than the route
-//      side — two independent brakes on the same defect.
+//   1. Do the PREVIEW surfaces write? NO — and they must not. `/drill`
+//      previews, `/progress` reports, `/plan` projects. None is a graded
+//      retrieval, so an event from any of them is evidence of a recall that
+//      never happened. Test 1 walks all of them and asserts an empty log.
 //
 //   2. Is the DURABILITY MACHINERY sound — would a tap survive, if one
 //      existed? YES. Test 2 drives `append()` through the page's own module
@@ -48,10 +45,27 @@ import { expect, test } from "@playwright/test";
 import { completeOnboarding, readEvents } from "./idb-helpers.test.ts";
 
 test.describe("C · commit before paint", () => {
-  test("THE FINDING: no reachable interaction ever writes a drill event", async ({ page }) => {
+  test("the PREVIEW surfaces still write nothing — only /session does", async ({ page }) => {
+    // ---------------------------------------------------------------------
+    // THIS TEST USED TO BE CALLED "THE FINDING: no reachable interaction ever
+    // writes a drill event", AND IT WAS RIGHT (v3-D67).
+    // ---------------------------------------------------------------------
+    // `append()` had zero callers, so the store invariant #2 calls TRUTH was
+    // never written by anything a learner could reach. The session loop has
+    // since landed and `e2e/first-session.test.ts` proves a tap on /session
+    // does append.
+    //
+    // Note that the old test would STILL PASS today, because it never visited
+    // /session — its name would simply have become a lie, asserting a finding
+    // that no longer holds while staying green. That is the failure mode this
+    // whole build keeps hitting, so the test is rewritten rather than deleted:
+    // what remains true and worth guarding is that the PREVIEW surfaces write
+    // nothing. `/drill` previews, `/progress` reports, `/plan` projects — none
+    // of them is a graded retrieval, and an event from any of them would be
+    // evidence of a recall that never happened.
     await completeOnboarding(page);
 
-    // Every learner-reachable surface, exercised.
+    // Every learner-reachable PREVIEW surface, exercised.
     await page.goto("/drill");
     await page.fill("#to-ayah", "6");
     await page.getByRole("radio", { name: /victory lap/i }).click();
@@ -68,8 +82,8 @@ test.describe("C · commit before paint", () => {
     const events = await readEvents(page);
     expect(
       events,
-      "no UI in this build appends to `events`: the log invariant #2 calls " +
-        "TRUTH is never written by a learner. `append()` has zero callers.",
+      "preview surfaces must append nothing: an event here is evidence of a " +
+        "retrieval the learner never performed",
     ).toHaveLength(0);
   });
 

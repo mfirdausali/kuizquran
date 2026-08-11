@@ -53,8 +53,21 @@ const PUBLIC_CORPUS = path.join(WEB_ROOT, "public", "corpus");
 
 /** The surahs a CLIENT surface may need. 112 is screen 2 and the landing demo
  *  (WIREFRAME §17 screen 2, §18 §2). Surah 12 stays SERVER-side via
- *  lib/corpus/load.ts — it is 3.4 MB and must never be shipped to a browser. */
-const CLIENT_SURAHS = [112];
+ *  lib/corpus/load.ts — it is 3.4 MB and must never be shipped to a browser.
+ *
+ *  103 AND 67 WERE ADDED THE DAY THE SESSION LOOP LANDED, and the reason is a
+ *  real defect the e2e suite caught in a browser: onboarding's DEFAULT_SURAH is
+ *  103, but only 112 was staged, so EVERY learner who accepted the default
+ *  finished onboarding and hit "this surah is not available on this device" —
+ *  a dead end on the product's main path. Unit tests missed it because they
+ *  hardcode 112; only the real walk exercised the enrolled surah.
+ *
+ *  The rule this encodes: anything `OFFERED_SURAHS` can enroll a learner in
+ *  MUST be staged, or enrolling them is a promise the app cannot keep. A test
+ *  asserts that correspondence so the two lists cannot drift again. Yusuf (12)
+ *  is the deliberate exception — it is offered but served from the server, and
+ *  the session loop for it is a separate piece of work. */
+const CLIENT_SURAHS = [112, 103, 67];
 
 /** The engine reads exactly these fields (types.ts#Corpus). Everything else the
  *  compiler emits — connections, lookalikes, per-ayah hashes — is server or

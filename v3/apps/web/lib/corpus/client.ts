@@ -47,7 +47,7 @@ import type { Corpus } from "@engine/types.ts";
  *  list and that script's CLIENT_SURAHS are the same decision written twice;
  *  the test asserts they agree, so a surah added to one and not the other
  *  fails rather than 404s at runtime. */
-export const CLIENT_SURAHS: readonly number[] = [112];
+export const CLIENT_SURAHS: readonly number[] = [112, 103, 67];
 
 /** The surah screen 2 and the landing demo reconstruct (WIREFRAME §17 / §18).
  *  Named once, here, so no surface hardcodes the number in its own JSX. */

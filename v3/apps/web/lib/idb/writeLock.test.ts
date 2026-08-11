@@ -113,3 +113,78 @@ describe("graceful degradation where navigator.locks is absent", () => {
     await writeLock.release();
   });
 });
+
+describe("acquire() against a real Web Locks implementation (v3-D70)", () => {
+  // WHY THESE TESTS EXIST.
+  //
+  // Every other test in this file uses `forceForTests`, which sets the status
+  // directly and never runs `acquire()`. That gap hid a defect that made
+  // writing STRUCTURALLY IMPOSSIBLE: the fallback branch was a
+  // `queueMicrotask`, and `navigator.locks.request` grants in a LATER TASK, so
+  // the fallback always won. Every tab settled as `reader`, `isWriter` was
+  // never true, and `assertWriter()` threw on every append — a single tab with
+  // no contention was told "the session is open in another tab".
+  //
+  // It went unnoticed for eight build-plan steps because nothing in the app
+  // called `acquire()` or `append()` at all (v3-D67), so a permanently-reader
+  // lock had no observable consequence. It surfaced in a real browser the day
+  // the session loop landed.
+  //
+  // These drive the REAL code path against a Web Locks stub that grants in a
+  // later task, exactly as a browser does.
+  function installLocks(opts: { heldByOther?: boolean } = {}) {
+    const held = opts.heldByOther === true;
+    // jsdom defines `navigator` as a getter-only property, so a plain
+    // assignment throws. Redefine it for the duration of the test.
+    Object.defineProperty(globalThis, "navigator", {
+      configurable: true,
+      writable: true,
+      value: {
+      locks: {
+        request(_name: string, _o: unknown, cb: () => Promise<void>) {
+          if (held) {
+            // Contended: the callback never runs, mirroring a browser holding
+            // the lock for another tab. The grace timer must resolve this.
+            return new Promise<void>(() => {});
+          }
+          // Uncontended: granted in a LATER TASK, never synchronously and
+          // never within the current microtask checkpoint.
+          return new Promise<void>((resolve) => {
+            setTimeout(() => void cb().then(resolve), 0);
+          });
+        },
+      },
+      },
+    });
+  }
+
+  beforeEach(() => {
+    writeLock.resetForTests?.();
+  });
+
+  it("a single uncontended tab becomes the WRITER", async () => {
+    // MUTATION: change the grace `setTimeout` back to `queueMicrotask` and this
+    // fails — which is precisely the defect that shipped.
+    installLocks();
+    const status = await writeLock.acquire();
+    expect(status.role).toBe("writer");
+    expect(writeLock.isWriter).toBe(true);
+  });
+
+  it("a writer that acquired the lock can actually append", async () => {
+    // The end-to-end consequence, asserted rather than inferred: the whole
+    // point of holding the lock is that the commit path opens.
+    installLocks();
+    await writeLock.acquire();
+    await append({ ...EV }, CTX);
+    expect(await countEvents()).toBe(1);
+  });
+
+  it("a tab that cannot get the lock settles as reader instead of hanging", async () => {
+    // The original intent of the fallback, preserved: contention must not block
+    // the UI forever. This is why the fix is a short timer and not its removal.
+    installLocks({ heldByOther: true });
+    const status = await writeLock.acquire();
+    expect(status.role).toBe("reader");
+  });
+});

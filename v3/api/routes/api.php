@@ -7,6 +7,7 @@ use App\Http\Controllers\Admin\AdminAuthController;
 use App\Http\Controllers\Admin\AdminRevealController;
 use App\Http\Controllers\Admin\AdminUsersController;
 use App\Http\Controllers\Admin\FlagController;
+use App\Http\Controllers\Admin\StripeSettingsController;
 use App\Http\Controllers\Admin\SystemHealthController;
 use App\Http\Controllers\Billing\StripeWebhookController;
 use App\Http\Controllers\ContentFreezeController;
@@ -103,6 +104,16 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/gloss-drafts', [GlossDraftsController::class, 'index']);
         Route::post('/gloss-drafts', [GlossDraftsController::class, 'store']);
         Route::post('/gloss-drafts/{id}/review', [GlossDraftsController::class, 'review']);
+
+        // Stripe credentials (step 23's operational half). READ + PROBE only:
+        // `index` reports presence/mode/fingerprint and never a secret value,
+        // `test` authenticates against Stripe with a read-only balance call,
+        // and `store` refuses on purpose (501, with the reason) because a live
+        // secret key in the database is readable from every backup and replica
+        // and cannot be un-leaked. See the controller header.
+        Route::get('/stripe', [StripeSettingsController::class, 'index']);
+        Route::post('/stripe', [StripeSettingsController::class, 'store']);
+        Route::post('/stripe/test', [StripeSettingsController::class, 'test']);
 
         // Build-plan step 28 (M9): the content-freeze gate, read as JSON by the
         // workbench so "is this corpus bookable for a qari session" is answered

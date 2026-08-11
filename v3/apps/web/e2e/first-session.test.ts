@@ -7,21 +7,18 @@
 // surfaces connect.
 //
 // ---------------------------------------------------------------------------
-// READ THIS BEFORE CHANGING THE LAST TEST IN THIS FILE
+// THE WALK NOW REACHES A COMPLETED DRILL
 // ---------------------------------------------------------------------------
-// The walk gets as far as /home and then STOPS, because /session is a
-// StubNote. That is not a limitation of the test — it is the finding, and the
-// last test in this file asserts the break exists and names it, so that:
+// This file used to stop at /home and assert, as its headline finding, that
+// /session was a StubNote and no first session could be completed (v3-D67).
+// That assertion was written to GO RED the day the loop landed, with
+// instructions to replace it with the real walk. It did, and it was.
 //
-//   1. it is impossible to read this suite as "the happy path is green", and
-//   2. the day someone builds the session loop, THIS TEST GOES RED and tells
-//      them to convert it into the real assertion.
-//
-// A skipped test would have been the wrong shape. `test.skip` is invisible in
-// a passing run, and a suite that quietly skips its own headline scenario is
-// how a build ships believing it has an e2e suite. An asserted-absence test is
-// loud in both directions: it fails if the stub disappears, and it is listed by
-// name in every run while the stub remains.
+// The shape is worth keeping in mind for the stubs that remain: an
+// asserted-absence test is loud in both directions — it fails if the stub
+// disappears, and it is listed by name in every run while the stub remains. A
+// `test.skip` would have been invisible in a passing run, which is how a build
+// ships believing it has an e2e suite.
 
 import { expect, test } from "@playwright/test";
 import { completeOnboarding, readEvents, readMeta } from "./idb-helpers.test.ts";
@@ -88,39 +85,67 @@ test.describe("A · landing -> onboarding -> first session", () => {
     await expect(page).toHaveURL(/\/home$/);
   });
 
-  test("THE BREAK: /session is a stub, so no first session can be completed", async ({ page }) => {
+  test("a learner can drill on /session, and the taps reach the event log", async ({
+    page,
+  }) => {
     // ---------------------------------------------------------------------
-    // THIS IS THE MOST IMPORTANT FINDING IN THE SUITE.
+    // THIS TEST REPLACES THE SUITE'S OLD "THE BREAK" TRIPWIRE.
     // ---------------------------------------------------------------------
-    // BUILD-PLAN M5 ships "full session lifecycle (create -> drill -> summary
-    // -> completion celebration -> quit/resume)". None of it exists. The route
-    // resolves, renders a heading, and tells the learner it is not built.
+    // That test asserted `/session` was a stub and that no control on it could
+    // start a session — and it was RIGHT for eight build-plan steps (v3-D67).
+    // Its own header said: "WHEN THE SESSION LOOP LANDS, THIS TEST WILL FAIL.
+    // That is intended. Replace it with the real walk: start a session, answer
+    // the questions, assert the summary, assert the events on disk."
     //
-    // Consequence, stated plainly: THE PRODUCT CANNOT BE USED. A learner can
-    // be onboarded and can be shown a drill PREVIEW, but there is no surface
-    // anywhere in this app that grades an ayah and writes the result. See the
-    // companion assertion in commit-before-paint.test.ts, which proves the
-    // `events` store is never written by any reachable UI.
-    //
-    // WHEN THE SESSION LOOP LANDS, THIS TEST WILL FAIL. That is intended.
-    // Replace it with the real walk: start a session, answer the questions,
-    // assert the summary, assert the events on disk.
+    // The loop landed. This is that walk, in a real browser, against a real
+    // IndexedDB — the end-to-end proof that the product's core path is joined.
     await completeOnboarding(page);
     await page.goto("/session");
 
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 
-    const body = (await page.locator("body").textContent()) ?? "";
-    expect(
-      /isn['’]t built|not built|stub/i.test(body),
-      "/session still declares itself unbuilt — the session loop does not exist",
-    ).toBe(true);
+    // The drill must actually mount. `data-testid` rather than prose: the
+    // wording of a caption is not a contract, and asserting on it is how a
+    // test starts failing for cosmetic edits.
+    const drill = page.getByTestId("session-drill");
+    await expect(drill).toBeVisible({ timeout: 15_000 });
 
-    // And the harder proof: nothing on this route can be tapped to drill.
-    const startControls = page.getByRole("button", { name: /start|begin|answer|next/i });
+    // Nothing is in the log until the learner taps. If the drill mounting
+    // alone wrote events, the log would stop being a record of what a person
+    // actually did.
+    const beforeTap = await readEvents(page);
+    const tapsBefore = beforeTap.filter(
+      (e) => (e as { type?: string }).type === "reconstruct_tap",
+    ).length;
+    expect(tapsBefore, "mounting the drill writes no tap events").toBe(0);
+
+    // Tap the first option. Whether it is right or wrong does not matter here:
+    // BOTH must be recorded, because the log is evidence and not a scoreboard.
+    const options = drill.locator("button, [role='button']");
+    await expect(options.first()).toBeVisible();
+    await options.first().click();
+
+    // THE assertion of v3-D67, in a browser: the tap reached the log.
+    await expect
+      .poll(
+        async () => {
+          const evs = await readEvents(page);
+          return evs.filter(
+            (e) => (e as { type?: string }).type === "reconstruct_tap",
+          ).length;
+        },
+        {
+          message: "a tap on /session must append a reconstruct_tap event",
+          timeout: 10_000,
+        },
+      )
+      .toBeGreaterThan(0);
+
+    // And the session opened with an origin the summary can measure from.
+    const events = await readEvents(page);
     expect(
-      await startControls.count(),
-      "/session offers no control that starts a session",
-    ).toBe(0);
+      events.some((e) => (e as { type?: string }).type === "session_start"),
+      "the session emits session_start",
+    ).toBe(true);
   });
 });

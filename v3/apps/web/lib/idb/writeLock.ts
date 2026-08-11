@@ -44,6 +44,11 @@ export class NotWriterError extends Error {
   }
 }
 
+/** How long to let `navigator.locks` actually grant the lock before concluding
+ *  another tab holds it. The grant arrives in a later task, so this must not be
+ *  zero — see the comment at the fallback for the defect that caused. */
+const ACQUIRE_GRACE_MS = 250;
+
 function supportsWebLocks(): boolean {
   return typeof navigator !== "undefined" && typeof navigator.locks?.request === "function";
 }
@@ -102,8 +107,12 @@ class WriteLock {
     // The lock is held until `held` resolves — i.e. for the tab's lifetime.
     await new Promise<void>((resolvedAcquisition) => {
       let settled = false;
+      let graceTimer: ReturnType<typeof setTimeout> | null = null;
       void navigator.locks
         .request(LOCK_NAME, { mode: "exclusive" }, () => {
+          // Cancel the fallback FIRST: a granted writer must never be demoted
+          // to reader by a timer that fires immediately afterwards.
+          if (graceTimer !== null) clearTimeout(graceTimer);
           this.set({ role: "writer" });
           if (!settled) {
             settled = true;
@@ -117,6 +126,7 @@ class WriteLock {
           });
         })
         .catch(() => {
+          if (graceTimer !== null) clearTimeout(graceTimer);
           this.set({ role: "reader", reason: "another-tab" });
           if (!settled) {
             settled = true;
@@ -125,15 +135,35 @@ class WriteLock {
         });
 
       // If the lock is already held elsewhere our callback does not run, so we
-      // must not block forever: report reader immediately and let the queued
-      // request promote us later, WITHOUT a reload.
-      queueMicrotask(() => {
+      // must not block forever: report reader and let the queued request
+      // promote us later, WITHOUT a reload.
+      //
+      // THIS WAS A `queueMicrotask` AND IT MADE WRITING IMPOSSIBLE.
+      // `navigator.locks.request` grants the lock in a later task, never within
+      // the current microtask checkpoint — so the fallback ALWAYS won the race,
+      // every tab settled as `reader`, `isWriter` was never true, and
+      // `assertWriter()` threw on every append. A single tab with no contention
+      // was told "the session is open in another tab".
+      //
+      // No unit test caught it: every writeLock test uses `forceForTests` and
+      // none exercises `acquire()` against a real Web Lock. It surfaced in the
+      // e2e suite the day something finally tried to WRITE (v3-D67) — before
+      // that, nothing in the app called `acquire()` or `append()` at all, so a
+      // permanently-reader lock had no observable consequence.
+      //
+      // A short timer, rather than no fallback at all, keeps the original
+      // intent: a tab that genuinely cannot get the lock must not hang.
+      graceTimer = setTimeout(() => {
         if (!settled) {
           this.set({ role: "reader", reason: "another-tab" });
           settled = true;
           resolvedAcquisition();
         }
-      });
+      }, ACQUIRE_GRACE_MS);
+      if (typeof graceTimer === "object" && graceTimer && "unref" in graceTimer) {
+        // Never hold a Node test process open on this timer.
+        (graceTimer as { unref: () => void }).unref();
+      }
     });
 
     return this.status;
