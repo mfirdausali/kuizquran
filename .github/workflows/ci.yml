@@ -141,3 +141,67 @@ jobs:
           composer run-script post-autoload-dump --no-interaction || true
           php artisan config:clear || true
           php artisan test
+
+  # ---- Playwright e2e (v3/apps/web): the M5 exit-criterion suite — full-Yusuf
+  # offline session, airplane-mode drill, commit-before-paint, a11y geometry.
+  # It has existed since build-plan step 17/18 but this workflow never ran it
+  # (HANDOVER.md item E9) — a browser-driven regression could land on main with
+  # `js`/`php` both green. Separate job, not folded into `js`: it needs a
+  # production `next build` + real Chromium, which is a different (slower,
+  # heavier) shape than the vitest unit gate. ----
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect the e2e suite
+        id: has
+        run: |
+          if [ -f v3/apps/web/playwright.config.ts ]; then
+            echo "yes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "yes=false" >> "$GITHUB_OUTPUT"; echo "no v3/apps/web e2e suite yet"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.has.outputs.yes == 'true'
+        with:
+          node-version: 20
+
+      - name: Compile the v3 corpus (12, 67, 103, 112)
+        # Same reason as the `js` job's identical step: apps/web's build
+        # stages public/corpus/ from packages/corpus-compiler/output/, which a
+        # fresh checkout does not have (v3-D52, gitignored).
+        if: steps.has.outputs.yes == 'true'
+        run: |
+          set -e
+          cd v3/packages/corpus-compiler
+          npm ci || npm install
+          for s in 12 67 103 112; do npm run compile -- "$s"; done
+
+      - name: Install apps/web deps
+        if: steps.has.outputs.yes == 'true'
+        working-directory: v3/apps/web
+        run: npm ci || npm install
+
+      - name: Install Playwright's Chromium
+        if: steps.has.outputs.yes == 'true'
+        working-directory: v3/apps/web
+        run: npx playwright install --with-deps chromium
+
+      - name: Build + run the e2e suite
+        # `npm run e2e` = `next build` (which reruns prebuild's corpus staging
+        # against the just-compiled output/) then `playwright test` against the
+        # production server (playwright.config.ts turns reuseExistingServer
+        # off whenever CI is set, which GitHub Actions sets by default).
+        if: steps.has.outputs.yes == 'true'
+        working-directory: v3/apps/web
+        run: npm run e2e
+
+      - name: Upload the Playwright report on failure
+        if: steps.has.outputs.yes == 'true' && failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: v3/apps/web/playwright-report/
+          retention-days: 7

@@ -644,7 +644,7 @@ the long pole and waits on no code.
 | E6 | **Fold-runner DB adapter + staging deploy + a host running `schedule:run`.** The schedule and ledger exist; the *data* and the *machine* do not. Advisory locks, dead-letter quarantine, late-arrival refold. | ~1 wk | This is what lets the 7-night clock mean production |
 | E7 | **Operational mailer** so a P1 actually pages someone (v3-D18). | ~1 day | Or accept H5's manual daily check |
 | E8 | **Stripe replay fixtures** — vendor `stripe trigger` recordings to `v3/fixtures/stripe/` (**currently README only, zero fixtures**) incl. partial-refund and dispute-won. PAY-1 closes itself. | ~2 days | Gated on H1 clearing |
-| E9 | **Wire the e2e suite into CI**, and update the absence-asserting tests as E3/E5 land. | ~1 day | It has never run in CI |
+| E9 | ~~**Wire the e2e suite into CI**~~ **DONE 2026-08-12** — `.github/workflows/ci.yml` gained an `e2e` job (compiles the 4-surah corpus, installs Chromium, `next build && playwright test`). Mutation-verified: removing `<ServiceWorkerRegistrar />` turned 6 offline-dependent tests red; reverted, 40/40 green. See DECISIONS.md v3-D78. | — | closed |
 | E10 | **Raise the test floor to 1614**, or accept that the +63 margin means a deleted test no longer trips the tripwire. | minutes | |
 
 ## Then, strictly serial — no parallelism compresses this

@@ -1963,3 +1963,81 @@ method both still cite stale, much lower counts from build-plan step 3
 (`1431 total`, `255 v2 vitest + 47 PHPUnit`) predating almost this entire
 build — corrected in this commit so the next run does not re-derive current
 counts from scratch the way this one had to.
+
+---
+
+## Ratified 2026-08-12 — build-plan step 30 continued: E9, the Playwright suite wired into CI
+
+### v3-D78 — The 40-test e2e suite now runs on every PR/push; a mutation proved it actually bites
+
+This run started, per NIGHTLY.md's own rule, by re-deriving state from `git log`
+rather than trusting the (stale) note at the top of NIGHTLY.md. The container's
+cached `origin/main` ref was itself stale (`cab5d16`, "Phase 0 complete") until
+`git fetch` force-updated it to `ee62990` (build-plan step 30, v3-D77) — the
+**identical** shape v3-D77's own Finding 0 already named ("a future run hitting
+the same 'detached HEAD, stale local main' shape should re-derive from
+`origin/main` the same way"). Recorded again because it recurred once already
+despite being written down: the fix is mechanical (`git fetch` before trusting
+any local ref), not a one-time note.
+
+HANDOVER.md's "WHAT IS LEFT" table (2026-08-12, later) lists engineering items
+E6–E10 as open against step 30, with E9 ("wire the e2e suite into CI") flagged
+by v3-D77 itself as "real, scoped, agent-doable follow-on work, same shape as
+this fix" — unlike E6 (needs a live host + staging DB), E7 (needs an actual
+mail provider) and E8 (blocked on human Stripe verification), E9 needed no
+external dependency this sandbox lacks.
+
+**What landed**, in `.github/workflows/ci.yml`: a new `e2e` job, parallel to
+the existing `js` and `php` jobs — detects `v3/apps/web/playwright.config.ts`,
+compiles the 4-surah corpus (same step the `js` job already runs, needed
+because `next build`'s `prebuild` stages `public/corpus/` from
+`packages/corpus-compiler/output/`, gitignored per v3-D52), installs
+Playwright's Chromium (`--with-deps`, the OS libs a fresh Ubuntu runner lacks),
+then `npm run e2e` (`next build && playwright test`) against the production
+server — `playwright.config.ts`'s existing `reuseExistingServer:
+!process.env.CI` and `forbidOnly: !!process.env.CI` already do the right thing
+under GitHub Actions' auto-set `CI=true`, unmodified. A report artifact
+uploads on failure for debugging.
+
+**Verified, not assumed:**
+- `make setup` run clean in this container (Laravel's gitignored
+  `bootstrap/cache`/`storage` dirs had to be created by hand first — the
+  Makefile's own `mkdir -p` line runs *after* `composer install`, which needs
+  them for `package:discover`; not fixed here, out of scope for E9, but worth
+  a future Makefile-ordering fix).
+- `TZ=UTC make test` → exit 0, **1761 passing** (255 v2 vitest + 47 v2/api +
+  229 v3/api + 2 incomplete[PAY-1, by design] + 101 corpus-compiler + 417
+  engine + 53 fold-runner + 659 apps/web) — unchanged from v3-D77's count,
+  confirming this run added no new unit/integration tests, only CI wiring.
+- `TZ=UTC make build` → exit 0.
+- The exact commands the new CI job runs were reproduced locally end to end:
+  `cd v3/packages/corpus-compiler && npm ci && npm run compile -- {12,67,103,112}`,
+  `cd v3/apps/web && npm ci`, `npx playwright install --with-deps chromium`
+  (fetched the pinned 1.62.1 revision, distinct from this sandbox's
+  pre-installed 1.56.1/rev-1194 browser — a real gap the CI job's own
+  `--with-deps` install step also has to close on every fresh runner), then
+  `CI=true npm run e2e` → **40 passed**, `reuseExistingServer` correctly off
+  and `forbidOnly`/retries correctly on under `CI=true`, matching the actual
+  GitHub Actions environment rather than local dev defaults.
+- **Mutation-tested the claim that matters** — "wiring this into CI would
+  actually catch a real regression," not merely "the YAML parses." Removed
+  `<ServiceWorkerRegistrar />` from `app/layout.tsx` (a one-line, easy-to-miss
+  regression a PR could plausibly ship) and reran the identical `CI=true`
+  command: **6 of `airplane-mode.test.ts`'s tests went RED** — service-worker
+  registration, the exit criterion, offline reload, cached corpus, `/api`
+  never cached, offline `/`→`/home` steering — exactly the offline-dependent
+  set, and nothing else. Reverted; `git diff v3/apps/web/app/layout.tsx` empty;
+  reran — 40/40 green again. This is the same mutation discipline v3-D45/D49
+  established: a green gate is evidence about the gate only once something has
+  been shown to turn it red.
+
+**Explicitly NOT done in this run, named so a future run does not re-discover
+them as new** (HANDOVER.md's E6–E8, E10, unchanged): the fold-runner DB
+adapter + staging deploy + a host actually running `schedule:run` (E6); an
+operational mailer so a fold-determinism P1 pages someone (E7); Stripe replay
+fixtures, blocked on human business verification (E8); raising the committed
+test-count floor to 1761 (E10). Also not done: fixing the `make setup`
+directory-ordering issue found above, and CI's own YAML correctness was not
+verified by an actual GitHub Actions run in this sandbox (no push happened
+before this fix was written) — verified instead by reproducing the identical
+commands locally, the same evidence standard v3-D77 used for its own CI fix.
