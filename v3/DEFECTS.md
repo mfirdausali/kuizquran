@@ -307,3 +307,39 @@ engine change closes this; flagged here so M6's schema design doesn't miss it.
 E-08 dies **by construction**: `expand()` emits seams only for `a..b−1`, so the
 seam at ayah N is never constructed and the unguarded call has no reachable
 input.
+
+---
+
+## PAY-1 — the Stripe replay suite has ZERO fixtures, so M7's exit gate is RED
+
+**Opened:** 2026-08-11, build-plan step 23. **Milestone:** M7.
+**Closing test:** `v3/api/tests/Feature/Billing/ReplaySuiteTest.php`
+(`test_fixture_set_is_present` + `test_all_orderings_reach_the_same_final_state`),
+both currently reporting INCOMPLETE rather than passing.
+
+**What is built and proven:** the entitlement state machine, all four states, the
+guarded transitions (optimistic lock + provider-timestamp precedence), the
+`unique(provider, provider_event_id)` idempotency index, the `max(tier)` merge,
+trial attribution, and the HMAC-SHA256 signature verification — 16 + 7 + 9 tests,
+every one mutation-verified.
+
+**What is NOT proven, and cannot be until a human acts:** that Stripe's REAL
+payloads carry the field names these handlers read. Every test drives the handlers
+with event arrays in the recorded SHAPE, which exercises domain logic correctly but
+says nothing about wire-format drift.
+
+**Why it is not closed by writing fixtures now:** hand-written JSON would prove the
+handlers parse hand-written JSON. That is the vacuous verification this build has
+shipped five times (v3-D38/D45/D49/D50/D53) — and here it would be on the revenue
+path. `ReplaySuiteTest` therefore asserts a MINIMUM FIXTURE COUNT before it asserts
+any behaviour, so an empty fixture set cannot read as green.
+
+**Unblocked by (human, calendar lead time — start now):**
+1. Stripe MY business verification (KYC + bank + tax). BUILD-PLAN says "Stripe
+   account from M0", so this is already LATE.
+2. FPX + GrabPay per-method activation (edge case #120's lifetime rail).
+3. `stripe trigger` recordings vendored into `v3/fixtures/stripe/`, including the
+   PARTIAL-refund and DISPUTE-WON shapes, which the default triggers do not emit
+   and which are exactly what #115/#116 exist for.
+
+Full instructions: `v3/fixtures/stripe/README.md`.

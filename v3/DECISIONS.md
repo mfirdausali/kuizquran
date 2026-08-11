@@ -1101,3 +1101,82 @@ with a message naming file, line, and the rule.
 The clause is written to be EXTENDED — `PRE_RECALL` lists the surfaces, and a
 new pre-recall route must be added to it. That is deliberate: an unlisted route
 is a hole, so the list is the thing to review when onboarding lands.
+
+---
+
+## Ratified 2026-08-11 — build-plan steps 23–26 (M7 monetization, M8 admin/flags)
+
+### v3-D54 — Q5 resolved: lapsed is review-only INDEFINITELY; WIREFRAME's "7 days" is stale prose
+
+Two documents disagreed and the paywall would have been built twice:
+
+- `docs/WIREFRAME.md:86` (inside the v3-D07 block) and `:348` both say "Reviews
+  stay open for **7 days** past the trial."
+- `DECISIONS.md` **v3-D16** says lapsed entitlement is review-only
+  **indefinitely** — "Never delete, never hard-stop."
+- `docs/BUILD-PLAN.md:199` Q5 frames exactly this as OPEN: "review-only
+  INDEFINITELY (strongest never-hostage reading, recommended default) or
+  review-only for 7 days then hard stop?"
+
+**v3-D16 wins**, on three grounds: it is the later ratified decision; CLAUDE.md's
+authority order puts `DECISIONS.md` above `docs/WIREFRAME.md`; and BUILD-PLAN's
+own Q5 names indefinite as the recommended default. The WIREFRAME "7 days" lines
+are hereby **stale prose**, not a competing requirement. They are left in place
+un-edited (WIREFRAME is the spec of what the product *is*, and rewriting history
+there is not this build's habit) — this entry is the supersession record.
+
+**What this means mechanically:** `lapsed_review_only` is a
+**terminal-but-reversible sink, never an absorbing one**. It never expires, never
+sets a TTL on data, never schedules a purge, and has no timer of any kind. The
+only purge path in the entire system is learner-initiated PDPA delete. A test
+asserts a lapsed entitlement 10 years past its lapse still permits review
+(`EntitlementStateMachineTest`), so a future "cleanup" cron cannot quietly
+reintroduce the 7-day stop.
+
+### v3-D55 — The paywall boundary is a GATE CLAUSE, not a docblock
+
+`#124` ("events for an out-of-entitlement surah are ALWAYS ingested — the log is
+truth") is the single worst thing in this product to get wrong: a paywall that
+drops evidence corrupts the memory graph permanently, and the corruption is
+silent because the missing events simply never existed.
+
+Prose has failed this build five times (v3-D38 tsc, D45 stage labels, D49 the
+encoded guard, D50 the testsuite dir, D53 the token guard). So the rule is
+enforced **statically, in two places**:
+
+- `apps/web/scripts/check-boundaries.mjs` **clause 9** — an entitlement-read
+  ALLOWLIST. Only named files may mention `Entitlement`/`entitlements`/
+  `PaywallGate`/`entitled`. Every other file fails the build with file+line.
+- `v3/api/tests/Feature/Boundaries/EntitlementBoundaryTest.php` — the PHP
+  counterpart, with `EventsController.php` **specifically outside** the list.
+
+Both directions are mutation-tested (v3-D49's lesson: a clause that only ever
+passes proves nothing). Adding `Entitlement` to the fold path fails; REMOVING a
+legitimate file from the allowlist also fails.
+
+Enforcement lives at exactly **three** points and nowhere else: session assembly
+(issuance-only, #96/#123), corpus delivery for non-trial surahs, and checkout.
+
+### v3-D56 — Stripe: the state machine is real, the fixture set is EMPTY, and the gate is RED
+
+Per the brief's "do NOT fake Stripe": no `StripeService` stub exists, and no
+handler has an `if (app()->environment('testing'))` branch. Handlers take a
+parsed, verified event array; tests supply recorded JSON.
+
+**No test-mode Stripe account exists yet**, so `v3/fixtures/stripe/` is empty and
+the replay suite is **RED by construction** — `ReplaySuiteTest` asserts a
+MINIMUM FIXTURE COUNT before it asserts any behaviour, and is marked skipped-with-
+reason rather than passing vacuously over zero cases. That is v3-D50's failure
+mode (71 tests that never ran) and it is refused here explicitly.
+
+The state machine, the transition guards, the idempotency index, the ordering
+precedence and the merge rule are all fully tested against **hand-built event
+arrays in the recorded shape** — which is legitimate, because those tests
+exercise the domain logic, not Stripe's wire format. What is NOT tested, and
+cannot be until an account exists: that Stripe's real payloads have the field
+names the handlers read. That gap is named in `DEFECTS.md#PAY-1`.
+
+**Human-gated, calendar lead time, start now:** Stripe MY business verification
+(KYC, days-to-weeks — BUILD-PLAN says "Stripe account from M0", so this is
+already LATE); FPX + GrabPay per-method activation; Q7 (card-only monthly vs
+Curlec; SST-inclusive?); refund policy numbers.

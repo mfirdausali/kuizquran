@@ -209,6 +209,115 @@ for (const f of files) {
   });
 }
 
+// --- Clause 9: THE ENTITLEMENT-READ ALLOWLIST (edge case #124, v3-D55). ---
+//
+// "Events for an out-of-entitlement surah → ALWAYS ACCEPT — log is truth;
+//  enforcement at issuance/corpus only."
+//
+// A paywall that drops evidence is the worst failure mode in this product: the
+// dropped events do not error, do not retry, and never appear anywhere. The
+// learner's memory graph is permanently and silently wrong, and no support
+// ticket can reconstruct what was lost.
+//
+// The failure mode is concrete and cheap to write: someone adds
+// `if (!entitled) return;` to the append or sync path, because it looks like
+// obvious hygiene. Prose in a docblock has already failed this build five times
+// (v3-D38/D45/D49/D50/D53), so the rule is STRUCTURAL: only the files below may
+// even MENTION entitlement, and everything else fails the build by name.
+//
+// Mirrors clause 3 (indexedDB.open only in lib/idb/db.ts) and clause 6 (single
+// egress), both of which have bitten.
+// NOTE ON THIS PATTERN — it was WRONG on the first attempt and the inverse
+// mutation caught it. The original was
+//   /\b(Entitlement|entitlements|PaywallGate|entitled|EntitlementCache)\b/
+// with a TRAILING \b, so `EntitlementSnapshot`, `EntitlementDecision` and
+// `permitsIssuance(entitlementSnapshot)` all slipped through: the trailing word
+// boundary requires the token to END there, and every real identifier in this
+// codebase is a PREFIX of a longer name. The clause passed on files that read
+// entitlement constantly — it was guarding almost nothing.
+//
+// Found by mutation-testing the INVERSE direction (removing a legitimate file
+// from the allowlist and expecting a failure). It did not fail. That is exactly
+// v3-D49's "a guard whose test never distinguished the states it guarded", and
+// it is why both directions get mutated, not just the obvious one.
+//
+// Leading \b only: match the START of an identifier, let it continue.
+const ENTITLEMENT_TOKENS = /\bEntitlement|\bentitlement|\bPaywall|\bentitled\b/;
+// The THREE enforcement points (session assembly, corpus delivery, checkout),
+// plus the entitlement island itself. Adding to this list is a reviewable act.
+// NOTE: session assembly (`app/(app)/session/page.tsx`) is still a STUB at this
+// step, so it is deliberately NOT here yet — an allowlist entry for a file that
+// does not read entitlement is an unreviewed hole waiting for the real code. It
+// gets added in the same commit that makes the session page a real enforcement
+// point. Same for the checkout surface, which does not exist yet.
+const ENTITLEMENT_ALLOWLIST = new Set([
+  "lib/entitlement/cache.ts",
+  "lib/entitlement/gate.ts",
+  "lib/entitlement/types.ts",
+  "lib/pricing.ts",
+]);
+// Named EXPLICITLY as forbidden, so the inverse mutation (removing one from the
+// allowlist) has something to prove against. These are the ingestion and fold
+// paths — the ones edge case #124 is about.
+const ENTITLEMENT_FORBIDDEN = ["lib/idb/append.ts", "lib/sync/outbox.ts", "lib/sync/merge.ts", "lib/sync/sync.ts"];
+for (const f of files) {
+  const r = rel(f);
+  if (r.endsWith(".test.ts") || r.endsWith(".test.tsx")) continue;
+  if (ENTITLEMENT_ALLOWLIST.has(r)) continue;
+  const src = stripComments(read(f));
+  src.split("\n").forEach((line, i) => {
+    if (ENTITLEMENT_TOKENS.test(line)) {
+      violations.push(
+        `${r}:${i + 1}: reads entitlement outside the allowlist. Edge case #124: ` +
+          `events are ALWAYS ingested — the log is truth. Enforcement lives at ` +
+          `session assembly, corpus delivery and checkout ONLY. If this file is a ` +
+          `legitimate enforcement point, add it to ENTITLEMENT_ALLOWLIST here.`,
+      );
+    }
+  });
+}
+// The allowlist must not rot into a list of files that no longer exist — a stale
+// allowlist entry silently re-opens a hole when a path is later re-created.
+for (const entry of ENTITLEMENT_ALLOWLIST) {
+  if (!files.some((f) => rel(f) === entry)) {
+    violations.push(`ENTITLEMENT_ALLOWLIST names ${entry}, which does not exist. Remove the stale entry.`);
+  }
+}
+// And the forbidden list must actually name real files, or the clause is
+// asserting nothing about the ingestion path (v3-D49's failure mode).
+for (const entry of ENTITLEMENT_FORBIDDEN) {
+  if (!files.some((f) => rel(f) === entry)) {
+    violations.push(`ENTITLEMENT_FORBIDDEN names ${entry}, which does not exist. The clause is not guarding the ingestion path.`);
+  }
+  if (ENTITLEMENT_ALLOWLIST.has(entry)) {
+    violations.push(`${entry} is in BOTH the entitlement allowlist and the forbidden list. Edge case #124 forbids it.`);
+  }
+}
+
+// --- Clause 10: prices are written in ONE place (edge case #196). ---
+// "config constants in ONE file + a test quoting v3-D07."
+//
+// The pricing test alone cannot catch this: it asserts the constants file is
+// right, and stays green while a template hardcodes "RM20" beside it. The day
+// pricing changes, the constants move and the template lies.
+const PRICE_LITERAL = /(?<![\w.])(?:RM\s?\d|USD\s?\d|\$\d+(?:\.\d\d)?\s*(?:\/|per\s)\s*(?:mo|month|year))/i;
+const PRICE_ALLOWLIST = new Set(["lib/pricing.ts"]);
+for (const f of files) {
+  const r = rel(f);
+  if (r.endsWith(".test.ts") || r.endsWith(".test.tsx")) continue;
+  if (PRICE_ALLOWLIST.has(r)) continue;
+  const src = stripComments(read(f));
+  src.split("\n").forEach((line, i) => {
+    if (PRICE_LITERAL.test(line)) {
+      violations.push(
+        `${r}:${i + 1}: a price literal outside lib/pricing.ts. Edge case #196: ` +
+          `pricing constants live in ONE file. A second copy is a copy that lies ` +
+          `the day prices change.`,
+      );
+    }
+  });
+}
+
 if (violations.length > 0) {
   console.error(`\n✗ boundaries gate FAILED — ${violations.length} violation(s)\n`);
   for (const v of violations) console.error(`   ✗  ${v}`);

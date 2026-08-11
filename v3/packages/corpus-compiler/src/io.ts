@@ -12,12 +12,13 @@
 // never reads from v1/ or v2/ at runtime (CLAUDE.md: v3 is a new generation,
 // not a migration).
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { RawGeometryVerse, RawMcqItem, RawMentalModel, RawVerse } from "./types.ts";
+import type { RawGeometryVerse, RawMcqItem, RawMentalModel, RawVerse, Word, WordMorph } from "./types.ts";
 import { parseQac, type QacData } from "./parseQac.ts";
 import { buildCorpus } from "./buildCorpus.ts";
+import { buildPool, type PoolEntry } from "./foilKernels.ts";
 import type { CorpusJson } from "./types.ts";
 import { YUSUF_SCENE_BEAT_LABELS } from "./sceneBeats.ts";
 
@@ -85,6 +86,55 @@ export function loadInputs(surah: number): LoadedInputs {
   return { surah, verses, mcqItems, mentalModel, geometry, qac, generatedFrom };
 }
 
+/** Every surah with vendored Uthmani verse data — the foil-kernel candidate
+ * pool's source. Derived from the data directory rather than hardcoded, so
+ * vendoring a new surah widens the pool automatically. */
+export function vendoredSurahs(): number[] {
+  return readdirSync(DATA_DIR)
+    .map((f) => /^(\d+)-verses\.json$/.exec(f)?.[1])
+    .filter((s): s is string => s !== undefined)
+    .map(Number)
+    .sort((a, b) => a - b);
+}
+
+/**
+ * Build the foil-kernel candidate pool: every distinct word form of every
+ * vendored surah's UTHMANI text, tagged with the roots QAC gives it.
+ *
+ * The pool is Uthmani corpus bytes, NOT QAC's reconstructed forms — measured,
+ * only 1045 of 1806 QAC forms are byte-identical to their Uthmani counterpart,
+ * so a QAC-sourced foil would render in a visibly different orthographic style
+ * from the correct answer and give the tile away for free. See foilKernels.ts.
+ */
+export function buildFoilPool(qac: QacData): Map<string, PoolEntry> {
+  const wordsBySurah = new Map<number, Word[]>();
+  for (const surah of vendoredSurahs()) {
+    const verses = readJson<RawVerse[]>(resolve(DATA_DIR, `${surah}-verses.json`));
+    const morph = qac.morphBySurah.get(surah) ?? new Map<string, WordMorph>();
+    const words: Word[] = [];
+    for (const v of verses) {
+      for (const w of v.words) {
+        const m = morph.get(`${v.verse_number}:${w.position}`);
+        words.push({
+          surah,
+          ayah: v.verse_number,
+          position: w.position,
+          text_uthmani: w.text_uthmani,
+          lemma: m?.lemma ?? null,
+          root: m?.root ?? null,
+          class: m?.class ?? null,
+          gloss: { en: w.translation, ms: null, ja: null },
+          act: null,
+          sceneImage: null,
+          line: null,
+        });
+      }
+    }
+    wordsBySurah.set(surah, words);
+  }
+  return buildPool(wordsBySurah);
+}
+
 /** Build the corpus object from freshly-loaded inputs. */
 export function buildFromInputs(inp: LoadedInputs): CorpusJson {
   const morph = inp.qac.morphBySurah.get(inp.surah) ?? new Map();
@@ -96,6 +146,7 @@ export function buildFromInputs(inp: LoadedInputs): CorpusJson {
     mentalModel: inp.mentalModel,
     geometry: inp.geometry,
     morph,
+    foilPool: buildFoilPool(inp.qac),
     curatedThreads: extras.curatedThreads,
     sceneBeatLabels: extras.sceneBeatLabels,
     generatedFrom: inp.generatedFrom,

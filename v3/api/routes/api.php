@@ -3,6 +3,12 @@
 use App\Http\Controllers\Auth\EmailVerificationController;
 use App\Http\Controllers\Auth\PasswordResetController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\Admin\AdminAuthController;
+use App\Http\Controllers\Admin\AdminRevealController;
+use App\Http\Controllers\Admin\AdminUsersController;
+use App\Http\Controllers\Admin\FlagController;
+use App\Http\Controllers\Admin\SystemHealthController;
+use App\Http\Controllers\Billing\StripeWebhookController;
 use App\Http\Controllers\EventsController;
 use App\Http\Controllers\OverridesController;
 use App\Http\Controllers\SpecsController;
@@ -31,6 +37,11 @@ Route::get('/verifications', [VerificationsController::class, 'index']);
 // Public read (build-plan step 16's question compiler consumes this).
 Route::get('/specs', [SpecsController::class, 'index']);
 
+// Build-plan step 23 (M7). UNAUTHENTICATED BY DESIGN — Stripe carries no session.
+// The HMAC signature over the raw body IS the authentication, and an unconfigured
+// signing secret fails CLOSED with a 503 rather than accepting anything.
+Route::post('/billing/stripe/webhook', StripeWebhookController::class);
+
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/auth/register', [AuthController::class, 'register']);
     Route::post('/auth/logout', [AuthController::class, 'logout']);
@@ -54,4 +65,31 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Build-plan step 15: spec write path (v3-D33).
     Route::post('/specs', [SpecsController::class, 'store'])->middleware('admin');
+
+    // ---- Build-plan steps 24 & 26 (M8): the admin console. ----
+    // Every route behind BOTH gates: `admin` (the env allowlist — the OUTER gate,
+    // whose break-glass is an env fix + restart, per edge case #146) and Sanctum.
+    Route::middleware('admin')->prefix('admin')->group(function () {
+        // Privacy / reveal (WIREFRAME §16, edge cases #147/#148).
+        Route::post('/users/{userId}/reveal', [AdminRevealController::class, 'reveal']);
+        Route::get('/reveal/{token}', [AdminRevealController::class, 'check']);
+        Route::get('/users/export.csv', [AdminUsersController::class, 'exportCsv']);
+
+        // System Health (step 24). #167: a failed probe renders `unknown`,
+        // never 0 — the console must distinguish "healthy" from "blind".
+        Route::get('/health', [SystemHealthController::class, 'index']);
+        // The ONLY mutating action on this surface. It RE-DERIVES from the event
+        // log and never invents (WIREFRAME §16: staff may never edit graded state).
+        Route::post('/health/rebuild-atom-cache', [SystemHealthController::class, 'rebuildAtomCache']);
+
+        // Flag plane (step 26). KILL is deliberately the lightest route here.
+        Route::get('/flags', [FlagController::class, 'index']);
+        Route::post('/flags/{key}/kill', [FlagController::class, 'kill']);
+        Route::post('/flags/{key}/enable', [FlagController::class, 'enable']);
+        Route::post('/flags/{key}/ack', [FlagController::class, 'acknowledge']);
+    });
 });
+
+// Admin login is OUTSIDE the sanctum group — it MINTS the token.
+// Fails closed with one generic error for all four failure cases (WIREFRAME §16).
+Route::post('/admin/login', [AdminAuthController::class, 'login'])->middleware('throttle:10,1');

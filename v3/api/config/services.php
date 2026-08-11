@@ -28,6 +28,18 @@ return [
         'key' => env('RESEND_KEY'),
     ],
 
+    /*
+     * Build-plan step 23 (M7). NO LIVE ACCOUNT EXISTS YET — see
+     * v3/fixtures/stripe/README.md and v3-D56. Every value here is unset by
+     * default, and the webhook route FAILS CLOSED (503) rather than accepting
+     * unsigned traffic when `webhook_secret` is absent.
+     */
+    'stripe' => [
+        'key' => env('STRIPE_KEY'),
+        'secret' => env('STRIPE_SECRET'),
+        'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
+    ],
+
     'slack' => [
         'notifications' => [
             'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),

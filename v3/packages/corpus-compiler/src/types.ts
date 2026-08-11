@@ -73,6 +73,14 @@ export interface Distractor {
   src_type: SrcType;
   /** Original authored rationale. */
   why: string;
+  /** Compile-time provenance: an authored row from a vendored mcq-items file,
+   * or one DERIVED by the foil kernels (foilKernels.ts). Makes the override
+   * layer's precedence OBSERVABLE in the artifact rather than an invisible
+   * property of compiler control flow, and lets the v3-D13 admin review queue
+   * flag kernel rows for qari adjudication. This is provenance about the FOIL,
+   * not QAC morphology, so v3-D24's stripping rule does not apply — and it
+   * carries no root/lemma. */
+  origin: "authored" | "kernel";
 }
 
 /** Connection atom: ayah n → n+1 within ONE surah (v3-D20 — chains never cross
@@ -116,13 +124,23 @@ export interface CorpusMeta {
   ayahCount: number;
   wordCount: number;
   generatedFrom: string[];
-  /** Distractor items whose self-collision was dropped during compile. */
+  /** Distractor items whose self-collision was dropped during compile. A
+   * collision is now detected with the ENGINE's grading equivalence (NFC +
+   * tatweel strip), not byte equality — see foilKernels.ts. */
   droppedCollisions: WordRef[];
-  /** True when this surah has no authored distractor source (yusuf-mcq-items
-   * style data). Distractors are empty and the compiler does not treat that
-   * as a defect — foil-kernel generation (NIGHTLY.md "Distractors — decided")
-   * is a separate, not-yet-implemented step. */
+  /** True when this surah has an authored distractor source (yusuf-mcq-items
+   * style data) covering at least one coordinate. False means every distractor
+   * row was DERIVED by the foil kernels. Per-row provenance lives on
+   * `Distractor.origin`; this flag is the corpus-level summary. */
   distractorsAuthored: boolean;
+  /** Per-origin row counts — the provenance summary that replaces relying on
+   * `distractorsAuthored` alone once kernels can fill a partially-authored
+   * surah coordinate-by-coordinate. */
+  distractorOrigin: { authored: number; kernel: number };
+  /** Histogram of foils-per-word: `kernelYield[n]` = number of words that got
+   * exactly n distractors. Makes honest degradation VISIBLE (a surah whose
+   * words only reach 2 or 3 foils shows up here) rather than silently padded. */
+  kernelYield: Record<number, number>;
   /** True when this surah has an authored mental model (acts / scene beats). */
   hasMentalModel: boolean;
   /** True when vendored mushaf geometry (page/line) exists for this surah —

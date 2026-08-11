@@ -32,6 +32,12 @@ import { buildLookAlikes, type CuratedThread } from "./lookalikes.ts";
 import { ayahToAct, buildSceneBeats } from "./sceneBeats.ts";
 import { mapPrdRank } from "./prdRank.ts";
 import { HASH_SPEC_VERSION } from "./hash.ts";
+import { admitAuthored, generateFoils, type KernelContext, type PoolEntry } from "./foilKernels.ts";
+
+/** Foils generated per un-authored word. 5 matches the authored surahs' shape
+ * (surah 12 ships 5 per word, 4 after a collision drop) and gives the engine's
+ * Learn band (maxRank 4, count 4) a full set with one in reserve. */
+const MAX_KERNEL_FOILS = 5;
 
 export interface BuildInputs {
   surah: number;
@@ -49,6 +55,11 @@ export interface BuildInputs {
   /** Vendored mushaf geometry (page/line) — undefined when this surah has
    * none yet (build-plan step 4; edge case #63's degraded mode). */
   geometry?: RawGeometryVerse[];
+  /** Candidate forms the foil kernels may DERIVE distractors from, keyed by
+   * engine grading key (see foilKernels.ts `buildPool`). Every entry's
+   * `surface` is real corpus bytes. Omitted/empty => no kernel generation, so
+   * a caller that supplies no pool gets exactly the previous behaviour. */
+  foilPool?: Map<string, PoolEntry>;
   generatedFrom: string[];
 }
 
@@ -136,38 +147,111 @@ export function buildCorpus(inp: BuildInputs): CorpusJson {
     }
   }
 
-  // ---- distractors (drop self-collisions, map prd_rank, preserve order) ----
+  // ---- distractors ----
+  // PRECEDENCE (NIGHTLY.md: "Yusuf's authored distractors stay as an override
+  // layer where they exist. Kernels are the baseline everywhere else"):
+  // per-COORDINATE, whole-set, authored wins. For each (ayah, position), if
+  // authored rows exist that coordinate is authored-only and kernels do not run
+  // there; otherwise kernels fill it.
+  //
+  // Whole-set rather than row-merged is deliberate: merging authored rows with
+  // generated ones at a single coordinate would interleave two different rank
+  // semantics (authored order vs. merged kernel score) and produce a gradient
+  // that is neither. Per-COORDINATE rather than per-surah means a future
+  // partially-authored surah works correctly with no schema change, even though
+  // no such surah exists today (surah 12 is authored on all 1777 coordinates).
+  //
+  // Every row — authored OR kernel — passes through a FoilSet accumulator whose
+  // equality is the ENGINE's grading key. That is what makes defects #7 and #9
+  // structurally impossible rather than checked: see foilKernels.ts. It also
+  // FIXES three live authored rows in surah 12 (12:21 p15, 12:22 p7, 12:24 p11)
+  // that are each the target plus one U+0640 tatweel — byte-different, so the
+  // old `d.text === item.correct` drop missed them, but grade-IDENTICAL, so
+  // 12:21 p15 shipped a two-correct-answer option set at Learn and Reinforce.
   const distractorsOut: Distractor[] = [];
   const droppedCollisions: WordRef[] = [];
+  const authoredCoords = new Set<string>();
+
   for (const item of mcqItems) {
+    const coord = `${item.verse}:${item.position}`;
+    authoredCoords.add(coord);
     const targetMorph = morphOf(item.verse, item.position);
+
+    const kept = admitAuthored(
+      item.correct,
+      item.distractors.map((d) => ({ surface: d.text, srcType: d.type, why: d.why })),
+    );
+    if (kept.length !== item.distractors.length) {
+      droppedCollisions.push({ ayah: item.verse, position: item.position });
+    }
+
     let rank = 0;
-    let droppedHere = false;
-    for (const d of item.distractors) {
-      if (d.text === item.correct) {
-        droppedHere = true;
-        continue; // drop self-collision; do not advance rank
-      }
+    for (const d of kept) {
       rank++;
-      const prd_rank = mapPrdRank({
-        targetText: item.correct,
-        targetRoot: targetMorph.root,
-        distractorText: d.text,
-        distractorRoot: rootByText.get(d.text) ?? null,
-        srcType: d.type,
-      });
       distractorsOut.push({
         surah,
         ayah: item.verse,
         position: item.position,
         rank,
-        text: d.text,
-        prd_rank,
-        src_type: d.type,
+        text: d.surface,
+        prd_rank: mapPrdRank({
+          targetText: item.correct,
+          targetRoot: targetMorph.root,
+          distractorText: d.surface,
+          distractorRoot: rootByText.get(d.surface) ?? null,
+          srcType: d.srcType,
+        }),
+        src_type: d.srcType,
         why: d.why,
+        origin: "authored",
       });
     }
-    if (droppedHere) droppedCollisions.push({ ayah: item.verse, position: item.position });
+  }
+
+  // Kernel fill for every coordinate WITHOUT authored rows.
+  if (inp.foilPool && inp.foilPool.size > 0) {
+    const ctx: KernelContext = { pool: inp.foilPool, surahWords: wordsOut };
+    for (const w of wordsOut) {
+      if (authoredCoords.has(`${w.ayah}:${w.position}`)) continue;
+      const foils = generateFoils(w, ctx, MAX_KERNEL_FOILS);
+      let rank = 0;
+      for (const f of foils) {
+        rank++;
+        distractorsOut.push({
+          surah,
+          ayah: w.ayah,
+          position: w.position,
+          rank,
+          text: f.surface,
+          prd_rank: mapPrdRank({
+            targetText: w.text_uthmani,
+            targetRoot: w.root,
+            distractorText: f.surface,
+            distractorRoot: rootByText.get(f.surface) ?? null,
+            srcType: f.srcType,
+          }),
+          src_type: f.srcType,
+          why: f.why,
+          origin: "kernel",
+        });
+      }
+    }
+  }
+
+  // Provenance summary + honest-degradation histogram.
+  let authoredRows = 0;
+  let kernelRows = 0;
+  const perWord = new Map<string, number>();
+  for (const d of distractorsOut) {
+    if (d.origin === "authored") authoredRows++;
+    else kernelRows++;
+    const k = `${d.ayah}:${d.position}`;
+    perWord.set(k, (perWord.get(k) ?? 0) + 1);
+  }
+  const kernelYield: Record<number, number> = {};
+  for (const w of wordsOut) {
+    const n = perWord.get(`${w.ayah}:${w.position}`) ?? 0;
+    kernelYield[n] = (kernelYield[n] ?? 0) + 1;
   }
 
   // ---- connections / lookalikes / scene beats ----
@@ -183,6 +267,8 @@ export function buildCorpus(inp: BuildInputs): CorpusJson {
       generatedFrom: inp.generatedFrom,
       droppedCollisions,
       distractorsAuthored: mcqItems.length > 0,
+      distractorOrigin: { authored: authoredRows, kernel: kernelRows },
+      kernelYield,
       hasMentalModel: mentalModel !== undefined,
       hasGeometry,
       schemaVersion: SCHEMA_VERSION,

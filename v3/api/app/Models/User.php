@@ -71,4 +71,25 @@ class User extends Authenticatable implements MustVerifyEmailContract
     {
         return $this->email;
     }
+
+    /** The learner's event log. Append-only; nothing here ever deletes it. */
+    public function events(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(Event::class);
+    }
+
+    /**
+     * Build-plan step 24 (M8). The INNER gate's roles.
+     *
+     * @return string[]
+     */
+    public function adminRoles(): array
+    {
+        return AdminRole::where('user_id', $this->id)->pluck('role')->all();
+    }
+
+    public function hasAdminRole(string $role): bool
+    {
+        return in_array($role, $this->adminRoles(), true);
+    }
 }

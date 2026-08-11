@@ -15,6 +15,7 @@
 
 import type { CorpusJson, RawVerse, WordRef } from "./types.ts";
 import { foldTanwin, normalizeArabic } from "./normalize.ts";
+import { gradeKey } from "./foilKernels.ts";
 
 export interface Check {
   name: string;
@@ -128,34 +129,88 @@ export function validateCorpus(
       detail: belowFour.length === 0 ? "no word below 4" : `below 4: ${belowFour.join(", ")}`,
     });
   } else {
+    // Kernel-filled surah. Shortfall is SOFT for the same reason the authored
+    // coverage check is: "degenerate surahs are the ICP's common case", and a
+    // kernel emits as many admissible foils as genuinely EXIST rather than
+    // padding to a quota (padding would mean inventing Arabic — rule 1 — or
+    // duplicating a sibling, which the accumulator forbids anyway).
+    const shortfall: string[] = [];
+    const noFoils: string[] = [];
+    for (const w of corpus.words) {
+      const n = distByWord.get(`${w.ayah}:${w.position}`) ?? 0;
+      if (n === 0) noFoils.push(`${w.ayah}:${w.position}`);
+      else if (n < MIN_DISTRACTORS - 1) shortfall.push(`${w.ayah}:${w.position}(${n})`);
+    }
     checks.push({
-      name: "distractor coverage",
+      name: "kernel distractor coverage",
       severity: "soft",
-      pass: true,
+      pass: shortfall.length === 0 && noFoils.length === 0,
       detail:
-        "no authored distractor source for this surah — 0 distractors is expected " +
-        "(foil-kernel generation is separate, not-yet-implemented follow-on work), " +
-        "not a compile defect",
+        corpus.distractors.length === 0
+          ? "no authored source and no foil pool — 0 distractors"
+          : `${corpus.distractors.length} kernel-derived foils; yield histogram ${JSON.stringify(corpus.meta.kernelYield)}` +
+            (shortfall.length ? `; below 4: ${shortfall.join(", ")}` : "") +
+            (noFoils.length ? `; NO foils at: ${noFoils.join(", ")}` : ""),
     });
+    // A word with ZERO foils is D51's slot machine: the tile bank would offer
+    // only the correct answer. Hard-fail only when the surah has a pool to draw
+    // from at all — a surah compiled with no pool legitimately has none.
+    if (corpus.distractors.length > 0) {
+      checks.push({
+        name: "every word has >=1 foil (D51 — no one-option quiz)",
+        severity: "hard",
+        pass: noFoils.length === 0,
+        detail: noFoils.length === 0 ? "every word has at least one foil" : `no foils at: ${noFoils.join(", ")}`,
+      });
+    }
   }
 
-  // 5. no distractor equals its target (hard — must be zero after the drop).
+  // 5. no distractor GRADES CORRECT against its target (hard — zero after the
+  //    drop). Compared with the ENGINE's grading key (NFC + tatweel strip),
+  //    NOT byte equality: this check previously used `d.text === target` and so
+  //    passed green while three surah-12 rows (12:21 p15, 12:22 p7, 12:24 p11)
+  //    shipped a foil that was the target plus one U+0640 tatweel — byte-
+  //    different, grade-identical. 12:21 p15 put a SECOND CORRECT ANSWER in the
+  //    Learn and Reinforce option sets. Byte equality here is precisely the gap
+  //    defect #7 lived in.
   const selfCollisions: string[] = [];
   const targetText = new Map<string, string>();
   for (const w of corpus.words) targetText.set(`${w.ayah}:${w.position}`, w.text_uthmani);
   for (const d of corpus.distractors) {
-    if (d.text === targetText.get(`${d.ayah}:${d.position}`)) {
+    const t = targetText.get(`${d.ayah}:${d.position}`);
+    if (t !== undefined && gradeKey(d.text) === gradeKey(t)) {
       selfCollisions.push(`${d.ayah}:${d.position}`);
     }
   }
   checks.push({
-    name: "no distractor equals its target",
+    name: "no distractor grades correct against its target (engine equivalence)",
     severity: "hard",
     pass: selfCollisions.length === 0,
     detail:
       selfCollisions.length === 0
         ? `clean (${corpus.meta.droppedCollisions.length} collisions dropped during compile)`
         : `remaining collisions: ${selfCollisions.join(", ")}`,
+  });
+
+  // 5b. no two SIBLING foils at one coordinate grade identical (#9). Same
+  //     engine equivalence — using the compiler's much broader normalizeArabic
+  //     here would delete legitimate option sets (304 rank<=4 pairs in surah 12
+  //     collide under the broad fold but are genuinely different words).
+  const siblingsByCoord = new Map<string, string[]>();
+  for (const d of corpus.distractors) {
+    const k = `${d.ayah}:${d.position}`;
+    if (!siblingsByCoord.has(k)) siblingsByCoord.set(k, []);
+    siblingsByCoord.get(k)!.push(gradeKey(d.text));
+  }
+  const dupSiblings: string[] = [];
+  for (const [k, keys] of siblingsByCoord) {
+    if (new Set(keys).size !== keys.length) dupSiblings.push(k);
+  }
+  checks.push({
+    name: "no two foils at one coordinate grade identical (#9)",
+    severity: "hard",
+    pass: dupSiblings.length === 0,
+    detail: dupSiblings.length === 0 ? "clean" : `duplicate siblings at: ${dupSiblings.join(", ")}`,
   });
 
   // 6. distractor attestation in the Quran — SOFT review flag. Checked against

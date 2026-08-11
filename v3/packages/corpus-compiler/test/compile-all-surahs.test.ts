@@ -34,12 +34,32 @@ describe("compiles 12 + 103 + 112 (build-plan step 3 exit bar)", () => {
     });
   }
 
-  it("surah 12 has authored distractors; 103 and 112 correctly have none yet", () => {
+  // Superseded by foil kernels (NIGHTLY.md "Distractors — decided", closing
+  // D51). This test previously asserted `alAsr.distractors` and
+  // `ikhlas.distractors` were EMPTY — that was a statement of the defect, not
+  // of intent: with zero distractors every reconstruct blank in 103/112 offered
+  // a tile bank containing only the correct answer. The assertion is now
+  // STRENGTHENED, not weakened: the surahs must be non-empty AND wholly
+  // kernel-origin, while surah 12 stays authored-only (the override layer).
+  it("surah 12 stays authored-only; 103 and 112 are now filled by the foil kernels", () => {
     const yusuf = buildFromInputs(loadInputs(12));
     const alAsr = buildFromInputs(loadInputs(103));
     const ikhlas = buildFromInputs(loadInputs(112));
+
     expect(yusuf.distractors.length).toBeGreaterThan(0);
-    expect(alAsr.distractors).toEqual([]);
-    expect(ikhlas.distractors).toEqual([]);
+    expect(yusuf.meta.distractorOrigin.kernel).toBe(0);
+
+    for (const c of [alAsr, ikhlas]) {
+      expect(c.distractors.length).toBeGreaterThan(0);
+      expect(c.meta.distractorOrigin.authored).toBe(0);
+      expect(c.distractors.every((d) => d.origin === "kernel")).toBe(true);
+      // every word is genuinely covered at the Learn band's rank window
+      for (const w of c.words) {
+        const atRank4 = c.distractors.filter(
+          (d) => d.ayah === w.ayah && d.position === w.position && d.rank <= 4,
+        );
+        expect(atRank4.length).toBeGreaterThanOrEqual(4);
+      }
+    }
   });
 });

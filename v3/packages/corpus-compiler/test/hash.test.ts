@@ -40,6 +40,7 @@ const distractor = (text: string): Distractor => ({
   prd_rank: "synonym",
   src_type: "semantic",
   why: "placeholder rationale",
+  origin: "authored",
 });
 
 describe("canonicalizeText — NFC normalization (edge case #18: combining-mark fixtures)", () => {
