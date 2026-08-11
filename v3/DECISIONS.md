@@ -647,3 +647,50 @@ loudly instead of passing.
 **Lesson worth keeping:** a verification step that cannot fail is worse than no
 verification step, because it manufactures false confidence. Any future "X is
 clean" claim in this build should be accompanied by evidence that X can fail.
+
+---
+
+## Ratified 2026-08-11 — build-plan step 17 PARTIAL: foundation landed, route tree outstanding
+
+### v3-D39 — What step 17 actually shipped, and what it did not
+
+The frontend foundation workflow lost its scaffolding agent to a content-filter
+error on its FINAL message (the work was already written to disk; only the
+agent's closing summary was blocked). Four of five agents completed. Rather than
+claim step 17 complete, this records the real line.
+
+**LANDED and independently verified:**
+- `v3/apps/web` — Next.js 16.3.0, App Router, TypeScript, no Tailwind (a locked
+  CSS system would fight it). Builds clean.
+- **The locked design system, ported with exactly one delta.** `check-locked-css.mjs`
+  proves it: "1 hunk at line 17 (@import -> 6 @font-face), 294 v1 lines otherwise
+  byte-identical." Mutation-tested — injecting a stray rule fails the gate.
+- **Amiri is genuinely self-hosted** (real WOFF2 binaries, converted locally).
+  The four Latin UI faces are ABSENT and the build says so out loud every time.
+  `check-fonts.mjs` HARD-FAILS on a missing Amiri (a fallback there means tofu
+  for Quranic codepoints, edge case #84) and warns-but-continues on the UI faces.
+  `public/fonts/FONTS.md` names each missing file and how to obtain it.
+- **The IndexedDB event-log island** — 37 tests. Web Locks single-writer (#75),
+  QuotaExceeded surfacing as retryable rather than a silently dropped tap (#74),
+  and the three-state loading model as a discriminated union so a component
+  cannot render a skeleton forever. Mutation-tested: neutering the event write
+  turns 16 tests red.
+- **`check-boundaries.mjs`** — 5 clauses, the strongest being that engine
+  decisions may not appear in JSX, making DEFECTS.md#B2 impossible by
+  construction rather than merely fixed once. Also enforces no-IDB-in-an-RSC
+  (#72: a server render has no log, so it paints 0 while the client hydrates 4).
+
+**NOT LANDED — plan section C, the route tree.** Only `/` exists, as a stub.
+`/home` (v3-D14's dashboard), library, surah detail, ayah detail, session,
+/progress/list and /plan were never created. Step 17 is therefore PARTIAL.
+The next frontend run starts here.
+
+### v3-D40 — The sacred-text guard states its ranges as escapes, never literals
+
+`check-boundaries.mjs` originally wrote its Arabic ranges as literal boundary
+characters. That put real Arabic codepoints in the repo's own detector, so a
+repo-wide sacred-text scan flagged the scanner itself — the single false
+positive most likely to teach a reader that the scan is noise and can be
+ignored. Rewritten as `\u` escapes: identical ranges, zero literals, and the
+guard still catches both literal Arabic and the `\u06xx` escape hatch (verified
+by injecting each and watching it fail).

@@ -13,6 +13,7 @@ API_V3  := v3/api
 CORPUS_COMPILER := v3/packages/corpus-compiler
 ENGINE  := v3/packages/engine
 FOLD_RUNNER := v3/worker/fold-runner
+WEB_V3  := v3/apps/web
 
 .PHONY: help setup dev dev-web dev-api dev-api3 test test-web test-api test-api3 test-v3 typecheck-v3 build clean doctor golden-log compile-corpus
 
@@ -42,6 +43,7 @@ setup: ## First run: install deps, create .env, key, migrate
 	cd $(CORPUS_COMPILER) && npm install
 	cd $(ENGINE) && npm install
 	cd $(FOLD_RUNNER) && npm install
+	cd $(WEB_V3) && npm install
 	@echo ""
 	@echo "✓ setup complete. Run: make dev"
 
@@ -71,10 +73,11 @@ test-api: ## PHPUnit (v2/api)
 test-api3: ## PHPUnit (v3/api — build-plan step 13)
 	cd $(API_V3) && php artisan test
 
-test-v3: typecheck-v3 ## vitest (v3 packages: corpus-compiler, engine, worker/fold-runner)
+test-v3: typecheck-v3 ## vitest (v3 packages: corpus-compiler, engine, worker/fold-runner, apps/web)
 	cd $(CORPUS_COMPILER) && npm test
 	cd $(ENGINE) && npm test
 	cd $(FOLD_RUNNER) && npm test
+	cd $(WEB_V3) && npm test
 
 typecheck-v3: ## tsc --noEmit across the v3 node packages
 	@# Until 2026-08-11 none of these packages depended on `typescript`, so
@@ -86,9 +89,16 @@ typecheck-v3: ## tsc --noEmit across the v3 node packages
 	cd $(CORPUS_COMPILER) && npm run -s typecheck
 	cd $(ENGINE) && npm run -s typecheck
 	cd $(FOLD_RUNNER) && npm run -s typecheck
+	@# apps/web must be here too, or it becomes the fourth package whose
+	@# typecheck never ran. Verify `npx tsc --version` prints a TypeScript
+	@# version there, not a TeX message.
+	cd $(WEB_V3) && npm run -s typecheck
 
-build: ## Type-check + build the SPA (must pass; see B9)
+build: ## Type-check + build the SPA and the v3 web app (must pass; see B9)
 	cd $(V2) && npm run build
+	@# Runs the prebuild gates too: locked-CSS byte-diff, font presence, and
+	@# the IDB/RSC + sacred-text boundary greps.
+	cd $(WEB_V3) && npm run build
 
 doctor: ## Check the harness is sane
 	@echo "node    $$(node -v 2>/dev/null || echo MISSING)"

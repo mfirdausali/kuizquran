@@ -1,0 +1,28 @@
+{
+  "name": "v3-web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "prebuild": "node scripts/check-locked-css.mjs && node scripts/check-fonts.mjs && node scripts/check-boundaries.mjs",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "gates": "node scripts/check-locked-css.mjs && node scripts/check-fonts.mjs && node scripts/check-boundaries.mjs"
+  },
+  "dependencies": {
+    "idb": "8.0.3",
+    "next": "16.3.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "fake-indexeddb": "^6.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9"
+  }
+}
