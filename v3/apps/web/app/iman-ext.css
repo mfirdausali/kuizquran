@@ -1,0 +1,288 @@
+/* ==========================================================================
+   iman-ext.css — THE EXTENSION LAYER
+   --------------------------------------------------------------------------
+   WHY THIS FILE EXISTS
+   --------------------------------------------------------------------------
+   `app/iman-ui.css` is LOCKED. `scripts/check-locked-css.mjs` asserts it is
+   byte-identical to `v1/styles/iman-ui.css` except one contiguous hunk at line
+   17 (the Google-Fonts @import replaced by six self-hosted @font-face rules).
+   That gate is structural, not a hash: it reports *which* line drifted. Any
+   other delta — one extra rule, one changed hex, one reordered declaration —
+   FAILS THE BUILD, because `prebuild` runs the gate before `next build`.
+
+   So: never edit the locked file. Every project-specific rule lives HERE.
+
+   THE RULES OF THIS LAYER
+   1. Import order is load-bearing. `layout.tsx` imports `./iman-ui.css` FIRST
+      and `./iman-ext.css` SECOND, so this file wins ties without needing
+      `!important`. If you find yourself typing `!important`, the import order
+      broke — fix that instead.
+   2. Additive only. Never redefine a locked token's VALUE (--teal-600, --r-card,
+      --font-arabic …). Locked classes may be EXTENDED (a wrapper, a modifier)
+      but their existing declarations must keep meaning what they meant, or the
+      design system has silently forked while the gate still reports green.
+   3. Reuse before you invent. `.screen .card .tile .bank .option .meter .bands
+      .stage-dot .banner .pill-streak .btn` already exist. A new class here
+      should be something the locked file genuinely does not have — a layout
+      shell, a hit-area, an a11y affordance — not a restyle of something it does.
+   4. The locked file's §8 "rules of use" still bind: the .ayah is the largest
+      type on any screen; coral only for slips; one .voice line per screen; no
+      shadows, no gradients, no border thicker than the hairline.
+
+   WHAT IS IN HERE AND WHY (each block names its edge case / wireframe §)
+     1. App shell layout — the fixed bottom tab bar and the scroll region above
+        it (WIREFRAME §14, v3-D05: Plan is a tab and replaces "You").
+     2. Tap targets — edge case #82. The locked `.tile` is ~32px tall and may
+        NOT be changed, so a transparent hit-area wrapper supplies the 44px.
+     3. a11y — WIREFRAME §15: never colour alone; RTL islands inside LTR chrome.
+     4. Small primitives the route tree needs (list rows, stubs, skeletons).
+   ========================================================================== */
+
+/* ---- 1. App shell -------------------------------------------------------
+   The shell is a column: a scrolling <main> above a fixed tab bar. The bar's
+   height plus the safe-area inset is published as a token so the scroll
+   region can reserve exactly that much and the last row of any list is never
+   trapped under the bar (the classic iOS bottom-nav bug).
+   -------------------------------------------------------------------------- */
+
+:root {
+  --tabbar-h: 56px;
+  /* iOS home-indicator inset. 0px everywhere else — env() falls back cleanly. */
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  /* Edge case #82's floor. Named once so every hit-area agrees. */
+  --tap-min: 44px;
+}
+
+.app-shell {
+  min-height: 100dvh;             /* dvh, not vh: mobile URL bars resize the viewport */
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-0);
+}
+
+.app-main {
+  flex: 1 1 auto;
+  /* Reserve the bar + the inset, so the final list row clears the tab bar. */
+  padding-bottom: calc(var(--tabbar-h) + var(--safe-b) + 8px);
+}
+
+/* The bar itself. Flat, hairline-topped — no shadow, per the locked §8 rules. */
+.tabbar {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 10;
+  display: flex;
+  background: var(--surface-1);
+  border-top: var(--hairline) solid var(--border);
+  padding-bottom: var(--safe-b);
+}
+
+.tabbar__item {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  /* Edge case #82 applied to the primary navigation: the whole tab is the
+     target, never just the label's text box. */
+  min-height: var(--tap-min);
+  height: var(--tabbar-h);
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.tabbar__item:hover { background: var(--surface-2); }
+
+/* Current tab. Colour is NOT the only signal — the markup also carries
+   aria-current="page", and the weight/opacity shift is visible in greyscale.
+   WIREFRAME §15: never colour alone. */
+.tabbar__item[aria-current="page"] {
+  color: var(--teal-600);
+  font-weight: 600;
+}
+
+/* The glyph slot. A dot rather than an icon font: the icon set is not part of
+   this step, and a missing icon font must not collapse the tab's height. */
+.tabbar__glyph {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: .45;
+}
+.tabbar__item[aria-current="page"] .tabbar__glyph { opacity: 1; }
+
+/* ---- 2. Tap targets — edge case #82 -------------------------------------
+   "44px targets vs locked ~32px .tile — a11y vs locked CSS. Fix: transparent
+   .tile-hit wrapper in ext layer; locked file CI byte-diffed."
+
+   The locked `.tile` is `padding: 6px 14px; font-size: 18px` ≈ 32px tall and
+   is byte-gated, so it cannot grow. `.tile-hit` wraps it in a transparent box
+   that guarantees the 44px MINIMUM without changing one painted pixel: the
+   visible tile keeps its locked size, the finger gets the area it needs.
+
+   Use it as `<span class="tile-hit"><button class="tile">…</button></span>`,
+   or on any control small enough to miss.
+   -------------------------------------------------------------------------- */
+
+.tile-hit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+  background: none;               /* transparent — it must be invisible */
+  border: none;
+  padding: 0;
+}
+
+/* Same guarantee for a bare link or button that is not a .tile. Applies the
+   floor without imposing a box on text that is already large enough. */
+.hit {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap-min);
+}
+
+/* ---- 3. a11y ------------------------------------------------------------
+   WIREFRAME §15.
+   -------------------------------------------------------------------------- */
+
+/* Visible only to screen readers. The standard clip-rect construction: it
+   stays in the a11y tree (unlike display:none) and is not focus-trapped. */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Skip link — the first focusable thing in the shell, invisible until focused. */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+}
+.skip-link:focus {
+  left: 8px; top: 8px;
+  padding: 8px 12px;
+  background: var(--surface-3);
+  border: var(--hairline) solid var(--border-stronger);
+  border-radius: var(--r-control);
+  color: var(--text-primary);
+}
+
+/* NEVER COLOUR ALONE (§15). A stage is rendered as dot + TEXT LABEL + NUMBER.
+   The locked `.stage-dot--*` classes supply the colour; this supplies the
+   label that carries the same information without it. Teal and coral are
+   near-indistinguishable to ~8% of men with deuteranopia, so the dot is
+   decoration on top of the text — never the text's replacement. */
+.stage-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.stage-label__name { font-weight: 500; color: var(--text-primary); }
+.stage-label__value { font-variant-numeric: tabular-nums; }
+
+/* An RTL Arabic island inside LTR chrome (§15: "mixed-direction rows are the
+   classic bug here"). The element carrying this MUST also carry dir="rtl"
+   lang="ar" in the markup — CSS direction alone does not tell a screen reader
+   which language it is reading, and does not set the bidi paragraph level for
+   assistive tech. This class is the paint; the attributes are the meaning. */
+.rtl-island {
+  direction: rtl;
+  text-align: right;
+  font-family: var(--font-arabic);
+  unicode-bidi: isolate;          /* neighbours' direction cannot leak in */
+}
+
+/* The inverse: a number or code fragment inside an RTL line stays LTR. */
+.ltr-island {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+/* prefers-reduced-motion: the locked file already kills all animation and
+   transition globally at line 185. Nothing is added here — a second, weaker
+   rule would only invite someone to "fix" the strong one. */
+
+/* ---- 4. Route-tree primitives ------------------------------------------- */
+
+/* A page heading block. Kept quiet so the .ayah stays the largest type on any
+   screen that has one (locked §8 rule 1). */
+.page-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 12px;
+}
+.page-head h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+.page-head h2 { margin: 0; font-size: 16px; font-weight: 600; }
+
+/* A vertical stack of cards/rows. */
+.stack { display: flex; flex-direction: column; gap: 12px; }
+.stack--tight { gap: 8px; }
+
+/* A tappable row inside a card list (surah rows, ayah rows). Meets the 44px
+   floor by construction rather than by wrapper. */
+.row-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: var(--tap-min);
+  padding: 8px 4px;
+  color: inherit;
+  text-decoration: none;
+  border-bottom: var(--hairline) solid var(--border);
+}
+.row-link:last-child { border-bottom: none; }
+.row-link:hover { background: var(--surface-1); }
+
+/* The build-plan stub marker. Every route that is not this step's work renders
+   a real page with a real heading and one of these — never a 404, never a
+   blank file. It is deliberately plain: a stub that looks finished is worse
+   than a stub that says what it is waiting for. */
+.stub-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  border: var(--hairline) dashed var(--border-stronger);
+  border-radius: var(--r-control);
+  padding: 10px 12px;
+}
+.stub-note code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+
+/* Skeleton block. "Skeletons are never zeros" (edge case #73): a pending read
+   paints THIS, never the digit 0. Animation is intentionally absent — the
+   locked file disables it under prefers-reduced-motion anyway, and a static
+   block is honest at zero cost. */
+.skel {
+  display: inline-block;
+  min-width: 2.5ch;
+  height: 1em;
+  vertical-align: -0.15em;
+  border-radius: 4px;
+  background: var(--surface-0);
+  border: var(--hairline) solid var(--border);
+}
+
+/* A quiet metadata line: "30 ayat · Makki". */
+.meta-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.meta-line__sep { color: var(--text-muted); }

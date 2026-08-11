@@ -694,3 +694,72 @@ positive most likely to teach a reader that the scan is noise and can be
 ignored. Rewritten as `\u` escapes: identical ranges, zero literals, and the
 guard still catches both literal Arabic and the `\u06xx` escape hatch (verified
 by injecting each and watching it fail).
+
+---
+
+## Ratified 2026-08-11 — steps 17 and 18: shell, routes, and the quiz loop
+
+### v3-D41 — Step 17 COMPLETE, step 18 (quiz components) COMPLETE
+
+Supersedes v3-D39's "PARTIAL". The route tree, app shell and CSS extension layer
+now exist, closing the gap that entry named.
+
+- **Routes** per v3-D14: `/` (landing, stub — the real page is M10) and a
+  `(app)` route group carrying `/home`, `/library`, `/surah/[surah]`,
+  `/surah/[surah]/[ayah]`, `/session`, `/progress`, `/progress/list`, `/plan`.
+  Every not-yet-built route is a real file with a stub marker naming its
+  build-plan step — never a 404, never an empty file.
+- **Shell**: root layout loads the locked CSS then `app/iman-ext.css`; a 4-tab
+  bottom bar where Plan replaces "You" (v3-D05). Client-side steering island for
+  edge case #92 (a service worker bypasses middleware, so `/`→`/home` must also
+  happen client-side; IndexedDB is truth, a cookie is only a hint).
+- **`app/iman-ext.css`** — the documented extension layer. The locked file is
+  byte-gated, so every project rule (e.g. #82's 44px `.tile-hit` wrapper) lives
+  here. This is what makes "never edit the locked file" a workable instruction
+  rather than a dead end.
+- **Quiz components**: one per render shape (Choice, SequenceFill, OrderTiles,
+  LocateChoice) plus a `QuizCard` dispatcher whose switch is exhaustive over the
+  four shapes with a never-typed default. `FaceText` is the ONE place
+  script→direction happens (#80). Grading is not in the views: a component
+  reports WHICH index was tapped and nothing else (gate clause 5 enforces it).
+- **#81 solved by construction, not by correction.** The component computes no
+  visual index at all — each handler closes over its ARRAY index. `.bank` is
+  CSS-mirrored, and presentation never travels back into data.
+  `mapTapToLogicalIndex` is a deliberate identity function that exists so the
+  property has somewhere to be asserted; an adversarial mutation to
+  `length - 1 - i` turns 7 tests red.
+
+### v3-D42 — The OrderTiles reveal expression: rewritten for clarity, NOT a live bug
+
+An adversarial reviewer flagged `correctOrder[ordinal] === correctOrder[index]`
+in `OrderTilesCard` as a defect that "silently ignores the answer key", and
+proposed `correctOrder[ordinal] === index`.
+
+**Both the alarm and the proposed fix were wrong, and the record should say so.**
+
+- It was NOT a live defect. `buildReorder` fills `correctOrder` with a strictly
+  increasing run of ayah numbers, so its elements are always DISTINCT, and for
+  distinct elements `co[a] === co[b]` is exactly equivalent to `a === b`.
+  Verified exhaustively over starts 1..200 x counts 1..8: zero divergence. The
+  reviewer's own counter-example used a permutation (`[3,1,2]`) the engine
+  cannot produce.
+- The proposed replacement would have INTRODUCED a bug: `correctOrder` holds
+  ayah numbers, not tile indices, so `correctOrder[ordinal] === index` compares
+  an ayah number against a position and holds only by accident.
+
+The expression is nonetheless rewritten to `ordinal === index` — the form that
+states the actual intent — because the old one only *read* as if it consulted
+the answer key, and its correctness rested on an unstated accident of
+distinctness rather than on expressed intent. It would become a real defect the
+day `correctOrder` is allowed to repeat a value.
+
+**The genuine gap the review exposed was in the TESTS, not the component**: every
+existing case used an in-order attempt, where correct and incorrect reveal
+implementations agree, so the reveal behaviour was entirely unpinned. Two tests
+now pin it directly (an out-of-order attempt marks exactly one tile correct; a
+fully in-order attempt marks all). Mutating the reveal to `true` turns one red.
+
+**Method note:** an adversarial verifier finding something is the START of an
+investigation, not the end of one. This one was confidently argued, specific,
+and wrong — and its fix would have shipped a real bug. Verify the counter-example
+against what the producer can actually emit before acting on it.

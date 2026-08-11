@@ -53,9 +53,9 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 868 total, typechecks first (typecheck-v3): 255 v2 vitest + 52
-             # corpus-compiler + 391 engine + 15 fold-runner + 37 apps/web + 118 PHPUnit.
-             # Steps 1-16 complete; step 17 PARTIAL (v3-D39: route tree outstanding).
+make test    # 960 total, typechecks first (typecheck-v3): 255 v2 vitest + 52
+             # corpus-compiler + 391 engine + 15 fold-runner + 129 apps/web + 118 PHPUnit.
+             # Steps 1-18 complete. Next: step 19 (macro panel, ring, progress table).
 make build   # must pass — CI no longer tolerates failure (B9)
 make doctor  # what's missing
 ```
