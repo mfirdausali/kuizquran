@@ -147,6 +147,59 @@
   min-height: var(--tap-min);
 }
 
+/* THE LOCKED CONTROLS THAT MISS THE FLOOR BY THEMSELVES (M10 a11y audit).
+   Found by measuring the locked declarations rather than trusting that block 2
+   above had covered everything — it had covered `.tile`, which is wrapped at
+   every call site, and missed the two controls that are NOT wrapped anywhere:
+
+     .option  padding: 9px 12px  + 14px x 1.5 line-height  = 39px   (iman-ui:269)
+     .btn     padding: 11px      + 14px x 1.5 line-height  = 43px   (iman-ui:326)
+
+   `.option` is the most-tapped control in the product — every `choice` and
+   `locateChoice` card is a stack of them — and it was 5px under the §15/v2-D28
+   floor on every quiz screen. `.btn` misses by a single pixel, which is still a
+   miss and still trivially fixed.
+
+   A floor, not a height: `min-height` cannot shrink a control that a longer
+   Arabic gloss has already made taller, so nothing that renders correctly today
+   moves. Neither locked rule is redefined — this only raises a minimum the
+   locked file never set, which keeps the byte-diff gate green (rule 2 of this
+   layer: extend, never restyle). Flex centring keeps the label optically
+   centred once the box is taller than its text; `.option` keeps its locked
+   `text-align`, so `--arabic`'s right-alignment still wins. */
+.option,
+.btn {
+  min-height: var(--tap-min);
+}
+
+/* `display: flex` makes the locked `text-align` INERT, so alignment has to be
+   restated in flex terms or `.option--arabic`'s `text-align: right` silently
+   stops working and every Arabic option left-aligns. `flex-start` under the
+   locked `direction: rtl` resolves to the RIGHT edge, so one declaration
+   reproduces both locked alignments — LTR options stay left, RTL options stay
+   right — without either branch naming a physical side. */
+.option {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* A quiet control sitting INSIDE a sentence rather than stacked in a column.
+   The locked `.btn` is `width: 100%` (a full-width stacked action), which is
+   right for the onboarding column and wrong for the "No items match … Clear"
+   line in the empty progress table, where it pushed the word onto its own
+   full-width row. Opt-in, so every existing stacked `.btn--ghost` is
+   untouched. */
+.stub-note .btn {
+  width: auto;
+  padding-inline: 8px;
+}
+
 /* ---- 3. a11y ------------------------------------------------------------
    WIREFRAME §15.
    -------------------------------------------------------------------------- */

@@ -38,6 +38,7 @@ import { explain } from "@/lib/workbench/explain.ts";
 import { loadFrontier, type FrontierLoad } from "@/lib/workbench/verifications.ts";
 import { FrontierNavigator } from "./FrontierNavigator";
 import { ExplainTrace } from "./ExplainTrace";
+import { QariMode } from "./QariMode";
 
 /** The lanes this picker can select. `rc` is absent BY DESIGN — WIREFRAME's
  *  DATA/CODE table keeps reconstruct.ts's state machine as CODE permanently,
@@ -86,6 +87,10 @@ export function WorkbenchIsland({ surah, corpus }: WorkbenchIslandProps) {
   const [load, setLoad] = useState<FrontierLoad>({ state: "loading" });
   const [ayah, setAyah] = useState<number>(1);
   const [lane, setLane] = useState<PickableLane>("s1");
+  // Bumped after every signature. The frontier is the thing a signature
+  // CHANGES, so a signed ayah whose chip stays amber on screen is a reviewer
+  // signing it twice — the re-read is part of the workflow, not a refresh nicety.
+  const [frontierEpoch, setFrontierEpoch] = useState(0);
 
   useEffect(() => {
     let live = true;
@@ -97,7 +102,15 @@ export function WorkbenchIsland({ surah, corpus }: WorkbenchIslandProps) {
     return () => {
       live = false;
     };
-  }, [surah]);
+  }, [surah, frontierEpoch]);
+
+  // The chip the navigator is CURRENTLY showing for the open ayah. Read from
+  // the same worklist the navigator paints, so qari mode and the chip beside
+  // it can never disagree about what is being signed.
+  const chipForAyah =
+    load.state === "ready"
+      ? (load.worklist.rows.find((r) => r.ayah === ayah)?.chip ?? null)
+      : null;
 
   const ayahCount = corpus.meta.ayahCount;
   const spec = useMemo(
@@ -167,6 +180,13 @@ export function WorkbenchIsland({ surah, corpus }: WorkbenchIslandProps) {
           built yet.
         </p>
       </section>
+
+      <QariMode
+        surah={surah}
+        ayah={ayah}
+        chip={chipForAyah}
+        onSigned={() => setFrontierEpoch((n) => n + 1)}
+      />
 
       <ExplainTrace explanation={explanation} surah={surah} />
     </div>

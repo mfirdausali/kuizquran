@@ -220,6 +220,13 @@ class FlagPlaneTest extends TestCase
             'typed_flag_name' => $key,
             'acknowledges_retention_risk' => true,
             'acknowledges_no_dark_pattern' => true,
+            // The version the operator read. Version 0 is the correct value for a
+            // flag with no row yet — this one has never been written. It is sent
+            // EXPLICITLY because the controller no longer defaults it to the
+            // version it just read back (M10 security review): a default made
+            // the row compare against itself, so a ramp could never conflict
+            // with a concurrent kill.
+            'version' => 0,
         ]);
 
         $response->assertOk();
@@ -305,5 +312,95 @@ class FlagPlaneTest extends TestCase
         ])->assertOk();
 
         $this->assertFalse(Flag::where('key', $key)->first()->bannerVisible());
+    }
+
+    // ═════════ M10 SECURITY REVIEW — the HTTP layer's version default ══════════
+
+    /**
+     * FINDING S3: `enable()` defaulted the expected version to the version it had
+     * just READ BACK from the database, so an omitted `version` compared the row
+     * against itself and could never conflict.
+     *
+     * Edge case #126 — "kill = unconditional write; ramp fails on conflict" — was
+     * proven at the SERVICE level by
+     * `test_a_concurrent_kill_and_ramp_always_resolves_to_killed`, which passes
+     * version 3 explicitly. Nothing exercised the HTTP layer, which is where the
+     * default lived. So the suite was green while the route most likely to be
+     * used by hand could silently overwrite a kill it never saw.
+     *
+     * THIS TEST GOES THROUGH THE ROUTE, and asserts the OUTCOME that matters:
+     * after a kill lands, a ramp that omits the version must NOT enable the flag.
+     * A test asserting merely "422 when version is absent" would be asserting the
+     * ingredient — it would still pass if the 422 were removed and the ramp were
+     * made to succeed, which is the failure mode itself.
+     *
+     * MUTATION: restore `$request->input('version', $current->version ?? 0)`.
+     * The versionless ramp then wins and `assertFalse(enabled)` goes red.
+     */
+    public function test_a_versionless_ramp_cannot_overwrite_a_concurrent_kill(): void
+    {
+        $admin = $this->admin();
+        $key = 'social.leaderboard';
+
+        // The flag is live; an operator kills it.
+        Flag::create(['key' => $key, 'enabled' => true, 'version' => 3]);
+        $this->flags()->kill($key, $admin->id, 1_700_000_000_000);
+        $this->assertFalse($this->flags()->enabled($key));
+
+        // A second operator's in-flight ceremony commits WITHOUT a version —
+        // a hand-rolled curl, or a console that forgot to round-trip the field.
+        $this->postJson("/api/admin/flags/{$key}/enable", [
+            'reason' => 'a perfectly good reason of sufficient length here',
+            'typed_flag_name' => $key,
+            'acknowledges_retention_risk' => true,
+            'acknowledges_no_dark_pattern' => true,
+            // no `version`
+        ]);
+
+        // THE PROPERTY: the killed flag is still killed. #126 holds over HTTP.
+        $this->assertFalse(
+            $this->flags()->enabled($key),
+            '#126: a ramp that never named a version must not resurrect a killed flag',
+        );
+    }
+
+    /**
+     * The same route still ramps correctly when the operator DOES name the
+     * version they read — so the fix above is a conflict check, not a blanket
+     * refusal that would make the enable path unusable.
+     */
+    public function test_a_ramp_naming_the_current_version_still_succeeds(): void
+    {
+        $this->admin();
+        $key = 'social.friends';
+        Flag::create(['key' => $key, 'enabled' => false, 'version' => 7]);
+
+        $this->postJson("/api/admin/flags/{$key}/enable", [
+            'reason' => 'a perfectly good reason of sufficient length here',
+            'typed_flag_name' => $key,
+            'acknowledges_retention_risk' => true,
+            'acknowledges_no_dark_pattern' => true,
+            'version' => 7,
+        ])->assertOk();
+
+        $this->assertTrue($this->flags()->enabled($key));
+    }
+
+    /** A ramp naming a STALE version is refused with the conflict status. */
+    public function test_a_ramp_naming_a_stale_version_conflicts(): void
+    {
+        $this->admin();
+        $key = 'social.activity_feed';
+        Flag::create(['key' => $key, 'enabled' => false, 'version' => 9]);
+
+        $this->postJson("/api/admin/flags/{$key}/enable", [
+            'reason' => 'a perfectly good reason of sufficient length here',
+            'typed_flag_name' => $key,
+            'acknowledges_retention_risk' => true,
+            'acknowledges_no_dark_pattern' => true,
+            'version' => 4,          // stale
+        ])->assertStatus(409);
+
+        $this->assertFalse($this->flags()->enabled($key));
     }
 }

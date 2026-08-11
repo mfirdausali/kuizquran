@@ -64,10 +64,47 @@ function slim(corpus) {
   return {
     meta: corpus.meta,
     verses: corpus.verses,
-    words: corpus.words,
+    words: (corpus.words ?? []).map(stripMorphology),
     distractors: corpus.distractors,
     ...(corpus.sceneBeats ? { sceneBeats: corpus.sceneBeats } : {}),
   };
+}
+
+/** The QAC morphology fields. GPL — see `v1/data/raw/SOURCES.md`. */
+const QAC_MORPHOLOGY_FIELDS = ["lemma", "root", "class"];
+
+/**
+ * STRIP QAC MORPHOLOGY BEFORE IT REACHES A BROWSER (v3-D24, M10 launch audit).
+ *
+ * v3-D24, verbatim: "`lemma` / `root` / `class` feed distractor generation and
+ * are **stripped from the learner artifact**. 1131/1777 shipped words currently
+ * carry `root`, so GPL exposure in a paid bundle is real."
+ *
+ * That decision was RATIFIED BUT NEVER IMPLEMENTED. Before this change, the
+ * staged `public/corpus/112.json` carried `lemma`, `root` and `class` on all 15
+ * of its words — a public, unauthenticated static asset inside a paid bundle,
+ * carrying GPL-licensed annotations. The compiler's own output legitimately
+ * keeps them (they feed distractor generation at BUILD time, which is exactly
+ * the "build-time only" the decision permits); the leak was here, at the one
+ * boundary where corpus data crosses into the browser, and `slim()` copied
+ * `corpus.words` through wholesale.
+ *
+ * Stripping is safe: nothing outside the compiler reads these fields. The
+ * engine's `types.ts` declares all three `| null`, and no engine module, lib or
+ * component dereferences them — verified by grep across `packages/engine/src`,
+ * `apps/web/lib`, `apps/web/components` and `apps/web/app`. Distractors arrive
+ * pre-computed in `corpus.distractors`, which is what the client actually
+ * consumes.
+ *
+ * `check-corpus-morphology.mjs` now fails the build if these fields reappear in
+ * `public/`, so the decision is enforced mechanically rather than by memory.
+ */
+function stripMorphology(word) {
+  const out = {};
+  for (const [key, value] of Object.entries(word)) {
+    if (!QAC_MORPHOLOGY_FIELDS.includes(key)) out[key] = value;
+  }
+  return out;
 }
 
 const staged = [];

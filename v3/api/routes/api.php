@@ -9,7 +9,9 @@ use App\Http\Controllers\Admin\AdminUsersController;
 use App\Http\Controllers\Admin\FlagController;
 use App\Http\Controllers\Admin\SystemHealthController;
 use App\Http\Controllers\Billing\StripeWebhookController;
+use App\Http\Controllers\ContentFreezeController;
 use App\Http\Controllers\EventsController;
+use App\Http\Controllers\GlossDraftsController;
 use App\Http\Controllers\OverridesController;
 use App\Http\Controllers\SpecsController;
 use App\Http\Controllers\VerificationsController;
@@ -87,6 +89,25 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/flags/{key}/kill', [FlagController::class, 'kill']);
         Route::post('/flags/{key}/enable', [FlagController::class, 'enable']);
         Route::post('/flags/{key}/ack', [FlagController::class, 'acknowledge']);
+
+        // ---- Build-plan step 27 (M9): the MS gloss authoring surface. ----
+        // ADMIN-ONLY EVEN FOR READS, unlike /verifications (which is a public
+        // read because the verified frontier is a transparency fact). These
+        // rows are UNREVIEWED, NON-SHIPPING drafts of religious translation;
+        // a public read of them is exactly the "app appears to publish an
+        // unreviewed Malay gloss" failure v3-D15 exists to prevent.
+        //
+        // The table ships EMPTY (see the migration): BUILD-PLAN allows agents
+        // to draft into a flagged non-shipping table only with Firdaus's
+        // ratification, and none is recorded in DECISIONS.md.
+        Route::get('/gloss-drafts', [GlossDraftsController::class, 'index']);
+        Route::post('/gloss-drafts', [GlossDraftsController::class, 'store']);
+        Route::post('/gloss-drafts/{id}/review', [GlossDraftsController::class, 'review']);
+
+        // Build-plan step 28 (M9): the content-freeze gate, read as JSON by the
+        // workbench so "is this corpus bookable for a qari session" is answered
+        // on the screen where sessions get scheduled, not only in a terminal.
+        Route::get('/content-freeze', [ContentFreezeController::class, 'index']);
     });
 });
 

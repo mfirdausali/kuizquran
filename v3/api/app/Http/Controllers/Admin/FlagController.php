@@ -104,8 +104,35 @@ class FlagController extends Controller
             return response()->json(['error' => 'ceremony incomplete', 'errors' => $errors], 422);
         }
 
-        $current = Flag::where('key', $key)->first();
-        $expectedVersion = (int) $request->input('version', $current->version ?? 0);
+        // ══════════════════════════════════════════════════════════════════════
+        // THE VERSION MUST COME FROM THE CLIENT (M10 security review).
+        //
+        // This previously defaulted to `$current->version` — the version READ
+        // BACK from the database one line earlier. An omitted `version` therefore
+        // compared the row against itself and could never conflict, which
+        // silently converted the optimistic-concurrency check into a no-op for
+        // any caller that left the field out. The 409 below became unreachable
+        // by the exact path most likely to hit it: a hand-rolled curl, or a
+        // console that forgot to round-trip the field.
+        //
+        // Edge case #126 is "kill = unconditional write; ramp fails on
+        // conflict". `FlagService::ramp()` implements that faithfully and
+        // `FlagPlaneTest` proves it AT THE SERVICE LEVEL — passing version 3
+        // explicitly. Nothing tested the HTTP layer, which is where the default
+        // lived, so a green suite coexisted with a ramp that could overwrite a
+        // kill it never saw.
+        //
+        // Now: no version, no ramp. Enabling a flag is the ceremony path, where
+        // one more required field is the correct trade against re-enabling a
+        // feature another operator killed seconds ago.
+        // ══════════════════════════════════════════════════════════════════════
+        if (! $request->has('version')) {
+            return response()->json([
+                'error' => 'ceremony incomplete',
+                'errors' => ['version' => 'required — the flag version you read, so a concurrent kill cannot be overwritten'],
+            ], 422);
+        }
+        $expectedVersion = (int) $request->input('version');
 
         $ok = $this->flags->ramp($key, $expectedVersion, $request->user()?->id, (int) round(microtime(true) * 1000), [
             'reason' => $reason,

@@ -201,7 +201,12 @@ export function ProgressTable({ rows }: ProgressTableProps) {
       {visible.length === 0 && (
         <div className="stub-note" role="status">
           No items match &ldquo;{query}&rdquo;.{" "}
-          <button type="button" className="btn btn--quiet" onClick={() => setQuery("")}>
+          {/* `btn--ghost` is the locked quiet modifier (iman-ui.css:338). This
+              read `btn--quiet` — a class NO stylesheet defines, so the button
+              rendered as a full-width default `.btn` mid-sentence rather than
+              the inline quiet control it is meant to be. `hit` supplies the
+              44px floor, as every other bare control in the app does. */}
+          <button type="button" className="btn btn--ghost hit" onClick={() => setQuery("")}>
             Clear
           </button>
         </div>

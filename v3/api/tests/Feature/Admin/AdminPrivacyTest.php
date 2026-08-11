@@ -285,4 +285,156 @@ class AdminPrivacyTest extends TestCase
             $this->assertStringNotContainsString('leaky@example.com', $csv, "`{$param}` must not reintroduce identity");
         }
     }
+
+    // ═════════════════ M10 SECURITY REVIEW — four findings ═════════════════════
+
+    /**
+     * FINDING S4: `AdminAudit`'s docblock says "`AdminAuditTest` asserts layer 2
+     * directly and asserts that layer 1 is DOCUMENTED", and both the model and
+     * the migration point at `docs/ADMIN-CONSOLE.md` for the Postgres grant.
+     *
+     * No such assertion existed, and the file did not exist either.
+     *
+     * That is not a documentation nit. The append-only guarantee has two layers,
+     * and layer 1 — `REVOKE UPDATE, DELETE` on the app's role — is the only one
+     * that survives a raw query, a psql session, or code that bypasses the
+     * model. It CANNOT be tested from inside the app that lacks it: an
+     * application holding UPDATE rights cannot prove it does not hold them. The
+     * strongest available in-repo assertion is therefore that the runnable grant
+     * and its verification query EXIST, so the human applying them has something
+     * to apply.
+     *
+     * MUTATION: delete `docs/ADMIN-CONSOLE.md`, or remove the GRANT statement
+     * from it. Red.
+     */
+    public function test_the_database_level_append_only_grant_is_documented(): void
+    {
+        $path = dirname(__DIR__, 3).'/docs/ADMIN-CONSOLE.md';
+
+        $this->assertFileExists(
+            $path,
+            'AdminAudit and the admin migration both cite docs/ADMIN-CONSOLE.md for the '.
+            'append-only grant. Layer 1 of a two-layer guarantee cannot be applied from a '.
+            'document that does not exist.',
+        );
+
+        $doc = file_get_contents($path);
+
+        // The runnable grant itself — not merely prose describing one.
+        $this->assertMatchesRegularExpression(
+            '/REVOKE\s+UPDATE,\s*DELETE.*ON\s+TABLE\s+admin_audit/is',
+            $doc,
+            'the document must carry the actual REVOKE, not a description of it',
+        );
+        $this->assertMatchesRegularExpression(
+            '/GRANT\s+INSERT,\s*SELECT\s+ON\s+TABLE\s+admin_audit/is',
+            $doc,
+            'the app role still needs INSERT and SELECT, or the audit log cannot be written',
+        );
+
+        // And a way to CHECK it, since the grant cannot be asserted from here.
+        $this->assertStringContainsString(
+            'role_table_grants',
+            $doc,
+            'a grant nobody can verify is a grant nobody will notice is missing',
+        );
+    }
+
+    // ═════════════════ M10 SECURITY REVIEW — three route findings ══════════════
+
+    /**
+     * FINDING S1: a reveal token was looked up BY VALUE ALONE, so it was usable
+     * by any admin who obtained it, not only the one who minted it.
+     *
+     * Why that matters even though every admin is already allowlisted: `reveal`
+     * writes exactly ONE audit row, at mint time, naming ONE actor. A second
+     * operator keeping that token alive generated no row of their own, so the
+     * audit log named an operator who was no longer the one holding the
+     * identity — an audit-COMPLETENESS failure on the one surface whose entire
+     * purpose is to make identity access reconstructable.
+     *
+     * Asserted as the OUTCOME a second admin observes (403 on a token that is
+     * simultaneously proven still valid for its owner), never as "the query has
+     * a where clause".
+     *
+     * MUTATION: drop `->where('admin_id', ...)` from `check()`. The second
+     * admin then gets 200 and this test goes red.
+     */
+    public function test_a_reveal_token_is_useless_to_a_second_admin(): void
+    {
+        config([
+            'admin.emails' => ['ops@example.com', 'ops2@example.com'],
+            'admin.pseudonym_pepper' => 'test-pepper',
+            'admin.reveal_ttl_seconds' => 900,
+        ]);
+        $first = User::factory()->create(['email' => 'ops@example.com', 'email_verified_at' => now()]);
+        $second = User::factory()->create(['email' => 'ops2@example.com', 'email_verified_at' => now()]);
+        $subject = User::factory()->create(['email' => 'learner@example.com']);
+
+        Sanctum::actingAs($first);
+        $token = $this->postJson("/api/admin/users/{$subject->id}/reveal", [
+            'reason_code' => 'support_ticket',
+            'reason_text' => 'investigating ticket 4821 about a missing session',
+        ])->json('revealToken');
+        $this->assertNotNull($token);
+
+        // The SECOND admin — fully authenticated, fully allowlisted — is refused.
+        Sanctum::actingAs($second);
+        $this->getJson('/api/admin/reveal/'.$token)->assertStatus(403);
+
+        // The token is genuinely still live for the admin who minted it, so the
+        // 403 above is ownership and not merely an expired token.
+        Sanctum::actingAs($first);
+        $this->getJson('/api/admin/reveal/'.$token)->assertOk()->assertJson(['valid' => true]);
+    }
+
+    /**
+     * FINDING S2: the bulk CSV export wrote NO audit row.
+     *
+     * The columns carry no identity, which is why it looked exempt. But stable
+     * pseudonyms plus signup dates plus event counts is a complete behavioural
+     * profile of the entire user base, joinable against any single previously
+     * revealed identity. A bulk read of every learner is exactly the event an
+     * audit log exists to record.
+     *
+     * MUTATION: delete the `AdminAudit::create` from `exportCsv`. Red here.
+     */
+    public function test_the_bulk_csv_export_is_audited(): void
+    {
+        $admin = $this->admin();
+        User::factory()->count(3)->create();
+
+        $this->assertSame(0, AdminAudit::count());
+
+        $this->get('/api/admin/users/export.csv')->streamedContent();
+
+        $row = AdminAudit::where('action', 'export_users_csv')->first();
+        $this->assertNotNull($row, 'a bulk read of every learner must leave a record');
+        $this->assertSame($admin->id, $row->actor_admin_id);
+        // The subject is the whole table; naming one learner would be a lie.
+        $this->assertNull($row->subject_pseudonym);
+    }
+
+    /**
+     * FINDING S2, second half: the row is written BEFORE the stream is consumed,
+     * so a dump that dies mid-flight has still been recorded. An audit log that
+     * only captures COMPLETED exports is one a crash can silently empty.
+     *
+     * `streamDownload` defers the callback until the content is read, so
+     * asserting the row exists on the returned response WITHOUT ever reading
+     * the stream proves the ordering.
+     */
+    public function test_the_export_audit_row_precedes_the_stream(): void
+    {
+        $this->admin();
+        User::factory()->count(2)->create();
+
+        $this->get('/api/admin/users/export.csv');   // deliberately NOT consumed
+
+        $this->assertSame(
+            1,
+            AdminAudit::where('action', 'export_users_csv')->count(),
+            'the audit row must not depend on the stream being read to completion',
+        );
+    }
 }

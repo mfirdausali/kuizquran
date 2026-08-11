@@ -240,6 +240,17 @@ function Section({ id }: { id: LandingSectionId }) {
           {/* v3-D19's positioning, stated plainly in the footer so it reaches a
               visitor who skipped the objections. */}
           <p className="caption">{FOOTER.position}</p>
+          {/* The attribution page (build-plan step 30, v3-D24: "ships
+              regardless"). Linked from the footer of the one page every visitor
+              sees, because an attribution page nobody can reach discharges no
+              obligation. A short label, not prose — clause 12 forbids sentences
+              in this markup, and the page's own copy lives in
+              lib/legal/attribution.ts. */}
+          <p className="caption">
+            <Link href="/attribution" className="hit">
+              Sources and attribution
+            </Link>
+          </p>
         </footer>
       );
 

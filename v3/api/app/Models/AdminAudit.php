@@ -14,14 +14,23 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  *     INSERT and SELECT on this table and NOT update/delete. This is the real
  *     guarantee — it holds against raw queries, against a future developer, and
  *     against this model being bypassed entirely.
- *     See `docs/ADMIN-CONSOLE.md` for the grant.
+ *     See `docs/ADMIN-CONSOLE.md` §1 for the runnable grant and its
+ *     verification query.
  *
- *  2. THE ORM GUARD BELOW: `saving`/`deleting` hooks throw on any attempt to
+ *  2. THE ORM GUARD BELOW: `updating`/`deleting` hooks throw on any attempt to
  *     modify an existing row. This is the layer that gives a clear error in
  *     development and in SQLite tests, where per-table grants do not exist.
  *
- * `AdminAuditTest` asserts layer 2 directly and asserts that layer 1 is
- * DOCUMENTED, because a grant cannot be tested from inside the app that lacks it.
+ * `AdminPrivacyTest` asserts layer 2 directly
+ * (`test_an_audit_row_can_never_be_updated_or_deleted`) and asserts that layer 1
+ * is DOCUMENTED AND RUNNABLE
+ * (`test_the_database_level_append_only_grant_is_documented`), because a grant
+ * cannot be tested from inside the app that lacks it — an application holding
+ * UPDATE rights cannot prove it does not hold them.
+ *
+ * NOTE (M10 audit): this docblock previously named a nonexistent `AdminAuditTest`
+ * and pointed at a `docs/ADMIN-CONSOLE.md` that had never been written, so layer
+ * 1 was a promise with nothing behind it. Both now exist.
  */
 class AdminAudit extends Model
 {

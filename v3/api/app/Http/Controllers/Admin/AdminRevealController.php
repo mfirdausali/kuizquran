@@ -118,10 +118,34 @@ class AdminRevealController extends Controller
     /**
      * Re-check a reveal token. The server decides expiry; a client that never
      * re-masks is refused here.
+     *
+     * ══════════════════════════════════════════════════════════════════════════
+     * THE TOKEN IS BOUND TO THE ADMIN WHO MINTED IT (M10 security review).
+     *
+     * This previously looked the token up by value alone. Every admin is behind
+     * the same allowlist, so any operator holding another operator's token could
+     * keep it alive — and, more importantly, `reveal` writes ONE audit row at
+     * mint time naming ONE actor. A second operator extending someone else's
+     * reveal produced no row of their own, so the audit log recorded a reveal by
+     * an operator who was no longer the one holding the identity. That is an
+     * audit-completeness failure, which is the property this whole surface
+     * exists to guarantee.
+     *
+     * Scoping the lookup to `admin_id` makes the token useless to anyone but its
+     * minter, and keeps "who held this identity, and when" answerable from the
+     * audit log alone.
+     * ══════════════════════════════════════════════════════════════════════════
+     *
+     * The refusal is deliberately IDENTICAL for expired, unknown, and
+     * belongs-to-another-admin. Distinguishing them would turn this route into
+     * an oracle for "is this a live token?" — the same oracle reasoning that
+     * governs `AdminAuthController::deny()`.
      */
     public function check(Request $request, string $token): JsonResponse
     {
-        $row = AdminRevealToken::where('token', $token)->first();
+        $row = AdminRevealToken::where('token', $token)
+            ->where('admin_id', $request->user()->id)
+            ->first();
         $nowMs = (int) round(microtime(true) * 1000);
 
         if (! $row || $row->isExpired($nowMs)) {

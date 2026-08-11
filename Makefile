@@ -15,7 +15,7 @@ ENGINE  := v3/packages/engine
 FOLD_RUNNER := v3/worker/fold-runner
 WEB_V3  := v3/apps/web
 
-.PHONY: help setup dev dev-web dev-api dev-api3 test test-web test-api test-api3 test-v3 typecheck-v3 build clean doctor golden-log compile-corpus
+.PHONY: help setup dev dev-web dev-api dev-api3 test test-web test-api test-api3 test-v3 typecheck-v3 build clean doctor golden-log compile-corpus content-freeze distractor-qa
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -126,3 +126,14 @@ compile-corpus: ## Compile the v3 corpus for surahs 12, 103, 112 (build-plan ste
 	cd $(CORPUS_COMPILER) && npm run compile -- 12
 	cd $(CORPUS_COMPILER) && npm run compile -- 103
 	cd $(CORPUS_COMPILER) && npm run compile -- 112
+
+# ---- M9 content ops (build-plan steps 27 & 28) ----
+# These are the ENGINEERING half. The hours they govern are human: a qari's
+# calendar and a reviewer's judgement. `content-freeze` exits NON-ZERO until
+# every M9 entry criterion is met — that exit code is what makes booking a
+# scholar against an unfrozen corpus a visible mistake rather than a silent one.
+content-freeze: ## M9 GATE: report each content-freeze criterion MET/NOT MET (exit 1 = do NOT book the qari)
+	@node v3/scripts/content-freeze.mjs
+
+distractor-qa: ## M9: 10% distractor QA sample for one surah (SURAH=112 [PCT=10] [WRITE=1])
+	@node v3/scripts/distractor-qa.mjs --surah $(or $(SURAH),112) --pct $(or $(PCT),10) $(if $(WRITE),--write,)
