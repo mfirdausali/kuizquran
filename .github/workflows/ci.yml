@@ -121,6 +121,27 @@ jobs:
         with:
           php-version: "8.3"
 
+      - uses: actions/setup-node@v4
+        if: steps.has.outputs.yes == 'true' && matrix.dir == 'v3/api'
+        with:
+          node-version: 20
+
+      - name: Compile the v3 corpus (12, 67, 103, 112)
+        # Same gap as the Makefile's test-api3 target (see its comment):
+        # OverrideHashRecomputeTest reads
+        # packages/corpus-compiler/output/112/hashes.json directly, with no
+        # fixture fallback by design. This job never compiled the corpus, so
+        # v3/api's suite has been red on a genuinely clean checkout since the
+        # commit that added that test — caught by reproducing it locally
+        # (`rm -rf packages/corpus-compiler/output && make test-api3`), not
+        # by a prior green CI run, because CI itself had the same gap.
+        if: steps.has.outputs.yes == 'true' && matrix.dir == 'v3/api'
+        run: |
+          set -e
+          cd v3/packages/corpus-compiler
+          npm ci || npm install
+          for s in 12 67 103 112; do npm run compile -- "$s"; done
+
       - name: Composer install + test
         if: steps.has.outputs.yes == 'true'
         working-directory: ${{ matrix.dir }}

@@ -70,7 +70,16 @@ test-web: ## vitest (v2)
 test-api: ## PHPUnit (v2/api)
 	cd $(API) && php artisan test
 
-test-api3: ## PHPUnit (v3/api — build-plan step 13)
+test-api3: compile-corpus ## PHPUnit (v3/api — build-plan step 13)
+	@# v3-D77 fixed this gap for test-v3/build but missed this target:
+	@# OverrideHashRecomputeTest (DEFECTS.md#B3's live-wiring closure) reads
+	@# packages/corpus-compiler/output/112/hashes.json directly — no
+	@# hand-seeded fixture substitutes for it (deliberately: the whole point
+	@# is proving the recompute against the REAL compiled artifact). Without
+	@# this dependency, `test-api3` run before `test-v3` in `test`'s own
+	@# prerequisite list — or standalone, as `make test-api3` — failed on a
+	@# genuinely clean checkout with no output/ yet. Reproduced by hand: `rm
+	@# -rf packages/corpus-compiler/output && make test-api3` before this fix.
 	cd $(API_V3) && php artisan test
 
 test-v3: typecheck-v3 compile-corpus ## vitest (v3 packages: corpus-compiler, engine, worker/fold-runner, apps/web)

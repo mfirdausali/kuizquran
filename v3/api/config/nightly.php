@@ -42,4 +42,24 @@ return [
 
     /* How many learners the fold check samples per night. */
     'sample_size' => (int) env('NIGHTLY_SAMPLE_SIZE', 50),
+
+    /*
+     * v3-D18: "A `fold_determinism` P1 pages by email, not phone." Who gets
+     * paged is BUILD-PLAN Q12 ("who carries the 3am pager"), still an open
+     * question with no named human — so this defaults to the SAME allowlist
+     * `config('admin.emails')` already uses to decide who has operational
+     * authority over this deployment, rather than inventing a second
+     * unratified identity axis. NIGHTLY_PAGER_EMAILS overrides it
+     * independently, for a deployment that wants a smaller on-call rotation
+     * than the full admin list.
+     *
+     * Delivery itself still needs a live SMTP account (LAUNCH-CHECKLIST
+     * gate 20, BLOCKED-ON-INFRA) — MAIL_MAILER defaults to `log`, so in
+     * dev/test/CI a "page" is a log line, never a real send. Going live
+     * needs no code change, only MAIL_MAILER=smtp + credentials.
+     */
+    'pager_emails' => array_values(array_filter(array_map(
+        fn ($e) => strtolower(trim($e)),
+        explode(',', env('NIGHTLY_PAGER_EMAILS', env('ADMIN_EMAILS', '')))
+    ))),
 ];

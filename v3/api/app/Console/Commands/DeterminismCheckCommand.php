@@ -2,12 +2,16 @@
 
 namespace App\Console\Commands;
 
+use App\Mail\DeterminismP1Alert;
 use App\Models\Event;
 use App\Models\NightlyCheckRun;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Symfony\Component\Process\Process;
+use Throwable;
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════
@@ -385,18 +389,17 @@ class DeterminismCheckCommand extends Command
         };
 
         if ($severity === 'p1') {
-            // v3-D18: "A `fold_determinism` P1 pages by email, not phone."
-            // The mail path itself is M3 infra and is NOT wired here — this
-            // logs at the level a mail-on-error handler subscribes to, and
-            // the gap is stated rather than papered over.
-            $this->error('  ↳ P1: this resets the 7-night window. v3-D18 says page by email — MAIL DISPATCH IS NOT WIRED (see report).');
+            $this->error('  ↳ P1: this resets the 7-night window. Paging v3-D18\'s configured recipients by email.');
         }
 
         if ($this->option('no-record')) {
+            // A dry run (manual/test invocation, `--no-record`) never counts
+            // toward the streak, so it must never page either — paging on a
+            // run nobody recorded would train the on-call to distrust pages.
             return $severity;
         }
 
-        NightlyCheckRun::create([
+        $run = NightlyCheckRun::create([
             'check' => $check,
             'night' => $night,
             'severity' => $severity,
@@ -405,6 +408,10 @@ class DeterminismCheckCommand extends Command
             'trigger' => (string) $this->option('trigger'),
             'ran_at' => (int) round(microtime(true) * 1000),
         ]);
+
+        if ($severity === 'p1') {
+            $this->pageOnCall($run);
+        }
 
         // The key SystemHealthController has always read and nothing ever
         // wrote. Its contract is a COUNT of divergences (0 = ok), so an
@@ -416,5 +423,39 @@ class DeterminismCheckCommand extends Command
         }
 
         return $severity;
+    }
+
+    /**
+     * v3-D18: "A `fold_determinism` P1 pages by email, not phone." Only
+     * reached for a RECORDED p1 (a real, ledgered night) — never for
+     * `--no-record`.
+     *
+     * A send failure (unconfigured SMTP, network error) is logged and
+     * swallowed, never rethrown: the P1's own record in the ledger is the
+     * durable fact, and it must survive regardless of whether any one
+     * delivery attempt succeeds — the same "the write itself is never
+     * blocked" discipline v3-D81's synchronous hash recompute already
+     * established for this codebase.
+     */
+    private function pageOnCall(NightlyCheckRun $run): void
+    {
+        $recipients = config('nightly.pager_emails', []);
+        if ($recipients === []) {
+            Log::warning('determinism P1: no pager recipients configured (NIGHTLY_PAGER_EMAILS/ADMIN_EMAILS both empty) — nobody paged', [
+                'check' => $run->check,
+                'night' => $run->night,
+            ]);
+
+            return;
+        }
+
+        try {
+            Mail::to($recipients)->send(new DeterminismP1Alert($run));
+        } catch (Throwable $e) {
+            Log::error('determinism P1: paging failed — '.$e->getMessage(), [
+                'check' => $run->check,
+                'night' => $run->night,
+            ]);
+        }
     }
 }

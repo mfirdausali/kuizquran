@@ -53,16 +53,22 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 1800 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 243 v3/api + 101 corpus-compiler
-             # + 417 engine + 53 fold-runner + 684 apps/web. (v3-D80, 2026-08-12)
+make test    # 1819 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 252 v3/api + 111 corpus-compiler
+             # + 417 engine + 53 fold-runner + 684 apps/web. (v3-D82, 2026-08-12)
              # NOTE (v3-D50): v3/api/tests/Unit/.gitkeep is LOAD-BEARING.
              # NOTE (v3-D77): `make test`/`make build` both depend on `compile-corpus`
              # now — do not hand-run compile-corpus first and assume that's why it's green.
+             # NOTE (v3-D82): v3-D77's compile-corpus fix missed `test-api3` itself —
+             # OverrideHashRecomputeTest reads the real compiled 112/hashes.json with
+             # no fixture fallback, so `test-api3` (and CI's `php` job for v3/api) was
+             # red on a genuinely clean checkout. Both now compile the corpus first.
              # Steps 1-26 + 29 done. 27/28 blocked on human content/qari (HANDOVER.md C1-C4).
-             # 30's engineering is mostly done; LAUNCH-CHECKLIST.md gate 19 (PDPA
-             # delete/purge) landed its backend in v3-D79 and its frontend surface
-             # (/settings) in v3-D80 — still open: the Postgres append-only grant
+             # 30's engineering: the P1 pager is now wired (v3-D82) — a confirmed P1
+             # emails config('nightly.pager_emails') (defaults to ADMIN_EMAILS); still
+             # needs a live SMTP account to actually deliver (gate 20). LAUNCH-CHECKLIST
+             # gate 19 (PDPA delete/purge) landed its backend in v3-D79 and its frontend
+             # surface (/settings) in v3-D80 — still open: the Postgres append-only grant
              # and a live nightly `pdpa:purge-due` run (gate 20, no staging host).
              # See LAUNCH-CHECKLIST.md's "critical path out of here" for what's
              # genuinely still open — re-verify against the repo, don't trust this

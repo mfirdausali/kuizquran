@@ -2418,3 +2418,99 @@ row and DEFECTS.md#B3 should be updated to reflect this closing — left for
 the merger alongside every other stale-count correction this file already
 warns about (v3-D77 Finding 0 pattern: re-derive from the repo, not from a
 document's number).
+
+### v3-D82 — The fold_determinism P1 pager is wired; and a second `compile-corpus` gap, same shape as v3-D77's
+
+This run started, per NIGHTLY.md's rule, by re-deriving state from `git log`
+(HEAD matched `origin/main` at `9dd5052`). `HANDOVER.md`'s "Engineering — in
+dependency order" table listed E7 ("Operational mailer so a P1 actually
+pages someone (v3-D18). ~1 day") without the BLOCKED-ON-INFRA tag its
+neighbors E6/E8 carry — but v3-D81 (the immediately prior entry) had lumped
+all three together as "need live infra or a Stripe account this sandbox
+does not have." Checked directly: `DeterminismCheckCommand::record()`'s own
+docblock said `MAIL DISPATCH IS NOT WIRED`, and `config/mail.php` already
+defaults to the `log` driver with `MAIL_MAILER` swappable to `smtp` by env
+(step 13 built this for password reset/email verification). Sending mail
+in tests needs no SMTP account at all — `Mail::fake()` is exactly how the
+rest of this codebase's Laravel suite avoids live services. So the CODE half
+of gate 20's "the pager is not wired" sub-gap was agent-doable; only actual
+delivery (a real SMTP account) stays BLOCKED-ON-INFRA, unchanged.
+
+**What landed:**
+
+- `config/nightly.php#pager_emails` — comma-separated `NIGHTLY_PAGER_EMAILS`,
+  defaulting to `ADMIN_EMAILS` if unset. BUILD-PLAN Q12 ("who carries the 3am
+  pager") is still an open, unratified question with no named human; rather
+  than invent a second identity axis to answer it, this reuses the SAME
+  allowlist `config('admin.emails')` already uses for operational authority.
+- `App\Mail\DeterminismP1Alert` (+ a plain-HTML view, no markdown-mail
+  dependency) — subject names the check/night; body carries only counts
+  (`divergentCount`/`skewCount`/`atomsCompared`/`usersChecked`), never the
+  report's per-atom `userId` findings. Matches A.4's "no PII in logs"
+  discipline from the M10 security review: an email an SMTP provider relays
+  and logs gets the same treatment as an application log line.
+- `DeterminismCheckCommand::record()` now calls a new private
+  `pageOnCall(NightlyCheckRun $run)` immediately after the ledger row is
+  created, but ONLY for a severity that is actually `'p1'` AND actually
+  recorded — `--no-record` (dry runs, tests, manual invocations) never
+  pages, because a page nobody's night got counted for would teach the
+  on-call to distrust pages. An empty recipient list logs a `Log::warning`
+  naming the gap instead of silently doing nothing. A send failure
+  (unconfigured SMTP, network error) is caught and logged, never rethrown —
+  the ledger row is the durable fact and must survive the mail attempt
+  regardless of whether it succeeds, the same "the write is never blocked"
+  discipline v3-D81's synchronous hash recompute already established.
+
+**Verified:**
+
+- New `tests/Feature/Nightly/DeterminismP1PagerTest.php` (5 tests). No
+  fixture or oracle involved in triggering a P1: `foldCheck.ts`'s own
+  contract says a live-cache key absent from a fresh fold is a genuine
+  divergence, so seeding one real `rung_complete` event (making the learner
+  visible to `sampleFromDatabase()`'s Event-driven query) plus one stray
+  `atom_cache` row for an ayah no event names, at the current engine
+  version, produces a real P1 through the actual DB-fed code path — proven
+  by hand first (`php -r ...`) before it became a test, exactly the
+  RED-before-green discipline this file already asks for.
+- Mutation-tested the two claims that matter, both by hand-reverting a
+  specific line and confirming the right tests (and only those) went red,
+  then restoring byte-identically (`diff` empty): (1) disabling the
+  `pageOnCall()` call — 3 of 5 tests red; (2) moving the P1 log line before
+  the `--no-record` early return without moving the actual page call —
+  proved the dry-run test is the one that catches a misplaced page (4 of 5
+  red when the page call itself was hoisted above the guard).
+- **Second finding, independent of the pager:** building the pager's test
+  exposed that `v3/api`'s test suite is red on a genuinely clean corpus
+  checkout — reproduced directly (`rm -rf
+  packages/corpus-compiler/output && make test-api3` → 3 failures,
+  `OverrideHashRecomputeTest` asserting `output/112/hashes.json` exists).
+  v3-D77 added `compile-corpus` as a dependency of `test-v3` and `build`,
+  but `test-api3` was never included, and `test`'s own prerequisite list
+  runs `test-api3` BEFORE `test-v3` — so a clean `make test` failed here
+  too, and CI's `php` job (which never compiled the corpus at all) has been
+  red on `v3/api` since the commit that added `OverrideHashRecomputeTest`
+  (`9dd5052`, this run's starting HEAD). Fixed: `Makefile#test-api3` now
+  depends on `compile-corpus`; `.github/workflows/ci.yml`'s `php` job
+  compiles the corpus before `v3/api`'s matrix leg (guarded to that leg
+  only — `v2/api` needs no corpus). Same recurring shape as v3-D38/D45/
+  D49/D50/D77: a gate whose author verified it locally without reproducing
+  a truly clean checkout.
+- Full suite: `TZ=UTC make test` → exit 0, **1819 passing + 2 incomplete**
+  (255 v2 vitest + 47 v2/api + 252 v3/api + 111 corpus-compiler + 417
+  engine + 53 fold-runner + 684 apps/web) — up from 1814 at v3-D81 by
+  exactly +5 (this run's new pager tests), zero regressions, confirmed
+  against a freshly-deleted `packages/corpus-compiler/output/` both times
+  (once to reproduce the `test-api3` bug, once after the Makefile fix).
+  `TZ=UTC make build` → exit 0, 18 routes.
+- No Arabic codepoints in any new/changed file (checked directly). No
+  `v1/**`/`v2/**` edit — `v2/tsconfig.tsbuildinfo` was regenerated as a
+  side effect of `make build`'s own v2 step (same as v3-D81 saw) and
+  reverted before committing, never staged.
+
+**Explicitly NOT done, named so a future run does not re-discover these as
+new:** live mail delivery (needs a real SMTP account, gate 20 unchanged);
+BUILD-PLAN Q12 itself (who the human on-call actually is) remains
+unratified — `pager_emails` is a reasonable code default, not an answer to
+the open question; step 30's E6 (fold-runner DB adapter + staging) and E8
+(Stripe fixtures) are untouched and still genuinely need infra this sandbox
+lacks.
