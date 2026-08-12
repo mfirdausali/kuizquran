@@ -457,12 +457,14 @@ the strip → red.
 
 ---
 
-## 19 · PDPA export / delete / purge cascades — **BACKEND GREEN · NO FRONTEND SURFACE**
+## 19 · PDPA export / delete / purge cascades — **GREEN (code) · BLOCKED-ON-INFRA (grant + live schedule)**
 
-**Updated 2026-08-12 (v3-D79).** Was NOT BUILT; the backend half now is.
+**Updated 2026-08-12 (v3-D80).** Was BACKEND GREEN / NO FRONTEND SURFACE; the
+frontend now exists too.
 
 ```bash
 cd v3/api && TZ=UTC php artisan test --filter=AccountDeletionTest   # 14 passed
+cd v3/apps/web && npx vitest run lib/account/api.test.ts test/settings-ui.test.tsx  # 25 passed
 ```
 
 `GET/POST /api/account/deletion`, `POST /api/account/deletion/restore`,
@@ -477,9 +479,14 @@ Mutation-verified (v3-D79): dropping the restore token's `user_id` scope (same
 shape as the M10 reveal-token finding S1) and disabling the admin-self-delete
 guard each turn their own regression test red.
 
-**Still open:**
-- **No frontend surface exists.** `apps/web` has no settings screen calling any
-  of these routes — a learner cannot reach this today, only an API client can.
+**Frontend, landed v3-D80:** `/settings` — `AccountExportPanel` (right-to-access
+download) and `AccountDeletionPanel` (enumerate-before-destroy confirm, request,
+one-time-token display, restore) — reachable by a link from `/home`'s header,
+per v3-D05's own reasoning for why this is not a fifth tab. All egress through
+`apiFetch` (check-boundaries.mjs clause 6). A learner can now reach and
+exercise every one of the four routes above without an API client.
+
+**Still open, both infra, neither code:**
 - **The Postgres append-only grant for `purge_ledger` is documented
   (`docs/ADMIN-CONSOLE.md` §1b) but not applied** — gate 20, no production
   database exists.
@@ -487,9 +494,9 @@ guard each turn their own regression test red.
   `schedule:run`" gap as gate 20 names for the determinism nightly.
 
 This is the dependency gate 13 names: the backup drill's reconciliation
-mechanism now has a real writer. **A launch that ships this backend without the
-frontend surface is still a PDPA exposure** — a learner who cannot find a
-delete button cannot exercise a right that only an API call reaches.
+mechanism now has a real writer, and a learner can now reach it. What remains
+on this gate is entirely gate 20's shape (a host, a grant, a schedule
+actually firing) — not an engineering gap in `apps/web` or `v3/api` anymore.
 
 ---
 
@@ -575,17 +582,18 @@ required to turn any of them on is gate 9.
 
 Ordered by what unblocks the most:
 
-1. **Stand up staging** (gate 20) → unblocks 3, 4, 10, and Postgres-13.
+1. **Stand up staging** (gate 20) → unblocks 3, 4, 10, Postgres-13, **and now
+   also gate 19's remaining Postgres grant + live purge schedule** — gate 19's
+   code (backend v3-D79, frontend v3-D80) is done; only the infra it needs is
+   left, so it collapses into this same item rather than standing apart.
 2. **Start the Stripe MY application** (gate 12) — weeks of calendar, and it
    gates 11. Should already have started.
 3. **Recruit the qari and the Malay reviewer** (gates 7, 8) — weeks of lead
    time; nothing engineering does shortens this.
-4. **Build a frontend surface for the PDPA delete path** (gate 19) — the
-   backend is done (v3-D79); a learner still cannot reach it without one.
-5. **Content: MS decision → scene beats → distractor QA → freeze** (gate 6),
+4. **Content: MS decision → scene beats → distractor QA → freeze** (gate 6),
    then and only then book the qari sessions.
-6. **Human passes**: a11y on real AT (14), Arabic visual QA (22).
-7. **Then** start the 7-night window (gate 10) — and do not merge engine or
+5. **Human passes**: a11y on real AT (14), Arabic visual QA (22).
+6. **Then** start the 7-night window (gate 10) — and do not merge engine or
    selection code during it, because a confirmed P1 resets it to day zero.
 
 **The honest summary:** every gate that engineering can close is closed. What

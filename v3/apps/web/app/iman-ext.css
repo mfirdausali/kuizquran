@@ -1261,3 +1261,22 @@
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
 }
+
+/* Settings — PDPA export/delete (build-plan step 23, LAUNCH-CHECKLIST gate 19).
+   `.settings-input` mirrors `.table-toolbar__input`'s tap-target and hairline
+   discipline rather than inventing a new one; the restore-token field is the
+   only free-text input this screen has. */
+.settings-input {
+  min-height: var(--tap-min);
+  padding: 6px 10px;
+  font: inherit;
+  color: var(--text-primary);
+  background: var(--surface-1);
+  border: var(--hairline) solid var(--border-stronger);
+  border-radius: var(--r-control);
+}
+.settings-confirm-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}

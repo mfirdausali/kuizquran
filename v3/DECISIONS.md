@@ -2171,3 +2171,137 @@ new:**
   "no host runs `schedule:run`" gap LAUNCH-CHECKLIST gate 20 already names for
   the determinism nightly. The command is proven correct in isolation
   (`$this->artisan(...)`), not proven to actually fire nightly in production.
+
+---
+
+## Ratified 2026-08-12 (later still) — build-plan step 23 continued: the PDPA frontend surface
+
+### v3-D80 — `/settings` is a real, reachable learner surface over v3-D79's backend; LAUNCH-CHECKLIST.md gate 19's "no frontend" half is closed
+
+This run started, per NIGHTLY.md's own rule, by re-deriving state from `git log`
+and `origin/main` rather than trusting a stale local ref — the container hit
+the now-familiar "detached HEAD, stale local `main`" shape (`cab5d16`) a
+**fourth** time; `git fetch origin main` force-updated it to `93ce02a`
+(v3-D79). `git checkout -B main origin/main` resolved it, same mechanical fix
+as v3-D77/78/79.
+
+With `HANDOVER.md` and `LAUNCH-CHECKLIST.md` re-read fresh: every BUILD-PLAN
+step through 26/29/30(E9) is DONE or blocked on something no agent can close.
+Step 23 (PDPA) was the one exception with real, scoped, agent-doable work
+left — LAUNCH-CHECKLIST gate 19 and HANDOVER's "critical path out of here"
+item 4 both named it explicitly: "the backend is done (v3-D79); a learner
+still cannot reach it without one." `grep -rn "account" apps/web/app
+apps/web/components` before this run returned nothing outside the unrelated
+admin Stripe screen — confirmed, not assumed.
+
+**What landed**, in `apps/web`:
+
+- `lib/account/api.ts` — the client for all four `AccountController` routes
+  (`GET /api/account/export`, `GET/POST /api/account/deletion`,
+  `POST /api/account/deletion/restore`), through `apiFetch` only
+  (`check-boundaries.mjs` clause 6 / DEFECTS.md#B8 — a second, unwrapped
+  `fetch("/api/...")` would 401-forever on a dead token on this one screen).
+  Every function is a typed result, never a throw, mirroring
+  `lib/workbench/verifications.ts`/`sign.ts`'s discipline: a destructive
+  PDPA screen must not meet a stack trace. The 403 (admin self-delete), 409
+  (already pending) and 404 (restore token mismatch) branches are each a
+  DISTINCT result variant, not folded into one generic failure — a caller
+  needs "already pending" to mean something different from "unreachable".
+- `components/settings/AccountExportPanel.tsx` — "right to access": fetches
+  the export on demand (never on mount) and triggers a same-tab JSON
+  download via an object URL. Never uploads the export anywhere else.
+- `components/settings/AccountDeletionPanel.tsx` — the destructive half,
+  built to the same two disciplines this codebase already established
+  elsewhere rather than inventing a third:
+  1. **Enumerate before destroy** (edge case #104, `DeviceReset`'s own
+     pattern). The confirm step reads the REAL event/surah count from the
+     server's own export before the destructive button is reachable —
+     verified by a test that asserts the button does not exist until the
+     count has rendered.
+  2. **A failed status read is a distinct THIRD state, never folded into
+     "not pending"** (the same discipline `lib/workbench/verifications.ts`
+     uses for the frontier). Deletion is not offered at all when the status
+     cannot be confirmed — offering it blind risks either a spurious 409 or,
+     worse, a learner never finding the cancel form for a deletion that is
+     in fact already scheduled.
+  The one-time restore token (`AccountController::requestDeletion`'s own
+  comment: "shown exactly once — never stored raw, never re-derivable") is
+  held in this component's memory only for the request that just created
+  it; a fresh page load has no token and asks the learner to paste back
+  whatever they saved, exactly matching the backend's own guarantee rather
+  than working around it (e.g. by silently caching it in localStorage,
+  which would contradict the backend's stated security property).
+- `/settings` (`app/(app)/settings/page.tsx`) — a server component wrapping
+  the two client islands, same shape as every other `(app)` route.
+  Deliberately reached by a link from `/home`'s header, NOT a fifth tab —
+  `components/shell/TabBar.tsx`'s own header already states the reason
+  (v3-D05): "the account surface is §24 (M7) and reaching it costs a tap
+  from /home rather than a permanent quarter of the navigation." This run
+  did not invent that rule; it was the one piece of the design already
+  waiting for a route to point at.
+- `app/iman-ext.css` gained two scoped classes (`.settings-input`,
+  `.settings-confirm-row`) — `.settings-input` deliberately mirrors
+  `.table-toolbar__input`'s tap-target/hairline declarations rather than
+  inventing new ones (the ext layer's own rule 3: "reuse before you
+  invent"). The locked file is untouched.
+
+**Verified:**
+
+- `lib/account/api.test.ts` (15 tests) — every success path hits the exact
+  method/URL/body the server validates; every failure shape (network error,
+  non-JSON body, wrong response shape, 403/404/409) resolves to its own typed
+  result rather than a generic catch-all.
+- `test/settings-ui.test.tsx` (10 tests) — the three-state status read
+  (loading / unavailable / ready), the enumerate-before-destroy gate (the
+  "Yes, delete my account" button is unreachable until the real 3-events/
+  2-surahs count has rendered, and Cancel fires zero POSTs), the full
+  request→display-token→restore-in-the-same-session round trip (the restore
+  POST body is asserted to carry the exact token this component held in
+  memory, never a re-typed one), the already-pending 409 reloading real
+  status instead of fabricating a token, and a wrong-token 404 rendering an
+  inline mismatch error rather than a token oracle. The export panel test
+  asserts an actual `Blob`/object-URL/anchor-click download, not merely
+  "some network call happened" — `URL.createObjectURL`/`revokeObjectURL`
+  and `HTMLAnchorElement.prototype.click` are stubbed because jsdom does not
+  implement the first two and would otherwise attempt real navigation on
+  the third.
+- `npx tsc --noEmit` (apps/web) — clean. (One real bug caught here: an
+  unused `{state:"loading"}` member on `api.ts`'s `DeletionStatusLoad` type
+  — copied from a sibling type and never actually returned by the
+  function — broke the discriminated-union narrowing in the panel's
+  `loadStatus()`. Removed; the type now matches what the function can
+  actually return.)
+- `npm run gates` (apps/web) — boundaries clause 6 (egress) and clause 5
+  (engine-decision-in-JSX) both pass over the new files; 170→171 files
+  checked.
+- `TZ=UTC make test` from a corpus freshly compiled via `make compile-corpus`
+  (the v3-D77 prerequisite, run explicitly rather than assumed) — **exit 0,
+  1800 passing + 2 incomplete (PAY-1, by design)**: 255 v2 vitest + 47
+  v2/api + 243 v3/api + 101 corpus-compiler + 417 engine + 53 fold-runner +
+  **684 apps/web (was 659; +25 — exactly the two new test files)**. Zero
+  regressions in any other suite.
+- `TZ=UTC make build` — exit 0. `/settings` appears as a real prerendered
+  static route (18 routes, was 17); `stage-corpus.mjs` confirms real corpus
+  staging (112/103/67), not the silent zero-corpus degrade v3-D77 found.
+
+**Explicitly NOT done, named so a future run does not re-discover these as
+new** (unchanged from v3-D79, this run only closed the frontend half):
+
+- The Postgres append-only grant for `purge_ledger` is documented but not
+  applied — gate 20, no production database exists anywhere in this build.
+- `pdpa:purge-due` has never run on a live schedule — same "no host runs
+  `schedule:run`" gap as gate 20 names for the determinism nightly.
+- **No confirmation the export download actually opens correctly in a real
+  browser** — the test proves the component calls the right browser APIs
+  with the right arguments (object URL from the right Blob, anchor `click()`
+  called once, URL revoked), which is what jsdom can prove; it does not
+  drive an actual file-save dialog. Playwright coverage of `/settings`
+  (download + the full request/restore round trip against a live server)
+  is real, scoped follow-on work — the existing 40-test e2e suite (v3-D78)
+  does not yet touch this route.
+- **The confirm step's event/surah count is sourced by calling the export
+  endpoint**, not a lighter-weight count-only endpoint. Fine at today's
+  scale (a few hundred events at most, per DECISIONS.md v3-D23's greenfield
+  data) but worth a dedicated count endpoint if export payloads grow large
+  enough that fetching the whole thing just to show two numbers becomes
+  wasteful — not a problem this build's real data volume presents yet.

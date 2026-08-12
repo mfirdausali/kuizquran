@@ -46,6 +46,7 @@
 //     so). MySurahs' zero state stands in with the honest subset: the surahs
 //     this build can actually teach.
 
+import Link from "next/link";
 import { MySurahs } from "@/components/home/MySurahs";
 import { DeviceReset } from "@/components/home/DeviceReset";
 import { StubNote } from "@/components/shell/StubNote";
@@ -59,6 +60,11 @@ export default function HomePage() {
         <header className="page-head">
           <h1>Home</h1>
           <p className="caption">Your surahs, and what is due today.</p>
+          {/* v3-D05 / TabBar's own header: the account surface costs a tap
+              from here rather than a permanent tab. */}
+          <p className="caption">
+            <Link href="/settings">Account &amp; data settings</Link>
+          </p>
         </header>
 
         {/* TODAY comes FIRST. The dashboard's job is to answer "what do I do
