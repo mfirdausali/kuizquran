@@ -18,6 +18,13 @@ states:
 
 Generated 2026-08-11. Verified against the repo, not against memory.
 
+> **Note (2026-08-12, v3-D79):** the test counts in this document (gate 0's
+> 1504, and the per-suite table it quotes) predate several later runs and are
+> stale — `v3/CLAUDE.md`'s `make test` comment carries the current number.
+> Only gate 19 was re-verified and edited in this pass. Every other gate's
+> verdict here is as of 2026-08-11 and should be re-checked against the repo
+> before being trusted, per this document's own opening rule.
+
 ---
 
 ## 0 · The one-command state of the world
@@ -303,10 +310,17 @@ a verdict rather than crashing).
 
 1. It ran against **SQLite**. A green SQLite drill does not prove a Postgres
    restore. → BLOCKED-ON-INFRA (gate 20).
-2. **The PDPA delete endpoint is M7 scope and is not built** — there is no purge
-   path anywhere in `api/app`. The drill exercises the purge-ledger
-   *reconciliation mechanism* the real endpoint will write to, not the endpoint.
-   → see gate 19.
+2. **The PDPA delete endpoint now exists (v3-D79) and writes to a real
+   `purge_ledger` table** — but the drill still reconciles against its own
+   throwaway JSON file, not that table, and this is deliberate rather than
+   stale: the ledger a real restore reconciles against must survive
+   independently of the very backup being restored, or a disaster that takes
+   out the primary database also takes out the record of who was purged
+   between the last backup and the incident. The drill's external file stands
+   in for that independent source; wiring it to read the live `purge_ledger`
+   table directly would defeat the property this drill exists to prove,
+   because that table would be wiped and restored right along with
+   everything else. → see gate 19.
 
 ---
 
@@ -443,16 +457,39 @@ the strip → red.
 
 ---
 
-## 19 · PDPA export / delete / purge cascades — **NOT BUILT (M7 scope)**
+## 19 · PDPA export / delete / purge cascades — **BACKEND GREEN · NO FRONTEND SURFACE**
 
-There is **no purge path anywhere in `api/app`**. BUILD-PLAN M7 lists
-"PDPA export/delete/restore(-with-token) + purge cascades" as shipping content;
-it has not shipped.
+**Updated 2026-08-12 (v3-D79).** Was NOT BUILT; the backend half now is.
 
-This is the dependency gate 13 names: the backup drill exercises the
-reconciliation mechanism, but the endpoint that would write to the purge ledger
-does not exist. **A launch that accepts real users without a delete path is a
-PDPA exposure**, independent of backups.
+```bash
+cd v3/api && TZ=UTC php artisan test --filter=AccountDeletionTest   # 14 passed
+```
+
+`GET/POST /api/account/deletion`, `POST /api/account/deletion/restore`,
+`GET /api/account/export` (all self-service, `auth:sanctum`, scoped to the
+caller's own `user_id`) + `php artisan pdpa:purge-due` (scheduled daily 02:00
+UTC) is the endpoint gate 13's backup drill was built in anticipation of — its
+own header said so explicitly: "when the PDPA endpoint lands, it writes to this
+same ledger and this drill covers it unchanged." `purge_ledger` is that ledger,
+now a real append-only table rather than the drill's throwaway JSON file.
+
+Mutation-verified (v3-D79): dropping the restore token's `user_id` scope (same
+shape as the M10 reveal-token finding S1) and disabling the admin-self-delete
+guard each turn their own regression test red.
+
+**Still open:**
+- **No frontend surface exists.** `apps/web` has no settings screen calling any
+  of these routes — a learner cannot reach this today, only an API client can.
+- **The Postgres append-only grant for `purge_ledger` is documented
+  (`docs/ADMIN-CONSOLE.md` §1b) but not applied** — gate 20, no production
+  database exists.
+- **`pdpa:purge-due` has never run on a live schedule** — same "no host runs
+  `schedule:run`" gap as gate 20 names for the determinism nightly.
+
+This is the dependency gate 13 names: the backup drill's reconciliation
+mechanism now has a real writer. **A launch that ships this backend without the
+frontend surface is still a PDPA exposure** — a learner who cannot find a
+delete button cannot exercise a right that only an API call reaches.
 
 ---
 
@@ -543,8 +580,8 @@ Ordered by what unblocks the most:
    gates 11. Should already have started.
 3. **Recruit the qari and the Malay reviewer** (gates 7, 8) — weeks of lead
    time; nothing engineering does shortens this.
-4. **Build the PDPA delete path** (gate 19) — the only remaining *code* gate on
-   this list that is a legal exposure rather than a quality one.
+4. **Build a frontend surface for the PDPA delete path** (gate 19) — the
+   backend is done (v3-D79); a learner still cannot reach it without one.
 5. **Content: MS decision → scene beats → distractor QA → freeze** (gate 6),
    then and only then book the qari sessions.
 6. **Human passes**: a11y on real AT (14), Arabic visual QA (22).
@@ -553,7 +590,8 @@ Ordered by what unblocks the most:
 
 **The honest summary:** every gate that engineering can close is closed. What
 remains is one infrastructure gap that cascades into four gates, two human
-recruitments with multi-week lead times, one unbuilt legal endpoint, and seven
+recruitments with multi-week lead times, one endpoint with no frontend yet
+wired to it, and seven
 days of calendar that cannot start until the rest of it lands.
 
 ---

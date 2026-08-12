@@ -1,6 +1,7 @@
 <?php
 
 use App\Console\Commands\DeterminismCheckCommand;
+use App\Console\Commands\PurgeDueAccountsCommand;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -58,3 +59,21 @@ Schedule::command(DeterminismCheckCommand::class, ['both', '--trigger=schedule']
             .'A confirmed P1 RESETS the 7-consecutive-green-nights window (BUILD-PLAN M10).'
         );
     });
+
+/*
+|--------------------------------------------------------------------------
+| PDPA PURGE
+|--------------------------------------------------------------------------
+|
+| Build-plan step 23 (M7) / LAUNCH-CHECKLIST.md gate 19. Runs daily, well
+| clear of the determinism nightly above — a purge deletes `events` rows,
+| and running it concurrently with a fold sampling those same rows is
+| exactly the kind of interleaving that page a false P1 (the same reasoning
+| DeterminismCheckCommand's own header gives for its single-flight lock).
+| `withoutOverlapping` guards a slow run against the next day's tick, same
+| belt-and-braces as the determinism schedule entry.
+*/
+Schedule::command(PurgeDueAccountsCommand::class)
+    ->dailyAt('02:00')
+    ->timezone('UTC')
+    ->withoutOverlapping();

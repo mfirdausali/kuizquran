@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AccountController;
 use App\Http\Controllers\Auth\EmailVerificationController;
 use App\Http\Controllers\Auth\PasswordResetController;
 use App\Http\Controllers\AuthController;
@@ -59,6 +60,14 @@ Route::middleware('auth:sanctum')->group(function () {
     // Build-plan step 14: ingestion + cursored pull.
     Route::post('/events', [EventsController::class, 'store']);
     Route::get('/events', [EventsController::class, 'index']);
+
+    // Build-plan step 23 (M7): PDPA export/delete/restore(-with-token).
+    // SELF-SERVICE ONLY — scoped to $request->user() throughout, never a
+    // route parameter, so there is no id to swap for another learner's.
+    Route::get('/account/export', [AccountController::class, 'export']);
+    Route::get('/account/deletion', [AccountController::class, 'deletionStatus']);
+    Route::post('/account/deletion', [AccountController::class, 'requestDeletion']);
+    Route::post('/account/deletion/restore', [AccountController::class, 'restoreDeletion']);
 
     // Build-plan step 15: override write path (DEFECTS.md#B1's own gate).
     Route::post('/overrides', [OverridesController::class, 'store'])->middleware('admin');

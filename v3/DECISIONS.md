@@ -2041,3 +2041,133 @@ directory-ordering issue found above, and CI's own YAML correctness was not
 verified by an actual GitHub Actions run in this sandbox (no push happened
 before this fix was written) — verified instead by reproducing the identical
 commands locally, the same evidence standard v3-D77 used for its own CI fix.
+
+---
+
+## Ratified 2026-08-12 (later) — build-plan step 23 (M7): PDPA export/delete/restore/purge
+
+### v3-D79 — The PDPA delete/purge path is built. LAUNCH-CHECKLIST.md gate 19 named it "the only remaining *code* gate on this list that is a legal exposure rather than a quality one"
+
+This run started, per NIGHTLY.md's own rule, by re-deriving state from `git log`
+and `origin/main` rather than trusting a stale local ref — the container hit the
+**identical** "detached HEAD, stale local `main`" shape v3-D77's Finding 0 and
+v3-D78 both already recorded (`git fetch origin main` force-updated the local
+ref from `cab5d16` to `d7d6a1e`). Recorded a third time only to note it is now a
+mechanical first step, not a surprise.
+
+With `git log`, `HANDOVER.md` and `LAUNCH-CHECKLIST.md` all re-read fresh: every
+BUILD-PLAN step 1-26/29/30(E9) is DONE or blocked on something no agent can
+close (a qari's calendar, Stripe business verification, a staging host, a
+scene-beat author). `LAUNCH-CHECKLIST.md` gate 19 was the one exception —
+**"PDPA export/delete/restore(-with-token) + purge cascades" (BUILD-PLAN's own
+M7 ships-list wording) had never been built.** `grep -rn "PDPA|purge"
+v3/api/app` before this run returned only comments and
+`BackupRestoreDrillCommand`'s own honest disclosure that it exercises a
+RECONCILIATION mechanism for a purge endpoint that "IS NOT BUILT YET." This is
+that endpoint.
+
+**Scope decision:** BUILD-PLAN Q10 ("full purge including the event log, or
+anonymize-and-retain for cohort aggregates") is nominally an open question only
+Firdaus can answer — but the codebase already commits to an answer everywhere
+it touches this: v3-D16 says outright "the only purge path in the entire system
+is learner-initiated PDPA delete" (present tense, describing a design already
+assumed), and `BackupRestoreDrillCommand` was already built and tested against
+a **hard-delete** purge model (`User::whereKey($id)->delete()`, a ledger of
+`{user_id, purged_at, reason}`, "the forgotten subject did NOT come back").
+Building anonymize-and-retain instead would have meant re-deciding a question
+the drill had already answered by construction, contradicting working, tested
+code rather than an unwritten default. Full purge is therefore not a fresh
+ratification of Q10 so much as making the codebase's existing, tested
+assumption reachable through an endpoint. **Q10 stays open in BUILD-PLAN.md**
+for the retention-metrics half of the question (v3-D07 doesn't cover it either)
+— this decision covers only "does the learner-initiated path exist and does it
+hard-delete," not the cohort-aggregation question.
+
+**The grace-period length (14 days) is a genuinely new default**, not implied
+by anything already built. Q10/BUILD-PLAN never price it. Chosen because it is
+long enough that a mis-tap or an angry deletion has a real week-plus to be
+undone, and short enough that it cannot be confused with v3-D16's INDEFINITE
+lapsed-review posture — a deletion request is the one state in this product
+that is *meant* to become irreversible. `config('pdpa.deletion_grace_days')`,
+overridable per deployment; supersede this entry if Firdaus wants a different
+number.
+
+**What landed**, in `v3/api`:
+
+- `account_deletion_requests` (one row = one pending request; existence IS the
+  pending state, `unique(user_id)` is the whole idempotency story) and
+  `purge_ledger` (permanent, append-only — same two-layer guarantee as
+  `admin_audit`: an ORM guard here, a documented-but-not-yet-applied Postgres
+  grant in `docs/ADMIN-CONSOLE.md` §1b, honestly marked not-yet-verified for
+  the identical reason §1's `admin_audit` grant is — no production database
+  exists, LAUNCH-CHECKLIST gate 20).
+- `AccountController` — `GET /api/account/export` (self-service, scoped to
+  the caller's own `user_id` throughout, enumerates event columns by
+  EXCLUSION rather than an allowlist so a future column cannot silently drop
+  out of a PDPA export), `GET/POST /api/account/deletion` (status + request —
+  schedules, never deletes), `POST /api/account/deletion/restore` (token-scoped
+  cancel). All four routes sit in the existing `auth:sanctum` group, none
+  behind `admin` — this is a learner acting on their own account, not an
+  operator action.
+- `PurgeDueAccountsCommand` (`php artisan pdpa:purge-due`, scheduled daily
+  02:00 UTC in `routes/console.php`, one hour clear of the 03:00 determinism
+  nightly so a purge's cascading `events` deletes cannot interleave with a
+  fold sampling those same rows) — the only code path that hard-deletes a
+  user for PDPA reasons. Writes the `purge_ledger` row **inside the same
+  transaction as, and before,** the user delete (mirrors
+  `AdminRevealController`'s audit-before-action-is-observable discipline).
+  Explicitly deletes Sanctum tokens first (`personal_access_tokens` is
+  polymorphic, not a real FK — `cascadeOnDelete` on `users` cannot reach it).
+- **An admin cannot self-request deletion** — refused with a clear 403 at
+  request time, not discovered as a raw FK failure two weeks later.
+  `admin_audit.actor_admin_id` is `restrictOnDelete` (the M8 migration, for
+  the audit trail's own integrity), so `User::delete()` would throw for any
+  user who has ever performed an audited action. Refusing up front means
+  `PurgeDueAccountsCommand` never has to handle that failure mode for a
+  request that should never have been created — though it still catches and
+  logs loudly (never silently drops) any delete that fails for an
+  unanticipated reason, e.g. an admin role granted *after* the request.
+
+**Verified:**
+
+- `php artisan test --filter=AccountDeletionTest` — **14 passed, 64
+  assertions.** Full `v3/api` suite: **243 passed, 2 incomplete** (was 229 + 2
+  — the 14 new tests, zero regressions elsewhere).
+- Mutation-tested two of the load-bearing claims, both observed RED then
+  reverted byte-identically (`git diff` on the untracked new files verified by
+  re-reading them, not by `git diff`, since they had not yet been committed):
+  dropping the `where('user_id', ...)` scope from `restoreDeletion()`'s query
+  (mirroring the M10 reveal-token finding S1's shape exactly) turned
+  `test_a_restore_token_is_useless_to_a_different_user` red — learner B's
+  restore call succeeded against learner A's token, 200 instead of 404;
+  disabling the admin-role guard in `requestDeletion()` turned
+  `test_an_admin_cannot_request_self_deletion` red — 201 instead of 403. The
+  `purge_ledger` append-only guard reuses `AdminAudit::booted()`'s exact,
+  already-mutation-tested shape verbatim rather than re-proving it.
+- `test_purge_due_hard_deletes_an_elapsed_request_and_leaves_a_ledger_row`
+  mirrors `BackupRestoreDrillCommand`'s own keeper/doomed fixture shape: a
+  purged user's events cascade-delete, their Sanctum token is gone, the
+  `account_deletion_requests` row cascades away with the user, a
+  `purge_ledger` row survives naming the correct `user_id` and
+  `reason: pdpa_delete`, and an untouched second user is provably unaffected.
+
+**Explicitly NOT done, named so a future run does not re-discover these as
+new:**
+
+- **The Postgres grant for `purge_ledger` is written but not applied** — same
+  gap as `admin_audit`'s own grant, same reason (gate 20, no production
+  database exists anywhere in this build).
+- **No frontend surface.** `apps/web` has no settings screen calling any of
+  these four routes. The backend contract is real and tested; nothing in the
+  product today lets a learner reach it. This is the LAUNCH-CHECKLIST gate 19
+  "code" half only — closing the gate fully (and updating that document's
+  header line) also wants a UI, which is out of scope for this pass and is a
+  real, scoped, agent-doable follow-on.
+- **Export is JSON only**, not the downloadable/emailed artifact a consumer
+  product might want. The PDPA "right to access" property (the learner's own
+  data, scoped, complete) is proven; presentation polish is not this run's
+  job.
+- **`pdpa:purge-due` has not run against a live schedule anywhere** — same
+  "no host runs `schedule:run`" gap LAUNCH-CHECKLIST gate 20 already names for
+  the determinism nightly. The command is proven correct in isolation
+  (`$this->artisan(...)`), not proven to actually fire nightly in production.

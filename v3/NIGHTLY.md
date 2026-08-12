@@ -77,7 +77,7 @@ are the baseline everywhere else.
 3. Implement the minimum that makes them pass.
 4. Run the gates: `make build`, `make test` (both now depend on
    `compile-corpus`, v3-D77 — no manual pre-step needed on a clean checkout).
-   1761 passing as of v3-D77 (255 v2 vitest + 47 v2/api + 229 v3/api + 101
+   1775 passing as of v3-D79 (255 v2 vitest + 47 v2/api + 243 v3/api + 101
    corpus-compiler + 417 engine + 53 fold-runner + 659 apps/web, +2 incomplete
    by design for PAY-1) — re-read the actual `Tests N passed` lines yourself
    rather than trusting this number once it's had time to go stale, plus any

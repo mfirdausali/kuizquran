@@ -78,6 +78,26 @@ RESET ROLE;
 
 ---
 
+## 1b · The same grant for `purge_ledger` (build-plan step 23 / gate 19)
+
+`purge_ledger` is append-only for the identical reason `admin_audit` is: it is
+the record `BackupRestoreDrillCommand` reconciles a restore against (§13 of
+LAUNCH-CHECKLIST.md — "a PDPA delete must not be undone by a restore"), and an
+editable ledger could silently resurrect a learner who was purged. `PurgeLedgerEntry::booted()`
+is the ORM layer; this is layer 1, not yet applied anywhere because no
+production database exists yet (same gap as §1 above).
+
+```sql
+REVOKE UPDATE, DELETE, TRUNCATE ON TABLE purge_ledger FROM app_role;
+GRANT  INSERT, SELECT                ON TABLE purge_ledger TO   app_role;
+GRANT USAGE, SELECT ON SEQUENCE purge_ledger_id_seq TO app_role;
+```
+
+Verify the same way as §1's grant, substituting `purge_ledger` for
+`admin_audit` in the `information_schema.role_table_grants` query.
+
+---
+
 ## 2 · Required environment
 
 | Variable | Purpose | Failure mode if unset |
@@ -85,6 +105,7 @@ RESET ROLE;
 | `ADMIN_EMAILS` | The admin allowlist, comma-separated | **Fails closed** — nobody is admin. Never throws, never opens up. |
 | `ADMIN_PSEUDONYM_PEPPER` | HMAC pepper for learner pseudonyms | **Throws.** Deliberately: an unset pepper would silently degrade to a digest that is brute-forceable over small integer user ids — a privacy failure that looks like it works. |
 | `ADMIN_REVEAL_TTL_SECONDS` | Server-side reveal TTL (default 900) | Defaults; the server always enforces its own copy, never the client's. |
+| `PDPA_DELETION_GRACE_DAYS` | Days between a learner's delete request and `pdpa:purge-due` actually removing the row (default 14) | Defaults; see `config/pdpa.php`. |
 
 An admin must **also have a verified email** (`EnsureIsAdmin`). This closes
 DEFECTS.md#B7: in v2, anyone who knew an allowlisted address could register it
