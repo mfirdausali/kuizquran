@@ -8,7 +8,8 @@
 // Per-ayah tiered hashes (v3-D13) are built here too, from the already
 // tiered hash.ts primitives, and are ALSO a compile-time-only artifact.
 
-import { contentHash16, ayahAdminHash, ayahQariHash } from "./hash.ts";
+import { contentHash16, ayahAdminHash, ayahAdminHashWithOverrides, ayahQariHash, ayahQariHashWithOverrides } from "./hash.ts";
+import type { HashOverride } from "./hash.ts";
 import type { CorpusJson } from "./types.ts";
 
 export interface AyahHashRow {
@@ -45,6 +46,34 @@ export function buildAyahHashTable(corpus: CorpusJson): AyahHashRow[] {
     ayah: v.ayah,
     qariHash: ayahQariHash(v, wordsByAyah.get(v.ayah) ?? [], sceneBeatByAyah.get(v.ayah) ?? null),
     adminHash: ayahAdminHash(distractorsByAyah.get(v.ayah) ?? []),
+    hashSpecVersion: corpus.meta.hashSpecVersion,
+  }));
+}
+
+/**
+ * Same table, override-aware (DEFECTS.md#B3's named live gap: "the LIVE
+ * wiring that automatically re-runs corpus:ingest-hashes with an
+ * override-aware recompute the moment an override is written"). This is
+ * that recompute's actual composition — `ayahQariHash`/`ayahAdminHash`
+ * were already tiered (B3's first fix); `*WithOverrides` (v3-D34) already
+ * resolved overrides into the tier that changes; nothing had assembled the
+ * per-surah TABLE those functions feed, which is what Laravel actually
+ * needs to re-ingest. With an empty override list this is byte-identical
+ * to `buildAyahHashTable` — asserted directly in the test, so this can
+ * never silently drift from the baseline path.
+ */
+export function buildAyahHashTableWithOverrides(corpus: CorpusJson, overrides: HashOverride[]): AyahHashRow[] {
+  const wordsByAyah = groupByAyah(corpus.words);
+  const distractorsByAyah = groupByAyah(corpus.distractors);
+  const sceneBeatByAyah = new Map<number, string>();
+  for (const sb of corpus.sceneBeats) {
+    for (const ayah of sb.ayahs) sceneBeatByAyah.set(ayah, sb.label);
+  }
+
+  return corpus.verses.map((v) => ({
+    ayah: v.ayah,
+    qariHash: ayahQariHashWithOverrides(v, wordsByAyah.get(v.ayah) ?? [], sceneBeatByAyah.get(v.ayah) ?? null, overrides),
+    adminHash: ayahAdminHashWithOverrides(distractorsByAyah.get(v.ayah) ?? [], overrides),
     hashSpecVersion: corpus.meta.hashSpecVersion,
   }));
 }

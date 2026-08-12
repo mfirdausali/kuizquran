@@ -2305,3 +2305,116 @@ new** (unchanged from v3-D79, this run only closed the frontend half):
   data) but worth a dedicated count endpoint if export payloads grow large
   enough that fetching the whole thing just to show two numbers becomes
   wasteful — not a problem this build's real data volume presents yet.
+
+---
+
+## Ratified 2026-08-12 (later still) — build-plan step 15's remaining gap: the override→hash-recompute trigger
+
+### v3-D81 — DEFECTS.md#B3's "explicitly deferred" live wiring is now automatic; no human re-runs `corpus:ingest-hashes` after an override
+
+This run started, per NIGHTLY.md's own rule, by re-deriving state from
+`git log` and `origin/main` (HEAD matched `origin/main` at `4075ca1` exactly —
+no detached-HEAD/stale-ref shape this time). `HANDOVER.md`'s step-15 row and
+`DEFECTS.md#B3`'s own closing note both still named the same real, agent-doable
+gap: "the LIVE wiring that automatically re-runs `corpus:ingest-hashes` with an
+override-aware recompute the moment an override is written... today, closing
+the loop end-to-end requires manually re-running the ingest command." Steps
+27/28 remain blocked on human content (scene-beat sign-off, qari calendar);
+step 30's remaining items (E6 fold-runner DB adapter, E7 mailer, E8 Stripe
+fixtures) all need live infra or a Stripe account this sandbox does not have.
+This gap needed neither — `ayahQariHashWithOverrides`/
+`ayahAdminHashWithOverrides` (v3-D34) already computed the override-aware
+hash; `VerificationsController`'s frontier already reacted correctly to any
+hash change (`VerificationsTest::test_b3_a_hash_change_on_a_verified_ayah…`,
+itself already documenting "the override → hash CHANGE half of that is
+proven in TS... this proves the Laravel-side frontier correctly reacts once
+the ingested current hash changes for any reason, including that one" —
+"including that one" was never actually exercised end to end until this run).
+
+**What landed:**
+
+- `packages/corpus-compiler/src/manifest.ts#buildAyahHashTableWithOverrides` —
+  the missing composition. `buildAyahHashTable` (baseline) and
+  `*WithOverrides` (override-resolved, per ayah) both existed; nothing had
+  assembled the override-aware PER-SURAH TABLE Laravel actually needs to
+  re-ingest. With zero overrides it is byte-identical to `buildAyahHashTable`
+  — asserted directly, so it can never silently drift from the baseline path
+  a normal corpus compile still uses.
+- `packages/corpus-compiler/src/recomputeHashes.ts` — a new CLI entry, same
+  contract discipline as `worker/fold-runner/bin/*.ts` (JSON on stdout on
+  EVERY path, even failure; a non-zero exit is never silent). Argv: a
+  corpus.json path. Stdin: a `HashOverride[]` JSON array (empty/absent =
+  baseline). Stdout: the `AyahHashRow[]` table.
+- `App\Support\CorpusHashRecomputer` (`v3/api`) — the Laravel side,
+  structured identically to `DeterminismCheckCommand`'s own
+  `invokeRunner()`: reads the DB (every `overrides` row for the surah, wire-
+  shaped to `HashOverride`), shells to `recomputeHashes.ts` via
+  `Symfony\Process`, decodes the JSON table, and ingests it through
+  `IngestHashesCommand::ingestRows()` — extracted as a reusable static
+  method so the command's hand-run path and the automatic path share the
+  identical upsert rather than risking two implementations of "ingest"
+  silently diverging.
+- `OverridesController::store()` now calls the recomputer synchronously,
+  inline in the request, and returns its result as `hashRecompute` in the
+  response body.
+
+**A deliberate choice worth recording: synchronous, not queued.** A queued
+job would need a worker process running somewhere — precisely the "needs a
+host" shape LAUNCH-CHECKLIST gate 20 already names for the nightly
+scheduler (`schedule:run` with nobody invoking it). Adding a second
+queue-shaped dependency this build does not otherwise have, to save
+sub-second latency on a rare admin action, would be trading a real gap for
+a new one. The override write itself is NEVER blocked by a recompute
+failure (surah not yet compiled, node unavailable) — the override is real
+admin content and must be saved regardless; a failure is reported in the
+response and logged (`Log::warning`, surah + error message only, no
+override payload text — the same "no PII/unreviewed free text in logs"
+discipline the M10 security review already established for this codebase).
+
+**Verified:**
+
+- Against the REAL compiled surah-112 corpus (`make compile-corpus`), not a
+  hand-seeded hash fixture: `OverrideHashRecomputeTest` (4 tests) proves (1)
+  a gloss override moves the qari hash and nothing else, (2) the B3 defect
+  closed completely end-to-end — a verified ayah's frontier flips to `stale`
+  with NO manual command run between the override POST and the next GET,
+  (3) a distractor override moves only the admin hash, (4) the override
+  write itself still succeeds (with `hashRecompute.ok: false`, reported not
+  swallowed) when its surah was never compiled.
+- `corpus-compiler/test/recomputeHashes.test.ts` (10 tests): the pure
+  function's parity with the baseline table at zero overrides; per-tier
+  isolation (gloss touches qari only, distractor touches admin only, never
+  a sibling ayah); the CLI script's exact contract by spawning the real
+  process — matching output byte-for-byte against calling the function
+  directly — plus every failure path (missing corpus file, malformed
+  stdin, non-array stdin, no argv) exits 1 with a JSON `{error}`, never a
+  stack trace.
+- Mutation-tested the wiring itself, the actual claim that matters: reverted
+  `OverridesController::store()`'s recompute call to a hardcoded
+  `{ok: true, rows: 0}` (i.e., "override write succeeds, nothing recomputes,
+  nobody notices") — all 4 `OverrideHashRecomputeTest` cases went RED,
+  including the B3 end-to-end case (frontier stayed `verified` instead of
+  going `stale`). Reverted byte-identically; 4/4 green again.
+- Full suite, from a genuinely fresh `make setup` in this container (no prior
+  `vendor/`, no prior `node_modules/`, no prior `.env`/sqlite db — a real
+  clean-checkout run, not a machine with leftover state): `TZ=UTC make test`
+  → **exit 0, 1814 passing + 2 incomplete** (255 v2 vitest + 47 v2/api + 247
+  v3/api + 101→111 corpus-compiler + 417 engine + 53 fold-runner + 684
+  apps/web) — up from 1800 at v3-D80, +14 exactly matching this run's 4 PHP
+  + 10 TS new tests, zero regressions elsewhere. `TZ=UTC make build` → exit
+  0, 18 routes, real corpus staged (112/103/67).
+- No Arabic codepoints in any new/changed file (checked directly, not by
+  trusting the CI grep alone). No `v1/**`/`v2/**` edit — `v2/tsconfig.tsbuildinfo`
+  was regenerated as a side effect of `make build`'s own v2 step and was
+  reverted before committing, never staged.
+
+**Explicitly NOT done, named so a future run does not re-discover these as
+new:** the Postgres-specific per-user advisory lock gap (v3-D32/v3-D70,
+unrelated to this trigger); B3's tiered-hash concept itself needed no
+change, only the missing trigger between two already-correct halves; this
+run did not touch `ayahQariHashWithOverrides`/`ayahAdminHashWithOverrides`
+(v3-D34) at all, only composed what already existed. HANDOVER.md's step-15
+row and DEFECTS.md#B3 should be updated to reflect this closing — left for
+the merger alongside every other stale-count correction this file already
+warns about (v3-D77 Finding 0 pattern: re-derive from the repo, not from a
+document's number).

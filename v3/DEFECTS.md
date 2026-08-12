@@ -145,14 +145,22 @@ upserted row, which is exactly how B3 became possible) +
 `VerificationsController`'s any-row-matches-current frontier (mutation-
 tested: ignoring a hash mismatch turns the closing test red).
 
-**Explicitly deferred, not forgotten:** the LIVE wiring that automatically
-re-runs `corpus:ingest-hashes` with an override-aware recompute the moment
-an override is written — the same class of "needs a running TS-side
-service reacting to a Laravel write" gap the fold-runner's DB adapter has
-(DECISIONS.md v3-D32). Today, closing the loop end-to-end requires
-manually re-running the ingest command after an override; the COMPUTATION
-and the FRONTIER LOGIC are both proven correct, only the automatic trigger
-is missing.
+**The live wiring is CLOSED (2026-08-12, DECISIONS.md v3-D81).** This gap
+described a real limitation as of step 15's original landing, but it no
+longer holds: `App\Support\CorpusHashRecomputer` runs SYNCHRONOUSLY inside
+`OverridesController::store()` — no queued job, so unlike the fold-runner's
+deferred DB adapter (v3-D32) this needed no "running TS-side service" gap
+at all. The moment an override is written, its surah's tiered hash table is
+recomputed (`corpus-compiler/src/recomputeHashes.ts`, shelled to the same
+way `DeterminismCheckCommand` shells to the fold-runner) and re-ingested
+through the same `IngestHashesCommand::ingestRows()` a human hand-running
+the command also uses. Closing test:
+`tests/Feature/Overrides/OverrideHashRecomputeTest.php`'s
+`test_b3_closed_end_to_end…` — against the REAL compiled surah-112 corpus, a
+verified ayah's frontier flips to `stale` with no command run between the
+override POST and the next frontier GET. Mutation-verified: hardcoding the
+recompute call to a no-op success turns all 4 of that file's tests red;
+reverted.
 
 ## B4 — override ties are unordered (M2) ✅ CLOSED (build-plan step 8)
 

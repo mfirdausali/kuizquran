@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Override;
+use App\Support\CorpusHashRecomputer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -60,7 +61,15 @@ class OverridesController extends Controller
             'created_at' => (int) round(microtime(true) * 1000),
         ]);
 
-        return response()->json(['override' => $this->toWire($row)], 201);
+        // DEFECTS.md#B3's live-wiring gap, closed: the moment an override
+        // lands, its surah's tiered hash table is recomputed and
+        // re-ingested — never a human hand-running corpus:ingest-hashes
+        // afterwards. A recompute failure (surah not yet compiled, node
+        // unavailable) is reported here and logged, but never blocks the
+        // override write itself — see CorpusHashRecomputer's own docblock.
+        $hashRecompute = app(CorpusHashRecomputer::class)->recompute($validated['surah']);
+
+        return response()->json(['override' => $this->toWire($row), 'hashRecompute' => $hashRecompute], 201);
     }
 
     private function toWire(Override $r): array

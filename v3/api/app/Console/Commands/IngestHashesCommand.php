@@ -37,12 +37,33 @@ class IngestHashesCommand extends Command
             return self::FAILURE;
         }
 
+        try {
+            self::ingestRows($surah, $rows);
+        } catch (\RuntimeException $e) {
+            $this->error($e->getMessage());
+
+            return self::FAILURE;
+        }
+
+        $this->info("ingested {$this->argument('path')}: ".count($rows)." row(s) for surah {$surah}");
+
+        return self::SUCCESS;
+    }
+
+    /**
+     * The upsert itself, shared with `App\Support\CorpusHashRecomputer`
+     * (build-plan step 15's B3 live-wiring gap) so the two callers — a
+     * human hand-running this command, and the automatic recompute after
+     * an override write — cannot silently diverge in what "ingest" means.
+     *
+     * @param  array<int,array<string,mixed>>  $rows
+     */
+    public static function ingestRows(int $surah, array $rows): void
+    {
         $now = (int) round(microtime(true) * 1000);
         foreach ($rows as $row) {
             if (! isset($row['ayah'], $row['qariHash'], $row['adminHash'], $row['hashSpecVersion'])) {
-                $this->error('malformed row: '.json_encode($row));
-
-                return self::FAILURE;
+                throw new \RuntimeException('malformed row: '.json_encode($row));
             }
             CorpusAyahHash::updateOrCreate(
                 ['surah' => $surah, 'ayah' => $row['ayah']],
@@ -54,9 +75,5 @@ class IngestHashesCommand extends Command
                 ],
             );
         }
-
-        $this->info("ingested {$this->argument('path')}: ".count($rows)." row(s) for surah {$surah}");
-
-        return self::SUCCESS;
     }
 }
