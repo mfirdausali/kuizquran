@@ -2862,3 +2862,93 @@ for surah 67 remain the sole live content-freeze blocker, unchanged — see
 30's E6 (fold-runner DB adapter + staging) and E8 (Stripe fixtures) remain
 untouched, still genuinely infra/human-blocked, unchanged from v3-D82
 through D84.
+
+---
+
+## 2026-08-13 (nightly) — a v3-D22 claim rule had a single-source function with zero callers and no gate
+
+### v3-D86 — `describeCertification()` guarded nothing; `check-boundaries.mjs` gained clause 15
+
+This run started per NIGHTLY.md's rule by re-deriving state from `git log`
+(HEAD matched `origin/main` at `acb5b8c`, v3-D85, cleanly — `git fetch origin
+main` showed no divergence this time). Every one of the 32 build-plan steps
+is still DONE, human-gated (27/28), or infra-gated (30's E6/E8), so — the same
+discipline v3-D83/D84/D85 each used in this position — this run re-verified
+the current state (`TZ=UTC make test`/`make build` on a fresh `make setup`)
+and then hunted for the next instance of this build's most recurring failure
+shape: a mechanism that reads as protecting something but does not.
+
+**Found in `lib/workbench/sign.ts#describeCertification()`.** Its own header
+states v3-D22's rule plainly: "No UI claims scholar verification for a surah
+lacking a human row" — and names the stakes: "this specific claim, made
+falsely, is a religious-authority misrepresentation, not a copy bug."
+`describeCertification()` is the one function built to answer "may this
+surface say a scholar verified this," mirroring `frontier.ts`'s own
+single-source discipline ("this file never computes one"). But grepping
+`app/`, `components/` and `lib/` for its name turned up exactly two hits:
+its own definition and its test. **Zero production callers, anywhere.** No
+shipped surface renders a certification claim today, so the rule currently
+holds vacuously — which is precisely the shape `DEFECTS.md#B2`'s first close
+was in ("no UI file was ported... the JSX-grep half of the closing criterion
+is vacuously true") right up until v3-D83 found it reborn, live, with zero
+callers to have warned anyone before it shipped.
+
+Confirmed mechanically, not just by grep: a string combining "scholar" or
+"qari" with a verification/certification word, written directly into a
+component instead of routed through `describeCertification()`, passes every
+one of `check-boundaries.mjs`'s 14 existing clauses and the full 1830-test
+suite unnoticed. Reproduced by injecting
+`const rogueClaim = "This surah is scholar-verified by a certified qari.";`
+into `components/workbench/QariMode.tsx` and re-running the gate: it reported
+`boundaries: OK`. That is the RED this run fixes.
+
+**Fixed:** `check-boundaries.mjs` clause 15 — any file under `app/`,
+`components/` or `lib/` (excluding tests) that pairs "scholar" or "qari" with
+a verification/certification word within 40 characters, in either order,
+fails the build unless the file is `lib/workbench/sign.ts` itself. Mirrors
+clause 10's single-file allowlist pattern (`PRICE_LITERAL`/`PRICE_ALLOWLIST`)
+rather than clause 14's key-literal pattern, because the real claim lives in
+free JSX/string text, not a typed key — the same shape clause 11's tajwid-claim
+scan guards, at a much smaller scope than that shared detector module
+warrants for one rule.
+
+**False-positive risk taken seriously, not assumed away.** `qari` is a real
+identifier in this codebase — `frontier.ts`'s own tier-status parameters are
+literally named `qari`/`admin`, and an early draft of the pattern (bare
+`qari` as the trigger word) fired on `frontier.ts:96,97,106`'s
+`if (qari === "verified" ...)` comparisons, which are tier-status logic, not
+a claim. Narrowed to require an article before it (`a qari` / `the qari` /
+`human qari` — the shape a human-readable sentence actually takes, and one no
+variable name produces). `scholar` needed no such guard: `\bscholar\b`
+already excludes "scholarly" (`attribution.ts`'s genuine, non-claiming
+"built on scholarly and open data") by word-boundary alone. Re-ran clean
+after narrowing: 170 files, zero violations.
+
+Mutation-verified both directions: re-injected the exact violating line into
+`QariMode.tsx` — clause 15 fired, naming the exact line and nothing else;
+reverted `QariMode.tsx` byte-identically (`diff` empty) and re-ran green.
+
+**Verified**: `TZ=UTC make test` → exit 0, **1830 passing + 2 incomplete**
+(255 v2 vitest + 47 v2/api + 253 v3/api + 111 corpus-compiler + 417 engine +
+61 fold-runner + 686 apps/web) — unchanged from v3-D85, zero regressions
+(expected: this is a build-time gate script, not exercised by the vitest/
+PHPUnit suites). `TZ=UTC make build` → exit 0, 18 routes, boundaries gate
+reports 171 files / clause list now includes `scholar-claim-single-source`.
+No Arabic codepoints in the changed file (checked directly). No `v1/**`/
+`v2/**` edit — `v2/tsconfig.tsbuildinfo` regenerated as the same `make build`
+side effect v3-D81 through D85 each recorded, reverted before staging,
+confirmed empty diff under `v1/**`/`v2/**`.
+
+**Explicitly NOT done, named so a future run does not re-discover this as
+new:** `describeCertification()` still has no production caller — clause 15
+prevents a SECOND, wrong implementation from appearing beside it, but does
+not build the first correct one. The public surface that would actually call
+it (a "certified" badge on `/library` or `/surah/[surah]`, gated on a
+human-signed qari row) is unbuilt and unscheduled — nothing in BUILD-PLAN.md
+names it as a launch requirement, and inventing that UI now would be
+speculative surface with no consumer to validate it against, the same
+discipline v3-D35/D36 used for deferring `explain()`. Step 30's E6
+(fold-runner DB adapter + staging) and E8 (Stripe fixtures) remain untouched
+and still genuinely infra/human-blocked; E7 (the P1 pager) is wired per
+v3-D82 but still needs a live SMTP account (gate 20) — unchanged from v3-D82
+through D85.

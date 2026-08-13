@@ -637,6 +637,70 @@ for (const f of files.filter((f) => /^(app|components|lib)\//.test(rel(f)))) {
   });
 }
 
+// --- Clause 15: SCHOLAR-VERIFICATION CLAIMS HAVE ONE SOURCE (v3-D22). ---
+//
+// `lib/workbench/sign.ts`'s own header names the stakes plainly: "No UI
+// claims scholar verification for a surah lacking a human row"... "this
+// specific claim, made falsely, is a religious-authority misrepresentation,
+// not a copy bug." `describeCertification()` is the ONE function built to
+// answer "may this surface say a scholar verified this" — every caller is
+// supposed to route through it rather than assembling the sentence itself,
+// the same discipline `frontier.ts` uses for the verified/stale/unverified
+// judgement ("this file never computes one").
+//
+// Found by the same audit method that produced clause 14: `describeCertification`
+// has ZERO callers anywhere in app/components/lib outside its own definition
+// and its test — no shipped surface renders a certification claim today, so
+// the invariant currently holds VACUOUSLY. That is exactly the shape B2's
+// first close was in (DEFECTS.md#B2, "no UI file was ported... the JSX-grep
+// half of the closing criterion is vacuously true") right up until v3-D83
+// found it reborn, undetected, with zero callers to have warned anyone.
+// Mechanically confirmed here too: a component-level string combining
+// "scholar"/"qari" with "verified"/"certified" — e.g. a future library or
+// surah-detail badge writing its own "scholar-verified" sentence instead of
+// calling describeCertification() — passes every one of clauses 1-14 and the
+// full test suite unnoticed (verified by injecting exactly that line into
+// QariMode.tsx and re-running this gate: it reported OK).
+//
+// This clause closes the gap the same way clause 10 confines price literals
+// to lib/pricing.ts: any file that wants to pair a "scholar" or "qari" claim
+// with a verification/certification word must be lib/workbench/sign.ts
+// itself — everywhere else, that pairing is the exact mistake v3-D22 exists
+// to prevent, whether or not it happens to be true today.
+// NOTE: bare "qari" is a real identifier in this codebase (frontier.ts's own
+// tier-status variables are literally named `qari`/`admin`), so the pattern
+// requires an ARTICLE before it ("a qari"/"the qari"/"human qari") — the shape
+// a human-readable claim actually takes, and one no variable name produces.
+// "scholar" needs no such guard: `\bscholar\b` already excludes "scholarly"
+// (attribution.ts's genuine, non-claiming usage) by word-boundary alone.
+const SCHOLAR_CLAIM =
+  /\bscholar\b.{0,40}\b(?:verif\w*|certif\w*)\b|\b(?:verif\w*|certif\w*)\w*\b.{0,40}\bscholar\b|\b(?:a|the|human)\s+qari\b.{0,40}\b(?:verif\w*|certif\w*|sign\w*)\b|\b(?:verif\w*|certif\w*|sign\w*)\w*\b.{0,40}\b(?:a|the|human)\s+qari\b/i;
+const SCHOLAR_CLAIM_ALLOWLIST = new Set(["lib/workbench/sign.ts"]);
+for (const f of files.filter((f) => /^(app|components|lib)\//.test(rel(f)))) {
+  const r = rel(f);
+  if (r.endsWith(".test.ts") || r.endsWith(".test.tsx")) continue;
+  if (SCHOLAR_CLAIM_ALLOWLIST.has(r)) continue;
+  const src = stripComments(read(f));
+  src.split("\n").forEach((line, i) => {
+    if (SCHOLAR_CLAIM.test(line)) {
+      violations.push(
+        `${r}:${i + 1}: a scholar/qari verification claim outside ` +
+          `lib/workbench/sign.ts. v3-D22: "No UI claims scholar verification ` +
+          `for a surah lacking a human row" — a religious-authority ` +
+          `misrepresentation, not a copy bug. Route any such claim through ` +
+          `lib/workbench/sign.ts#describeCertification() instead.`,
+      );
+    }
+  });
+}
+// The allowlist must name a real file, or this clause is guarding nothing —
+// the same rot-check clause 9 applies to its own allowlist.
+for (const entry of SCHOLAR_CLAIM_ALLOWLIST) {
+  if (!files.some((f) => rel(f) === entry)) {
+    violations.push(`SCHOLAR_CLAIM_ALLOWLIST names ${entry}, which does not exist. Remove the stale entry.`);
+  }
+}
+
 if (violations.length > 0) {
   console.error(`\n✗ boundaries gate FAILED — ${violations.length} violation(s)\n`);
   for (const v of violations) console.error(`   ✗  ${v}`);
@@ -647,5 +711,5 @@ if (violations.length > 0) {
 console.log(
   `boundaries: OK — ${files.length} files checked (idb/client, sacred-text, ` +
     `engine-decision, egress, recall-before-identity, entitlement, pricing, v3-D19 claims, ` +
-    `no-engine-fixture-in-production, no-hardcoded-rung).`,
+    `no-engine-fixture-in-production, no-hardcoded-rung, scholar-claim-single-source).`,
 );
