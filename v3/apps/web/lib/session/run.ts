@@ -48,6 +48,13 @@ import {
 import { rebuild } from "@engine/rebuild.ts";
 import { assembleQueue, type QueueItem } from "@engine/scheduler.ts";
 import { summarizeSession, type SessionSummary } from "@engine/sessionSummary.ts";
+// DEFECTS.md#B2 / v3-D26: gradeClassToWire() is "the ONE function" that may
+// resolve a grading decision to a wire Rung — see its own header. A hardcoded
+// `rung: full ? "S3" : "S2"` here would be B2's exact ternary shape reborn in
+// application code, invisible to check-boundaries.mjs clause 5 (JSX-only) and
+// unasserted by any test until v3-D83 added both. Every rung below is a call,
+// never a literal.
+import { gradeClassToWire } from "@engine/gradeClass.ts";
 
 import { append, type AppendContext } from "@/lib/idb/append";
 import { getEventsForSurah } from "@/lib/idb/read";
@@ -225,7 +232,13 @@ export async function startSession(input: StartInput, c: Corpus): Promise<StartR
 
   if (!isResume) {
     await append(
-      { type: "session_start", ts: now, surah, ayah: queue[0]!.ayah, rung: "RC" } as DrillEvent,
+      {
+        type: "session_start",
+        ts: now,
+        surah,
+        ayah: queue[0]!.ayah,
+        rung: gradeClassToWire("rc"),
+      } as DrillEvent,
       { now, tz },
     );
   }
@@ -303,7 +316,7 @@ export async function answerCurrent(
       ts: ctx.now,
       surah: run.surah,
       ayah: cur.ayah,
-      rung: "RC",
+      rung: gradeClassToWire("rc"),
       position: cur.position,
       choice,
       correct: adv.correct,
@@ -320,8 +333,9 @@ export async function answerCurrent(
         surah: run.surah,
         ayah: cur.ayah,
         // A fully-blanked pass encodes as S3; a partial one as S2. The ENGINE
-        // decided which via `full` — this only records the verdict it returned.
-        rung: adv.full ? "S3" : "S2",
+        // decided which via `full` — this only resolves that GradeClass to its
+        // wire Rung via gradeClassToWire(), never a re-derived ternary (B2).
+        rung: gradeClassToWire(adv.full ? "s3_full" : "s2_partial"),
         structured: true,
       } as DrillEvent,
       ctx,

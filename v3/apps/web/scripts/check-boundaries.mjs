@@ -605,6 +605,38 @@ for (const f of files.filter((f) => /^(app|components|lib)\//.test(rel(f)))) {
   });
 }
 
+// --- Clause 14: NO HARDCODED RUNG LITERAL — every wire rung goes through
+// gradeClassToWire() (DEFECTS.md#B2 / v3-D26). ---
+//
+// `gradeClass.ts`'s own header says gradeClassToWire() is "the ONE function
+// that resolves [a GradeClass] to a literal Rung... there is structurally
+// nowhere else for that decision to live" — but that was never mechanically
+// true. Clause 5 only scans app/ and components/ for the named engine
+// FUNCTIONS (blankCountFor/assembleQueue/unlockPermitted); it has no pattern
+// for a Rung literal, and it never looks at lib/. `lib/session/run.ts` — the
+// ONLY module that actually emits graded wire events today — reintroduced
+// B2's exact ternary shape, `rung: adv.full ? "S3" : "S2"`, undetected by any
+// gate and unasserted by any test (a nightly audit found it; see DECISIONS.md
+// v3-D83). This clause closes that blind spot structurally: no `rung:` key
+// anywhere in app/components/lib may be assigned a literal Rung string
+// ("S1"/"S2"/"S3"/"S4"/"RC") or a ternary between two such literals — the
+// value must always be the return of a call, i.e. gradeClassToWire(...).
+const RUNG_LITERAL = /\brung\s*:\s*(?:["'](?:S[1-4]|RC)["']|[^,}]*\?\s*["'](?:S[1-4]|RC)["'])/;
+for (const f of files.filter((f) => /^(app|components|lib)\//.test(rel(f)))) {
+  const r = rel(f);
+  if (r.endsWith(".test.ts") || r.endsWith(".test.tsx")) continue;
+  const src = stripComments(read(f));
+  src.split("\n").forEach((line, i) => {
+    if (RUNG_LITERAL.test(line)) {
+      violations.push(
+        `${r}:${i + 1}: a literal Rung assigned to \`rung:\`. Every wire rung ` +
+          `must be produced by @engine/gradeClass.ts#gradeClassToWire() — ` +
+          `DEFECTS.md#B2, DECISIONS.md v3-D26/v3-D83.`,
+      );
+    }
+  });
+}
+
 if (violations.length > 0) {
   console.error(`\n✗ boundaries gate FAILED — ${violations.length} violation(s)\n`);
   for (const v of violations) console.error(`   ✗  ${v}`);
@@ -615,5 +647,5 @@ if (violations.length > 0) {
 console.log(
   `boundaries: OK — ${files.length} files checked (idb/client, sacred-text, ` +
     `engine-decision, egress, recall-before-identity, entitlement, pricing, v3-D19 claims, ` +
-    `no-engine-fixture-in-production).`,
+    `no-engine-fixture-in-production, no-hardcoded-rung).`,
 );

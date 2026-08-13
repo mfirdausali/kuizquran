@@ -2514,3 +2514,106 @@ unratified — `pager_emails` is a reasonable code default, not an answer to
 the open question; step 30's E6 (fold-runner DB adapter + staging) and E8
 (Stripe fixtures) are untouched and still genuinely need infra this sandbox
 lacks.
+
+---
+
+## 2026-08-13 — DEFECTS.md#B2 reborn outside JSX, and the mapping v3-D26 asked to be re-verified finally has a real caller
+
+### v3-D83 — `lib/session/run.ts` re-derived B2's exact ternary; `gradeClassToWire()` had ZERO callers anywhere until now
+
+This run started per NIGHTLY.md's rule by re-deriving state from `git log`
+(HEAD matched `origin/main` at `bcc3f85`) and reading `CLAUDE.md`,
+`INVARIANTS.md`, `DECISIONS.md`, `DEFECTS.md` and `BUILD-PLAN.md` in full.
+Every step of the 32-step order is DONE, human-gated (27/28, qari content
+and sessions) or infra-gated (30's remaining E6/E8, per v3-D82's own
+explicit list) — so rather than invent a new numbered step, this run did
+what the build's own history says a nightly should do when the named work
+is genuinely exhausted: re-verified the current green state from a clean
+`make setup` (confirmed **1819 passing + 2 incomplete**, exit 0, matching
+CLAUDE.md's comment exactly — 255 v2 vitest + 47 v2/api + 252 v3/api + 111
+corpus-compiler + 417 engine + 53 fold-runner + 684 apps/web), then went
+looking for the next instance of this build's single most recurring failure
+shape: a decision that reads as enforced but isn't.
+
+**v3-D26's own text names exactly where to look**: *"this mapping has zero
+call sites exercising it end-to-end... when M4's spec-driven question
+compiler lands and a spec actually declares a `gradeClass`, re-verify every
+entry against that real usage before trusting it further."* M4 landed at
+step 16. The session lifecycle — the ONLY code that actually emits a graded
+`DrillEvent` today — landed at step 18. Neither ever re-verified this. A
+grep for `gradeClassToWire` confirmed it directly: the function is defined,
+exported, and imported nowhere outside its own module and type
+declarations — genuinely dead code on the product's single most consequential
+write path.
+
+**What was actually there instead**, `lib/session/run.ts:324` (pre-fix):
+
+```ts
+rung: adv.full ? "S3" : "S2",
+```
+
+This is `DEFECTS.md#B2`'s exact defect shape — `Drill.tsx:203`'s
+`const rung: Rung = item.full ? "S3" : "S2"` — reborn in application code.
+`gradeClass.ts`'s own header comment already warns against precisely this:
+*"there is structurally nowhere else for that decision to live"* — and yet
+there was, because the mechanical gate never looked. `check-boundaries.mjs`
+clause 5 (B2's supposed enforcement) scans only `app/` and `components/` for
+three named engine function calls; it has no pattern for a Rung literal and
+never reads `lib/`. `run.test.ts`'s 9 existing tests exercised every rung-
+bearing event type and never once asserted the VALUE of `rung`. Two
+independent blind spots — one mechanical, one behavioral — let the exact bug
+B2 was fixed to prevent ship, undetected, in the code learners actually run
+every session.
+
+**Not a live grading bug today**: `GRADE_CLASS_TO_RUNG`'s `s2_partial`→`S2`/
+`s3_full`→`S3` entries happen to be the identical mapping the ternary
+computed, so no learner has been graded wrong. The defect is architectural —
+a duplicated decision with no mechanism forcing the two copies to agree —
+which is exactly the "erodes silently, nothing crashes when it breaks"
+shape INVARIANTS.md's property pack exists to catch for invariants 1/3/4/5;
+invariant 6 (this one) had no equivalent guard for real application code,
+only for JSX.
+
+**Fixed, RED before green:**
+
+1. `lib/session/run.test.ts` — a `vi.mock` of `@engine/gradeClass.ts` whose
+   override returns `"S1"` regardless of input (a value distinct from every
+   value the old ternary/literals could coincidentally produce), then drives
+   a full session and asserts every `session_start`/`reconstruct_tap`/
+   `ayah_produced` event's `rung` equals it. This proves the WIRING, not
+   just the value — the lesson v3-D58 already named: a value-only assertion
+   would have passed against the hardcoded literals by coincidence and
+   proven nothing. Confirmed RED against the pre-fix code (`expected 'RC' to
+   be 'S1'`) before writing the fix. A second test pins the real,
+   un-mocked mapping still produces S2/S3.
+2. `check-boundaries.mjs` **clause 14** — greps `app/`, `components/` and
+   `lib/` (production files only) for a literal Rung (`"S1"`–`"S4"`/`"RC"`)
+   assigned to a `rung:` key, directly or via ternary. Confirmed RED against
+   the pre-fix file (3 violations, one per site) before the fix; GREEN after.
+3. `lib/session/run.ts` — all three `rung:` sites now call
+   `gradeClassToWire("rc")` / `gradeClassToWire(adv.full ? "s3_full" :
+   "s2_partial")`. `gradeClassToWire` has a real caller for the first time.
+
+**Mutation-verified in both directions**: reverted the `ayah_produced` site
+back to the literal ternary — both the new vitest test AND clause 14 went
+red independently, on the exact line. Reverted byte-identically
+(`diff` empty) and re-ran green.
+
+**Verified**: `TZ=UTC make test` → exit 0, **1821 passing + 2 incomplete**
+(255 v2 vitest + 47 v2/api + 252 v3/api + 111 corpus-compiler + 417 engine +
+53 fold-runner + **686** apps/web, +2 over v3-D82's 1819 — exactly this
+run's two new tests, zero regressions). `TZ=UTC make build` → exit 0, 18
+routes, boundaries gate reports 171 files / clause list now includes
+`no-hardcoded-rung`. No Arabic codepoints in any changed file (checked
+directly, not by memory). No `v1/**`/`v2/**` edit —
+`v2/tsconfig.tsbuildinfo` regenerated as a `make build` side effect (same as
+v3-D81/D82) and reverted before staging, never committed.
+
+**Explicitly NOT done, named so a future run does not re-discover these as
+new:** the other five `GradeClass` entries (`pretest`, `ungraded`, `gate`)
+still have no real call site — only `rc`/`s2_partial`/`s3_full` are
+exercised by the session loop today, because pretest/ungraded/gate taps
+are not yet part of any shipped flow. v3-D26's flag stays partially open for
+those three specifically; re-check when a caller for them exists. Step 30's
+E6 (fold-runner DB adapter + staging) and E8 (Stripe fixtures) are
+untouched, unchanged from v3-D82, still genuinely infra/human-blocked.

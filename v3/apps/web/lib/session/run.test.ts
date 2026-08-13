@@ -56,6 +56,29 @@ vi.mock("@/lib/idb/append", async (importOriginal) => {
       appendSpy ? appendSpy(...args) : actual.append(...args),
   };
 });
+
+// A seam for the "gradeClassToWire is the ONE mapping" test alone. When null
+// (every other test) the REAL function runs untouched. DEFECTS.md#B2 / v3-D26:
+// `gradeClass.ts`'s own header says gradeClassToWire() is "the ONE function
+// that resolves [a GradeClass] to a literal Rung... there is structurally
+// nowhere else for that decision to live" — but nothing ever called it, and
+// this module independently re-derived the identical S2/S3/RC ternary instead
+// (functionally correct today, only because the two copies still agree). This
+// mock proves the WIRING, not just the VALUE: if run.ts is genuinely routing
+// every rung through gradeClassToWire(), overriding it must change every
+// emitted rung. A hardcoded literal alongside a correct-by-coincidence value
+// would pass a value-only assertion and prove nothing (the exact vacuity shape
+// this build has hit repeatedly — v3-D58 et al.).
+let gradeClassToWireSpy: ((gc: string) => string) | null = null;
+
+vi.mock("@engine/gradeClass.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@engine/gradeClass.ts")>();
+  return {
+    ...actual,
+    gradeClassToWire: (gc: Parameters<typeof actual.gradeClassToWire>[0]) =>
+      gradeClassToWireSpy ? gradeClassToWireSpy(gc) : actual.gradeClassToWire(gc),
+  };
+});
 import {
   startSession,
   currentItem,
@@ -349,5 +372,53 @@ describe("resume (edge case #93) — a reload does not lose the session", () => 
     // origin and make every reload look like a fresh session.
     const events = await getAllEvents();
     expect(events.filter((e) => e.type === "session_start").length).toBe(1);
+  });
+});
+
+describe("DEFECTS.md#B2 / v3-D26 — every wire rung is resolved by gradeClassToWire(), never re-derived", () => {
+  it("routes session_start, reconstruct_tap AND ayah_produced through the engine's ONE mapping", async () => {
+    // Every GradeClass maps to a DISTINCT Rung, so an override that always
+    // returns "S1" (pretest's wire value — never RC/S2/S3, so it cannot be
+    // confused with a coincidentally-correct hardcoded literal) makes every
+    // site that genuinely calls gradeClassToWire() observably diverge from
+    // whatever it would otherwise have emitted.
+    gradeClassToWireSpy = () => "S1";
+
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+    const { taps } = await playThrough(started.run, c);
+    gradeClassToWireSpy = null;
+
+    expect(taps).toBeGreaterThan(0);
+
+    const events = await getAllEvents();
+    const withRung = events.filter(
+      (e) => e.type === "session_start" || e.type === "reconstruct_tap" || e.type === "ayah_produced",
+    );
+    // Every one of the three rung-bearing event types must actually appear,
+    // or this assertion would vacuously pass over an empty set.
+    expect(events.some((e) => e.type === "session_start")).toBe(true);
+    expect(events.some((e) => e.type === "reconstruct_tap")).toBe(true);
+    expect(events.some((e) => e.type === "ayah_produced")).toBe(true);
+    for (const e of withRung) {
+      expect(e.rung).toBe("S1");
+    }
+  });
+
+  it("without the override, ayah_produced still carries the real S2/S3 the engine decided", async () => {
+    // The mock is a probe, not a replacement — with it off, the genuine
+    // mapping must still hold: a completed pass grades S2 or S3, never RC/S1/S4.
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+    await playThrough(started.run, c);
+
+    const events = await getAllEvents();
+    const produced = events.filter((e) => e.type === "ayah_produced");
+    expect(produced.length).toBeGreaterThan(0);
+    for (const e of produced) {
+      expect(["S2", "S3"]).toContain(e.rung);
+    }
   });
 });

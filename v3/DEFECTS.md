@@ -125,6 +125,22 @@ existing so nothing later has anywhere else to put the decision) is done.
 Exact per-value mapping recorded as v3-D26 (DECISIONS.md), explicitly
 flagged for re-verification once M4's spec system gives it a real caller.
 
+**Reopened and re-closed 2026-08-13 (v3-D83).** M5's session loop
+(`lib/session/run.ts`, build-plan step 18) shipped B2's *exact* ternary —
+`rung: adv.full ? "S3" : "S2"` — undetected, because `check-boundaries.mjs`
+clause 5 only scanned `app/`/`components/` for named engine functions, never
+`lib/`, and had no pattern for a Rung literal; `gradeClassToWire()` had zero
+callers anywhere until this fix. Not a live grading bug (the ternary's
+values happened to match the real mapping), but the exact "nowhere else for
+that decision to live" property the fix was supposed to guarantee did not
+hold. Closed for real: all three `rung:` sites in `run.ts` now call
+`gradeClassToWire()`; `check-boundaries.mjs` gained **clause 14** (greps
+`app/`+`components/`+`lib/` for any literal Rung assigned to `rung:`); a new
+`run.test.ts` suite mocks `gradeClassToWire` and proves the WIRING (not just
+the value) by asserting every emitted rung reflects the mock's override.
+Mutation-verified both ways: reverting one site to the literal turns both
+the gate and the test red, on the exact line; reverted byte-identically.
+
 ## B3 — `ayah_verifications` has no content hash ✅ CLOSED (build-plan step 15)
 
 Migration is `unique(surah,ayah)` + `verified_by` + `note` + `created_at`. A qari

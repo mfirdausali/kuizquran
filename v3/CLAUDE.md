@@ -53,9 +53,9 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 1819 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 1821 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 252 v3/api + 111 corpus-compiler
-             # + 417 engine + 53 fold-runner + 684 apps/web. (v3-D82, 2026-08-12)
+             # + 417 engine + 53 fold-runner + 686 apps/web. (v3-D83, 2026-08-13)
              # NOTE (v3-D50): v3/api/tests/Unit/.gitkeep is LOAD-BEARING.
              # NOTE (v3-D77): `make test`/`make build` both depend on `compile-corpus`
              # now — do not hand-run compile-corpus first and assume that's why it's green.
@@ -63,6 +63,11 @@ make test    # 1819 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # OverrideHashRecomputeTest reads the real compiled 112/hashes.json with
              # no fixture fallback, so `test-api3` (and CI's `php` job for v3/api) was
              # red on a genuinely clean checkout. Both now compile the corpus first.
+             # NOTE (v3-D83): DEFECTS.md#B2 was reborn outside JSX — `lib/session/run.ts`
+             # (the real session loop, step 18) re-derived the exact `full ? S3 : S2`
+             # ternary; `gradeClassToWire()` had ZERO callers anywhere. Fixed, and
+             # check-boundaries.mjs clause 14 now greps app/+components/+lib/ for a
+             # literal Rung on `rung:` so this cannot silently return.
              # Steps 1-26 + 29 done. 27/28 blocked on human content/qari (HANDOVER.md C1-C4).
              # 30's engineering: the P1 pager is now wired (v3-D82) — a confirmed P1
              # emails config('nightly.pager_emails') (defaults to ADMIN_EMAILS); still
