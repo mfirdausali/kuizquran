@@ -2617,3 +2617,97 @@ are not yet part of any shipped flow. v3-D26's flag stays partially open for
 those three specifically; re-check when a caller for them exists. Step 30's
 E6 (fold-runner DB adapter + staging) and E8 (Stripe fixtures) are
 untouched, unchanged from v3-D82, still genuinely infra/human-blocked.
+
+---
+
+## 2026-08-13 (later) — the root Makefile's own `setup` target could not run on a genuinely clean checkout
+
+### v3-D84 — `make setup` created `bootstrap/cache` AFTER `composer install`, defeating the exact fix its own adjacent comment described
+
+This run started per NIGHTLY.md's rule by re-deriving state from `git log`
+(HEAD matched `origin/main` at `703e15c`, v3-D83). Per v3-D83's own closing
+note, every one of the 32 build-plan steps is DONE, human-gated (27/28), or
+infra-gated (30's remaining E6/E8) — so, following the same discipline v3-D83
+itself used when it found itself in this position, this run re-verified the
+current state from a genuinely fresh `make setup` rather than inventing a new
+numbered step, and went looking for the next instance of this build's
+single most recurring failure shape: **a check that reads as protecting
+something but does not.**
+
+It did not have to look far. `make setup` on a container with no prior
+`vendor/`, no prior `node_modules/`, and no prior Laravel-generated
+directories **failed immediately**:
+
+```
+In PackageManifest.php line 179:
+  The /home/user/kuizquran/v2/api/bootstrap/cache directory must be present
+  and writable.
+```
+
+`Makefile:28-31` (pre-fix) read:
+
+```makefile
+cd $(API) && composer install
+@# bootstrap/cache and storage/framework are gitignored — a fresh clone has
+@# neither, and `package:discover` fails cryptically without them.
+cd $(API) && mkdir -p bootstrap/cache storage/framework/{cache,sessions,views} storage/logs
+```
+
+The comment on lines 29-30 correctly describes the exact failure that just
+happened — but the `mkdir` it explains sits **after** the `composer install`
+line, not before it. Composer's `post-autoload-dump` hook runs
+`php artisan package:discover` as part of `install` itself, so creating the
+directory afterwards never actually helps a fresh clone; it only looks like a
+fix because a machine with the directory already present (any container that
+previously ran setup) never exercises the failure at all. This is the
+identical shape to v3-D50 (an empty-but-untracked directory silently breaking
+a clean checkout while looking fine on a machine with leftover state) and
+v3-D77/v3-D82 (a verification step nobody re-ran against a genuinely wiped
+`output/`) — a fourth instance of the same class, this time one level below
+the test suite, in the harness that is supposed to get a new checkout running
+at all. `v3/api`'s block (`Makefile:38-39`, pre-fix) carried the identical
+ordering bug, one `composer install` earlier in the same target.
+
+**Not new to CI** — `.github/workflows/ci.yml`'s `php` job already creates
+`bootstrap/cache`/`storage/framework/*` **before** `composer install --no-scripts`
+(and passes `--no-scripts` as a second, independent guard), so this defect
+never affected CI, only a human or agent running `make setup` locally. That is
+exactly why nobody caught it: CI's own correct implementation gave no signal
+that the Makefile's copy of the same idea was backwards.
+
+**Fixed:** both blocks in `Makefile#setup` reordered — `mkdir -p` now
+precedes `composer install` for `v2/api` and `v3/api`, matching what the
+comment already said should happen. The comment was reworded to state the
+ordering requirement explicitly ("Create them BEFORE `composer install`, not
+after") so the next reader cannot repeat the same inversion.
+
+**Verified**, on the same wipe that reproduced the bug (`rm -rf
+v2/api/{bootstrap/cache,storage/framework,storage/logs,vendor}`, a fresh
+`composer`/`npm` cache-backed but otherwise clean container):
+
+- `make setup` (pre-fix, reproduced first): fails exactly as quoted above,
+  `Error 1`, before any migration or npm step runs.
+- `make setup` (post-fix): completes end to end — composer install, npm
+  install ×5 workspaces, `php artisan migrate --force` ×2 (v2/api's 4 tables,
+  v3/api's 19), exit 0.
+- `TZ=UTC make test` from that same fresh setup → exit 0, **1821 passing + 2
+  incomplete** (255 v2 vitest + 47 v2/api + 252 v3/api + 111 corpus-compiler +
+  417 engine + 53 fold-runner + 686 apps/web) — unchanged from v3-D83, zero
+  regressions, confirming the fix only touches setup ordering, nothing
+  behavioral.
+- `TZ=UTC make build` → exit 0, 18 routes, real corpus staged (12/67/103/112).
+- No `v1/**`/`v2/**` edit. The `rm -rf` used to reproduce this bug
+  incidentally deleted two git-tracked `v2/api/storage/framework/**/.gitignore`
+  placeholder files and regenerated `v2/tsconfig.tsbuildinfo` as a side effect
+  of the subsequent `make build`/`make test` runs (same side effect v3-D81/
+  D82/D83 each recorded) — both restored with `git checkout --` before
+  staging anything, confirmed empty diff under `v2/**` before commit. No
+  Arabic codepoints in the changed file (it contains no strings at all,
+  checked directly).
+
+**Explicitly NOT done, named so a future run does not re-discover it as
+new:** this fix touches only the root `Makefile`'s `setup` target. It does
+not touch `.github/workflows/ci.yml` (already correct, see above) or
+`v3/api`'s own composer scripts. Step 30's E6 (fold-runner DB adapter +
+staging) and E8 (Stripe fixtures) remain untouched and still genuinely
+infra/human-blocked, unchanged from v3-D82/D83.

@@ -25,18 +25,21 @@ setup: ## First run: install deps, create .env, key, migrate
 	@command -v php >/dev/null || { echo "✗ php not found"; exit 1; }
 	@command -v composer >/dev/null || { echo "✗ composer not found"; exit 1; }
 	@command -v node >/dev/null || { echo "✗ node not found"; exit 1; }
-	cd $(API) && composer install
 	@# bootstrap/cache and storage/framework are gitignored — a fresh clone has
-	@# neither, and `package:discover` fails cryptically without them.
+	@# neither, and composer's post-autoload-dump `package:discover` step fails
+	@# cryptically without them. Create them BEFORE `composer install`, not
+	@# after — composer runs `package:discover` as part of install itself, so
+	@# creating the directory afterwards never actually helps a fresh clone.
 	cd $(API) && mkdir -p bootstrap/cache storage/framework/{cache,sessions,views} storage/logs
+	cd $(API) && composer install
 	@[ -f $(API)/.env ] || (cp $(API)/.env.example $(API)/.env && echo "→ created $(API)/.env")
 	@grep -q '^APP_KEY=base64' $(API)/.env || (cd $(API) && php artisan key:generate)
 	cd $(API) && php artisan migrate --force
 	cd $(V2) && npm install
 	@[ -f $(V2)/.env ] || (cp $(V2)/.env.example $(V2)/.env && echo "→ created $(V2)/.env")
 	@# v3-D08: v3's own Laravel app, separate from v2/api above (build-plan step 13).
-	cd $(API_V3) && composer install
 	cd $(API_V3) && mkdir -p bootstrap/cache storage/framework/{cache,sessions,views} storage/logs
+	cd $(API_V3) && composer install
 	@[ -f $(API_V3)/.env ] || (cp $(API_V3)/.env.example $(API_V3)/.env && echo "→ created $(API_V3)/.env")
 	@grep -q '^APP_KEY=base64' $(API_V3)/.env || (cd $(API_V3) && php artisan key:generate)
 	cd $(API_V3) && php artisan migrate --force
