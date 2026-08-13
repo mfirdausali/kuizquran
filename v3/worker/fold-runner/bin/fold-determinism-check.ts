@@ -35,17 +35,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { foldDeterminismCheckRun, type SampledUser } from "../src/foldCheck.ts";
 import { EXIT_CODE } from "../src/severity.ts";
+import { ENGINE_VERSION } from "../src/engineVersion.ts";
 import type { AtomState } from "../../../packages/engine/src/atom.ts";
 import type { AtomsMap } from "../../../packages/engine/src/rebuild.ts";
 import type { DrillEvent } from "../../../packages/engine/src/types.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const GOLDEN = join(HERE, "..", "..", "..", "fixtures", "golden-log");
-
-/** The engine version this build folds under. Bump deliberately when engine
- *  semantics change — that bump is what turns a post-deploy divergence into
- *  a WARN instead of a 3am page. */
-export const ENGINE_VERSION = "v3-engine-0.1.0";
 
 function readStdin(): string {
   try {

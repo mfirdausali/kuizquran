@@ -2711,3 +2711,154 @@ not touch `.github/workflows/ci.yml` (already correct, see above) or
 `v3/api`'s own composer scripts. Step 30's E6 (fold-runner DB adapter +
 staging) and E8 (Stripe fixtures) remain untouched and still genuinely
 infra/human-blocked, unchanged from v3-D82/D83.
+
+---
+
+## 2026-08-13 (later still) — the admin "rebuild atom cache" button did not rebuild anything, and leaked its own mutex
+
+### v3-D85 — `SystemHealthController::rebuildAtomCache()` was a comment describing work nothing did; fixed synchronously, per the v3-D81 precedent, not by adding an unstaffed queue
+
+This run started per NIGHTLY.md's rule by re-deriving state from `git log`
+(HEAD matched `origin/main` at `473d8b4`, v3-D84) — but first had to repair
+the CHECKOUT itself: the container's local `main`/`origin/main` refs were
+stale at `cab5d16` (the pre-Phase-0 nightly-brief commit) inside a shallow
+clone with no common ancestor to `473d8b4`, even though GitHub's real
+`refs/heads/main` (checked via `git ls-remote`) already matched HEAD. A
+`git fetch origin main` (forced update of the stale tracking ref) resolved
+it — no divergent history existed, only a stale local cache. Recorded here
+because it cost real time before any of this run's actual audit could start,
+and the next run hitting the same shallow-clone symptom should reach for
+`git ls-remote origin` before suspecting a real fork.
+
+With the checkout confirmed current, `TZ=UTC make test`/`make build` on a
+genuinely fresh `make setup` reproduced v3-D84's own numbers exactly (1821
+passing + 2 incomplete, exit 0 both) — every one of the 32 build-plan steps
+is still DONE, human-gated (27/28 — confirmed directly: `make content-freeze`
+still exits 1 on surah 67's zero scene beats; the `67-mental-model.DRAFT.json`
+Firdaus authored at 75ac0bb is deliberately uncompiled, per that commit's own
+reasoning, and promoting a human's draft into the shipping corpus without
+their own sign-off is exactly the kind of content decision no agent may
+make), or infra-gated (30's E6/E8). So this run did what v3-D83/D84 each did
+in the same position: re-verify, then hunt for the next instance of this
+build's most recurring failure shape — a mechanism that reads as protecting
+or doing something and does not.
+
+**Found in `SystemHealthController::rebuildAtomCache()`** (build-plan step
+24, WIREFRAME §16's "staff may never edit graded state, only re-derive it"):
+
+```php
+// The actual re-fold is dispatched to the Node fold-runner (v3-D08).
+// The lock is held for its duration and released by the job.
+return response()->json(['started' => true, 'queued' => false]);
+```
+
+No dispatch existed anywhere in the codebase — no `Process` call, no queued
+job, no code path that ever wrote a single `atom_cache` row. The endpoint
+acquired `REBUILD_LOCK` and simply never released it (the release the
+comment promises "by the job" — a job that was never written). Every real
+click left the mutex held for its full 600s TTL. **Both existing tests for
+this endpoint passed anyway**, and for the same reason each time: both
+manually call `Cache::lock(...)->forceRelease()` before AND after — code
+written to compensate for the leak, not to exercise the mutex. This gap was
+named nowhere — not DEFECTS.md, not DECISIONS.md, not LAUNCH-CHECKLIST.md,
+not HANDOVER.md — across nine prior audits of this exact surface (gate 16's
+security review even reads S1-S4 line by line over this controller's
+neighbours and never touches this method).
+
+**The obvious fix (a queued `ShouldQueue` job) would have reproduced the
+exact same defect in a new shape.** `App\Support\CorpusHashRecomputer`
+(v3-D81, this build's other "PHP triggers a TS subprocess from an admin
+write" case) already reasoned through this: a queued job needs a worker
+process running somewhere, and LAUNCH-CHECKLIST gate 20 says explicitly that
+nothing on this deployment runs one. A `RebuildAtomCacheJob` sitting in the
+`jobs` table forever, silently doing nothing because nobody runs
+`queue:work`, is not a fix — it is a job class standing in for the comment
+that used to lie about the same thing. So this run followed v3-D81's own
+precedent instead: the rebuild is now genuinely **synchronous**, inside the
+admin's request, paying real latency rather than hiding it behind
+infrastructure this sandbox (and, per gate 20, this deployment) does not
+have.
+
+**What landed:**
+
+- `worker/fold-runner/bin/rebuild-atom-cache.ts` — a new runner, same shape
+  as `bin/fold-determinism-check.ts`: stdin `{engineVersion?, users:
+  [{userId, events}]}`, stdout one JSON report, exit 0 (including zero
+  users — an empty log honestly re-derives to zero atoms, which is not a
+  failure) or 5 on malformed input. Calls the SAME `foldEvents()`
+  (`src/fold.ts`) the determinism checks use — v3-D08: PHP never folds, and
+  now neither does a second Node script with its own copy of the fold.
+  Its `ENGINE_VERSION` constant moved to a new `src/engineVersion.ts`:
+  importing it from `bin/fold-determinism-check.ts` (its old home) executed
+  THAT file's own `process.exit(main())` module-scope side effect first —
+  caught immediately because the new runner's own tests failed with the
+  WRONG script's error message ("envelope has no `samples` array") on the
+  first run.
+- `App\Support\FoldRunnerProcess` + `App\Support\EventWireCodec` — the
+  Process-invocation and storage-to-wire logic `DeterminismCheckCommand`
+  already had, extracted so `AtomCacheRebuilder` (the second caller) reads
+  the same code rather than a second copy that could drift — exactly
+  v3-D49's failure shape, avoided by construction this time.
+  `DeterminismCheckCommand` now delegates to both; its own test suite (30
+  Nightly-filtered tests) re-ran unchanged and green, confirming the
+  refactor is behavior-preserving.
+- `App\Support\AtomCacheRebuilder` — samples every user with events or a
+  stale `atom_cache` row, hands their full log to the runner, and inside one
+  transaction per rebuild **deletes and reinserts** each user's rows from
+  the fresh fold (replace, never merge — a rebuild that left a stale row the
+  new fold does not produce would be exactly the "editing graded state"
+  WIREFRAME §16 forbids, just by omission instead of an explicit write).
+- `SystemHealthController::rebuildAtomCache()` now calls it inside a
+  try/finally that releases `REBUILD_LOCK` regardless of outcome, and a
+  failure returns 500 with the reason logged rather than a silent `started:
+  true`.
+
+**The existing concurrency test's premise did not survive the fix, honestly
+noted rather than routed around.** `test_a_second_rebuild_queues_and_never_
+runs_concurrently` called the endpoint twice in a row and asserted the
+second call queued — which passed under the OLD code only because the first
+call never released the lock. Under a genuinely synchronous rebuild, the
+first call finishes and releases the lock before the second one fires, so it
+legitimately runs again; two sequential requests that never overlapped
+queuing would be the wrong assertion, not a stronger one. Rewritten to
+simulate real concurrency directly (the test acquires the lock itself first,
+as another in-flight request would, then asserts an arriving request
+queues) — the property `#168` actually cares about, tested for real instead
+of by accident. A new test,
+`test_the_rebuild_actually_writes_atom_cache_rows_from_the_real_engine`,
+drives one real `rung_complete` event through the real engine (via the
+subprocess, never a hand-computed expectation) and asserts the resulting
+`atom_cache` row's `reps`/`strength` match, that a stale row for an atom the
+fresh fold does not reproduce is gone, and that the lock is free afterward.
+
+**Mutation-verified, both load-bearing claims, each reverted byte-identically
+after:** (1) skipping the real `AtomCacheRebuilder::rebuild()` call (returning
+a hardcoded zero-row result) — the new "actually writes rows" test failed on
+`usersProcessed`, exactly where it should; (2) removing the `finally` block's
+`$lock->release()` — the SAME test failed on its own "lock must be released"
+assertion. Both confirmed RED, both reverted, both confirmed GREEN again.
+
+**Verified:** `TZ=UTC make test` → exit 0, **1830 passing + 2 incomplete**
+(255 v2 vitest + 47 v2/api + 253 v3/api + 111 corpus-compiler + 417 engine +
+**61** fold-runner (was 53, +8 new) + 686 apps/web) — up from v3-D84's 1821
+by exactly +9 (8 new fold-runner tests for the new runner, +1 net on
+`SystemHealthTest` after replacing one test and adding another).
+`TZ=UTC make build` → exit 0, 18 routes, boundaries gate 171 files/10 clauses
+(unchanged). `./vendor/bin/pint --test` clean on every changed/new PHP file
+(two real style fixes applied and re-verified). No Arabic codepoints in any
+changed or new file (checked directly, both the diff and every new file
+whole). No `v1/**`/`v2/**` edit — `v2/tsconfig.tsbuildinfo` regenerated as
+the same `make build` side effect v3-D81 through D84 each recorded, reverted
+before staging, confirmed empty diff under `v1/**`/`v2/**`.
+
+**Explicitly NOT done, named so a future run does not re-discover these as
+new:** the rebuild is still O(all users) per click with no pagination or
+background chunking — fine at this build's actual scale (a handful of dev
+users) and consistent with `CorpusHashRecomputer`'s own "admin action, rare,
+low-traffic" reasoning, but a genuinely large user base would want this
+chunked or queued for real once a queue worker exists (gate 20). Scene beats
+for surah 67 remain the sole live content-freeze blocker, unchanged — see
+`67-mental-model.DRAFT.json` and this entry's own opening paragraph. Step
+30's E6 (fold-runner DB adapter + staging) and E8 (Stripe fixtures) remain
+untouched, still genuinely infra/human-blocked, unchanged from v3-D82
+through D84.

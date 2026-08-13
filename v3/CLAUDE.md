@@ -53,9 +53,9 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 1821 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 252 v3/api + 111 corpus-compiler
-             # + 417 engine + 53 fold-runner + 686 apps/web. (v3-D83, 2026-08-13)
+make test    # 1830 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 253 v3/api + 111 corpus-compiler
+             # + 417 engine + 61 fold-runner + 686 apps/web. (v3-D85, 2026-08-13)
              # NOTE (v3-D50): v3/api/tests/Unit/.gitkeep is LOAD-BEARING.
              # NOTE (v3-D77): `make test`/`make build` both depend on `compile-corpus`
              # now — do not hand-run compile-corpus first and assume that's why it's green.
@@ -68,6 +68,14 @@ make test    # 1821 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # ternary; `gradeClassToWire()` had ZERO callers anywhere. Fixed, and
              # check-boundaries.mjs clause 14 now greps app/+components/+lib/ for a
              # literal Rung on `rung:` so this cannot silently return.
+             # NOTE (v3-D85): the admin "rebuild atom cache" button (step 24) never
+             # actually rebuilt anything — no Process call, no queued job, and the
+             # lock it acquired was never released; both its tests passed only
+             # because they manually force-released that lock. Fixed SYNCHRONOUSLY
+             # (matching v3-D81's CorpusHashRecomputer precedent) via the new
+             # App\Support\AtomCacheRebuilder + worker/fold-runner/bin/rebuild-atom-cache.ts —
+             # a queued job would have reproduced the same "nothing runs it" defect,
+             # since nothing on this deployment runs a queue worker either.
              # Steps 1-26 + 29 done. 27/28 blocked on human content/qari (HANDOVER.md C1-C4).
              # 30's engineering: the P1 pager is now wired (v3-D82) — a confirmed P1
              # emails config('nightly.pager_emails') (defaults to ADMIN_EMAILS); still

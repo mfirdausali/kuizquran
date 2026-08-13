@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\AdminAudit;
+use App\Support\AtomCacheRebuilder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Build-plan step 24 (M8). SYSTEM HEALTH.
@@ -126,6 +128,13 @@ class SystemHealthController extends Controller
      *
      * WIREFRAME §16: "Staff may never edit graded state." A rebuild RE-DERIVES from
      * the event log; it never invents. This is the ONLY mutating action here.
+     *
+     * RUNS SYNCHRONOUSLY, inside this request — see AtomCacheRebuilder's own
+     * header for why a queued job would silently reproduce the exact defect
+     * this endpoint used to have (a comment describing work nothing actually
+     * does, because nothing runs a queue worker on this deployment).
+     * `started: true` therefore means the rebuild has COMPLETED, not merely
+     * begun; the lock is released in `finally` regardless of outcome.
      */
     public function rebuildAtomCache(Request $request): JsonResponse
     {
@@ -149,8 +158,25 @@ class SystemHealthController extends Controller
             'ip' => $request->ip(),
         ]);
 
-        // The actual re-fold is dispatched to the Node fold-runner (v3-D08).
-        // The lock is held for its duration and released by the job.
-        return response()->json(['started' => true, 'queued' => false]);
+        try {
+            $result = app(AtomCacheRebuilder::class)->rebuild();
+        } catch (\Throwable $e) {
+            Log::error('atom cache rebuild failed — '.$e->getMessage());
+
+            return response()->json([
+                'started' => false,
+                'queued' => false,
+                'reason' => 'rebuild failed: '.$e->getMessage(),
+            ], 500);
+        } finally {
+            $lock->release();
+        }
+
+        return response()->json([
+            'started' => true,
+            'queued' => false,
+            'usersProcessed' => $result['usersProcessed'],
+            'atomsWritten' => $result['atomsWritten'],
+        ]);
     }
 }

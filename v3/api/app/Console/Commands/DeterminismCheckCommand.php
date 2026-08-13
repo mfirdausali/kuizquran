@@ -5,12 +5,13 @@ namespace App\Console\Commands;
 use App\Mail\DeterminismP1Alert;
 use App\Models\Event;
 use App\Models\NightlyCheckRun;
+use App\Support\EventWireCodec;
+use App\Support\FoldRunnerProcess;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
-use Symfony\Component\Process\Process;
 use Throwable;
 
 /**
@@ -255,43 +256,15 @@ class DeterminismCheckCommand extends Command
     }
 
     /**
-     * Storage columns → the frozen DrillEvent wire shape (v3-D10). A pure
-     * rename: nothing here computes, reinterprets, or defaults an engine
-     * value — Laravel stores the wire and hands it back (v3-D08).
+     * Storage columns → the frozen DrillEvent wire shape (v3-D10). Delegates
+     * to App\Support\EventWireCodec, shared with AtomCacheRebuilder — see
+     * that class's header for why this must not be a second copy.
      *
      * @return array<string,mixed>
      */
     private function toWireEvent(Event $e): array
     {
-        $wire = [
-            'type' => $e->type,
-            'ts' => (int) $e->ts,
-            'surah' => (int) $e->surah,
-            'ayah' => (int) $e->ayah,
-            'rung' => $e->rung,
-        ];
-        $optional = [
-            'id' => $e->uuid, 'position' => $e->position, 'correct' => $e->correct,
-            'pretest' => $e->pretest, 'to' => $e->to_ayah, 'stepKind' => $e->step_kind,
-            'structured' => $e->structured, 'latency' => $e->latency, 'resume' => $e->resume,
-            'testKind' => $e->test_kind, 'score' => $e->score, 'total' => $e->total,
-            'sentToReviews' => $e->sent_to_reviews, 'siteKey' => $e->site_key,
-            'visitOrdinal' => $e->visit_ordinal, 'deviceId' => $e->device_id,
-            'deviceSeq' => $e->device_seq, 'tz' => $e->tz, 'corpusHash' => $e->corpus_hash,
-            'locale' => $e->locale, 'gradeClass' => $e->grade_class,
-        ];
-        foreach ($optional as $k => $v) {
-            if ($v !== null) {
-                $wire[$k] = $v;
-            }
-        }
-
-        // `choice` is deliberately NOT forwarded. It holds tapped answer
-        // text — Arabic for S2/S3 — and the fold never reads it
-        // (rebuild.ts/applyEvent depend only on structural coordinates).
-        // Sending it would push sacred text through a subprocess pipe and
-        // into a stored JSON report for no benefit whatsoever.
-        return $wire;
+        return EventWireCodec::toWire($e);
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -326,36 +299,7 @@ class DeterminismCheckCommand extends Command
      */
     private function invokeRunner(array $args, ?string $stdin): array
     {
-        $runnerDir = (string) config('nightly.fold_runner_path', base_path('../worker/fold-runner'));
-        $node = (string) config('nightly.vite_node', $runnerDir.'/node_modules/.bin/vite-node');
-
-        if (! is_dir($runnerDir) || ! is_file($node)) {
-            return [5, [
-                'severity' => 'error',
-                'error' => "fold-runner not runnable: expected {$node}. Run `npm install` in worker/fold-runner.",
-            ]];
-        }
-
-        $process = new Process([$node, ...$args], $runnerDir, null, $stdin, 900);
-        $process->run();
-
-        $exit = $process->getExitCode() ?? 5;
-        $out = trim($process->getOutput());
-        $report = json_decode($out, true);
-        if (! is_array($report)) {
-            // The runner is contracted to print JSON on EVERY path. If it
-            // did not, we do not guess — the night is an error night with
-            // the raw output preserved as evidence.
-            $report = [
-                'severity' => 'error',
-                'error' => 'runner produced no parseable JSON report',
-                'stdout' => mb_substr($out, 0, 2000),
-                'stderr' => mb_substr(trim($process->getErrorOutput()), 0, 2000),
-            ];
-            $exit = 5;
-        }
-
-        return [$exit, $report];
+        return FoldRunnerProcess::run($args, $stdin);
     }
 
     /**
