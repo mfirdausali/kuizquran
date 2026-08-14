@@ -3248,3 +3248,122 @@ DeviceReset.tsx`'s own comment: "this build has no account adoption and no
 server-side identity to restore from"). Step 30's E6/E8 and gate 20 (hosting)
 remain untouched and still genuinely infra/human-blocked, unchanged from
 v3-D82 through D87.
+
+---
+
+## 2026-08-14 (nightly, later still) — the adjacent finding v3-D88 flagged for a future run
+
+### v3-D89 — `SyncTrigger` wires `lib/sync/sync.ts#syncCycle()`; B5's fix finally has a live caller
+
+This run started per NIGHTLY.md's rule by re-deriving state rather than
+trusting the stored line: HEAD was DETACHED at `e20b20a` (v3-D88), one
+commit ahead of the local `main` ref's cached position (`main` was still
+sitting at `cab5d168`, the commit right after Phase 0) — a `git fetch`
+confirmed `origin/main` already matched HEAD, so `main` was fast-forwarded
+to match. The **exact** "local `main` pointer stale relative to its own
+remote-tracking ref" shape v3-D77 Finding 0 named and v3-D87 caught before
+it cost hours — caught here too, for the same reason: re-derive from the
+repo and `git log`, never trust NIGHTLY.md's own stored step number.
+
+Every one of the 32 build-plan steps was still DONE, human-gated (27/28),
+or infra/human-gated (30's E6/E7/E8), so this run followed v3-D82 through
+D88's established practice: pick up the most recent, most concrete
+agent-doable gap a prior run already named rather than re-discovering one
+from scratch. v3-D88 named exactly one, in its own words: `syncCycle()`
+(and `pushOutbox`/`pullFromServer`/`shouldAttemptSync`/`backoffMs`) were
+built and unit-tested since build-plan step 21 (B5's actual fix lives in
+`merge.ts`, which `syncCycle` reaches via `pullFromServer`), exported from
+`lib/sync`'s own public barrel, and had **zero production callers anywhere
+in `apps/web`** — re-verified at the start of this run with the same
+`grep -rln "syncCycle\|pullFromServer\|pushOutbox" apps/web` (excluding
+tests) v3-D88 used, still returning nothing outside `lib/sync/` itself.
+Concretely: a learner's second device has never actually pulled their
+first device's events, because nothing in a running app ever called the
+function that reaches `mergeFromServer`. `SyncStatus.tsx` (the "N pending"
+indicator) only ever read `countPending()` — a deliberate passive
+observer, per its own test's docblock — so its presence on `/home` gave no
+signal that anything was actually flushing.
+
+**Built:** `components/shell/SyncTrigger.tsx`, a passive background
+island. Two precedents, not inventions:
+
+- **The render/effect shape** mirrors `ServiceWorkerRegistrar` exactly —
+  renders `null` always, does its work in a `useEffect`, and every failure
+  path is "do nothing, the app is unaffected" (`syncCycle` is documented
+  to never throw into its caller; wrapped in try/catch anyway, because an
+  effect boundary in this codebase does not trust that twice).
+- **When it fires** — mount, plus window `online` and `focus` — is not
+  invented either. It mirrors this codebase's own PRIOR generation's
+  answer to the identical question, `v2/src/sync/useBackgroundSync.ts`
+  (read-only reference; nothing under `v1/**`/`v2/**` touched). Nothing in
+  v3 ever superseded that answer, so re-deriving a different trigger shape
+  from nothing would have been the actual invention.
+
+`shouldAttemptSync()` is honoured as a hint before every attempt (never a
+gate on appending — invariant #2 is untouched by this file), so a phone in
+airplane mode does not dial a dead network on every refocus; that function
+had the identical zero-caller problem as `syncCycle` itself and gets its
+first real caller here too. A degraded cycle schedules exactly ONE retry
+via the also-previously-uncalled `backoffMs(attempt)` (full jitter,
+capped) rather than a fixed interval or a spin loop, and the attempt
+counter resets on a clean cycle. An `inFlightRef`-style guard stops
+overlapping cycles from a mount attempt still in flight colliding with an
+`online`/`focus` firing moments later — harmless by construction (uuid is
+the idempotency key, per `sync.ts`'s own header) but wasteful traffic for
+no benefit, so guarded anyway. Mounted in `app/(app)/layout.tsx` beside
+`<TabBar/>` — scoped to the learner's actual app shell, not the stateless
+landing page or the earliest onboarding screens, matching where
+`SyncStatus.tsx` already lives.
+
+**RED before green.** `test/sync-trigger.test.tsx` (8 tests) was written
+and committed to work against FIRST, then run against a tree with the
+component temporarily removed (`mv` aside, not deleted) to confirm a real
+Vite `Failed to resolve import "@/components/shell/SyncTrigger"` failure —
+not a vacuous pass — before the component was restored. Covers: fires on
+mount; fires again on window `online`; fires again on window `focus`;
+makes no request at all when `navigator.onLine` reports false (asserted
+via `vi.spyOn(window.navigator, "onLine", "get")`, since no earlier test
+in this codebase had stubbed that getter); renders nothing and never
+blocks paint (#103 — asserted by never awaiting anything before the
+`render()` call returns); stops firing after unmount, even on a
+subsequent `online` event; and a degraded cycle (server 500) retries
+exactly once via `backoffMs` and stops retrying once the server recovers
+(fake timers + a real `fetch` stub honouring `EventsController`'s actual
+response contract, the same "stub the server, not the module" discipline
+`outbox.test.ts`/`pull.test.ts` already established).
+
+**Environment note, not a code finding:** `make setup` failed on a clean
+checkout in this run's sandbox — `composer install` for `v2/api` timed out
+falling back to a `git clone --mirror` of `laravel/framework` through this
+environment's proxy (GitHub API dist downloads returned "Could not
+authenticate", forcing the git-source fallback, which then hit the
+default 300s process timeout). Unrelated to this change: `npm install` for
+every JS package succeeded immediately and directly. Worked around with
+`COMPOSER_PROCESS_TIMEOUT=900 composer install`, which then completed
+cleanly for both `v2/api` and `v3/api` from the already-populated
+composer cache. Recorded here in case a future run hits the same
+proxy-timeout shape and wastes time diagnosing it as a code problem.
+
+**Verified:** `TZ=UTC make test` → exit 0, **1866 passing + 2 incomplete**
+(255 v2 vitest + 47 v2/api + 258 v3/api + 111 corpus-compiler + 417 engine
++ 61 fold-runner + **717** apps/web (was 709, +8 — exactly this run's new
+test file)) — up from v3-D88's 1858 by exactly +8. `TZ=UTC make build` →
+exit 0, 18 routes, `npm run gates` reports `boundaries: OK` (176 files,
+was 174) and `corpus-glyphs: OK` unchanged. `npx tsc --noEmit` clean. No
+Arabic codepoints in any new or changed file (checked directly, whole
+files). No `v1/**`/`v2/**` edit — `v2/tsconfig.tsbuildinfo` regenerated as
+the same `make build` side effect v3-D81 through D88 each recorded,
+reverted before staging, confirmed empty diff under `v1/**`/`v2/**`.
+
+**Explicitly NOT done, named so a future run does not re-discover this as
+new:** `permitsIssuance`/`permitsReview` (v3-D88's own deliberately
+withheld wire) are untouched by this change — that remains a
+stop-and-report product question about what "review-only" means for a
+queue that mixes new material and review in one assembly, not a wiring
+gap this run's precedent resolves by analogy. Server-side `PaywallGate`
+enforcement at "corpus delivery" or "checkout" (v3-D55's other two named
+enforcement points) is still unbuilt — corpus is still served as static
+build-time files, and checkout does not exist as a learner surface at all
+(account adoption itself is unbuilt). Step 30's E6/E7/E8 and
+LAUNCH-CHECKLIST gate 20 (hosting) remain untouched and still genuinely
+infra/human-blocked, unchanged from v3-D82 through D88.

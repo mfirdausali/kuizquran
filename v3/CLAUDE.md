@@ -53,9 +53,21 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 1858 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 1866 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 258 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 709 apps/web. (v3-D88, 2026-08-14)
+             # + 417 engine + 61 fold-runner + 717 apps/web. (v3-D89, 2026-08-14)
+             # NOTE (v3-D89): `lib/sync/sync.ts#syncCycle()` — B5's actual fix
+             # (merge.ts) reached via `pullFromServer` — had ZERO production
+             # callers anywhere in apps/web since build-plan step 21: a
+             # learner's second device never actually pulled their events.
+             # `components/shell/SyncTrigger.tsx` now calls it on mount +
+             # window `online`/`focus` (v2/src/sync/useBackgroundSync.ts's own
+             # precedent for this exact question), gives `shouldAttemptSync()`
+             # and `backoffMs()` their first real callers too, and is mounted
+             # in app/(app)/layout.tsx beside <TabBar/>. See DECISIONS.md
+             # v3-D89. `permitsIssuance`/`permitsReview` (v3-D88) remain
+             # untouched — still a stop-and-report product question, not
+             # resolved by this run's precedent.
              # NOTE (v3-D88): `PaywallGate::permitsIssuance()` and its client
              # mirror `lib/entitlement/gate.ts#permitsIssuance()` had ZERO
              # production callers, on EITHER side, six days after the session
