@@ -2952,3 +2952,123 @@ discipline v3-D35/D36 used for deferring `explain()`. Step 30's E6
 and still genuinely infra/human-blocked; E7 (the P1 pager) is wired per
 v3-D82 but still needs a live SMTP account (gate 20) — unchanged from v3-D82
 through D85.
+
+---
+
+## 2026-08-14 (nightly) — LAUNCH-CHECKLIST gate 21 (per-corpus Amiri glyph coverage) closed, mislabeled BLOCKED-ON-INFRA
+
+### v3-D87 — the checklist's own reasoning for the block had already stopped applying
+
+This run started by re-deriving state per NIGHTLY.md's rule rather than
+trusting the stored line: HEAD was DETACHED, pointing at `4770d55` (v3-D86),
+one commit ahead of the local `main` ref's cached position — a fresh
+`git fetch` (this session's shallow clone needed `--unshallow` to see it)
+showed `origin/main` was already at `4770d55`, so no reconciliation was
+actually needed; the local `main` branch pointer was simply stale relative to
+its own remote-tracking ref, the same failure shape v3-D77 Finding 0 warned
+about, caught before it cost hours this time. `main` was fast-forwarded to
+match and `make setup`/`TZ=UTC make test`/`TZ=UTC make build` were run clean
+before touching anything, confirming **1830 passing + 2 incomplete** and a
+clean `make build` — the exact numbers `v3/CLAUDE.md` already documented.
+
+Every one of the 32 build-plan steps was still DONE, human-gated (27/28), or
+infra/human-gated (30's E6/E7/E8), so this run followed v3-D82 through D86's
+established practice: re-verify, then look for a genuine, agent-doable gap
+this document's own audits had already named but not yet closed.
+
+**Found in `v3/LAUNCH-CHECKLIST.md` gate 21.** It named the fix precisely —
+"a script that walks each compiled corpus's codepoints and asserts every one
+is mapped by the shipped Amiri subset. Cheap to build" — then marked itself
+BLOCKED-ON-INFRA on the reasoning that this "needs the final launch corpus set
+(gate 6) to be meaningful". That reasoning stopped applying at v3-D59/Q3
+(2026-08-11): the launch set closed at 12 + 67 + 103 + 112 and all four have
+been compiled ever since. The gate had simply never been re-read against its
+own stated blocker — the exact "prose says a thing that is no longer true
+about its own codebase" shape v3-D24/v3-D55 both named, just in a checklist
+verdict instead of a decision.
+
+**Built:** `v3/apps/web/scripts/check-corpus-glyphs.mjs`, wired into both
+`npm run gates` and `prebuild` (after `stage-corpus.mjs`/
+`check-corpus-morphology.mjs`). No new dependency: the shipped fonts are
+WOFF2, and `cmap` — the table mapping a codepoint to a glyph — is stored
+UNTRANSFORMED inside WOFF2's one Brotli stream (only `glyf`/`loca` undergo the
+format's reconstruction transform), so a ~60-line WOFF2 table-directory
+parser plus Node's built-in `zlib.brotliDecompressSync` recovers real `cmap`
+bytes; cmap formats 4 (BMP) and 12 (full Unicode — Amiri's platform 3/
+encoding 10 subtable, which is where the Quranic annotation marks live) are
+both parsed into the actual set of codepoints mapped to a non-`.notdef` glyph.
+
+**Self-verified against an independent, human-produced number, not trusted
+once.** `public/fonts/FONTS.md` records Amiri's coverage "verified manually,
+once... not from memory" on 2026-08-11: U+0600–06FF 254, U+0750–077F 48,
+U+FB50–FDFF 611, U+FE70–FEFF 140, U+06D6–06ED 24/24. Run against the real
+shipped `amiri-400.woff2`/`amiri-700.woff2`, this parser reproduces every one
+of those five counts exactly — the strongest correctness evidence available
+for a from-scratch binary-format parser, since it agrees with a number
+produced by a completely different (manual) method. Pinned as a regression in
+`test/check-corpus-glyphs-gate.test.ts` rather than trusted once and left to
+drift.
+
+**Scans** `verses[].text_uthmani`, `words[].text_uthmani` and
+`distractors[].text` — the three fields a learner's browser actually paints
+(the same three arrays `stage-corpus.mjs#slim()` ships to a client, plus
+surah 12's `text_uthmani`, server-rendered rather than staged). Deliberately
+excludes `words[].lemma`/`.root`: Arabic-script QAC morphology, but
+`check-corpus-morphology.mjs` (gate 18, v3-D24) already proves those never
+reach a browser — demanding coverage for them would check glyphs nobody is
+ever asked to render.
+
+**Non-vacuous by construction, both directions — this build's own recurring
+failure shape, guarded against explicitly rather than assumed away:**
+- Hard-fails, never silently passes, if `packages/corpus-compiler/output/`
+  exists but none of the four launch surahs compiled under it (a genuine
+  anomaly — `compile-corpus` writes all four together) — the exact "0
+  scanned, reads as OK" shape B2/the scholar-claim gap (v3-D83/D86) were.
+- Soft-skips (exit 0, loud warning) only when `output/` does not exist at
+  all — the ordinary, legitimate state of a clean checkout that has not run
+  `make compile-corpus` yet (`output/` is gitignored, v3-D52); this gate runs
+  inside `npm run gates`, which must survive that state, same posture
+  `stage-corpus.mjs` already established.
+- Mutation-verified: forcing the coverage comparison to always report
+  "covered" turned 4 of the 12 companion tests red, each naming the exact
+  injected codepoint gap it should have caught; reverted byte-identically
+  (`diff` empty), 12/12 green again.
+
+**Tests spawn the real script, never an extracted helper** — the discipline
+`content-freeze-gate.test.ts` states explicitly ("A gate is only worth its
+exit code... testing an extracted helper would prove the helper works while
+the SCRIPT could stop calling it"). Every assertion drives
+`check-corpus-glyphs.mjs` as a subprocess with `--corpus-root`/`--fonts`/
+`--surahs` overrides, against synthetic fixture trees built with
+`String.fromCodePoint(...)` — never a literal Arabic byte, the same technique
+`b6-repeated-word-sweep.test.ts` and `arabic.ts`'s own `TATWEEL` constant use.
+
+**Real result against the launch corpus today:** zero uncovered codepoints —
+`corpus-glyphs: OK — 4 corpus artifact(s) (surahs 12, 67, 103, 112), 206
+distinct codepoint(s) checked, all mapped by the shipped Amiri subset (1691
+codepoints across 2 font file(s))`. If a fifth surah is ever added, or the
+bundled Amiri files are ever swapped, this now re-verifies automatically on
+every build instead of depending on someone re-running FONTS.md's manual
+check by hand.
+
+**Verified:** `TZ=UTC make test` → exit 0, **1842 passing + 2 incomplete**
+(255 v2 vitest + 47 v2/api + 253 v3/api + 111 corpus-compiler + 417 engine +
+61 fold-runner + **698** apps/web (was 686, +12 for the new gate's own
+suite)) — up from v3-D86's 1830 by exactly +12. `TZ=UTC make build` → exit 0,
+18 routes, `npm run gates` output now ends with the new `corpus-glyphs: OK`
+line. `npx tsc --noEmit` clean. No Arabic codepoints in either new file
+(checked directly, both files whole, not just the diff). No `v1/**`/`v2/**`
+edit — `v2/tsconfig.tsbuildinfo` regenerated as the same `make build` side
+effect v3-D81 through D86 each recorded, reverted before staging, confirmed
+empty diff under `v1/**`/`v2/**`.
+
+**Explicitly NOT done, named so a future run does not re-discover this as
+new:** the WOFF2 parser supports cmap formats 4 and 12 only (throws loudly on
+anything else, rather than silently under-reporting coverage) — sufficient
+for both shipped Amiri files today, but a future font swap using a different
+subtable format would need the parser extended, not silently pass. Gate 22
+(Arabic visual QA screenshot-diff) is a different property entirely — this
+gate proves a glyph EXISTS in the font, never that it RENDERS correctly
+(ligatures, harakat stacking, bidi) — and remains BLOCKED-ON-HUMAN, unchanged.
+Step 30's E6/E8 and gate 20 (hosting) remain untouched and still genuinely
+infra/human-blocked, unchanged from v3-D82 through D86.

@@ -528,21 +528,71 @@ BUILD-PLAN Q12 is still open: self-managed VPS vs Forge + managed Postgres, and
 
 ---
 
-## 21 · Per-corpus Amiri glyph-subset check — **BLOCKED-ON-INFRA**
+## 21 · Per-corpus Amiri glyph-subset check — **GREEN (2026-08-14)**
 
-Codepoint coverage was verified **manually, once**, and recorded in
-`public/fonts/FONTS.md` (Arabic U+0600–06FF: 254 mapped; Supplement: 48;
-Presentation Forms-A: 611). `check-fonts.mjs` verifies the font **exists** and
-hard-fails on missing Amiri — it does not verify per-corpus glyph coverage.
+```bash
+cd v3/apps/web && node scripts/check-corpus-glyphs.mjs
+#   corpus-glyphs: OK — 4 corpus artifact(s) (surahs 12, 67, 103, 112),
+#   206 distinct codepoint(s) checked, all mapped by the shipped Amiri
+#   subset (1691 codepoints across 2 font file(s)).
+```
 
-**To close:** a script that walks each compiled corpus's codepoints and asserts
-every one is mapped by the shipped Amiri subset. Cheap to build; it needs the
-final launch corpus set (gate 6) to be meaningful.
+**Closed.** This gate was previously marked BLOCKED-ON-INFRA on the reasoning
+that it "needs the final launch corpus set... to be meaningful" — but that set
+closed at v3-D59/Q3 (12 + 67 + 103 + 112, all four compiled) well before this
+gate was written, so the blocker never actually applied by the time anyone
+looked again. Re-checked against the repo per NIGHTLY.md's own rule rather than
+trusted from this document's stale verdict.
 
-**Related, and loud:** `npm run gates` currently warns that **4 of 6 UI fonts are
-absent** (Inter 400/500/600, Source Serif 4 400). By design this is a warning,
-not a failure — they degrade to the fallbacks the locked token stacks already
-name. Amiri, the one that matters, is present.
+Coverage was previously verified **manually, once** (`public/fonts/FONTS.md`,
+2026-08-11: Arabic U+0600–06FF 254 mapped, Supplement 48, Presentation
+Forms-A 611, Forms-B 140, Quranic annotation marks 24/24) — a fact about the
+font in isolation, never re-run against a specific compiled corpus and never
+re-checked when a new surah compiled. `check-fonts.mjs` verifies the font
+FILE exists; it does not read a single glyph out of it.
+
+**No new dependency.** `check-corpus-glyphs.mjs` parses the shipped WOFF2
+files directly: a minimal WOFF2 table-directory reader plus Node's built-in
+`zlib.brotliDecompressSync` recovers `cmap` (untransformed inside WOFF2's one
+Brotli stream — only `glyf`/`loca` undergo the format's reconstruction
+transform), then parses cmap formats 4 and 12 into the set of codepoints the
+font actually maps to a non-`.notdef` glyph. **Self-verified against
+FONTS.md's independently-verified numbers**: run against the real shipped
+fonts, this parser reproduces all five documented counts exactly (254, 48,
+611, 140, 24/24) — see `test/check-corpus-glyphs-gate.test.ts`, which pins this
+as a regression rather than trusting the parser once.
+
+**Scans** `verses[].text_uthmani`, `words[].text_uthmani` and
+`distractors[].text` — the three fields a learner's browser actually paints
+(the same three arrays `stage-corpus.mjs#slim()` ships to a client, plus
+surah 12's `text_uthmani` which is server-rendered rather than staged).
+`words[].lemma`/`.root` are excluded: `check-corpus-morphology.mjs` (gate 18)
+already proves those never reach a browser, so demanding glyph coverage for
+them would check glyphs nobody is ever asked to render.
+
+**Non-vacuous by construction, both directions:**
+- FAILS loudly (never silently passes) if `packages/corpus-compiler/output/`
+  exists but none of the four launch surahs compiled under it — the exact
+  "0 scanned, reads as OK" shape this build has shipped before.
+- SKIPS (exit 0, loud warning) only when `output/` does not exist at all — a
+  legitimate state on a clean checkout that has not run `make compile-corpus`
+  yet (`output/` is gitignored, v3-D52); `npm run gates` must survive that.
+- Mutation-verified: forcing the coverage check to always pass turned 4 of the
+  12 companion tests red, on the exact assertions naming the injected gap;
+  reverted byte-identically, 12/12 green again.
+
+Wired into both `npm run gates` and `prebuild`, after `stage-corpus.mjs` and
+`check-corpus-morphology.mjs` in the same chain.
+
+**Real result today:** zero uncovered codepoints across all four launch
+surahs. If a fifth surah is added post-launch, or the shipped Amiri subset is
+ever swapped, this gate re-verifies automatically on the next build — nobody
+has to remember to re-run FONTS.md's manual check.
+
+**Related, and loud, unchanged:** `npm run gates` still warns that **4 of 6 UI
+fonts are absent** (Inter 400/500/600, Source Serif 4 400). By design this is
+a warning, not a failure — they degrade to the fallbacks the locked token
+stacks already name. Amiri, the one this gate covers, is present.
 
 ---
 

@@ -53,9 +53,17 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 1830 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 1842 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 253 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 686 apps/web. (v3-D85, 2026-08-13)
+             # + 417 engine + 61 fold-runner + 698 apps/web. (v3-D87, 2026-08-14)
+             # NOTE (v3-D87): LAUNCH-CHECKLIST gate 21 (per-corpus Amiri glyph
+             # coverage) was mislabeled BLOCKED-ON-INFRA on a reason that had
+             # already stopped applying once the launch surah set closed
+             # (v3-D59). `check-corpus-glyphs.mjs` (no new dependency — a
+             # from-scratch WOFF2/cmap parser, self-verified against
+             # FONTS.md's independently-verified codepoint counts) now runs in
+             # `npm run gates`/`prebuild` and reports zero uncovered
+             # codepoints across all four launch surahs.
              # NOTE (v3-D50): v3/api/tests/Unit/.gitkeep is LOAD-BEARING.
              # NOTE (v3-D77): `make test`/`make build` both depend on `compile-corpus`
              # now — do not hand-run compile-corpus first and assume that's why it's green.
