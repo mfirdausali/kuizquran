@@ -269,14 +269,26 @@ for (const f of files) {
 const ENTITLEMENT_TOKENS = /\bEntitlement|\bentitlement|\bPaywall|\bentitled\b/;
 // The THREE enforcement points (session assembly, corpus delivery, checkout),
 // plus the entitlement island itself. Adding to this list is a reviewable act.
-// NOTE: session assembly (`app/(app)/session/page.tsx`) is still a STUB at this
-// step, so it is deliberately NOT here yet — an allowlist entry for a file that
-// does not read entitlement is an unreviewed hole waiting for the real code. It
-// gets added in the same commit that makes the session page a real enforcement
-// point. Same for the checkout surface, which does not exist yet.
+//
+// CORRECTED (v3-D88): the note this comment used to carry — "session assembly
+// (`app/(app)/session/page.tsx`) is still a STUB at this step" — went stale
+// the moment step 18 (v3-D67) landed the real session loop, and was never
+// revisited. That staleness is exactly why `permitsIssuance()`/`PaywallGate`
+// sat with ZERO production callers on either side for six days after the
+// session loop shipped: the reasoning for deferring the allowlist entry no
+// longer applied, but nothing re-read it. `lib/entitlement/sync.ts` (fetch +
+// offline-durable cache for the snapshot `GET /api/entitlement` now serves)
+// is added here because it IS a legitimate reader — it exists so
+// `permitsIssuance` can be called with real data at all. It is NOT yet called
+// from `app/(app)/session/page.tsx` itself: doing that safely needs a
+// decision this run did not have the authority to make alone — see v3-D88 for
+// exactly what and why. `app/(app)/session/page.tsx` and the checkout surface
+// stay OUT of this allowlist until that decision lands and each actually
+// reads entitlement, per this clause's own rule.
 const ENTITLEMENT_ALLOWLIST = new Set([
   "lib/entitlement/cache.ts",
   "lib/entitlement/gate.ts",
+  "lib/entitlement/sync.ts",
   "lib/entitlement/types.ts",
   "lib/pricing.ts",
 ]);

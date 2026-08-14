@@ -10,6 +10,7 @@ use App\Http\Controllers\Admin\AdminUsersController;
 use App\Http\Controllers\Admin\FlagController;
 use App\Http\Controllers\Admin\StripeSettingsController;
 use App\Http\Controllers\Admin\SystemHealthController;
+use App\Http\Controllers\Billing\EntitlementController;
 use App\Http\Controllers\Billing\StripeWebhookController;
 use App\Http\Controllers\ContentFreezeController;
 use App\Http\Controllers\EventsController;
@@ -68,6 +69,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/account/deletion', [AccountController::class, 'deletionStatus']);
     Route::post('/account/deletion', [AccountController::class, 'requestDeletion']);
     Route::post('/account/deletion/restore', [AccountController::class, 'restoreDeletion']);
+
+    // Build-plan step 23 (M7): the client's only source for its own
+    // entitlement snapshot — see EntitlementController's docblock for why
+    // this was the missing wire, not the PaywallGate class itself.
+    Route::get('/entitlement', [EntitlementController::class, 'show']);
 
     // Build-plan step 15: override write path (DEFECTS.md#B1's own gate).
     Route::post('/overrides', [OverridesController::class, 'store'])->middleware('admin');

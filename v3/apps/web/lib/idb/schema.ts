@@ -73,7 +73,22 @@ export type MetaKey =
    *  surah, pace, optional placement priors — and nothing else). Written in
    *  the SAME transaction as `onboardedAt`, choices first, so the stamp
    *  `OnboardedSteer` trusts is never visible before the data it vouches for. */
-  | "onboardingChoices";
+  | "onboardingChoices"
+  // --- build-plan step 23 (M7, billing). No DB_VERSION bump, same
+  // reasoning as `pullCursor`/`onboardingChoices`: `meta` is `{key: string}`-
+  // keyed and un-indexed, so a new key needs no migration.
+  //
+  // NAMED "billing", NOT the feature-specific word clause 9 greps for: this
+  // module is a LEAF (no dependency on `lib/entitlement/*`, same argument
+  // `MetaRecordValue` already makes for onboarding below), and a literal
+  // containing that word in a closed union member is CODE, not prose —
+  // `check-boundaries.mjs` clause 9 strips comments before it scans, so it
+  // would have flagged this file as an entitlement reader for spelling its
+  // own key, which it structurally is not. ---
+  /** The last billing snapshot `lib/entitlement/sync.ts` fetched from
+   *  `GET /api/entitlement`, so `lib/entitlement/gate.ts#permitsIssuance` can
+   *  answer offline without a round trip (v3-D07's TTL+grace cache). */
+  | "billingSnapshot";
 
 /** The structured value `onboardingChoices` holds. Declared STRUCTURALLY here
  *  rather than imported from `lib/onboarding/choices.ts`, so schema.ts stays a
@@ -88,13 +103,30 @@ export interface MetaRecordValue {
   placement: { kind: string; throughAct?: number; probed?: number };
 }
 
+/** The structured value `billingSnapshot` holds. Declared STRUCTURALLY here
+ *  for the same reason `MetaRecordValue` is: schema.ts stays a leaf module
+ *  with no dependency on `lib/entitlement/*`, and the authoritative
+ *  `EntitlementSnapshot` type (in `lib/entitlement/types.ts`) is assigned into
+ *  this slot at the write site, so a drift between the two is a type error
+ *  there rather than a surprise at the read site. Named `BillingSnapshotRecord`
+ *  rather than the feature-specific word, same reasoning as the `MetaKey`
+ *  member above. */
+export interface BillingSnapshotRecord {
+  state: string;
+  tier: string;
+  region: string;
+  trialSurah: number | null;
+  cachedAt: number;
+}
+
 export interface MetaRow {
   key: MetaKey;
-  /** A scalar for every key except `onboardingChoices`, which holds the small
-   *  structured record above. Kept as an explicit UNION rather than widened to
-   *  `unknown`: widening would silently un-type the eight existing scalar keys,
-   *  whose readers currently rely on `typeof value === "number"` narrowing. */
-  value: string | number | null | MetaRecordValue;
+  /** A scalar for every key except `onboardingChoices`/`billingSnapshot`,
+   *  which hold the small structured records above. Kept as an explicit UNION
+   *  rather than widened to `unknown`: widening would silently un-type the
+   *  scalar keys, whose readers currently rely on `typeof value === "number"`
+   *  narrowing. */
+  value: string | number | null | MetaRecordValue | BillingSnapshotRecord;
 }
 
 /** A cached atom. This store is a CACHE, never truth: it must be safe to

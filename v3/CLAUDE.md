@@ -53,9 +53,21 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 1842 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 253 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 698 apps/web. (v3-D87, 2026-08-14)
+make test    # 1858 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 258 v3/api + 111 corpus-compiler
+             # + 417 engine + 61 fold-runner + 709 apps/web. (v3-D88, 2026-08-14)
+             # NOTE (v3-D88): `PaywallGate::permitsIssuance()` and its client
+             # mirror `lib/entitlement/gate.ts#permitsIssuance()` had ZERO
+             # production callers, on EITHER side, six days after the session
+             # loop (step 18) made the reason for deferring them stale.
+             # `GET /api/entitlement` + `lib/entitlement/sync.ts` now give the
+             # client a real snapshot to call `permitsIssuance` WITH — but the
+             # actual call inside `lib/session/run.ts#startSession` is still
+             # NOT wired, on purpose: doing so naively would deny REVIEW for a
+             # lapsed learner too, since `/session` issues one mixed queue and
+             # v3-D16 (this build's "single ethical commitment") requires
+             # review to stay open forever. See DECISIONS.md v3-D88 for the
+             # two ways to resolve that and why picking one needs Firdaus.
              # NOTE (v3-D87): LAUNCH-CHECKLIST gate 21 (per-corpus Amiri glyph
              # coverage) was mislabeled BLOCKED-ON-INFRA on a reason that had
              # already stopped applying once the launch surah set closed
