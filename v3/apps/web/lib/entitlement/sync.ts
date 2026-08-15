@@ -13,8 +13,14 @@
 // where an offline session can read it without a round trip.
 //
 // NEVER BLOCKS A SESSION. `readEntitlementSnapshot` is a plain IndexedDB read;
-// `refreshEntitlementSnapshot` is fire-and-forget from every caller in this
-// codebase (see `lib/session/run.ts#startSession`) — the same "background
+// `refreshEntitlementSnapshot` is fire-and-forget from its one real caller,
+// `components/session/SessionIsland.tsx`'s mount effect — NOT from
+// `lib/session/run.ts#startSession`, which this comment originally (and
+// wrongly) named: `run.ts` is a plain state machine with no React and no
+// side-effect scheduling of its own (its own header says so), so it was
+// never going to be the wiring point, and nothing had actually called this
+// module until a later run found the false claim (DECISIONS.md, the entry
+// after v3-D89) and fixed it. Fire-and-forget is the same "background
 // reconciliation, never a precondition" rule `lib/sync/sync.ts`'s own header
 // states for the event log. A network failure here degrades to a cache miss,
 // which `cache.ts#freshness()` already treats as "server is authoritative,

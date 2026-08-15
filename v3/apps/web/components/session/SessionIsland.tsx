@@ -36,6 +36,7 @@ import { fetchCorpus } from "@/lib/corpus/client";
 import { assemblePass, filledSoFar } from "@/lib/onboarding/pass";
 import { currentTz } from "@/lib/idb/append";
 import { writeLock } from "@/lib/idb/writeLock";
+import { refreshEntitlementSnapshot } from "@/lib/entitlement/sync";
 import {
   answerCurrent,
   clearReveal,
@@ -72,6 +73,20 @@ export function SessionIsland({ surah }: SessionIslandProps) {
   // reload re-derives whatever is still due (edge case #93).
   useEffect(() => {
     let alive = true;
+
+    // OPPORTUNISTIC ENTITLEMENT CACHE WARM — v3-D88's unwired half.
+    // `lib/entitlement/sync.ts` was built (GET /api/entitlement + an
+    // offline-durable cache) so `permitsIssuance()` could one day be called
+    // with real data, but nothing ever called IT either. This is the cache
+    // warm only: fire-and-forget, never awaited, and its result gates
+    // nothing here — the actual GATING call remains deliberately unwired
+    // (v3-D88: a genuine open product question about what "lapsed" means
+    // for a queue that mixes new material and review in one assembly,
+    // Firdaus's call, not this component's). `refreshEntitlementSnapshot`
+    // never throws by its own contract (see its own tests); the `catch` is
+    // this codebase's usual belt-and-braces around an effect boundary.
+    void refreshEntitlementSnapshot(Date.now()).catch(() => {});
+
     void (async () => {
       try {
         // ACQUIRE THE WRITE LOCK FIRST. `append` re-asserts writer status at

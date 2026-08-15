@@ -279,13 +279,22 @@ const ENTITLEMENT_TOKENS = /\bEntitlement|\bentitlement|\bPaywall|\bentitled\b/;
 // longer applied, but nothing re-read it. `lib/entitlement/sync.ts` (fetch +
 // offline-durable cache for the snapshot `GET /api/entitlement` now serves)
 // is added here because it IS a legitimate reader — it exists so
-// `permitsIssuance` can be called with real data at all. It is NOT yet called
-// from `app/(app)/session/page.tsx` itself: doing that safely needs a
-// decision this run did not have the authority to make alone — see v3-D88 for
-// exactly what and why. `app/(app)/session/page.tsx` and the checkout surface
-// stay OUT of this allowlist until that decision lands and each actually
-// reads entitlement, per this clause's own rule.
+// `permitsIssuance` can be called with real data at all.
+//
+// CORRECTED AGAIN (the run after v3-D89): `components/session/SessionIsland.tsx`
+// is added here too. It calls `refreshEntitlementSnapshot` fire-and-forget on
+// mount to warm the offline-durable cache — the "so permitsIssuance can be
+// called with real data at all" half `lib/entitlement/sync.ts` was built for,
+// which nothing had actually done. This is the CACHE WARM only: SessionIsland
+// still does not call `permitsIssuance` itself, and still does not deny or
+// alter a session in any way — that gating call remains deliberately unwired
+// (v3-D88's open product question about what "lapsed" means for a queue that
+// mixes new material and review in one assembly). `app/(app)/session/page.tsx`
+// (as a route/enforcement point) and the checkout surface stay OUT of this
+// allowlist until that decision lands and each actually GATES on entitlement,
+// per this clause's own rule.
 const ENTITLEMENT_ALLOWLIST = new Set([
+  "components/session/SessionIsland.tsx",
   "lib/entitlement/cache.ts",
   "lib/entitlement/gate.ts",
   "lib/entitlement/sync.ts",

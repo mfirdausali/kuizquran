@@ -3367,3 +3367,114 @@ build-time files, and checkout does not exist as a learner surface at all
 (account adoption itself is unbuilt). Step 30's E6/E7/E8 and
 LAUNCH-CHECKLIST gate 20 (hosting) remain untouched and still genuinely
 infra/human-blocked, unchanged from v3-D82 through D88.
+
+---
+
+## 2026-08-15 (nightly) — the other unwired half of v3-D88
+
+### v3-D90 — `SessionIsland` finally calls `refreshEntitlementSnapshot()`; `lib/entitlement/sync.ts`'s own header was wrong about who called it
+
+This run started per NIGHTLY.md's rule: `git status` was clean, HEAD was
+DETACHED at `21cbcfb` (v3-D89), one commit ahead of the local `main` ref's
+cached position (`main` was sitting at `cab5d168`, right after Phase 0) —
+the shallow clone in this sandbox had not fetched far enough to see that
+`origin/main` already matched HEAD, so `git merge --ff-only` initially
+reported "unrelated histories" until `git fetch --unshallow` resolved it.
+Same "local ref stale relative to its own remote-tracking ref" shape
+v3-D77/v3-D87/v3-D89 each hit, caught the same way: re-derive from the
+repo, never trust a stored line.
+
+Every one of the 32 build-plan steps was still DONE, human-gated (27/28),
+or infra/human-gated (30's E6/E7/E8). Rather than re-run the same "grep
+for TODO/stub prose" sweep from scratch, a fresh general-purpose agent was
+given the established bug shape (v3-D82 through D89: a mechanism built and
+unit-tested, reading as if it protects or wires something, with ZERO
+production callers) and asked to find the next instance. It found one
+`lib/entitlement/sync.ts` itself names, in its own header, as already
+fixed — and it wasn't.
+
+**The claim:** `sync.ts:16` — *"`refreshEntitlementSnapshot` is
+fire-and-forget from every caller in this codebase (see
+`lib/session/run.ts#startSession`)."* **The reality, re-verified directly:**
+`grep -n "entitlement" lib/session/run.ts` returned nothing. `run.ts` is a
+plain state machine with **no React and no side-effect scheduling of its
+own** — its own header says exactly that, "this file holds NO React, NO
+JSX and NO DOM" — so it was never going to be the wiring point for a
+fire-and-forget background call regardless. `fetchEntitlementSnapshot`,
+`readEntitlementSnapshot` and `refreshEntitlementSnapshot` had zero
+importers anywhere outside `lib/entitlement/sync.test.ts` itself. This is
+one layer more insidious than v3-D88's original finding: a comment
+asserting the wire was ALREADY live, sitting uncorrected in the one file
+whose whole reason for existing is that nothing called it.
+
+**What this is not.** v3-D88 correctly, deliberately left `permitsIssuance`
+unwired into `startSession` because gating a session on it would deny
+REVIEW for a lapsed learner too — `/session` issues one mixed queue, and
+v3-D16 promises review stays open forever. That question is untouched
+here; nothing about it has a new answer. What `sync.ts` actually needs
+called is narrower and carries none of that risk: `refreshEntitlementSnapshot`
+only fetches-and-caches a snapshot for `permitsIssuance` to read LATER,
+whenever a human decides how the gate should work. It denies nothing,
+blocks nothing, and does not gate the session in any way today — per its
+own contract, a failed refresh doesn't even touch a valid cached grant. It
+is a cache warm, structurally incapable of resolving v3-D88's open
+question by accident.
+
+**Built:** `components/session/SessionIsland.tsx`'s mount effect now calls
+`void refreshEntitlementSnapshot(Date.now()).catch(() => {})` — fire, not
+awaited, before the corpus/session-start work begins, with a defensive
+catch matching this codebase's usual "an effect boundary does not trust a
+documented never-throws contract twice" discipline (`SyncTrigger.tsx`'s
+own precedent). `SessionIsland`, not `run.ts`, is the real wiring point: it
+is the one and only caller of `startSession`, and it already owns a mount
+effect that does other one-time, best-effort background work (acquiring
+the write lock). `lib/entitlement/sync.ts`'s header comment — the false
+claim itself — is corrected to name the real caller and explain why
+`run.ts` was never going to be it.
+
+`check-boundaries.mjs` clause 9's `ENTITLEMENT_ALLOWLIST` gained
+`components/session/SessionIsland.tsx` — a real, reviewable new
+entitlement reader, exactly the kind the allowlist exists to name. Its
+comment is corrected in place (not merely appended to) to state precisely
+what changed: the cache warm is wired; the GATE is still not, and stays
+not until v3-D88's question is answered.
+
+**RED before green.** `test/session-island.test.tsx` (3 tests, new file)
+was written first and run against the pre-fix tree: 2 of 3 failed — "calls
+GET /api/entitlement on mount" and "persists the fetched snapshot" both
+failed with no request ever made and `readEntitlementSnapshot()` resolving
+`null`. (The third, "still reaches the drilling phase when the entitlement
+fetch fails," passed vacuously before the fix — nothing was wired to fail
+— and stayed the exact same assertion afterward, now non-vacuous: it
+proves the wiring is genuinely fire-and-forget rather than an accidental
+precondition, by driving the entitlement endpoint to a 500 and confirming
+the drill still renders and no snapshot gets cached.) Reverting the
+`SessionIsland.tsx` change after the fix reproduces the identical 2
+failures; re-applied, 3/3 green — the mutation both directions.
+
+**Verified:** `TZ=UTC make test` → exit 0, **1869 passing + 2 incomplete**
+(255 v2 vitest + 47 v2/api + 258 v3/api + 111 corpus-compiler + 417 engine
++ 61 fold-runner + **720** apps/web (was 717, +3 — exactly this run's new
+test file)) — up from v3-D89's 1866 by exactly +3. `TZ=UTC make build` →
+exit 0, 18 routes. `npm run gates`/`check-boundaries.mjs` → `boundaries:
+OK`, 176 files (was 176 — SessionIsland.tsx already existed and was
+already scanned; only the allowlist grew). `npx tsc --noEmit` clean. No
+Arabic codepoints in any new or changed file (checked directly, whole
+files, not just the diff). No `v1/**`/`v2/**` edit — `v2/tsconfig.tsbuildinfo`
+regenerated as the same `make build` side effect v3-D81 through D89 each
+recorded, reverted before staging, confirmed empty diff under
+`v1/**`/`v2/**`.
+
+**Explicitly NOT done, named so a future run does not re-discover this as
+new:** `permitsIssuance`/`permitsReview` still have zero GATING callers —
+only the cache-warm half moved. Server-side `PaywallGate` enforcement at
+"corpus delivery" or "checkout" is still unbuilt, for the same reasons
+v3-D88/v3-D89 named (no entitlement-gated corpus route; no checkout
+surface; no account adoption). Step 30's E6/E7/E8 and LAUNCH-CHECKLIST
+gate 20 (hosting, the pager, Postgres grants, a live nightly schedule)
+remain untouched and still genuinely infra/human-blocked, unchanged since
+v3-D82. No other zero-caller mechanism was found in this run's sweep
+(multi-surah `StubNote`s, the TODO/FIXME grep, the artisan-command audit,
+and LAUNCH-CHECKLIST's other BLOCKED rows were all re-checked and are
+still accurately described) — the next run should re-sweep rather than
+assume this list is exhaustive, per this document's own repeated lesson.
