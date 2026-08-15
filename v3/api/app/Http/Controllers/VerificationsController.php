@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AdminRole;
 use App\Models\AyahVerification;
 use App\Models\CorpusAyahHash;
 use Illuminate\Http\JsonResponse;
@@ -13,6 +14,12 @@ use Illuminate\Validation\Rule;
  * metric, DEFECTS.md#B3 closed: verified = ANY row's `content_hash`
  * matches the CURRENT tier hash in `corpus_ayah_hashes`. Rows read in
  * `id` order (B4's lesson generalized, never `created_at` alone).
+ *
+ * v3-D92: signing the QARI tier requires the acting admin to hold
+ * `AdminRole::QARI` — the migration's own docblock says a role "refines
+ * what an already-allowlisted admin may do", but nothing enforced it until
+ * this. The admin tier (distractors + specs) stays open to any admin —
+ * v3-D13 never gated it on scholarship.
  */
 class VerificationsController extends Controller
 {
@@ -59,6 +66,12 @@ class VerificationsController extends Controller
             'reviewerKind' => ['required', Rule::in(self::REVIEWER_KINDS)],
             'note' => ['nullable', 'string'],
         ]);
+
+        if ($validated['tier'] === 'qari' && ! $request->user()->hasAdminRole(AdminRole::QARI)) {
+            return response()->json([
+                'error' => 'only an admin holding the qari role may sign a qari-tier verification',
+            ], 403);
+        }
 
         $hashRow = CorpusAyahHash::where('surah', $validated['surah'])->where('ayah', $validated['ayah'])->first();
         if (! $hashRow) {

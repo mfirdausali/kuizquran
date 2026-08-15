@@ -395,13 +395,13 @@ and wants its own decision.
 
 ---
 
-## 16 · Security review of admin routes — **GREEN (three findings fixed)**
+## 16 · Security review of admin routes — **GREEN (five findings fixed)**
 
 ```bash
-cd v3/api && TZ=UTC php artisan test --filter="Admin|FlagPlane"
+cd v3/api && TZ=UTC php artisan test --filter="Admin|FlagPlane|Verifications"
 ```
 
-Full written review in **§A** below. Four real findings, all fixed and
+Full written review in **§A** below. Five real findings, all fixed and
 regression-tested with mutation proof:
 
 | # | Finding | State |
@@ -410,6 +410,7 @@ regression-tested with mutation proof:
 | S2 | The **bulk CSV export wrote no audit row.** No identity columns, so it looked exempt — but stable pseudonyms + signup dates + event counts is a full behavioural profile of the entire user base, joinable against any one previously revealed identity. | FIXED — audited *before* the stream opens, so a dump that dies mid-flight is still recorded. |
 | S3 | `enable()` **defaulted the expected flag version to the version it had just read**, making the concurrency check a no-op for any caller omitting it — a versionless ramp could overwrite a concurrent kill. | FIXED — version now required; test asserts the killed flag stays killed. |
 | S4 | The append-only audit's **layer 1 was a promise with nothing behind it.** `AdminAudit` and the migration both cite `docs/ADMIN-CONSOLE.md` for the Postgres `REVOKE UPDATE, DELETE` grant, and the docblock claimed an `AdminAuditTest` asserted it was documented. **Neither the file nor that test existed** — so the only layer that survives a raw query or a bypassed model was undocumented and unappliable. | FIXED — grant, verification query and destructive proof written; a test asserts they exist and are runnable. **Applying it to production remains a human step (gate 20).** |
+| S5 | `POST /api/verifications` gated `tier: qari` on the generic `admin` allowlist only — the `AdminRole::QARI` role (build-plan step 24) existed and its own migration docblock said roles "refine what an already-allowlisted admin may do," but nothing checked one, and no code path anywhere could even grant it. Any operator or moderator admin could sign a scholar's row. (2026-08-15, v3-D92.) | FIXED — `store()` now requires `hasAdminRole(AdminRole::QARI)` for the qari tier; `admin:grant-role` (new, CLI-only) is the missing grant path. Admin-tier writes stay open to any admin (v3-D13 never gated them on scholarship). |
 
 **Verified already-correct:** fails-closed admin auth with one generic error for
 all four failure cases **and constant timing** (the dummy-hash path is real and

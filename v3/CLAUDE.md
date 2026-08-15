@@ -53,9 +53,23 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 1872 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 261 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 720 apps/web. (v3-D91, 2026-08-15)
+make test    # 1883 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler
+             # + 417 engine + 61 fold-runner + 720 apps/web. (v3-D92, 2026-08-15)
+             # NOTE (v3-D92): `POST /api/verifications` gated `tier: qari` on the
+             # generic `admin` allowlist only — `AdminRole::QARI` (build-plan step
+             # 24) existed and its own migration docblock said roles "refine what
+             # an already-allowlisted admin may do," but nothing ever checked one,
+             # and no code path anywhere could even GRANT it. Any operator or
+             # moderator admin could sign a scholar's qari-tier row undetected —
+             # confirmed live: the existing test suite exercised this exact path
+             # with a roleless admin fixture and passed. Fixed: `store()` now
+             # requires `hasAdminRole(AdminRole::QARI)` for the qari tier; new
+             # CLI-only `admin:grant-role {email} {role}` is the missing grant
+             # path (roles refine an allowlisted admin, they never admit one).
+             # Admin-tier writes (distractors/specs) stay open to any admin —
+             # v3-D13 never gated them on scholarship. See DECISIONS.md v3-D92
+             # and LAUNCH-CHECKLIST.md gate 16 (S5).
              # NOTE (v3-D91): `App\Flags\FlagService::autoWaiveDueKills()` (v3-D17's
              # 72h audited auto-waive, LAUNCH-CHECKLIST gate 9) was built and
              # unit-tested since the flag plane shipped but had ZERO production

@@ -3611,3 +3611,147 @@ untouched and still genuinely infra/human-blocked, unchanged since v3-D82.
 `TrialAttribution` (above) is a new, real, open finding — not a should-fix
 this run skipped, but a should-decide a future run should surface to
 Firdaus rather than resolve alone.
+
+---
+
+## Ratified 2026-08-15 (nightly) — build-plan step 24 (M8) execution: the qari-role gap
+
+### v3-D92 — `POST /api/verifications` gated `tier: qari` on nothing but the generic admin allowlist; any admin could sign a scholar's row
+
+This run started per NIGHTLY.md's rule: `git status` clean, HEAD matched
+`origin/main` at `e796097` (v3-D91) directly (no detached-HEAD/stale-ref
+repair needed this time — the first clean start since v3-D77 first named the
+recurring shape). `TZ=UTC make test`/`make build` reproduced clean before any
+change: **1872 passing + 2 incomplete**, matching `v3/CLAUDE.md`'s documented
+v3-D91 number exactly. `make setup` had to run first (fresh checkout, no
+`vendor`/`node_modules` anywhere except `v2/api`) — recorded because it is
+the reason this run's baseline confirmation took long enough to be worth
+naming, not because anything about it was unusual.
+
+Every one of the 32 build-plan steps was still DONE, human-gated (27/28), or
+infra/human-gated (30's E6/E7/E8), so this run followed v3-D82 through D91's
+practice: hunt for the next instance of the "mechanism built and
+unit-tested, zero production enforcement" shape those entries established.
+A whole-repo sweep for PHP methods with zero callers outside their own file
+(`public function X` matched against every reference in `app/`+`routes/`,
+excluding Console/Commands' own artisan entry points and Laravel framework
+hooks like `routeNotificationForMail`) surfaced `AdminRole::QARI` /
+`User::hasAdminRole()` — real since build-plan step 24, referenced only by
+`AdminAuthController::login()`'s read-only `'roles' => $user->adminRoles()`
+response field and `AccountController::requestDeletion()`'s
+admin-self-delete guard. **Nothing anywhere checked a role to gate an
+action**, despite the roles migration's own docblock stating the entire
+point: *"Roles refine what an already-allowlisted admin may do; they never
+grant admission."*
+
+**Traced to a concrete, live gap, not a theoretical one:**
+`VerificationsController::store()` (`POST /api/verifications`, build-plan
+step 15/v3-D13) accepts `tier: qari` or `tier: admin` and is gated only by
+the generic `admin` middleware — the SAME allowlist any operator or
+moderator would also pass. `QariMode.tsx` (the frontend "signing pane",
+step 25/M9) confirms this is not merely an API-level oversight: its own
+header states plainly that admin auth is enforced **only** by
+`auth:sanctum` + the env allowlist on the write routes, and that a
+client-side admin gate is deliberately NOT built yet ("shipping half of it
+... would be security theatre") — so there is no layer, frontend or
+backend, that ever asks whether the acting admin is actually the qari.
+**Confirmed live, not vacuous:** `VerificationsTest.php`'s own
+`adminHeaders()` fixture creates a bare allowlisted admin with **zero**
+`admin_roles` rows, and every pre-existing qari-tier-signing test in that
+file passed using it — the test suite was actively exercising and
+green-passing the exact gap, the same "a green suite is evidence about the
+tests, not proof about the code" shape v3-D45/D49 already named twice in
+this build.
+
+**Why this matters beyond a missing `if`:** LAUNCH-CHECKLIST gate 7 states
+"No agent may sign a verification row. This gate blocks PUBLIC LAUNCH
+absolutely" — a rule about WHO may certify scripture as scholar-reviewed.
+Under solo operation (v3-D17) with one admin, the gap has caused no harm
+yet; but BUILD-PLAN Q9 ("is there a second admin at launch?") is still
+open, and the day it is answered yes, any operator or moderator admin could
+write a `tier: qari` row and `describeCertification()`
+(`lib/workbench/sign.ts`, v3-D86's own single-source-of-truth guard) would
+honestly report it as a real scholar signature, because the row itself
+would be indistinguishable from one the qari actually made.
+
+**A second, prerequisite gap, found while scoping the fix — recorded so a
+future run does not "fix" this by re-discovering it as new:** `grep -rln
+"AdminRole::create\|new AdminRole(" app database routes` (excluding
+model/test files) returned **zero hits**. The `admin_roles` table has
+existed since step 24 with no controller, command, or seeder anywhere that
+ever writes a row to it. Gating `tier: qari` on `hasAdminRole(QARI)` without
+first building a way to GRANT that role would not have closed this gap — it
+would have made qari-tier signing entirely impossible in production
+forever, a worse defect than the one being fixed (the exact failure mode
+BUILD-PLAN's own "Agent deployment strategy" section warns against:
+shipping half of a gate is not a smaller version of shipping the gate).
+
+**Built, both halves:**
+
+- `App\Console\Commands\GrantAdminRoleCommand` (`admin:grant-role {email}
+  {role} {--revoke} {--by=}`) — the missing grant path. Refuses an email
+  outside `ADMIN_EMAILS` (roles refine an already-allowlisted admin, they
+  never admit one — the migration's own rule, now enforced rather than only
+  stated) and an email with no `users` row yet. Idempotent re-grant (no
+  duplicate row under the table's existing `unique(user_id, role)`);
+  `--revoke` is a genuine no-op, not an error, when the role was never held
+  — the same discipline `PurgeDueAccountsCommand` already established for
+  "nothing due". Multi-role per admin works (the migration's own comment:
+  "the qari who also moderates"), tested directly. This is a CLI-only
+  surface, deliberately: matches v3-D17's "solo operation assumed" /
+  edge case #146's break-glass precedent ("fix the env var and restart" —
+  a privileged, rare action performed by whoever has host access), and
+  building an HTTP endpoint for it now would be a second, unreviewed
+  privilege-escalation surface with no admin-role-management UI to drive it
+  yet.
+- `VerificationsController::store()` — `tier === 'qari'` now requires
+  `$request->user()->hasAdminRole(AdminRole::QARI)`, checked before the
+  hash lookup so a non-qari admin gets a clear 403 rather than a 422 that
+  looks like a data problem. `tier === 'admin'` is untouched and stays open
+  to any allowlisted admin — v3-D13 never gated the admin tier
+  (distractors + specs) on scholarship, only the qari tier (text + glosses
+  + scene beats) carries that weight.
+
+**RED before green.** The negative test was written and run against the
+pre-fix controller first: `Expected response status code [403] but received
+201` — a real 201, not a vacuous pass, proving the gap rather than assuming
+it. After the fix: green. Mutation-verified: replaced the new `if` guard's
+condition with a hardcoded `if (false)` — exactly 1 of 13
+`VerificationsTest` cases failed, on the exact assertion this entry's fix
+exists for; the other 12 stayed green because they either don't touch the
+qari tier or already carry the role, which is the correct, non-vacuous
+shape (a mutation that fails everything proves nothing specific). Reverted
+byte-identically (`git diff` empty at that point), reapplied the real
+check.
+
+**Existing tests updated, not weakened:** every pre-existing test in
+`VerificationsTest.php` and `OverrideHashRecomputeTest.php` that signs the
+qari tier now uses an admin fixture that actually holds `AdminRole::QARI`
+(`qariAdminHeaders()`, new; `OverrideHashRecomputeTest`'s own
+`adminHeaders()` extended in place) — same requests, same assertions, now
+against a fixture that matches what the endpoint actually requires. No
+assertion was loosened or removed to make a test pass.
+
+**Verified:** `TZ=UTC make test` → exit 0, **1883 passing + 2 incomplete**
+(255 v2 vitest + 47 v2/api + **272** v3/api (was 261, +11 — 3 new
+`VerificationsTest` cases + 8 new `GrantAdminRoleCommandTest` cases,
+exactly this run's new test surface) + 111 corpus-compiler + 417 engine +
+61 fold-runner + 720 apps/web) — up from v3-D91's 1872 by exactly +11.
+`TZ=UTC make build` → exit 0, 18 routes (unchanged — no frontend file
+touched; `QariMode.tsx`'s own header already correctly disclosed that no
+client-side admin gate exists yet, so there was nothing to update there).
+No `v1/**`/`v2/**` edit — `v2/tsconfig.tsbuildinfo` regenerated as the same
+`make build` side effect v3-D81 through D91 each recorded; reverted before
+staging, confirmed empty diff under `v1/**`/`v2/**`. No Arabic codepoints
+anywhere in the diff (checked every changed/new file directly, not just the
+diff hunks) — the whole change is PHP authorization/command code with no
+corpus or gloss content.
+
+**Explicitly NOT done, named so a future run does not re-discover these as
+new:** no HTTP endpoint or admin-console UI for granting/listing roles —
+`admin:grant-role` is CLI-only by design, per the reasoning above; if a
+role-management screen is ever wanted, that is new scope, not a gap in this
+fix. `TrialAttribution` (v3-D91) and `permitsIssuance`/`permitsReview`
+(v3-D88) remain exactly as those entries left them — untouched,
+stop-and-report, unresolved. Step 30's E6/E7/E8 and LAUNCH-CHECKLIST gate 20
+remain genuinely infra/human-blocked, unchanged since v3-D82.

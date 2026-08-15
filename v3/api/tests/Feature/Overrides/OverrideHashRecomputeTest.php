@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Overrides;
 
+use App\Models\AdminRole;
 use App\Models\CorpusAyahHash;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -36,9 +37,15 @@ class OverrideHashRecomputeTest extends TestCase
         Config::set('admin.emails', ['admin@example.com']);
     }
 
+    /** v3-D92: this file's own b3 test signs a qari-tier verification, so
+     *  the fixture admin needs the qari role, not just the allowlist. */
     private function adminHeaders(): array
     {
         $admin = User::factory()->create(['email' => 'admin@example.com']);
+        AdminRole::create([
+            'user_id' => $admin->id, 'role' => AdminRole::QARI,
+            'granted_at' => (int) round(microtime(true) * 1000), 'granted_by' => 'test-fixture',
+        ]);
         $token = $admin->createToken('device')->plainTextToken;
 
         return ['Authorization' => 'Bearer '.$token];
