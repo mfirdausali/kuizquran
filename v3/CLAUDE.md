@@ -53,9 +53,18 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 1869 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 258 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 720 apps/web. (v3-D90, 2026-08-15)
+make test    # 1872 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 261 v3/api + 111 corpus-compiler
+             # + 417 engine + 61 fold-runner + 720 apps/web. (v3-D91, 2026-08-15)
+             # NOTE (v3-D91): `App\Flags\FlagService::autoWaiveDueKills()` (v3-D17's
+             # 72h audited auto-waive, LAUNCH-CHECKLIST gate 9) was built and
+             # unit-tested since the flag plane shipped but had ZERO production
+             # callers — `routes/console.php` scheduled only the determinism
+             # nightly and the PDPA purge, never this. A killed flag's admin
+             # banner never actually auto-cleared after 72h on a real host. Fixed:
+             # `flags:auto-waive` (`AutoWaiveKillsCommand`), scheduled daily
+             # 04:00 UTC. See DECISIONS.md v3-D91. Still fires only once gate 20
+             # (a host running `schedule:run`) exists.
              # NOTE (v3-D90): `lib/entitlement/sync.ts`'s own header CLAIMED
              # `refreshEntitlementSnapshot` was already "fire-and-forget from
              # every caller ... see lib/session/run.ts#startSession" — false;

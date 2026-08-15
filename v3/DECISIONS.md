@@ -3478,3 +3478,136 @@ v3-D82. No other zero-caller mechanism was found in this run's sweep
 and LAUNCH-CHECKLIST's other BLOCKED rows were all re-checked and are
 still accurately described) — the next run should re-sweep rather than
 assume this list is exhaustive, per this document's own repeated lesson.
+
+---
+
+## 2026-08-15 (nightly, later) — the next instance of the same bug shape, on the flag plane's own safety valve
+
+### v3-D91 — `flags:auto-waive` gives `FlagService::autoWaiveDueKills()` its first production caller; LAUNCH-CHECKLIST gate 9's "72h auto-waive, audited" row was GREEN on unit-test evidence only
+
+This run started per NIGHTLY.md's rule: `git status` clean, HEAD DETACHED at
+`ca36865` (v3-D90), and the local `main` ref cached at `cab5d168` (right after
+Phase 0) — the **fourth** consecutive occurrence of the exact "local ref stale
+relative to its own remote-tracking ref" shape v3-D77/D87/D89/D90 each hit.
+`git ls-remote origin` showed the real `refs/heads/main` already matched HEAD;
+`git fetch origin main && git checkout -B main origin/main` resolved it, same
+mechanical fix as every prior occurrence. Recording again, per those entries'
+own instruction to keep recording it rather than assume it's fixed by having
+been written down once.
+
+`TZ=UTC make test`/`make build` reproduced clean before any change: **1869
+passing + 2 incomplete**, matching CLAUDE.md's documented v3-D90 number
+exactly. Every one of the 32 build-plan steps was still DONE, human-gated
+(27/28), or infra/human-gated (30's E6/E7/E8), so this run followed
+v3-D82 through D90's practice: a fresh general-purpose research agent was
+dispatched (no code access) to re-sweep for the next instance of the
+"mechanism built and unit-tested, zero production callers" shape those
+entries established, explicitly told not to re-flag `permitsIssuance`/
+`permitsReview` (v3-D88, still an open product question) or anything already
+named as infra/human-blocked.
+
+**Found:** `App\Flags\FlagService::autoWaiveDueKills()` — v3-D17's 72-hour
+audited auto-waive of an unacknowledged flag kill, LAUNCH-CHECKLIST.md gate
+9's own "72h auto-waive, audited | GREEN" row — had existed and been
+unit-tested (`FlagPlaneTest::test_the_72h_auto_waive_is_audited`) since the
+flag plane shipped at build-plan step 26, and its own docblock at
+`FlagService.php:187` already said so: *"for the scheduler to call."*
+`grep -rn "autoWaiveDueKills" api --include=*.php` (excluding vendor)
+returned exactly two hits outside the method's own file: that one test, and
+nothing else. `routes/console.php` scheduled the determinism nightly and
+`pdpa:purge-due` — never this. **A killed flag's admin banner has never
+actually auto-cleared after 72 hours on any host that has ever run this
+code**, because nothing in a running app ever called the method that clears
+it; only a test invoking the service directly ever exercised the property.
+This is the same shape v3-D82 (the P1 pager), v3-D85 (the atom-cache
+rebuild), v3-D88/89/90 (entitlement sync, sync cycle) each found and
+fixed — a mechanism that reads, in its own tests and its own docblock, as
+already protecting something, while the deployed app has never once run it.
+
+**Why LAUNCH-CHECKLIST's own opening rule applies here directly:** that
+document states "a checklist that reports green because a check exists —
+rather than because it passed — is the v3-D50 failure." Gate 9's "72h
+auto-waive, audited | GREEN" verdict was true of the unit logic only, never
+verified against a running schedule, exactly the shape the document's own
+preamble names as the failure to avoid.
+
+**Built**, mirroring `PurgeDueAccountsCommand`'s already-established
+thin-Artisan-wrapper-around-a-service-method shape (gate 19's own fix):
+
+- `App\Console\Commands\AutoWaiveKillsCommand` (`flags:auto-waive`) —
+  resolves `FlagService` via the container, computes `$nowMs` the same
+  `(int) round(microtime(true) * 1000)` way `PurgeDueAccountsCommand` and
+  `DeterminismCheckCommand` already do, calls `autoWaiveDueKills($nowMs)`,
+  reports the count.
+- `routes/console.php` — `Schedule::command(AutoWaiveKillsCommand::class)
+  ->dailyAt('04:00')->timezone('UTC')->withoutOverlapping()`, placed after
+  the existing 02:00/03:00 entries with the same UTC-explicit,
+  non-overlapping reasoning those two already carry. `php artisan
+  schedule:list` confirms all three: `0 3 * * *`, `0 2 * * *`, `0 4 * * *`.
+
+**What this does NOT touch:** `FlagService::acknowledgeKill()` deliberately
+omits `enabled` from its update (#159, "an ack never re-enables"), and
+`autoWaiveDueKills()` calls that same method — an auto-waive clears only the
+banner's "needs attention" state, never the flag's enabled state. A killed
+flag stays off until an explicit, fully-ceremonied ramp, unchanged by this
+run. Nothing about the ramp/kill/ack code paths themselves changed.
+
+**RED before green.** `tests/Feature/Flags/AutoWaiveKillsCommandTest.php` (3
+tests, new file) was committed and run against the pre-fix tree first: all 3
+failed with `CommandNotFoundException` — `flags:auto-waive` did not exist —
+not a vacuous pass. After the command and schedule entry landed: 3/3 green.
+Mutation-verified in the same run: replaced the command's real
+`$flags->autoWaiveDueKills($nowMs)` call with a hardcoded `$waived = 0;`
+probe — 1 of 3 tests failed, on the exact assertion (`a kill 73h old must be
+auto-waived by the scheduled command`), the other two staying green because
+they assert the *absence* of an effect, which a no-op probe trivially
+satisfies. Reverted byte-identically (`diff` empty); 3/3 green again.
+
+**Verified:** `TZ=UTC make test` → exit 0, **1872 passing + 2 incomplete**
+(255 v2 vitest + 47 v2/api + **261** v3/api (was 258, +3 — exactly this
+run's new test file) + 111 corpus-compiler + 417 engine + 61 fold-runner +
+720 apps/web) — up from v3-D90's 1869 by exactly +3. `TZ=UTC make build` →
+exit 0, 18 routes (unchanged — no frontend surface touched). No
+`v1/**`/`v2/**` edit — `v2/tsconfig.tsbuildinfo` regenerated as the same
+`make build`/`make test` side effect v3-D81 through D90 each recorded,
+reverted before staging both times it appeared in this run, confirmed empty
+diff under `v1/**`/`v2/**`. No Arabic codepoints anywhere in the diff (the
+whole change is PHP scheduling/wiring code with no corpus or gloss content).
+
+**Adjacent finding, explicitly NOT touched this run, named so a future run
+does not re-discover it as new and does not attempt it without reading this
+first:** the same research sweep found `App\Billing\TrialAttribution`
+(`api/app/Billing/TrialAttribution.php`) — edge cases #121/#122, "which
+surah consumes the trial" — has ZERO production callers either (only its own
+test and one allowlist entry in `EntitlementBoundaryTest.php` reference it),
+so `Entitlement.trial_surah`/`trial_surah_source` are never written in a
+running app and `PaywallGate::permitsIssuance()`'s `trial_surah === null`
+branch (`PaywallGate.php:61`, "always allow this surah") can never see a
+real value even after v3-D88's open gating question is eventually answered.
+**This is NOT a same-shape wiring fix** like the one this entry closes: the
+mechanism keys off a `surah_started` event type and a `spec_snapshot.
+trialSurahSource` flag that **do not exist in the frozen wire**
+(`packages/engine/src/types.ts`'s closed `EventType` union has no
+`surah_started` member — only `session_start`). CLAUDE.md's own rule is
+explicit that the wire freezes ONCE, complete, because three consumers read
+it — extending it is not a mechanical wiring commit, and deriving the signal
+from the existing `session_start` event instead (which already carries
+`surah`) is a real design choice about what "first learner-chosen surah"
+means operationally, not obviously equivalent to the wireframe's own
+"surah_started" language. Left untouched deliberately, the same
+stop-and-report class as v3-D88's `permitsIssuance` gating question — a
+future run should read `TrialAttribution.php`'s own docblock and
+`EntitlementBoundaryTest.php`'s allowlist entry before either wiring it
+naively or proposing a wire change, and should not guess at which of the two
+resolutions is right without Firdaus.
+
+**Explicitly NOT done, named so a future run does not re-discover this as
+new:** `permitsIssuance`/`permitsReview` (v3-D88) remain ungated, unchanged.
+Server-side `PaywallGate` enforcement at corpus delivery or checkout is
+still unbuilt. Step 30's E6/E7/E8 and LAUNCH-CHECKLIST gate 20 (hosting, the
+pager, Postgres grants, a live nightly schedule — which is also what makes
+`flags:auto-waive` actually FIRE anywhere, not merely exist) remain
+untouched and still genuinely infra/human-blocked, unchanged since v3-D82.
+`TrialAttribution` (above) is a new, real, open finding — not a should-fix
+this run skipped, but a should-decide a future run should surface to
+Firdaus rather than resolve alone.

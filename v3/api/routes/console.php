@@ -1,5 +1,6 @@
 <?php
 
+use App\Console\Commands\AutoWaiveKillsCommand;
 use App\Console\Commands\DeterminismCheckCommand;
 use App\Console\Commands\PurgeDueAccountsCommand;
 use Illuminate\Foundation\Inspiring;
@@ -75,5 +76,25 @@ Schedule::command(DeterminismCheckCommand::class, ['both', '--trigger=schedule']
 */
 Schedule::command(PurgeDueAccountsCommand::class)
     ->dailyAt('02:00')
+    ->timezone('UTC')
+    ->withoutOverlapping();
+
+/*
+|--------------------------------------------------------------------------
+| FLAG KILL AUTO-WAIVE
+|--------------------------------------------------------------------------
+|
+| v3-D17 / LAUNCH-CHECKLIST.md gate 9: "72h auto-waive, audited." Until this
+| entry, `FlagService::autoWaiveDueKills()` was built and unit-tested but had
+| ZERO production callers — a killed flag's admin banner never actually
+| cleared after 72 hours in a running app. Scheduled well clear of the other
+| two nightly jobs above (02:00/03:00 UTC) for the same "don't interleave
+| unrelated writers over the same tables" reasoning the PDPA entry already
+| gives, though this job touches only `flags`/`flag_ramp_audit`, never
+| `events` or `users`. Never re-enables a flag (#159) — see
+| AutoWaiveKillsCommand's own docblock.
+*/
+Schedule::command(AutoWaiveKillsCommand::class)
+    ->dailyAt('04:00')
     ->timezone('UTC')
     ->withoutOverlapping();

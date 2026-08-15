@@ -204,7 +204,7 @@ cd v3/api && TZ=UTC php artisan test --filter=FlagPlane   # 16 tests
 | Enable-hard ceremony (reason ≥20 chars + two ethics booleans + verbatim flag name), server-enforced | GREEN |
 | Kill-easy: one click, unconditional write, no ceremony | GREEN |
 | Ack never re-enables (#159) | GREEN |
-| 72h auto-waive, audited | GREEN |
+| 72h auto-waive, audited | GREEN (2026-08-15, v3-D91) — see note below |
 | **All 11 flags default OFF** | GREEN — `FlagRegistry`: 11 `false`, 0 `true` |
 | Pre-committed shutdown rule in DECISIONS.md before any ramp | BLOCKED-ON-HUMAN — Firdaus |
 | Second admin at launch, or the degraded solo rules | BLOCKED-ON-HUMAN — BUILD-PLAN Q9 |
@@ -214,6 +214,20 @@ the version it had just read back, which made the optimistic-concurrency check a
 no-op for any caller omitting the field — a versionless ramp could resurrect a
 flag another operator had just killed. Now required; regression test asserts the
 *outcome* (the killed flag stays killed), not the 422.
+
+**Corrected 2026-08-15 (v3-D91).** The "72h auto-waive, audited" row above was
+GREEN on the strength of `FlagPlaneTest`'s direct unit call to
+`FlagService::autoWaiveDueKills()` — but nothing in the deployed app ever
+called that method: `routes/console.php` scheduled only the determinism
+nightly and the PDPA purge. A killed flag's admin banner never actually
+auto-cleared after 72 hours on a real host; the "GREEN" verdict was true of
+the unit logic only, the exact `v3-D50` failure mode this document's own
+opening rule warns against. Fixed: `flags:auto-waive`
+(`AutoWaiveKillsCommand`), scheduled daily at 04:00 UTC alongside the other
+two nightly jobs. See DECISIONS.md v3-D91 for the closing test and mutation
+proof. This closes the gap for real, but the schedule still only *fires* once
+gate 20 (a host running `schedule:run`) exists — same caveat as gates 3, 4,
+10 and 19's purge half.
 
 ---
 
