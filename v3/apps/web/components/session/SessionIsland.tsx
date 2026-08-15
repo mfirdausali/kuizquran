@@ -73,6 +73,7 @@ export function SessionIsland({ surah }: SessionIslandProps) {
   // reload re-derives whatever is still due (edge case #93).
   useEffect(() => {
     let alive = true;
+    let unsubscribe: (() => void) | null = null;
 
     // OPPORTUNISTIC ENTITLEMENT CACHE WARM — v3-D88's unwired half.
     // `lib/entitlement/sync.ts` was built (GET /api/entitlement + an
@@ -87,24 +88,10 @@ export function SessionIsland({ surah }: SessionIslandProps) {
     // this codebase's usual belt-and-braces around an effect boundary.
     void refreshEntitlementSnapshot(Date.now()).catch(() => {});
 
-    void (async () => {
+    // Load the corpus and start the session. Only ever entered once THIS TAB
+    // is confirmed the writer (v3-D93).
+    async function beginAsWriter(): Promise<void> {
       try {
-        // ACQUIRE THE WRITE LOCK FIRST. `append` re-asserts writer status at
-        // commit time (edge case #75) and THROWS if this tab never claimed it.
-        // Nothing in the app claimed it before this — the lock sat `pending`
-        // forever, so the very first `session_start` append threw and the page
-        // hung on "Preparing…". Found by the e2e suite in a real browser; no
-        // unit test caught it because they force writer status directly.
-        const status = await writeLock.acquire();
-        if (!alive) return;
-        if (status.role !== "writer") {
-          // Another tab owns the session. Refusing here is correct: two tabs
-          // appending under one deviceId would fork the per-device ordinal
-          // namespace, which is unrepairable.
-          setPhase({ kind: "not-writer" });
-          return;
-        }
-
         const c = await fetchCorpus(surah);
         if (!alive) return;
         if (!c) {
@@ -132,9 +119,49 @@ export function SessionIsland({ surah }: SessionIslandProps) {
           message: err instanceof Error ? err.message : "Could not start the session.",
         });
       }
+    }
+
+    void (async () => {
+      try {
+        // ACQUIRE THE WRITE LOCK FIRST. `append` re-asserts writer status at
+        // commit time (edge case #75) and THROWS if this tab never claimed it.
+        // Nothing in the app claimed it before this — the lock sat `pending`
+        // forever, so the very first `session_start` append threw and the page
+        // hung on "Preparing…". Found by the e2e suite in a real browser; no
+        // unit test caught it because they force writer status directly.
+        const status = await writeLock.acquire();
+        if (!alive) return;
+        if (status.role === "writer") {
+          await beginAsWriter();
+          return;
+        }
+        // Another tab owns the session right now. Refusing to write here is
+        // correct: two tabs appending under one deviceId would fork the
+        // per-device ordinal namespace, which is unrepairable.
+        setPhase({ kind: "not-writer" });
+        // BUT `WriteLock.release()`'s own contract is "a queued tab is
+        // promoted without a reload" — the Web Locks request behind
+        // `acquire()` is still queued and can be granted LATER, in a task
+        // this effect has already returned from. v3-D93: subscribe so that
+        // later grant actually starts the session, instead of leaving the
+        // learner stuck on this message until they reload by hand.
+        unsubscribe = writeLock.subscribe((s) => {
+          if (!alive || s.role !== "writer") return;
+          unsubscribe?.();
+          unsubscribe = null;
+          void beginAsWriter();
+        });
+      } catch (err) {
+        if (!alive) return;
+        setPhase({
+          kind: "failed",
+          message: err instanceof Error ? err.message : "Could not start the session.",
+        });
+      }
     })();
     return () => {
       alive = false;
+      unsubscribe?.();
     };
   }, [surah]);
 

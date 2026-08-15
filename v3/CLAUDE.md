@@ -53,9 +53,24 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 1883 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 1885 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 720 apps/web. (v3-D92, 2026-08-15)
+             # + 417 engine + 61 fold-runner + 722 apps/web. (v3-D93, 2026-08-15)
+             # NOTE (v3-D93): `WriteLock.subscribe()`/`useWriterStatus()`
+             # (lib/idb/writeLock.ts, lib/idb/useLogState.ts) — edge case #75's
+             # multi-tab writer-takeover mechanism — had ZERO production callers.
+             # `SessionIsland.tsx` took one `writeLock.acquire()` snapshot at
+             # mount and never learned of a LATER promotion, even though
+             # `WriteLock.release()`'s own docblock promises "a queued tab is
+             # promoted without a reload." A learner who closed the other tab
+             # stayed stuck on "This session is open in another tab... reload
+             # this page" with no way back short of a manual reload. Fixed:
+             # the mount effect now subscribes to `writeLock` and starts the
+             # session the moment status flips to writer, no remount needed.
+             # `useWriterStatus()` itself remains unconsumed (a separate,
+             # smaller gap — see DECISIONS.md v3-D93). `TrialAttribution`
+             # (v3-D91) and `permitsIssuance`/`permitsReview` (v3-D88) are
+             # unchanged, still open product questions, not wiring gaps.
              # NOTE (v3-D92): `POST /api/verifications` gated `tier: qari` on the
              # generic `admin` allowlist only — `AdminRole::QARI` (build-plan step
              # 24) existed and its own migration docblock said roles "refine what

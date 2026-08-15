@@ -156,3 +156,52 @@ describe("#103 — it never blocks the session (cache warm, not a precondition)"
     await expect(readEntitlementSnapshot()).resolves.toBeNull();
   });
 });
+
+// v3-D93 — `writeLock.subscribe()` / `useWriterStatus()` (lib/idb/useLogState.ts)
+// were built and unit-tested (writeLock.test.ts's "subscribers observe status
+// transitions") but had ZERO production callers: SessionIsland took one
+// `writeLock.acquire()` snapshot at mount and never learned about a LATER
+// promotion. `writeLock.release()`'s own docblock promises "a queued tab is
+// promoted without a reload" — that promise was silently broken the entire
+// time nothing subscribed. A learner stuck on "This session is open in
+// another tab" who closed the other tab had no way back in short of a manual
+// reload, even though the underlying Web Locks queue had already promoted
+// this tab.
+describe("multi-tab writer promotion (v3-D93 — 'promoted without a reload')", () => {
+  it("starts the session the moment this tab is promoted from reader to writer, with no remount", async () => {
+    installFetch();
+    writeLock.resetForTests();
+    writeLock.forceForTests({ role: "reader", reason: "another-tab" });
+    render(<SessionIsland surah={SURAH} />);
+
+    await waitFor(() =>
+      expect(screen.getByText(/open in another tab/i)).toBeTruthy(),
+    );
+    // No session was assembled while this tab was a reader.
+    expect(screen.queryByTestId("session-drill")).toBeNull();
+
+    // The other tab closes; Web Locks grants OUR already-queued request —
+    // exactly what `WriteLock.release()` calls "promoted without a reload".
+    // `forceForTests` calls the same internal `set()` a real grant would.
+    writeLock.forceForTests({ role: "writer" });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("session-drill")).toBeTruthy(),
+    );
+  });
+
+  it("never starts a session while this tab remains a reader", async () => {
+    installFetch();
+    writeLock.resetForTests();
+    writeLock.forceForTests({ role: "reader", reason: "another-tab" });
+    render(<SessionIsland surah={SURAH} />);
+
+    await waitFor(() =>
+      expect(screen.getByText(/open in another tab/i)).toBeTruthy(),
+    );
+    // A distractor transition — still not the writer — must not start one.
+    writeLock.forceForTests({ role: "reader", reason: "another-tab" });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByTestId("session-drill")).toBeNull();
+  });
+});

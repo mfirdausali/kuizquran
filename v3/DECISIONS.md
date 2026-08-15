@@ -3755,3 +3755,116 @@ fix. `TrialAttribution` (v3-D91) and `permitsIssuance`/`permitsReview`
 (v3-D88) remain exactly as those entries left them — untouched,
 stop-and-report, unresolved. Step 30's E6/E7/E8 and LAUNCH-CHECKLIST gate 20
 remain genuinely infra/human-blocked, unchanged since v3-D82.
+
+---
+
+## Ratified 2026-08-15 (nightly, later still) — the same bug shape, on multi-tab writer promotion
+
+### v3-D93 — `writeLock.subscribe()`/`useWriterStatus()` had zero production callers; a promoted tab stayed stuck on "reload this page"
+
+This run started per NIGHTLY.md's rule: `git status` clean, HEAD matched
+`origin/main` at `e32dd63` (v3-D92) directly after a stale-local-`main`-ref
+repair (`git fetch origin main && git checkout -B main origin/main` — the
+fifth consecutive occurrence of the shape v3-D77/D87/D89/D90/D91 each
+recorded; `git ls-remote` confirmed the real `refs/heads/main` already
+matched HEAD). `make setup` (fresh checkout, no `vendor`/`node_modules`
+anywhere). `TZ=UTC make test`/`make build` reproduced clean before any
+change: **1883 passing + 2 incomplete**, matching `v3/CLAUDE.md`'s
+documented v3-D92 number exactly; `make build` exit 0, 18 routes.
+
+Every one of the 32 build-plan steps was still DONE, human-gated (27/28), or
+infra/human-gated (30's E6/E7/E8), so this run followed v3-D82 through D92's
+now-established practice: dispatch a fresh, code-blind research agent to
+sweep for the next instance of "mechanism built and unit-tested, zero
+production callers", explicitly told not to re-flag `TrialAttribution`
+(v3-D91) or `permitsIssuance`/`permitsReview` (v3-D88) — both already
+correctly classified as open product questions, not wiring gaps.
+
+**Found:** `v3/apps/web/lib/idb/writeLock.ts#WriteLock.subscribe()` and its
+one wrapper, `lib/idb/useLogState.ts#useWriterStatus()`, had exactly one
+caller in the whole tree — `writeLock.test.ts`'s own "subscribers observe
+status transitions" case. `useWriterStatus` had **zero** callers, including
+its own test file. Confirmed:
+
+```
+$ grep -rn "useWriterStatus" . --include="*.ts*" | grep -v node_modules | grep -v .next
+./lib/idb/index.ts:63:export { useLogState, useWriterStatus } from "./useLogState.ts";
+./lib/idb/useLogState.ts:58:export function useWriterStatus(): WriterStatus {
+```
+
+`writeLock.ts`'s own module header states the promise these exist to keep:
+edge case #75 ("two tabs, one session") means exactly one tab is the
+WRITER; the others get "their commit path... disabled and **a banner
+offers 'Use here instead'**." `WriteLock.release()`'s own docblock is more
+specific still: "so a queued tab is promoted **without a reload**." Neither
+half of that promise held. `SessionIsland.tsx` (the session loop, build-plan
+step 18 / v3-D67) took exactly ONE `await writeLock.acquire()` snapshot at
+mount; if another tab held the lock, it rendered a static "This session is
+open in another tab... reload this page" message and never looked again.
+`acquire()`'s own real behaviour — the underlying `navigator.locks.request`
+stays queued and its callback calls `this.set({role:"writer"})` whenever the
+browser actually grants it, potentially long after `acquire()`'s own promise
+already resolved with `reader` — fires into an empty listener set, because
+nothing had ever subscribed. A learner who closed the other tab got no
+"Use here instead" button and no live re-render; they were stuck on a
+message telling them to do by hand exactly what the mechanism was built to
+do automatically. This is the same shape v3-D82/D85/D88/D89/D90/D91/D92
+each found: real code, real tests, a docblock that reads as already true,
+and a live app that has never once exercised the path.
+
+**Built.** `SessionIsland.tsx`'s mount effect: the corpus-load +
+`startSession` sequence was extracted into a local `beginAsWriter()` so it
+has one definition, callable either immediately (the writer case,
+unchanged) or later (the promotion case). On `status.role !== "writer"`, it
+now additionally calls `writeLock.subscribe((s) => { if (s.role ===
+"writer") { unsubscribe(); void beginAsWriter(); } })`, cleaned up on
+unmount. `useWriterStatus()` itself was not the wiring point — `useEffect`
+subscriptions in this component already own imperative side effects
+(starting a session), and `useWriterStatus()`'s job is to hand a *value* to
+a render, which is not what promotion needs to trigger here; `subscribe()`
+is the shared primitive both go through, and it is what this fix actually
+exercises, closing its zero-caller gap directly. `useWriterStatus` itself
+remains unconsumed — a smaller, separate gap, not fixed here (see below).
+
+**RED before green.** `test/session-island.test.tsx` gained two cases under
+"multi-tab writer promotion (v3-D93)". Run against the pre-fix tree: 1 of 2
+failed — "starts the session the moment this tab is promoted... with no
+remount" — `Unable to find an element by: [data-testid="session-drill"]`,
+the component still showing "open in another tab" after the simulated
+promotion. (The negative case, "never starts a session while this tab
+remains a reader," passed on the pre-fix tree too — correctly, since it
+never exercises promotion at all; it stays meaningful post-fix as the
+paired assertion that the subscription doesn't fire on a same-role
+re-notification.) After the fix: 5/5 green (3 pre-existing + 2 new).
+Mutation-verified: replaced the real `unsubscribe =
+writeLock.subscribe(...)` call with a no-op comment — exactly 1 of 5 tests
+failed, on the promotion assertion; reverted byte-identically (`diff`
+against a pre-mutation backup empty), re-applied, 5/5 green again.
+
+**Verified:** `TZ=UTC make test` → exit 0, **1885 passing + 2 incomplete**
+(255 v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler + 417 engine +
+61 fold-runner + **722** apps/web (was 720, +2 — exactly this run's two new
+test cases)) — up from v3-D92's 1883 by exactly +2. `TZ=UTC make build` →
+exit 0, 18 routes (unchanged — no route file touched). `npm run gates` →
+`boundaries: OK`, **177** files (was 176 — the test file grew; no new
+production file needed an allowlist entry, since `writeLock.subscribe` has
+no clause-9-style boundary gate). `npx tsc --noEmit` clean. No Arabic
+codepoints in either changed file (checked directly, whole files). No
+`v1/**`/`v2/**` edit — `v2/tsconfig.tsbuildinfo` regenerated as the same
+`make build`/`make test` side effect v3-D81 through D92 each recorded;
+reverted before staging, confirmed empty diff under `v1/**`/`v2/**`.
+
+**Explicitly NOT done, named so a future run does not re-discover this as
+new:** `useWriterStatus()` itself still has zero callers — this fix wired
+`writeLock.subscribe()` directly rather than through the hook, for the
+reason stated above (an imperative promotion trigger, not a rendered
+value). If a future caller wants to render live writer/reader status as a
+value (e.g. an explicit "Use here instead" banner rather than the current
+static message, which was itself out of scope for this run — the fix makes
+promotion actually WORK without a reload, it does not add the banner
+button `writeLock.ts`'s own header names), `useWriterStatus()` is the
+already-built, already-tested hook for that. `TrialAttribution` (v3-D91)
+and `permitsIssuance`/`permitsReview` (v3-D88) remain exactly as those
+entries left them — untouched, stop-and-report, unresolved. Step 30's
+E6/E7/E8 and LAUNCH-CHECKLIST gate 20 remain genuinely infra/human-blocked,
+unchanged since v3-D82.
