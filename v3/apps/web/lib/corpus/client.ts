@@ -42,6 +42,8 @@
 // paint instead of an infinite spinner.
 
 import type { Corpus } from "@engine/types.ts";
+import { applyOverrides } from "@engine/overrides.ts";
+import { fetchOverrides } from "@/lib/overrides/fetch.ts";
 
 /** Surahs staged into `public/corpus/` by `scripts/stage-corpus.mjs`.
  *
@@ -87,32 +89,47 @@ function usable(value: unknown): value is Corpus {
 
 /**
  * Fetch one surah's corpus for a client surface, or `null` if this build
- * cannot serve it.
+ * cannot serve it. Overrides (`lib/overrides/fetch.ts`) are applied before
+ * the result is cached or returned — see the module header: this is the
+ * previously-missing wiring between the override layer's write path
+ * (`POST /api/overrides`) and an actual learner session.
  *
- * NOT routed through `lib/sync/apiFetch.ts`: that module is the SINGLE EGRESS
- * for `/api` (check-boundaries clause 6) and carries the bearer token and the
- * 401 re-mint interceptor. This is a static asset under `/corpus/`, fetched by
- * a learner who by definition has no account yet — sending it through an auth
- * interceptor would both be wrong and would drag identity into a surface whose
- * entire premise is that identity has not been asked for.
+ * The STATIC CORPUS fetch itself is NOT routed through `lib/sync/apiFetch.ts`:
+ * that module is the SINGLE EGRESS for `/api` (check-boundaries clause 6) and
+ * carries the bearer token and the 401 re-mint interceptor. This is a static
+ * asset under `/corpus/`, fetched by a learner who by definition has no
+ * account yet — sending it through an auth interceptor would both be wrong
+ * and would drag identity into a surface whose entire premise is that
+ * identity has not been asked for. `fetchOverrides` is a SEPARATE call and
+ * DOES go through `apiFetch` (`GET /api/overrides` is a public read, so no
+ * account is required for it to succeed) — the two egress rules are about
+ * different resources, not in tension.
  */
 export async function fetchCorpus(surah: number): Promise<Corpus | null> {
   const cached = cache.get(surah);
   if (cached) return cached;
   if (!CLIENT_SURAHS.includes(surah)) return null;
 
+  let raw: Corpus;
   try {
     const res = await fetch(`/corpus/${surah}.json`, { cache: "force-cache" });
     if (!res.ok) return null;
     const parsed: unknown = await res.json();
     if (!usable(parsed)) return null;
-    cache.set(surah, parsed);
-    return parsed;
+    raw = parsed;
   } catch {
     // Offline, blocked, or malformed. All three mean the same thing to a
     // caller: there is no corpus to reconstruct, say so honestly.
     return null;
   }
+
+  // Never blocks and never throws (fetchOverrides's own discipline): a
+  // corrections fetch that fails leaves the raw corpus in place rather than
+  // failing the whole session.
+  const overrides = await fetchOverrides(surah);
+  const patched = overrides.length > 0 ? applyOverrides(raw, overrides).corpus : raw;
+  cache.set(surah, patched);
+  return patched;
 }
 
 /** Test seam ONLY — the module-level cache would otherwise leak one test's

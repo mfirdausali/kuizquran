@@ -499,8 +499,12 @@ describe("fetchCorpus", () => {
     __resetCorpusCache();
     const first = await fetchCorpus(DEMO_SURAH);
     expect(first?.meta.surah).toBe(112);
+    // 2, not 1: fetchCorpus now also fetches /api/overrides (the wiring
+    // this run's sweep found missing — see test/corpus-client-overrides.test.ts)
+    // before caching. A second call must still add ZERO further fetches —
+    // that is the property this test actually pins.
     await fetchCorpus(DEMO_SURAH);
-    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledTimes(2);
   });
 });
 

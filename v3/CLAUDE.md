@@ -53,13 +53,37 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 1899 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 1903 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 736 apps/web. (v3-D95, 2026-08-16)
-             # `make test` now enforces v3-D95's test-count floor
-             # (`v3/TEST-FLOOR`, currently 1899) — a suite that silently
-             # shrinks (deleted test file, stray `.skip`) now fails the
-             # build even though every test that DID run still passed.
+             # + 417 engine + 61 fold-runner + 740 apps/web. (v3-D96, 2026-08-16)
+             # `make test` enforces v3-D95's test-count floor (`v3/TEST-FLOOR`,
+             # currently 1899, so tonight's +4 margin is intentionally not yet
+             # banked into the floor) — a suite that silently shrinks (deleted
+             # test file, stray `.skip`) now fails the build even though every
+             # test that DID run still passed.
+             # NOTE (v3-D96): `packages/engine/src/overrides.ts#applyOverrides()`
+             # — "the ONE place override precedence is decided," closing
+             # DEFECTS.md#B1/#B4 — was unit-tested three times but had ZERO
+             # production callers. Both halves of the write/read API were real
+             # and independently tested (`POST /api/overrides` admin-gated write,
+             # `GET /api/overrides` public read), but `lib/corpus/client.ts
+             # #fetchCorpus` — what `SessionIsland.tsx` actually drills a real
+             # learner against — served the raw compiled corpus straight
+             # through. A qari/admin correcting a wrong gloss or a bad
+             # distractor via the already-shipped write path had that
+             # correction silently never reach the learner being graded on it.
+             # Fixed: new `lib/overrides/fetch.ts#fetchOverrides()` (mirrors
+             # `lib/entitlement/sync.ts`'s never-throws/never-blocks discipline,
+             # routed through `apiFetch`, the sole `/api` egress) + `fetchCorpus`
+             # now applies the result via `applyOverrides()` before caching.
+             # Deliberately NOT done: `lib/corpus/load.ts` (the SSR loader
+             # behind `/plan`/`/progress`/`/surah/[surah]`/`/workbench`) still
+             # serves the raw corpus — this codebase has no established
+             # pattern for the Next.js server to call the Laravel API over
+             # HTTP (every other live server state is client-fetched), so
+             # inventing one is real scope, not tonight's wiring fix; and
+             # `isQuestionDisabled()`/the `disable` field remains unconsumed
+             # anywhere in the selection engine. See DECISIONS.md v3-D96.
              # NOTE (v3-D95): eight straight nights (v3-D82..D94) mined the
              # same bug class — "mechanism built and unit-tested, zero
              # production callers." This run's fresh sweep came back empty

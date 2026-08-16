@@ -4195,3 +4195,163 @@ sometimes still finds something), but should not feel obligated to force a
 marginal fix if it also comes back empty; converting to a different genuine,
 already-named engineering gap (as this run did) is the honest fallback, and
 manufacturing a finding to avoid reporting "nothing new" is not.
+
+---
+
+## Ratified 2026-08-16 (nightly, later) — the sweep found a live instance after all: `applyOverrides()` had zero production callers
+
+### v3-D96 — a qari/admin correction never reached a learner being graded; `fetchCorpus` now applies it
+
+This run started per NIGHTLY.md's rule. `git log`/`origin/main` showed a
+shallow-clone artifact of the now-familiar shape (v3-D77/D87/D89–D95): the
+checkout's `main` ref was cached at `cab5d16` (pre-dating even Phase 0's real
+commit history), while `HEAD` was correctly at `5ba96c8` (v3-D95). `git fetch
+--unshallow origin` resolved it — `origin/main` and the detached `HEAD` are
+the same commit; `git merge --ff-only origin/main` brought the local `main`
+ref current. Every one of the 32 build-plan steps was confirmed DONE,
+human-gated (27/28, H2 unchanged: surah 67 scene beats), or infra-gated
+(30's E6/E7/E8, all LAUNCH-CHECKLIST gates BLOCKED-ON-HUMAN/-INFRA — verified
+against a fresh read of `LAUNCH-CHECKLIST.md`, not assumed).
+
+Per v3-D82 through v3-D95's established practice, a fresh, code-blind
+research agent was dispatched to sweep for the next "mechanism built and
+unit-tested, zero production callers" instance, explicitly told the full
+exclusion list D95 accumulated (`EntitlementMachine::merge()`,
+`permitsIssuance`/`permitsReview`, `TrialAttribution`, `useWriterStatus()`,
+`describeCertification()`, `regionFromCountry()`, `AdminRole::
+OPERATOR`/`MODERATOR`, `rowAtomKey()`, step 30's E6/E7/E8, and the RC-only
+session-loop architecture as ratified design, not a gap). Unlike D95's own
+sweep, **this one did not come back empty.**
+
+**Finding, independently re-verified by hand before touching any code:**
+`packages/engine/src/overrides.ts#applyOverrides()` — the function's own
+docblock calls it "the ONE place override precedence is decided (invariant
+#6)," closing DEFECTS.md#B1 and #B4 — is unit-tested three times
+(`overrides.test.ts`, `b4-override-ties.test.ts`, and as a fixture helper in
+`ladder.test.ts`). The write path is real: `POST /api/overrides`
+(`OversidesController::store`, admin-gated, tested in
+`tests/Feature/Overrides/OverridesTest.php`, recomputing the surah's tiered
+hash on every write). The read path is real: `GET /api/overrides` is a
+PUBLIC read — its own docblock says "every client, including an anonymous
+not-yet-synced device, needs these to build correct questions." But
+`grep -rn "applyOverrides" apps/web` (outside the engine package and its own
+tests) returned nothing, and `grep -rn "overrides" lib components -i`
+(outside tests) returned zero hits. Worse than the sweep's first read:
+`lib/corpus/client.ts#fetchCorpus` — NOT the read-only SSR corpus loader,
+but the one `components/session/SessionIsland.tsx` actually drills a real
+learner against — serves the raw compiled corpus straight through, cached,
+with no override fetch or merge anywhere in the chain. `reconstruct.ts`
+(the RC-only graded path, per D95's own re-confirmation) draws its
+near-miss distractors from `corpus.distractorsFor`/`pickOptions` and reads
+`CorpusWord.gloss` — both fields `applyOverrides` patches. **A qari or
+admin correcting a wrong gloss or swapping out a bad distractor via the
+already-shipped, already-tested write path had that correction silently
+never reach the learner actually being graded on it** — the write appeared
+to succeed (201, hash recomputed) and nothing downstream was ever wrong in
+a way any existing test could see, because no existing test exercised the
+read side at all.
+
+Scope note, decided before writing any code: `lib/corpus/load.ts` (the
+SSR-only loader backing `/plan`, `/progress`, `/surah/[surah]`, `/workbench`)
+is a STATIC file read with no established pattern anywhere in this codebase
+for the Next.js server to call the Laravel API over HTTP — grepping
+`apps/web` for `process.env` outside `lib/sync/apiFetch.ts` returns nothing,
+and `check-boundaries.mjs` clause 6 (SINGLE EGRESS, `fetch(...api/...)`
+banned everywhere except `apiFetch.ts`) scans every `.ts`/`.tsx`/`.mjs` file
+under `apps/web`, `load.ts` included — inventing a second egress pattern for
+one file is a real architectural addition, not a wiring fix, and is left
+named here rather than done tonight. Every *other* live piece of server
+state in this app (entitlement, sync) is fetched CLIENT-SIDE via `apiFetch`
+and never from an SSR loader — overrides fit that same established pattern,
+not `load.ts`'s. The fix below is scoped to the path that actually grades a
+learner: `fetchCorpus`/`client.ts`, consumed by `SessionIsland.tsx`,
+`TodaySession.tsx`, and `FirstRecall.tsx`. `isQuestionDisabled()`/the
+`disable` field is ALSO left unwired: nothing in the selection engine
+consumes a disabled-set today (RC-only architecture confirmed by D95), so
+wiring it now would be inventing a new selection-engine contract with no
+current caller shape to fit it into — a distinct, larger piece of work than
+tonight's read-side wiring, named here so a future run does not
+re-discover it as new.
+
+**RED before green.** `test/corpus-client-overrides.test.ts` (4 tests, new
+file) was committed and run against the UNMODIFIED `fetchCorpus` first: 2 of
+4 failed for real reasons — "patches a word's gloss" (`expected 'Say' to be
+'TEST_OVERRIDE_GLOSS_MARKER'` — the real surah-112 ayah-1 position-1 gloss
+came back unpatched) and "calls GET /api/overrides" (`expected false to be
+true` — no such call was ever made). The other 2 (degrade-to-raw-corpus on a
+failed overrides fetch; an unrelated word's gloss stays untouched) passed
+vacuously against the current no-op behaviour, as expected of tests
+describing a property that was already accidentally true. Committed
+separately (`test(v3): fetchCorpus must apply overrides, RED`) before any
+implementation change. No Arabic byte was typed in this test: the override
+payload is an authored English marker string (`TEST_OVERRIDE_GLOSS_MARKER`)
+over a fixture coordinate (surah 112, ayah 1, position 1); every Arabic byte
+the test touches is read from the real compiled corpus on disk.
+
+**Built:**
+- `lib/overrides/fetch.ts` (new) — `fetchOverrides(surah)`, mirroring
+  `lib/entitlement/sync.ts#fetchEntitlementSnapshot`'s exact failure
+  discipline: routes through `apiFetch` (the single egress; this file is
+  `"use client"`, so unlike `load.ts` it legitimately can), never throws, a
+  network failure/non-200/malformed body/shape-invalid row all degrade to
+  `[]` — never a crash mid-session, matching #103's "never blocks" rule
+  every other background fetch in this codebase already follows. Rows
+  failing a runtime shape check (closed `field` set, required keys) are
+  dropped individually rather than blinding the whole fetch to every other
+  valid correction.
+- `lib/corpus/client.ts#fetchCorpus` — after the raw corpus fetch succeeds,
+  now fetches overrides for the same surah and, if any exist, applies them
+  via `applyOverrides()` before caching. The docblock is rewritten to state
+  plainly why the static-corpus fetch stays raw `fetch` (unauthenticated,
+  pre-account learner) while the NEW overrides fetch goes through
+  `apiFetch` (a public read that happens to use the sole-egress module,
+  not a contradiction of the file's own long-standing egress rule).
+
+**Verified:**
+- `test/corpus-client-overrides.test.ts`: 4/4 green.
+- A genuinely PRE-EXISTING test broke as a direct, correct consequence:
+  `test/onboarding.test.tsx`'s "serves the real corpus on a 200, and caches
+  it" asserted the global fetch spy was called exactly once — now correctly
+  twice (corpus + overrides) on the first call, and still exactly twice
+  (zero more) after a second `fetchCorpus` call for the same surah. Updated
+  the assertion and its comment to name why; the property the test actually
+  exists to pin — a cache hit adds zero further network calls — is
+  unchanged and still verified.
+- `node scripts/check-boundaries.mjs`: OK, 179 files, clause 6 (single
+  egress) included — `fetchOverrides` is the only new caller of `apiFetch`,
+  `client.ts` itself never calls `fetch(...api/...)` directly.
+- `TZ=UTC make test`: **1903 passing** (was 1899 at v3-D95) — 255 v2 vitest
+  + 47 v2/api + 272 v3/api + 111 corpus-compiler + 417 engine + 61
+  fold-runner + **740** apps/web (was 736, +4 — exactly this run's new test
+  file). `check-test-floor.mjs`: OK, 1903 >= floor 1899 (+4 margin, all of
+  it this run's). `TEST-FLOOR` left at 1899 — under, not at, the new total,
+  which is the intended state between nights (v3-D95's own note: raising it
+  to the exact new total is a per-commit discipline for whichever run adds
+  tests that move the floor's own honest baseline, not something to bump
+  reflexively every time the total grows by a small margin).
+- `TZ=UTC make build`: exit 0, 18 routes (unchanged — no route file
+  touched), `tsc` clean inside the build, corpus-glyphs/morphology/
+  locked-css gates all OK.
+- No Arabic codepoints in any new or changed file (checked programmatically
+  against every range INVARIANTS.md's Absolute B names, whole-file, over
+  `lib/overrides/fetch.ts`, `lib/corpus/client.ts`,
+  `test/corpus-client-overrides.test.ts`, `test/onboarding.test.tsx`).
+- No `v1/**`/`v2/**` edit — `v2/tsconfig.tsbuildinfo` regenerated as the
+  same `make build`/`make test` side effect v3-D81 through D95 each
+  recorded, reverted before staging; `git diff --stat -- v1 v2` empty at
+  commit time.
+
+**Explicitly NOT done, named so a future run does not re-discover these as
+new:** `lib/corpus/load.ts` (the SSR loader for `/plan`, `/progress`,
+`/surah/[surah]`, `/workbench`) still serves the raw, uncorrected corpus —
+a real, live gap, but one that needs a new server-side-egress pattern this
+codebase has never had, not a wiring fix; a future run doing this should
+decide and record that pattern deliberately, not invent it as a side effect
+of a different fix. `isQuestionDisabled()`/the `disable` override field
+remains unconsumed anywhere in the selection engine — genuinely open,
+larger scope than tonight's read-side fix, distinct from the `gloss`/
+`distractor`/`group` patches this run wired. `group` overrides
+(`CorpusWord.groupPositions`) are now technically reachable through the
+same patched-corpus path but were not independently exercised by a new
+test beyond `applyOverrides`'s own existing coverage — worth a future
+run's dedicated check if group overrides become a real qari workflow.
