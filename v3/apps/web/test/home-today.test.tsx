@@ -42,6 +42,8 @@ import { fileURLToPath } from "node:url";
 import type { Corpus, DrillEvent } from "@engine/types.ts";
 import { rebuild } from "@engine/rebuild.ts";
 import { assembleQueue } from "@engine/scheduler.ts";
+import { completedDayIndices, computeStreak } from "@engine/streak.ts";
+import { DEFAULT_DAY_CONFIG } from "@engine/daybound.ts";
 
 import { DB_NAME, append, currentTz, openDb, resetDbForTests, writeLock } from "@/lib/idb";
 import { getEventsForSurah } from "@/lib/idb/read";
@@ -222,6 +224,72 @@ describe("§10 — the due count shown is the due count the session will serve",
     expect(
       screen.getByText(new RegExp(`\\b${expected} items? due today`, "i")),
     ).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE QUIET STREAK — the landing page's own FAQ ("Is this another streak
+// app?") answers "There is a streak, and it is deliberately unimportant" in
+// the present tense, about the shipped product. `packages/engine/src/
+// streak.ts#computeStreak()`/`completedDayIndices()` are real, pure,
+// unit-tested (19 assertions, `test/habit.test.ts`'s FR9 describe block) —
+// and had ZERO production callers anywhere in `apps/web` until this fix.
+// Same shape as v3-D96 (an admin's override correction never reaching the
+// learner it was meant to correct): a real, tested mechanism the product's
+// own marketing copy already promises, silently never reaching the screen.
+//
+// As with the due count above, the expectation is DERIVED from the engine's
+// own `completedDayIndices`/`computeStreak`, run over the same event log the
+// component reads — never a hand-picked number the test chose itself.
+// ---------------------------------------------------------------------------
+async function engineStreakLabel(surah: number, now: number): Promise<string | null> {
+  const prior = await getEventsForSurah(surah);
+  const cfg = { ...DEFAULT_DAY_CONFIG, tz: currentTz() };
+  const days = completedDayIndices(prior, cfg);
+  const streak = computeStreak(days, now, cfg);
+  if (streak.length === 0) return null;
+  return `${streak.length}-day streak`;
+}
+
+describe("the quiet streak pill — backs the landing page's own FAQ claim", () => {
+  it("shows nothing for a freshly enrolled learner with no completed days", async () => {
+    await enroll(SURAH);
+    serveCorpus();
+
+    const expected = await engineStreakLabel(SURAH, Date.now());
+    expect(expected).toBeNull();
+
+    render(<TodaySession />);
+    await waitFor(() => expect(screen.getByTestId("today-session")).toBeTruthy());
+    expect(document.querySelector(".pill-streak")).toBeNull();
+  });
+
+  it("renders the ENGINE's own streak length once days have been completed", async () => {
+    await enroll(SURAH);
+    serveCorpus();
+
+    // Two CONSECUTIVE completed learning-days: exactly one 24h period apart,
+    // which lands on adjacent learning-day indices regardless of rollover
+    // hour, since `learningDayIndex` is a fixed-period floor of the instant.
+    const now = Date.now();
+    await addEvent({
+      type: "ayah_produced",
+      ts: now - 24 * 60 * 60 * 1000,
+      surah: SURAH,
+      ayah: 1,
+      rung: "S3",
+    });
+    await addEvent({ type: "ayah_produced", ts: now, surah: SURAH, ayah: 2, rung: "S3" });
+
+    const expected = await engineStreakLabel(SURAH, now);
+    // A guard on the oracle: a streak of zero here would make the assertion
+    // below vacuously satisfiable by a component that renders nothing.
+    expect(expected).not.toBeNull();
+
+    render(<TodaySession />);
+    await waitFor(() => expect(screen.getByTestId("today-session")).toBeTruthy());
+    const pill = await screen.findByText(expected as string);
+    expect(pill.className).toContain("pill-streak");
   });
 });
 
