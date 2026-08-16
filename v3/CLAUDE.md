@@ -53,9 +53,30 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 1890 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 1899 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 727 apps/web. (v3-D94, 2026-08-16)
+             # + 417 engine + 61 fold-runner + 736 apps/web. (v3-D95, 2026-08-16)
+             # `make test` now enforces v3-D95's test-count floor
+             # (`v3/TEST-FLOOR`, currently 1899) — a suite that silently
+             # shrinks (deleted test file, stray `.skip`) now fails the
+             # build even though every test that DID run still passed.
+             # NOTE (v3-D95): eight straight nights (v3-D82..D94) mined the
+             # same bug class — "mechanism built and unit-tested, zero
+             # production callers." This run's fresh sweep came back empty
+             # against that same bar for the first time (see DECISIONS.md
+             # v3-D95 for the full retrace of near-misses ruled out). Picked
+             # up HANDOVER.md's own still-open E10 instead: nothing summed
+             # the seven `make test` suites and compared against a floor, so
+             # DEFECTS.md#B9's "build gate that can never fail" had a live
+             # sibling — a suite could shrink and `make test` would still
+             # exit 0. Built `v3/scripts/check-test-floor.mjs` (RED before
+             # green, 9 new tests), wired into the root `Makefile`'s `test`
+             # target. Mutation-verified 3 ways incl. a LIVE-FIRE proof: a
+             # temporarily `.skip`'d real test in `sync-trigger.test.tsx`
+             # left the vitest suite itself green (735 passed | 1 skipped)
+             # but made `make test` exit 2 — proving the gate catches
+             # exactly the silent-shrink case it was built for. See
+             # DECISIONS.md v3-D95.
              # NOTE (v3-D94): `lib/idb/append.ts#retryAppend()`/`RetryableAppendError`
              # — edge case #74's "QuotaExceeded on tap write... card blocks with
              # retry banner; tap never silently dropped" — had ZERO production

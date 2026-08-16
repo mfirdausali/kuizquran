@@ -4029,3 +4029,169 @@ product/UI gap, not a wiring fix. `TrialAttribution` (v3-D91),
 remain exactly as those entries left them. Step 30's E6/E7/E8 and
 LAUNCH-CHECKLIST gate 20 remain genuinely infra/human-blocked, unchanged
 since v3-D82.
+
+---
+
+## Ratified 2026-08-16 (nightly) — build-plan step 30 (M10) continued: the test-count floor, and the first negative sweep
+
+### v3-D95 — the "mechanism built, zero production callers" sweep came back empty; closed HANDOVER.md's own E10 (test-count floor) instead
+
+This run started per NIGHTLY.md's rule: HEAD was DETACHED at `6bb4059`
+(v3-D94), one commit ahead of the local `main` ref's cached position — the
+now-familiar shape v3-D77/D87/D89/D90/D91/D92/D93 each recorded (`git fetch
+origin main` confirmed `origin/main` already matched HEAD;
+`git checkout -B main origin/main` resolved it). `make setup` (fresh
+checkout, no `vendor`/`node_modules` anywhere). `TZ=UTC make test`/`make
+build` reproduced clean before any change: **1890 passing + 2 incomplete**,
+matching `v3/CLAUDE.md`'s documented v3-D94 number exactly; `make content-freeze`
+reproduced the same single NOT-MET criterion HANDOVER.md already names
+(surah 67 scene beats — human-only, unchanged).
+
+Every one of the 32 build-plan steps was still DONE, human-gated (27/28), or
+infra/human-gated (30's E6/E7/E8), so this run followed v3-D82 through D94's
+established practice: a fresh, code-blind research agent was dispatched to
+sweep for the next instance of "mechanism built and unit-tested, zero
+production callers," explicitly told not to re-flag `EntitlementMachine::
+merge()` (v3-D94), `permitsIssuance`/`permitsReview` (v3-D88),
+`TrialAttribution` (v3-D91), `useWriterStatus()` (v3-D93), or step 30's
+E6/E7/E8.
+
+**This is the first night that sweep came back empty against its own bar.**
+It re-traced every near-miss from the last several nights — `describeCertification()`
+(already deferred at v3-D86), `regionFromCountry()` (downstream of the
+no-checkout-flow gap `EntitlementMachine::merge()` shares), `AdminRole::
+OPERATOR`/`MODERATOR` (gate nothing named anywhere in the spec — real
+deferred M11/M8 scope, not an oversight), and the RC-only session-loop
+architecture (`buildQuestion`'s cloze/junction/locate/reorder lanes and
+`selectFor` never reaching `lib/session/run.ts` — confirmed, by re-reading
+v3-D25/D35/D36/D37/DEFECTS.md#B2's v3-D83 re-close, to be the RATIFIED
+design, not a gap: `reconstruct.ts` is permanently the only graded path).
+The one candidate it surfaced, `rowAtomKey()` (`lib/progress/rows.ts:291`),
+fails the bar on two counts the sweep named itself: it has no test at all
+(not "tested, unwired" — just unreferenced by anything, including its own
+test file), and the feature its docblock claims to serve
+(`AyahStatsIsland.tsx`'s per-ayah stats) already works correctly through a
+different, real path (`buildProgressRows()`/`ayahRow()`/`seamRowFrom()`).
+Forcing a fix onto dead code with a stale comment and no live defect behind
+it would be manufacturing a finding to have one — left untouched, named here
+so a future run doesn't re-spend the sweep rediscovering the same dead end.
+
+**Given that, this run picked up a different, already-named, genuinely open
+item instead: HANDOVER.md's own E10** ("Raise the test floor to 1614, or
+accept that the +63 margin means a deleted test no longer trips the
+tripwire"). Verified still open: no file anywhere in the repo sums the seven
+`make test` suites and compares against a floor (`grep -rln "test.*floor\|
+testCount\|MIN_TESTS"` across `v3/apps/web/scripts`, `v3/apps/web/test`,
+`v3/api` returns nothing). This is a real, live gap in the same family as
+DEFECTS.md#B9 ("the CI build gate was a no-op"): B9 stops `make test` from
+reporting green on **zero** tests; nothing stops it reporting green on
+**fewer** tests than last night, provided every test that DID run still
+passed. HANDOVER.md's own audit had already widened this into a documented
++63-test margin without closing it.
+
+**RED before green.** `v3/apps/web/test/check-test-floor-gate.test.ts` (9
+tests) was written and committed to work against FIRST, then run against a
+tree with no `v3/scripts/check-test-floor.mjs` yet: all 9 failed on a real
+`MODULE_NOT_FOUND` from Node — a genuine RED, not vacuous, since the script
+did not exist. Every literal suite-summary line the test's `buildLog()`
+helper reproduces (vitest's `Tests  N passed (N)`, v2/api's own
+`{"tool":"phpunit",...}` JSON line, v3/api's `Tests:    N incomplete, M
+passed (…assertions)`) was captured by hand from real runs of this repo's
+seven suites in this session, not invented.
+
+**Built**, `v3/scripts/check-test-floor.mjs` (mirroring `content-freeze.mjs`'s
+own "report, don't decide" shape and its `run(script,args)`-spawns-the-
+real-script test convention):
+
+- Splits the log on each suite's own literal `cd <dir> && npm test`/`php
+  artisan test` recipe line — the exact, unescaped command the root
+  Makefile's non-`@`-silenced recipes already echo — rather than scanning
+  the whole log for a suite's summary shape. This is load-bearing: five of
+  the seven suites (v2, corpus-compiler, engine, fold-runner, apps/web) all
+  emit the byte-identical vitest `Tests  N passed (N)` line, so without a
+  boundary, one suite's count could silently attribute to another's slot.
+- Counts v3/api's `Tests:  K incomplete, N passed` line's `passed` figure
+  ONLY, never `K+N` — PAY-1's 2 deliberately-incomplete tests (DEFECTS.md)
+  must never inflate the total, or a real regression could hide behind a
+  growing incomplete count.
+- Fails LOUDLY, never silently, when a suite's marker is entirely absent
+  from the log (a suite that never ran) — distinct from, and treated more
+  seriously than, a suite whose marker is present but whose summary line
+  doesn't match any known shape (also reported as missing, by name, rather
+  than guessed at).
+- `TEST-FLOOR` (new file, `v3/TEST-FLOOR`, one integer) is the floor value;
+  a `--floor-file` CLI override exists ONLY for the test suite, mirroring
+  `content-freeze.mjs --surahs`' "override via a real flag, not a test-only
+  code path" discipline.
+
+Wired into the root `Makefile`'s `test` target: `make test-web`/`test-api`/
+`test-api3`/`test-v3` remain independently runnable exactly as before (their
+own recipes are untouched); `make test` itself now runs the four through a
+`tee`d subshell under `set -o pipefail`, captures the combined log to a
+`mktemp` file, exits with the SUITE run's own status if anything failed
+before ever consulting the floor (a genuine test failure must never be
+masked by the floor check running anyway), and otherwise hands the log to
+`check-test-floor.mjs` and exits with ITS status.
+
+**Mutation-verified, three ways, each reverted byte-identically
+(`diff` against a pre-mutation backup empty each time):**
+1. Replaced the script's `ok` computation with a hardcoded `true` — 3 of 9
+   tests failed, on exactly the shrink-detection, missing-suite, and
+   floor-comparison assertions (the tests asserting an ABSENCE of an effect
+   stayed green, as expected).
+2. Widened the v3/api regex to sum `incomplete + passed` — 1 test failed,
+   on the exact assertion pinning v3/api's count to 272 (not 274).
+3. **Live-fire, against the REAL suite, not a synthetic log**: temporarily
+   `it.skip`'d one real test in `test/sync-trigger.test.tsx`, ran the actual
+   `TZ=UTC make test` end to end. The vitest suite itself still exited 0
+   (735 passed | 1 skipped (736) — skipping is not failing). **Without this
+   gate, `make test` would have reported green on a real, silent test-count
+   drop.** With it: `make test` exited 2, `check-test-floor.mjs` correctly
+   refused to guess at the ambiguous "N passed | M skipped" line (reporting
+   `apps/web` as MISSING rather than mis-parsing it as a clean pass) —
+   failing loudly for a reason slightly different from, but no less correct
+   than, the one this fix was written to catch. Reverted (`sed` restoring
+   `it(` from `it.skip(`); `git diff` on that file empty afterward.
+
+**`TEST-FLOOR` is set to 1899, not 1890 — zero margin, the original property
+HANDOVER.md's own note asked to restore.** This run's own 9 new tests moved
+apps/web from 727 to 736 (255 v2 + 47 v2/api + 272 v3/api + 111
+corpus-compiler + 417 engine + 61 fold-runner + 736 apps/web = 1899); the
+floor is set to exactly that total specifically so the tripwire is live
+starting tonight, not after some future run happens to notice the margin.
+Raising `TEST-FLOOR` is expected and correct as suites grow — the gate's own
+message says so on a shrink ("if this is a deliberate, reviewed test
+removal, update TEST-FLOOR in the same commit — never silently") — what it
+must never do is move backward without a reviewed reason.
+
+**Verified:** `TZ=UTC make test` → exit 0, **1899 passing + 2 incomplete**
+(255 v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler + 417 engine +
+61 fold-runner + **736** apps/web (was 727, +9 — exactly this run's new
+test file)) — up from v3-D94's 1890 by exactly +9, all nine of them the new
+gate's own tests. `TZ=UTC make build` → exit 0, 18 routes (unchanged — no
+route file touched). `npx tsc --noEmit` clean. No Arabic codepoints anywhere
+in any new or changed file (checked programmatically, whole files, over the
+three new/changed files, against every range INVARIANTS.md's Absolute B
+names). No `v1/**`/`v2/**` edit — `v2/tsconfig.tsbuildinfo` regenerated as
+the same `make build`/`make test` side effect v3-D81 through D94 each
+recorded, reverted before staging, confirmed empty diff under
+`v1/**`/`v2/**`.
+
+**Explicitly NOT done, named so a future run does not re-discover these as
+new:** `rowAtomKey()` (`lib/progress/rows.ts:291`) remains unremoved —
+genuine dead code with a stale docblock, but no live defect behind it; a
+future run may delete it as cleanup, not as a v3-D82-shape fix. Every item
+this run's sweep re-confirmed as already-named and deliberately deferred
+(`EntitlementMachine::merge()`, `permitsIssuance`/`permitsReview`,
+`TrialAttribution`, `useWriterStatus()`, `describeCertification()`,
+`regionFromCountry()`, `AdminRole::OPERATOR`/`MODERATOR`) remains exactly as
+those entries left them. Step 30's E6/E7/E8 and LAUNCH-CHECKLIST gate 20
+remain genuinely infra/human-blocked, unchanged since v3-D82. **This may be
+the shape of future nights too**: the "unwired mechanism" bug class this
+build mined for eight consecutive nights (v3-D82 through D94) is not
+provably exhausted, but tonight's exhaustive sweep found nothing new against
+its own evidence bar — a future run should still sweep first (cheap,
+sometimes still finds something), but should not feel obligated to force a
+marginal fix if it also comes back empty; converting to a different genuine,
+already-named engineering gap (as this run did) is the honest fallback, and
+manufacturing a finding to avoid reporting "nothing new" is not.

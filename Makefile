@@ -65,7 +65,22 @@ dev-api: ## Run only the API (:8000)
 dev-api3: ## Run only v3's API (:8001) — no frontend consumes it yet (M5)
 	cd $(API_V3) && php artisan serve --port=8001
 
-test: test-web test-api test-api3 test-v3 ## Run every suite
+test: ## Run every suite; enforces v3-D95's test-count floor (TEST-FLOOR) so a suite can shrink without `make test` staying green by accident
+	@# B9 closed the gate that could never fail (zero tests = pass). It did
+	@# nothing about a suite silently shrinking while every test that DID run
+	@# still prints PASS. check-test-floor.mjs reads the log this exact run
+	@# produces (never a second, possibly-divergent invocation) and sums the
+	@# seven suites' own summary lines; missing a suite marker or dropping
+	@# below TEST-FLOOR fails loudly. See DECISIONS.md v3-D95.
+	@set -o pipefail; \
+	log=$$(mktemp); \
+	( $(MAKE) --no-print-directory test-web && $(MAKE) --no-print-directory test-api && $(MAKE) --no-print-directory test-api3 && $(MAKE) --no-print-directory test-v3 ) 2>&1 | tee "$$log"; \
+	suite_status=$$?; \
+	if [ $$suite_status -ne 0 ]; then rm -f "$$log"; exit $$suite_status; fi; \
+	node v3/scripts/check-test-floor.mjs "$$log"; \
+	floor_status=$$?; \
+	rm -f "$$log"; \
+	exit $$floor_status
 
 test-web: ## vitest (v2)
 	cd $(V2) && npm test
