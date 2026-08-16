@@ -159,7 +159,19 @@ export function TodaySession() {
       const { row } = state;
       return (
         <div className="stack stack--tight" data-testid="today-session">
-          <p className="voice">{row.label}</p>
+          <p className="voice">
+            {row.label}
+            {/* FR9's quiet streak (the landing FAQ's own claim, backed for
+                real). `null` when there is nothing to show yet — see
+                `HomeSurahRow.streakLabel`'s doc comment. Already a finished
+                sentence fragment; nothing is counted here. */}
+            {row.streakLabel ? (
+              <>
+                {" "}
+                <span className="pill-streak">{row.streakLabel}</span>
+              </>
+            ) : null}
+          </p>
           {/* Already a sentence when it arrived. Nothing is counted here. */}
           <p className="caption">{row.dueLabel}</p>
           {row.ctaEnabled ? (

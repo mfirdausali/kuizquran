@@ -53,14 +53,32 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 1903 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 1905 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 740 apps/web. (v3-D96, 2026-08-16)
+             # + 417 engine + 61 fold-runner + 742 apps/web. (v3-D97, 2026-08-16)
              # `make test` enforces v3-D95's test-count floor (`v3/TEST-FLOOR`,
-             # currently 1899, so tonight's +4 margin is intentionally not yet
+             # currently 1899, so the margin above is intentionally not yet
              # banked into the floor) — a suite that silently shrinks (deleted
              # test file, stray `.skip`) now fails the build even though every
              # test that DID run still passed.
+             # NOTE (v3-D97): `packages/engine/src/streak.ts#computeStreak()`/
+             # `completedDayIndices()` (FR9 — pause-on-miss, never zeroes,
+             # 19 tests) had ZERO production callers. Unlike prior nights this
+             # wasn't silent data corruption — it was a marketing claim with
+             # nothing behind it: the landing page's own FAQ answers "Is this
+             # another streak app?" in the present tense ("There is a streak,
+             # and it is deliberately unimportant... no leaderboard, no
+             # ranking..."), and nothing in the shipped app ever showed a
+             # streak anywhere. Fixed, scoped narrowly: `lib/home/queue.ts`
+             # now computes a quiet `${n}-day streak` (or null on zero — never
+             # a nagging "0-day streak") from the SAME event log the due-count
+             # already reads; `TodaySession.tsx` renders it via the locked
+             # `.pill-streak` class (existed, unused, since the v1 port).
+             # Deliberately NOT done: `atRisk`/`pausedOnMiss`/`makeupAvailable`
+             # stay unsurfaced, and the rich streak-calendar/freeze-token UI
+             # WIREFRAME/BUILD-PLAN name is v3-D06's flag-gated M11 social
+             # scope, OFF by default — this fix backs the FAQ's own minimal,
+             # private claim, not that larger surface. See DECISIONS.md v3-D97.
              # NOTE (v3-D96): `packages/engine/src/overrides.ts#applyOverrides()`
              # — "the ONE place override precedence is decided," closing
              # DEFECTS.md#B1/#B4 — was unit-tested three times but had ZERO

@@ -39,9 +39,12 @@
 // incipit authored here would be scripture typed by hand.
 
 import type { Corpus } from "@engine/types.ts";
+import { completedDayIndices, computeStreak } from "@engine/streak.ts";
+import { DEFAULT_DAY_CONFIG } from "@engine/daybound.ts";
 
 import { assembleFor } from "@/lib/session/run";
 import { OFFERED_SURAHS, surahLabel } from "@/lib/onboarding/surahs";
+import { currentTz } from "@/lib/idb";
 
 /** The route a learner takes into today's work. Named once so no view spells
  *  it, and so the CTA cannot point somewhere the dashboard did not decide. */
@@ -77,6 +80,23 @@ export interface HomeSurahRow {
    * which describes nothing and is the word §12 objects to.
    */
   readonly ctaLabel: string;
+  /**
+   * "3-day streak", or `null` when there is nothing to show yet.
+   *
+   * `packages/engine/src/streak.ts` — FR9's quiet, personal streak (pauses on
+   * a miss, never zeroes; no leaderboard, no ranking, no notifications; the
+   * landing page's own FAQ describes exactly this, present-tense, as already
+   * shipped: "There is a streak, and it is deliberately unimportant"). `null`
+   * on a length of zero rather than a "0-day streak" — a fresh learner has no
+   * streak yet, and a bare zero reads as a nag, which is the anti-pattern
+   * `streak.ts`'s own header names ("streak-as-idol... the UI keeps it
+   * quiet"). Deliberately does not surface `atRisk`/`pausedOnMiss` here: a
+   * paused streak still counts (it is not punished), and the richer streak
+   * calendar/freeze-token UI is BUILD-PLAN M11 social scope (v3-D06),
+   * flag-gated and post-launch — this is only the minimal, private count the
+   * FAQ promises today.
+   */
+  readonly streakLabel: string | null;
 }
 
 export interface BuildHomeSurahInput {
@@ -116,7 +136,21 @@ export async function buildHomeSurah(
     ctaEnabled: dueCount > 0,
     ctaHref: SESSION_HREF,
     ctaLabel: "Start today's session",
+    streakLabel: streakLabelFor(assembled.prior, now),
   };
+}
+
+/**
+ * "3-day streak" from the SAME event log `assembleFor` already read (no
+ * second log read, no second source of truth). `null` on zero — see
+ * `HomeSurahRow.streakLabel`'s own doc comment for why.
+ */
+function streakLabelFor(prior: Parameters<typeof completedDayIndices>[0], now: number): string | null {
+  const cfg = { ...DEFAULT_DAY_CONFIG, tz: currentTz() };
+  const days = completedDayIndices(prior, cfg);
+  const streak = computeStreak(days, now, cfg);
+  if (streak.length === 0) return null;
+  return `${streak.length}-day streak`;
 }
 
 /**

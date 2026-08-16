@@ -4355,3 +4355,150 @@ larger scope than tonight's read-side fix, distinct from the `gloss`/
 same patched-corpus path but were not independently exercised by a new
 test beyond `applyOverrides`'s own existing coverage — worth a future
 run's dedicated check if group overrides become a real qari workflow.
+
+---
+
+## Ratified 2026-08-16 (nightly, later still) — the sweep found a live instance again: the landing page's own streak claim was unbacked by the product
+
+### v3-D97 — `computeStreak()`/`completedDayIndices()` had zero production callers; `/home` now shows the quiet streak the FAQ already promises
+
+This run started per NIGHTLY.md's rule: read the five source-of-truth docs,
+confirmed HEAD (`889437e`, v3-D96) matched `origin/main` (no shallow-clone
+staleness this time), and re-derived state from `git log` and the repo
+rather than trusting any stale line — every one of the 32 build-plan steps
+is DONE, human-gated (27/28), or infra-gated (30's E6/E7/E8, all
+LAUNCH-CHECKLIST gates unchanged since v3-D96's own read of the checklist).
+
+Per v3-D82 through v3-D96's established practice, a fresh, code-blind
+research agent was dispatched to sweep for the next "mechanism built and
+unit-tested, zero production callers" instance, given the full exclusion
+list v3-D95/D96 accumulated (`EntitlementMachine::merge()`,
+`permitsIssuance`/`permitsReview`, `TrialAttribution`, `useWriterStatus()`,
+`describeCertification()`, `regionFromCountry()`, `AdminRole::
+OPERATOR`/`MODERATOR`, `rowAtomKey()`, step 30's E6/E7/E8, the RC-only
+session-loop architecture as ratified design, `lib/corpus/load.ts`'s SSR
+override gap, and `isQuestionDisabled()`). It did not come back empty.
+
+**Finding, independently re-verified by hand before touching any code:**
+`packages/engine/src/streak.ts#computeStreak()`/`completedDayIndices()` —
+FR9, pause-on-miss (never zeroes), single-day make-up repair, 19 assertions
+in `test/habit.test.ts`'s own describe block — is real, pure, and fully
+tested. `grep -rln "computeStreak\|completedDayIndices\|StreakState"
+--include="*.ts" --include="*.tsx" --include="*.php" .` returned only the
+source file and its own test file: zero callers anywhere in `apps/web` or
+`v3/api`. Unlike every prior instance of this bug class, the harm here is
+not silent data corruption — it is a **marketing claim with nothing behind
+it**. `apps/web/lib/landing/copy.ts`'s `OBJECTIONS` FAQ (rendered
+unconditionally by `components/sections/Objections.tsx` inside `app/
+page.tsx`, the one page this build scrutinizes hardest for overclaiming —
+`lib/landing/claims.ts`'s v3-D19 detector exists specifically to keep this
+page honest, though it only catches *oversold* claims, not *absent-feature*
+ones, which is exactly the gap this instance fell through) answers "Is this
+another streak app?" in the present tense: *"There is a streak, and it is
+deliberately unimportant. No leaderboard, no ranking, no score to compare
+with anyone... And there are no guilt notifications..."* A prospective
+learner reads that reassurance, converts partly on it, then never sees a
+streak anywhere in the shipped product — not `/home`, not `/progress`, not
+onboarding, not the macro panel.
+
+**Scope, decided before writing any code.** WIREFRAME.md and BUILD-PLAN.md
+both independently name a much bigger "streak calendar" — freeze tokens,
+friend-visible streak length, together-streaks — as v3-D06's flag-gated
+social surface, explicitly **post-launch, M11, all 11 flags OFF** by
+construction. That is NOT what the FAQ claims. The FAQ's own words — "no
+leaderboard, no ranking... nobody can see which verses are weak for you"
+— describe a minimal, PRIVATE, non-social count, which is a strictly
+smaller thing than the flag-gated calendar and ships at launch (build-plan
+step 29, the landing page, already DONE) regardless of when the calendar
+lands. Wiring the calendar/freeze-token UI would be inventing new scope
+outside tonight's bug-class fix; backing the FAQ's own present-tense claim
+with the already-built, already-tested pure function is the wiring fix the
+established practice calls for. `atRisk`/`pausedOnMiss` are deliberately
+NOT surfaced yet — a paused streak still counts (FR9's whole point is that
+a miss doesn't punish), and richer framing of that state is exactly the
+social-surface scope named above.
+
+**Placement.** `/home`'s `TODAY` card, beside the due count — the one
+surface `streak.ts`'s own header instruction ("the UI keeps it quiet")
+argues for: a single small pill, not a dedicated screen. The locked
+v1 stylesheet already ships an unused `.pill-streak` class (`app/
+iman-ui.css:318`, amber, "streak/consistency" semantics per `components/
+plan/PlanCalendar.tsx`'s own comment at line 158-160) — built for exactly
+this and never rendered by anything until now. No CSS was touched (the
+locked-CSS byte-diff gate would reject that); only a new caller of an
+existing class.
+
+**RED before green.** `test/home-today.test.tsx` gained two tests under a
+new `describe("the quiet streak pill…")` block, committed and run against
+the UNMODIFIED `TodaySession`/`buildHomeSurah` first: the "no completed
+days → no pill" case passed vacuously (nothing renders today, as expected
+of a property that's already accidentally true), but "renders the ENGINE's
+own streak length once days have been completed" failed for a real reason
+— `TestingLibraryElementError: Unable to find an element with the text:
+2-day streak` — confirming the pill did not exist. As with the file's own
+`engineDueCount` oracle, the expected string is DERIVED from a second,
+independent call to `completedDayIndices`/`computeStreak` over the same
+event log the component reads, never a number the test chose itself; the
+two completed days are stamped exactly 24h apart so they land on adjacent
+learning-day indices under any rollover hour or device timezone, avoiding
+the calendar-math fragility a fixed-offset assumption would risk. No
+Arabic byte was written — the test drives the real, staged 112 corpus via
+`fetch`, exactly like every other assertion in that file.
+
+**Built:**
+- `lib/home/queue.ts` — imports `completedDayIndices`/`computeStreak` from
+  the engine and `DEFAULT_DAY_CONFIG`; new private `streakLabelFor(prior,
+  now)` (device tz via `lib/idb`'s existing `currentTz()`, the same helper
+  `append()` already uses) returns `` `${n}-day streak` `` or `null` on a
+  length of zero — a `null`, not a "0-day streak", because a bare zero on
+  a fresh learner's first screen is exactly the "streak-as-idol" nag
+  `streak.ts`'s own header warns against. `HomeSurahRow` gained
+  `streakLabel: string | null`, computed from `assembled.prior` — the SAME
+  event-log read `assembleFor` already performed for the due count, not a
+  second log read.
+- `components/home/TodaySession.tsx` — the `ready` state's title line
+  renders `<span className="pill-streak">{row.streakLabel}</span>` after
+  the surah label when `streakLabel` is non-null; nothing otherwise. The
+  component still decides nothing (`check-boundaries.mjs` clause 5's rule
+  holds — the streak, like the due count, is fully decided in `lib/`
+  before it reaches this file).
+
+**Verified:**
+- `test/home-today.test.tsx`: 10/10 green (was 8; +2, both new).
+- Mutation-verified: reverted `streakLabel: streakLabelFor(assembled.prior,
+  now)` to a hardcoded `streakLabel: null` — the streak-length test failed
+  on exactly that assertion (`Unable to find an element with the text:
+  2-day streak`), the seven pre-existing tests in the file stayed green (as
+  expected — none of them assert anything about the streak). Reverted
+  byte-identically (`diff` against a pre-mutation backup empty).
+- `node scripts/check-boundaries.mjs`: OK, 179 files — unchanged clause
+  count, no new violation.
+- `TZ=UTC make test`: **1905 passing** (was 1903 at v3-D96) — 255 v2
+  vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler + 417 engine + 61
+  fold-runner + **742** apps/web (was 740, +2 — exactly this run's two new
+  tests). `check-test-floor.mjs`: OK, 1905 >= floor 1899 (+6 margin).
+  `TEST-FLOOR` left at 1899, unmoved, same discipline v3-D95/D96 record.
+- `TZ=UTC make build`: exit 0, 18 routes (unchanged — no route file
+  touched), corpus-glyphs/morphology/locked-css gates all OK.
+- No Arabic codepoints in any new or changed file (checked
+  programmatically against every range INVARIANTS.md's Absolute B names,
+  whole-file, over `lib/home/queue.ts`, `components/home/TodaySession.tsx`,
+  `test/home-today.test.tsx`).
+- No `v1/**`/`v2/**` edit — `v2/tsconfig.tsbuildinfo` regenerated as the
+  same `make build`/`make test` side effect v3-D81 through D96 each
+  recorded, reverted before staging; `git diff --stat -- v1 v2` empty at
+  commit time.
+
+**Explicitly NOT done, named so a future run does not re-discover these as
+new:** `atRisk`/`pausedOnMiss`/`makeupAvailable` are computed by
+`computeStreak()` but not surfaced anywhere — deliberately, per the scope
+note above; a future run building the real streak-freeze/make-up UI should
+treat that as v3-D06's flag-gated social scope, not an extension of
+tonight's quiet pill. `lib/landing/claims.ts`'s v3-D19 detector still only
+catches OVERSOLD claims (a feature described as bigger than it is), not
+ABSENT-feature claims (a feature described as existing when it does not) —
+this instance is proof the second class is real, but building a detector
+for it is a distinct, larger piece of work than backing the one claim this
+run found, and is left named here rather than attempted tonight.
+`lib/corpus/load.ts`'s SSR override gap and `isQuestionDisabled()`
+(v3-D96) remain exactly as that entry left them — neither touched.
