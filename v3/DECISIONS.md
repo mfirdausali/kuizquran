@@ -3868,3 +3868,164 @@ and `permitsIssuance`/`permitsReview` (v3-D88) remain exactly as those
 entries left them — untouched, stop-and-report, unresolved. Step 30's
 E6/E7/E8 and LAUNCH-CHECKLIST gate 20 remain genuinely infra/human-blocked,
 unchanged since v3-D82.
+
+---
+
+## Ratified 2026-08-16 (nightly) — the same bug shape, on tap-retry after a quota error
+
+### v3-D94 — `lib/idb/append.ts#retryAppend`/`RetryableAppendError` had zero production callers; a failed tap was a dead end, not a retry banner
+
+This run started per NIGHTLY.md's rule: HEAD was DETACHED at `9c7ff35`
+(v3-D93). `git fetch origin main` confirmed `origin/main` already matched
+that exact commit, so this was the now-familiar detached-HEAD repair
+(v3-D77/D87/D89/D90/D91/D92/D93 each recorded the same shape) —
+`git checkout -B main origin/main`. `make setup` (fresh checkout, no
+`vendor`/`node_modules` anywhere). `TZ=UTC make test`/`make build`
+reproduced clean before any change: **1885 passing + 2 incomplete**,
+matching `v3/CLAUDE.md`'s documented v3-D93 number exactly; `make build`
+exit 0, 18 routes.
+
+Every one of the 32 build-plan steps was still DONE, human-gated (27/28), or
+infra/human-gated (30's E6/E7/E8), so this run followed v3-D82 through D93's
+now-established practice: dispatch a fresh, code-blind research agent to
+sweep for the next instance of "mechanism built and unit-tested, zero
+production callers", explicitly told not to re-flag `TrialAttribution`
+(v3-D91), `permitsIssuance`/`permitsReview` (v3-D88), or `useWriterStatus()`
+(v3-D93, already correctly named as a smaller, deliberately-deferred gap).
+
+**Two candidates came back.** The first, `App\Billing\EntitlementMachine::merge()`
+(edge case #113, anonymous lifetime buyer adopts an existing account) has
+zero production callers and a real docblock/migration comment describing it
+— but tracing it further showed it is NOT a wiring gap of an already-shipped
+feature the way v3-D82 through D93 each were: account adoption itself has no
+UI, no checkout surface, and no client contract for how `login()` would even
+learn which anonymous entitlement to merge — three separate DECISIONS.md
+entries already say so directly (`components/home/DeviceReset.tsx`'s own
+comment, quoted at lines ~3247 and ~3367 above: "this build has no account
+adoption and no server-side identity to restore from"). Wiring `merge()`
+correctly means designing that whole flow, which is real M6 scope, not one
+night's mechanical fix — so it is left exactly as those entries left it,
+named here only so a future run does not re-discover the same false-positive
+sweep result as new.
+
+**The second candidate is the genuine gap, and it is on the grading-adjacent
+tap path**: `lib/idb/append.ts#retryAppend()`/`RetryableAppendError` (built
+at build-plan step 18, `append.test.ts` proves the mechanism works — "retry
+reuses the SAME id and deviceSeq — no double-count") had **zero** callers
+outside their own test file:
+
+```
+$ grep -rln "\bretryAppend\b" . --include="*.ts*" | grep -v node_modules | grep -v .next
+./lib/idb/append.ts            (definition)
+./lib/idb/append.test.ts       (its own test)
+./lib/idb/index.ts             (barrel re-export only)
+```
+
+`append.ts`'s own header names exactly what this was built for: edge case
+#74, "QuotaExceeded on tap write — commit-before-paint broken — card blocks
+with retry banner; tap never silently dropped." Traced to the live gap:
+`lib/session/run.ts#answerCurrent` (the session loop, v3-D67) let a thrown
+`RetryableAppendError` propagate raw, and `components/session/
+SessionIsland.tsx`'s only catch turned EVERY commit failure — retryable or
+not — into a static `<p role="alert">{message}</p>` with no button, no
+retry, nothing. The retry banner edge case #74 names did not exist. A
+learner who hit a real quota-exceeded write mid-drill (or any transient IDB
+write failure) was stuck on a dead-end sentence; reloading a quota-full
+device does not even help, since the identical write fails again on the
+next attempt. This is the eighth instance of the exact shape v3-D82 through
+D93 each found: a real, tested mechanism with a docblock that reads as
+already true, and a live app that never once exercised the path.
+
+**Why this could not be a one-line wire-up, unlike most of this series.**
+`answerCurrent` commits up to TWO events per tap (`reconstruct_tap`, then
+conditionally `ayah_produced`), and a naive retry — re-invoking
+`answerCurrent` from scratch — re-runs `advanceReconstruct` and re-appends
+the FIRST event under a brand-new id, double-counting it if it had already
+landed durably before the SECOND commit failed. `retryAppend`'s own
+contract ("reuses the row verbatim... so a success here cannot double-count")
+only holds if the caller retries the SPECIFIC failed commit, not the whole
+tap. Built:
+
+- `SessionCommitFailure` (new, exported from `run.ts`) — thrown by
+  `answerCurrent` in place of a bare `RetryableAppendError`. Carries `cause`
+  (the underlying error) and a `resume()` continuation that retries THAT ONE
+  commit via `retryAppend` and then carries on exactly where the function
+  left off (the pending `ayah_produced` commit if one is due, then settling
+  the run) — never by re-deriving `advanceReconstruct`.
+- `commitThenContinue()` (internal) — the one place either commit happens,
+  used identically for the tap and for `ayah_produced`. On a retryable
+  failure it throws a `SessionCommitFailure` whose `resume()` re-enters the
+  SAME call with the new failure as `priorFailure`, so a second or third
+  failure of the identical commit is handled the same way, not just the
+  first.
+- `answerCurrent` now stamps `tz` explicitly on both event literals (was
+  left to `append()`'s `ctx.tz` fallback) — neutral on the non-retry path
+  (identical resulting value), but load-bearing for a resumed retry that may
+  run long after the original `ctx` was captured: the retry must commit the
+  SAME tz the tap actually happened under, not whatever the retry click's
+  own moment would otherwise fall back to.
+- `SessionIsland.tsx`'s `Phase`'s `"failed"` variant gained an optional
+  `retry?: () => void`. A new `commit()` helper (replacing the ad-hoc
+  try/catch inline in `onAnswer`) is now the ONE place a commit-producing
+  action runs, used by both a fresh tap and a resumed retry; on a
+  `SessionCommitFailure` it renders a real "Retry" button wired to
+  `err.resume()`, never to re-invoking `answerCurrent`. A successful
+  resume (or a successful fresh tap) explicitly clears a prior "failed"
+  phase back to "drilling" — the quiz card only renders once phase escapes
+  the named states, so this reset is required, not cosmetic.
+
+**RED before green, both layers.** `lib/session/run.test.ts` gained a
+"edge case #74" describe block (4 new tests) and `test/session-island.test.tsx`
+gained one. Run against the pre-fix tree: the 4 `run.test.ts` cases failed
+on `SessionCommitFailure` not existing (`toBeInstanceOf` against `undefined`,
+and a bare `instanceof` TypeError) — a real RED, not a vacuous one, since the
+capability genuinely did not exist. The UI test failed on
+`screen.findByRole("button", { name: /retry/i })` timing out against the
+real pre-fix DOM: `<p role="alert">This tap was NOT saved. Retry.</p>` with
+literally no button — the exact dead end this entry describes, reproduced
+live rather than assumed. Reverted, re-applied, all 21 pass (afterEach's
+`appendSpy = null` reset was upgraded to guarantee reset even when an
+assertion inside a test's own try/catch rethrows unhandled — an earlier draft
+of the new tests leaked a permanently-failing mock into unrelated LATER
+tests in the same file on the pre-fix RED run, caught by re-running and
+seeing tests fail that had nothing to do with this change; fixed with the
+same `afterEach` discipline `writeLock.resetForTests()` already uses
+elsewhere in this suite).
+
+**Mutation-verified.** Replaced `commitThenContinue`'s retry branch (`if
+(priorFailure) await retryAppend(priorFailure, ctx); else ...`) with an
+unconditional fresh `await append(event, ctx)` — simulating exactly the bug
+this fix exists to prevent (a retry that re-appends under a new id).
+Result: **3 of the 21 new/touched tests failed** across both files, each on
+the assertion naming the SAME row being reused (`taps[0]!.id` no longer
+matched the simulated `RetryableAppendError`'s stamped id; one test's own
+"never re-entered" call-count assertion also failed). Reverted
+byte-identically (`diff` against a pre-mutation backup copy of `run.ts`
+empty), re-ran: 21/21 green again.
+
+**Verified:** `TZ=UTC make test` → exit 0, **1890 passing + 2 incomplete**
+(255 v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler + 417 engine +
+61 fold-runner + **727** apps/web (was 722, +5 — exactly this run's 4
+`run.test.ts` cases + 1 `session-island.test.tsx` case)) — up from v3-D93's
+1885 by exactly +5. `TZ=UTC make build` → exit 0, 18 routes (unchanged — no
+route file touched). `npx tsc --noEmit` clean. `npm run gates` →
+boundaries OK. No Arabic codepoints anywhere in the diff (checked
+programmatically over the full unified diff against every range
+INVARIANTS.md's Absolute B names, plus a grep for `\u06`/`ݐ`/`\uFB5`/
+`\uFE7` escapes and `fromCharCode` — zero hits). No `v1/**`/`v2/**` edit —
+`v2/tsconfig.tsbuildinfo` regenerated as the same `make build` side effect
+v3-D81 through D93 each recorded, reverted before staging, confirmed empty
+diff under `v1/**`/`v2/**`.
+
+**Explicitly NOT done, named so a future run does not re-discover these as
+new:** `startSession`'s own `session_start` append (in `run.ts`) is NOT
+retry-wired — edge case #74's own wording is specifically about "tap
+write[s]", and a quota error before a session even starts already fails
+loudly (the existing "unavailable"/"failed" phase) rather than silently, so
+this was scoped out deliberately rather than missed. `App\Billing\
+EntitlementMachine::merge()` (above) remains untouched, a real M6-scope
+product/UI gap, not a wiring fix. `TrialAttribution` (v3-D91),
+`permitsIssuance`/`permitsReview` (v3-D88) and `useWriterStatus()` (v3-D93)
+remain exactly as those entries left them. Step 30's E6/E7/E8 and
+LAUNCH-CHECKLIST gate 20 remain genuinely infra/human-blocked, unchanged
+since v3-D82.

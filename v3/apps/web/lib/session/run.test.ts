@@ -30,7 +30,7 @@
 // violation and a worse test — it would freeze a corpus detail into an assertion
 // that has nothing to do with what is being checked.
 
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { IDBFactory } from "fake-indexeddb";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -84,8 +84,10 @@ import {
   currentItem,
   answerCurrent,
   sessionSummaryOf,
+  SessionCommitFailure,
   type SessionRun,
 } from "./run";
+import { RetryableAppendError } from "@/lib/idb/append";
 
 // A fixed clock. The frontend is ALLOWED Date.now(); the engine is not. Tests
 // pass time in explicitly so a run is reproducible and TZ-independent — the
@@ -348,6 +350,168 @@ describe("commit before paint (invariant #2)", () => {
     // ...and by the time it does, the event is already durable.
     const events = await getAllEvents();
     expect(events.some((e) => e.type === "reconstruct_tap")).toBe(true);
+  });
+});
+
+describe("edge case #74 — a retryable append failure can be retried without double-counting", () => {
+  // `appendSpy` is process-wide state shared across every test in this file
+  // (see the module mock above) — a test that throws BEFORE resetting it
+  // would leak a permanently-failing append into every test that runs after,
+  // which is a real trap this suite fell into while this file was written
+  // (an un-guarded `appendSpy = null` after a re-throwing assertion corrupted
+  // unrelated later tests). `finally` closes that hole for good.
+  afterEach(() => {
+    appendSpy = null;
+  });
+
+  it("answerCurrent throws SessionCommitFailure — not a bare error — and leaves no half-applied event", async () => {
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+    const cur = currentItem(started.run, c);
+    if (!cur) throw new Error("an item must be served");
+
+    appendSpy = async (ev) => {
+      throw new RetryableAppendError(
+        "write-failed",
+        { ...(ev as object), id: "sim-retry-id", deviceId: "sim-retry-device", deviceSeq: 999 } as any,
+      );
+    };
+
+    let caught: unknown;
+    try {
+      await answerCurrent(started.run, c, cur.correctIndex, { now: T0 + 100, tz: TZ });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(SessionCommitFailure);
+    expect((caught as SessionCommitFailure).cause).toBeInstanceOf(RetryableAppendError);
+
+    // A thrown commit must not leave a half-applied event — the tap never landed.
+    const events = await getAllEvents();
+    expect(events.some((e) => e.type === "reconstruct_tap")).toBe(false);
+  });
+
+  it("resume() lands the SAME row via retryAppend — the mocked append() export is never re-entered", async () => {
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+    const cur = currentItem(started.run, c);
+    if (!cur) throw new Error("an item must be served");
+
+    // Only the TAP commit fails here — an incidental `ayah_produced` (112:1's
+    // very first tap can complete the whole ayah in one blank) must go
+    // through untouched, so this test isolates the tap-retry path alone.
+    // Every call through the MOCKED `append` export for the tap fails. A
+    // correct retry goes through `retryAppend`, which — per its own header —
+    // reuses the row verbatim via the LOCAL (unmocked) `append` inside
+    // lib/idb/append.ts, never re-entering this spy. So `tapAppendCalls` must
+    // stay at 1.
+    const real = await vi.importActual<typeof import("@/lib/idb/append")>(
+      "@/lib/idb/append",
+    );
+    let tapAppendCalls = 0;
+    appendSpy = async (ev, actx) => {
+      if ((ev as { type?: string }).type !== "reconstruct_tap") {
+        return real.append(ev, actx);
+      }
+      tapAppendCalls++;
+      throw new RetryableAppendError(
+        "write-failed",
+        { ...(ev as object), id: "sim-retry-id", deviceId: "sim-retry-device", deviceSeq: 999 } as any,
+      );
+    };
+
+    let failure: SessionCommitFailure | undefined;
+    try {
+      await answerCurrent(started.run, c, cur.correctIndex, { now: T0 + 100, tz: TZ });
+    } catch (err) {
+      if (err instanceof SessionCommitFailure) failure = err;
+      else throw err;
+    }
+    expect(failure).toBeInstanceOf(SessionCommitFailure);
+    if (!failure) return;
+
+    const next = await failure.resume();
+    expect(next.lastTap).not.toBeNull();
+    expect(tapAppendCalls).toBe(1);
+
+    const events = await getAllEvents();
+    const taps = events.filter((e) => e.type === "reconstruct_tap");
+    // Exactly one tap event — a retry that re-called `answerCurrent` from
+    // scratch (rather than resuming) would double it under a fresh id.
+    expect(taps.length).toBe(1);
+    expect(taps[0]!.id).toBe("sim-retry-id");
+  });
+
+  it("also retries an ayah_produced commit that fails AFTER its tap already landed", async () => {
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+
+    const real = await vi.importActual<typeof import("@/lib/idb/append")>(
+      "@/lib/idb/append",
+    );
+    let ayahAppendCalls = 0;
+    appendSpy = async (ev, actx) => {
+      if ((ev as { type?: string }).type === "ayah_produced") {
+        ayahAppendCalls++;
+        throw new RetryableAppendError(
+          "write-failed",
+          { ...(ev as object), id: "sim-ayah-id", deviceId: "sim-ayah-device", deviceSeq: 998 } as any,
+        );
+      }
+      return real.append(ev, actx);
+    };
+
+    let run = started.run;
+    let cur = currentItem(run, c);
+    let failure: SessionCommitFailure | undefined;
+    let taps = 0;
+    while (cur && taps < 500 && !failure) {
+      try {
+        run = await answerCurrent(run, c, cur.correctIndex, { now: T0 + taps * 1000, tz: TZ });
+        taps++;
+        cur = currentItem(run, c);
+      } catch (err) {
+        if (err instanceof SessionCommitFailure) failure = err;
+        else throw err;
+      }
+    }
+    expect(failure).toBeInstanceOf(SessionCommitFailure);
+    if (!failure) return;
+
+    const next = await failure.resume();
+    expect(next.lastTap).not.toBeNull();
+    expect(ayahAppendCalls).toBe(1); // never re-entered on retry
+
+    const events = await getAllEvents();
+    const produced = events.filter((e) => e.type === "ayah_produced");
+    expect(produced.length).toBe(1);
+    expect(produced[0]!.id).toBe("sim-ayah-id");
+  });
+
+  it("a non-retryable append error is NOT wrapped in SessionCommitFailure", async () => {
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+    const cur = currentItem(started.run, c);
+    if (!cur) throw new Error("an item must be served");
+
+    appendSpy = async () => {
+      throw new Error("some unrelated failure — not a RetryableAppendError");
+    };
+
+    let caught: unknown;
+    try {
+      await answerCurrent(started.run, c, cur.correctIndex, { now: T0 + 100, tz: TZ });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).not.toBeInstanceOf(SessionCommitFailure);
+    expect(caught).toBeInstanceOf(Error);
   });
 });
 

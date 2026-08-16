@@ -31,20 +31,41 @@
 //      fetch fails outright — this is a cache warm, not a precondition.
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { Corpus } from "@engine/types.ts";
 
-import { DB_NAME, openDb, resetDbForTests, writeLock } from "@/lib/idb";
+import { DB_NAME, openDb, resetDbForTests, writeLock, getAllEvents, RetryableAppendError } from "@/lib/idb";
 import { readEntitlementSnapshot } from "@/lib/entitlement/sync";
 import { resetApiFetchForTests } from "@/lib/sync/apiFetch";
 import { resetTokenForTests, setToken } from "@/lib/sync/token";
 import { SessionIsland } from "@/components/session/SessionIsland";
 
-afterEach(cleanup);
+// A seam for edge case #74's retry test alone. When null (every other test)
+// the REAL append runs untouched — same discipline as lib/session/run.test.ts's
+// own `appendSpy`, which this mirrors so a UI-level test can provoke exactly
+// one retryable commit failure without faking a genuine IndexedDB quota error.
+let appendSpy:
+  | ((ev: Parameters<typeof import("@/lib/idb/append").append>[0],
+      ctx: Parameters<typeof import("@/lib/idb/append").append>[1]) => Promise<unknown>)
+  | null = null;
+
+vi.mock("@/lib/idb/append", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/idb/append")>();
+  return {
+    ...actual,
+    append: (...args: Parameters<typeof actual.append>) =>
+      appendSpy ? appendSpy(...args) : actual.append(...args),
+  };
+});
+
+afterEach(() => {
+  cleanup();
+  appendSpy = null;
+});
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SURAH = 112;
@@ -203,5 +224,60 @@ describe("multi-tab writer promotion (v3-D93 — 'promoted without a reload')", 
     writeLock.forceForTests({ role: "reader", reason: "another-tab" });
     await new Promise((r) => setTimeout(r, 20));
     expect(screen.queryByTestId("session-drill")).toBeNull();
+  });
+});
+
+// Edge case #74 (QuotaExceeded on a tap write): `lib/idb/append.ts#retryAppend`/
+// `RetryableAppendError` were built and tested (append.test.ts) so a failed tap
+// is never silently dropped — but nothing in the session loop ever CALLED
+// `retryAppend`. `SessionIsland`'s only catch turned every append failure,
+// retryable or not, into a bare `<p role="alert">` with no way back: the
+// mechanism edge case #74 names ("the card blocks with retry banner") existed
+// and was unreachable. A learner who hit a real quota error mid-drill had no
+// recovery short of reloading (and reloading a QUOTA-FULL device recovers
+// nothing — the same tap fails again on the next attempt too).
+describe("edge case #74 — a retryable append failure offers Retry, not a dead end", () => {
+  it("clicking Retry lands the SAME tap via retryAppend and returns to drilling — no duplicate event", async () => {
+    installFetch();
+    render(<SessionIsland surah={SURAH} />);
+    await waitFor(() => expect(screen.getByTestId("session-drill")).toBeTruthy());
+
+    const real = await vi.importActual<typeof import("@/lib/idb/append")>(
+      "@/lib/idb/append",
+    );
+    let tapAppendCalls = 0;
+    appendSpy = async (ev, actx) => {
+      const type = (ev as { type?: string }).type;
+      if (type !== "reconstruct_tap" || tapAppendCalls > 0) {
+        return real.append(ev, actx);
+      }
+      tapAppendCalls++;
+      throw new RetryableAppendError(
+        "write-failed",
+        { ...(ev as object), id: "sim-ui-retry-id", deviceId: "sim-ui-retry-device", deviceSeq: 997 } as any,
+      );
+    };
+
+    const bank = document.querySelector(".bank");
+    expect(bank).not.toBeNull();
+    const tiles = within(bank as HTMLElement).getAllByRole("button");
+    fireEvent.click(tiles[0]!);
+
+    // The dead end this gap left: a bare alert with no way back. The fix is a
+    // control the learner can act on, not a paragraph.
+    const retryBtn = await screen.findByRole("button", { name: /retry/i });
+    expect(screen.queryByTestId("session-drill")).toBeNull();
+
+    fireEvent.click(retryBtn);
+
+    await waitFor(() => expect(screen.getByTestId("session-drill")).toBeTruthy());
+
+    // The retry reused the row `RetryableAppendError` carried — a fresh
+    // `answerCurrent` retry (rather than `resume()`) would double-count it
+    // under a new id.
+    const events = await getAllEvents();
+    const taps = events.filter((e) => e.type === "reconstruct_tap");
+    expect(taps.length).toBe(1);
+    expect(taps[0]!.id).toBe("sim-ui-retry-id");
   });
 });

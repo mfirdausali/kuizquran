@@ -43,6 +43,7 @@ import {
   currentItem,
   sessionSummaryOf,
   startSession,
+  SessionCommitFailure,
   type SessionRun,
   type SessionUnavailable,
 } from "@/lib/session/run";
@@ -58,7 +59,10 @@ type Phase =
   | { kind: "loading" }
   | { kind: "unavailable"; reason: SessionUnavailable | "no-corpus" }
   | { kind: "not-writer" }
-  | { kind: "failed"; message: string }
+  // `retry`, when present, is a RETRYABLE commit failure (edge case #74):
+  // clicking it re-enters `SessionCommitFailure.resume()`, never a fresh
+  // `answerCurrent` call — see that class's own header for why.
+  | { kind: "failed"; message: string; retry?: () => void }
   | { kind: "drilling" }
   | { kind: "summary"; summary: SessionSummary };
 
@@ -180,6 +184,55 @@ export function SessionIsland({ surah }: SessionIslandProps) {
     return filledSoFar(run.machine);
   }, [run]);
 
+  // Run one commit-producing action (a fresh tap, or a retried
+  // `SessionCommitFailure.resume()`) and paint whatever it settles into. A
+  // RETRYABLE failure (edge case #74 — e.g. QuotaExceeded on a tap write)
+  // gets a `retry` the learner can act on, wired straight to `resume()` —
+  // never to re-invoking `answerCurrent`, which would re-append an
+  // already-landed tap under a fresh id (see `SessionCommitFailure`'s own
+  // header). Any OTHER error is not retryable this way and keeps the plain
+  // message the learner previously saw.
+  const commit = useCallback((action: () => Promise<SessionRun>) => {
+    setBusy(true);
+    void (async () => {
+      // COMMIT BEFORE PAINT: this await is the invariant. Neither a fresh
+      // `answerCurrent` nor a resumed retry resolves until the event is
+      // durable.
+      try {
+        const next = await action();
+        setRun(next);
+        // Escape a prior "failed" phase now that the commit landed — the
+        // quiz card only renders once phase is no longer one of the named
+        // states, so a successful retry must clear it explicitly.
+        setPhase((p) => (p.kind === "failed" ? { kind: "drilling" } : p));
+
+        if (next.done) {
+          const summary = await sessionSummaryOf(next);
+          setPhase({ kind: "summary", summary });
+        }
+      } catch (err) {
+        // A failed COMMIT must never paint a verdict (invariant #2). Losing
+        // the write lock mid-session is the real case: the tap did not land,
+        // so the learner is told rather than shown a grade with no event.
+        if (err instanceof SessionCommitFailure) {
+          setPhase({
+            kind: "failed",
+            message: err.message,
+            retry: () => commit(() => err.resume()),
+          });
+        } else {
+          setPhase({
+            kind: "failed",
+            message:
+              err instanceof Error ? err.message : "That tap could not be saved.",
+          });
+        }
+      } finally {
+        setBusy(false);
+      }
+    })();
+  }, []);
+
   const onAnswer = useCallback(
     (index: number) => {
       if (!run || !corpus || busy) return;
@@ -187,36 +240,11 @@ export function SessionIsland({ surah }: SessionIslandProps) {
       // before the next blank, and a double-tap must never double-append.
       if (run.lastTap) return;
 
-      setBusy(true);
-      void (async () => {
-        // COMMIT BEFORE PAINT: this await is the invariant. `answerCurrent`
-        // does not resolve until the event is durable.
-        try {
-          const next = await answerCurrent(run, corpus, index, {
-            now: Date.now(),
-            tz: currentTz(),
-          });
-          setRun(next);
-
-          if (next.done) {
-            const summary = await sessionSummaryOf(next);
-            setPhase({ kind: "summary", summary });
-          }
-        } catch (err) {
-          // A failed COMMIT must never paint a verdict (invariant #2). Losing
-          // the write lock mid-session is the real case: the tap did not land,
-          // so the learner is told rather than shown a grade with no event.
-          setPhase({
-            kind: "failed",
-            message:
-              err instanceof Error ? err.message : "That tap could not be saved.",
-          });
-        } finally {
-          setBusy(false);
-        }
-      })();
+      commit(() =>
+        answerCurrent(run, corpus, index, { now: Date.now(), tz: currentTz() }),
+      );
     },
-    [run, corpus, busy],
+    [run, corpus, busy, commit],
   );
 
   const onContinue = useCallback(() => {
@@ -238,9 +266,16 @@ export function SessionIsland({ surah }: SessionIslandProps) {
 
   if (phase.kind === "failed") {
     return (
-      <p className="caption" role="alert">
-        {phase.message}
-      </p>
+      <div className="stack">
+        <p className="caption" role="alert">
+          {phase.message}
+        </p>
+        {phase.retry ? (
+          <button type="button" className="btn" onClick={phase.retry}>
+            Retry
+          </button>
+        ) : null}
+      </div>
     );
   }
 

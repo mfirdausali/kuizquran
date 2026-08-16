@@ -53,9 +53,28 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 1885 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 1890 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 722 apps/web. (v3-D93, 2026-08-15)
+             # + 417 engine + 61 fold-runner + 727 apps/web. (v3-D94, 2026-08-16)
+             # NOTE (v3-D94): `lib/idb/append.ts#retryAppend()`/`RetryableAppendError`
+             # — edge case #74's "QuotaExceeded on tap write... card blocks with
+             # retry banner; tap never silently dropped" — had ZERO production
+             # callers. `lib/session/run.ts#answerCurrent` let a retryable commit
+             # failure propagate raw, and `SessionIsland.tsx`'s only catch turned
+             # EVERY failure into a static alert with no button — the retry banner
+             # edge case #74 names did not exist; a learner who hit a real quota
+             # error mid-drill was stuck on a dead end. Fixed: `answerCurrent` now
+             # throws a new `SessionCommitFailure` (carrying a `resume()` that
+             # retries the SPECIFIC failed commit via `retryAppend`, reusing its
+             # id/deviceSeq, then continues exactly where it left off — never by
+             # re-invoking `answerCurrent`, which would double-append an
+             # already-landed event under a fresh id); `SessionIsland.tsx` renders
+             # a real "Retry" button wired to `resume()`. A second candidate this
+             # run's sweep found, `EntitlementMachine::merge()` (edge case #113),
+             # was traced and left alone: account adoption has no UI or client
+             # contract at all yet (per DECISIONS.md, `DeviceReset.tsx`'s own
+             # comment), so wiring `merge()` is real M6 scope, not a one-night fix.
+             # See DECISIONS.md v3-D94.
              # NOTE (v3-D93): `WriteLock.subscribe()`/`useWriterStatus()`
              # (lib/idb/writeLock.ts, lib/idb/useLogState.ts) — edge case #75's
              # multi-tab writer-takeover mechanism — had ZERO production callers.

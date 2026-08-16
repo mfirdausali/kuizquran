@@ -56,7 +56,12 @@ import { summarizeSession, type SessionSummary } from "@engine/sessionSummary.ts
 // never a literal.
 import { gradeClassToWire } from "@engine/gradeClass.ts";
 
-import { append, type AppendContext } from "@/lib/idb/append";
+import {
+  append,
+  retryAppend,
+  RetryableAppendError,
+  type AppendContext,
+} from "@/lib/idb/append";
 import { getEventsForSurah } from "@/lib/idb/read";
 
 /** Why a session could not start. Reported, never papered over with an empty
@@ -288,10 +293,80 @@ export function currentItem(run: SessionRun, c: Corpus): CurrentItem | null {
 }
 
 /**
+ * Thrown by `answerCurrent` when a commit fails with a RETRYABLE storage error
+ * (edge case #74: QuotaExceeded, or any other transient IndexedDB write
+ * failure, on a tap write). Carries `cause` — the underlying
+ * `RetryableAppendError`, whose `event` is the exact stamped row that did not
+ * land — and a `resume()` continuation.
+ *
+ * `resume()` retries THAT ONE commit via `retryAppend` (same id, same
+ * deviceSeq — see `lib/idb/append.ts`'s own header) and then carries on
+ * exactly where `answerCurrent` left off: if the failing commit was the tap,
+ * it goes on to the `ayah_produced` commit when one is due and settles the
+ * run; if the failing commit was itself `ayah_produced` (the tap had already
+ * landed), it retries only that one. A caller must NEVER recover from this by
+ * calling `answerCurrent` again from scratch — that re-derives `advanceReconstruct`
+ * and re-appends the tap under a FRESH id, double-counting an event that may
+ * already be durable. `resume()` is the only correct retry path, which is why
+ * it is the thing this error carries rather than leaving the caller to
+ * reconstruct one.
+ */
+export class SessionCommitFailure extends Error {
+  constructor(
+    readonly cause: RetryableAppendError,
+    private readonly resumeFn: () => Promise<SessionRun>,
+  ) {
+    super(cause.message);
+    this.name = "SessionCommitFailure";
+  }
+
+  resume(): Promise<SessionRun> {
+    return this.resumeFn();
+  }
+}
+
+/**
+ * Commit one event, or (on retry) reuse a previously failed attempt's
+ * already-stamped row via `retryAppend` — never a fresh `append` of the same
+ * logical event, which would burn a second id/deviceSeq (see
+ * `SessionCommitFailure`'s own header). On success, hands off to `onSuccess`.
+ * On a retryable failure, throws a `SessionCommitFailure` whose `resume()`
+ * re-enters THIS SAME call with the new failure as `priorFailure` — so a
+ * second, third, … failure of the identical commit is handled the same way,
+ * not just the first.
+ */
+async function commitThenContinue(
+  event: DrillEvent,
+  ctx: AppendContext,
+  priorFailure: RetryableAppendError | null,
+  onSuccess: () => Promise<SessionRun>,
+): Promise<SessionRun> {
+  try {
+    if (priorFailure) {
+      await retryAppend(priorFailure, ctx);
+    } else {
+      await append(event, ctx);
+    }
+  } catch (err) {
+    if (err instanceof RetryableAppendError) {
+      throw new SessionCommitFailure(err, () =>
+        commitThenContinue(event, ctx, err, onSuccess),
+      );
+    }
+    throw err;
+  }
+  return onSuccess();
+}
+
+/**
  * Apply one tap: COMMIT, then return the state that paints a verdict.
  *
  * The append is awaited before the returned state carries `lastTap`, so the
  * card cannot reveal a verdict that no durable event supports (invariant #2).
+ *
+ * A RETRYABLE commit failure (edge case #74) throws `SessionCommitFailure`
+ * rather than resolving — see that class's header for why a caller must
+ * retry via `.resume()`, never by calling this function again.
  */
 export async function answerCurrent(
   run: SessionRun,
@@ -309,40 +384,72 @@ export async function answerCurrent(
 
   const adv = advanceReconstruct(run.machine, c, choice);
 
+  // `tz` is stamped explicitly (rather than left to `append()`'s `ctx.tz`
+  // fallback) so a resumed retry — which may run long after this `ctx` was
+  // captured — commits the SAME tz the tap actually happened under, not
+  // whatever the retry click's own moment would otherwise fall back to.
+  const tapEvent = {
+    type: "reconstruct_tap",
+    ts: ctx.now,
+    tz: ctx.tz,
+    surah: run.surah,
+    ayah: cur.ayah,
+    rung: gradeClassToWire("rc"),
+    position: cur.position,
+    choice,
+    correct: adv.correct,
+    structured: true,
+  } as DrillEvent;
+
   // ---- COMMIT ---------------------------------------------------------------
-  await append(
-    {
-      type: "reconstruct_tap",
+  return commitThenContinue(tapEvent, ctx, null, () =>
+    answerAfterTap(run, c, cur, adv, optionIndex, ctx),
+  );
+}
+
+/** Everything that happens once the tap event has durably landed — the
+ *  optional `ayah_produced` commit, then settling the returned run. Split out
+ *  so a retried tap (via `SessionCommitFailure.resume()`) re-enters exactly
+ *  here rather than re-running `advanceReconstruct` a second time. */
+async function answerAfterTap(
+  run: SessionRun,
+  c: Corpus,
+  cur: CurrentItem,
+  adv: ReturnType<typeof advanceReconstruct>,
+  optionIndex: number,
+  ctx: AppendContext,
+): Promise<SessionRun> {
+  if (adv.ayahProduced) {
+    const ayahEvent = {
+      type: "ayah_produced",
       ts: ctx.now,
+      tz: ctx.tz,
       surah: run.surah,
       ayah: cur.ayah,
-      rung: gradeClassToWire("rc"),
-      position: cur.position,
-      choice,
-      correct: adv.correct,
+      // A fully-blanked pass encodes as S3; a partial one as S2. The ENGINE
+      // decided which via `full` — this only resolves that GradeClass to its
+      // wire Rung via gradeClassToWire(), never a re-derived ternary (B2).
+      rung: gradeClassToWire(adv.full ? "s3_full" : "s2_partial"),
       structured: true,
-    } as DrillEvent,
-    ctx,
-  );
+    } as DrillEvent;
 
-  if (adv.ayahProduced) {
-    await append(
-      {
-        type: "ayah_produced",
-        ts: ctx.now,
-        surah: run.surah,
-        ayah: cur.ayah,
-        // A fully-blanked pass encodes as S3; a partial one as S2. The ENGINE
-        // decided which via `full` — this only resolves that GradeClass to its
-        // wire Rung via gradeClassToWire(), never a re-derived ternary (B2).
-        rung: gradeClassToWire(adv.full ? "s3_full" : "s2_partial"),
-        structured: true,
-      } as DrillEvent,
-      ctx,
+    return commitThenContinue(ayahEvent, ctx, null, () =>
+      settleAnswer(run, c, cur, adv, optionIndex),
     );
   }
   // ---- only now may a verdict be painted ------------------------------------
+  return settleAnswer(run, c, cur, adv, optionIndex);
+}
 
+/** Compute the state a caller may paint a verdict from. Every commit this tap
+ *  required has already landed durably by the time this runs. */
+async function settleAnswer(
+  run: SessionRun,
+  c: Corpus,
+  cur: CurrentItem,
+  adv: ReturnType<typeof advanceReconstruct>,
+  optionIndex: number,
+): Promise<SessionRun> {
   const slips = adv.correct ? run.slips : run.slips + 1;
   const lastTap = { index: optionIndex, correct: adv.correct };
 
