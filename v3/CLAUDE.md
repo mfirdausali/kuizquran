@@ -53,14 +53,54 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 1905 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 1913 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 742 apps/web. (v3-D97, 2026-08-16)
+             # + 417 engine + 61 fold-runner + 750 apps/web. (v3-D99, 2026-08-17)
              # `make test` enforces v3-D95's test-count floor (`v3/TEST-FLOOR`,
              # currently 1899, so the margin above is intentionally not yet
              # banked into the floor) — a suite that silently shrinks (deleted
              # test file, stray `.skip`) now fails the build even though every
              # test that DID run still passed.
+             # NOTE (v3-D99): DEFECTS.md#B10, found while wiring v3-D98 (below).
+             # `lib/session/run.ts#answerCurrent` graded a tap against the
+             # ENGINE'S RAW, unshuffled `[correct, ...distractors]` order
+             # (`currentItem(...).options`), but the index a real tap reports
+             # is into the SHUFFLED display bank `lib/onboarding/pass.ts
+             # #assemblePass` builds and `SessionIsland` actually renders —
+             # the identical drift v3-D57/D58 already found and fixed once in
+             # onboarding/the landing demo (`lib/demo/reconstruct.ts#applyTap`
+             # is the already-correct precedent). A standalone diagnostic
+             # against the real 112 corpus found 0 of 4 blanks of 112:1 where
+             # the raw slot the old code read agreed with what the learner was
+             # actually shown as correct — tapping the DISPLAYED correct tile
+             # was graded against whichever face the shuffle happened to leave
+             # at raw slot 0. This is the ONLY graded path in the product.
+             # Fixed: `answerCurrent` now resolves the tapped surface via the
+             # SAME `assemblePass` call `SessionIsland` renders from, mirroring
+             # `applyTap` exactly. Confirmed with a genuine RED: reverting the
+             # fix and re-running `run.test.ts` failed 10 of 21 tests,
+             # including sessions that never reached `done` — a correct tap
+             # graded wrong stalls the reconstruction outright, since a
+             # wrong-graded tap never advances. Nothing caught this for five
+             # days because `run.test.ts`'s own `playThrough` always submitted
+             # raw index 0 (bypassing the shuffle entirely), the e2e suite's
+             # one `/session` tap explicitly doesn't check correctness, and
+             # `quiz.test.tsx` tests the cards in isolation with mocked
+             # `onAnswer`. See DEFECTS.md#B10 and DECISIONS.md v3-D99.
+             # NOTE (v3-D98): `packages/engine/src/freeplay.ts` (FR6, "three
+             # doors after session complete" — extra Learn, weak-spot gym,
+             # open practice, plus cold-success adoption and a
+             # diminishing-returns nudge) had ZERO production callers, in v2
+             # or v3, despite being fully unit-tested (17 assertions). Scoped
+             # to Door 1 only (`extraLearnGrant`) — the one piece that slots
+             # into the existing post-session summary screen with no new
+             # route or picker UI. `lib/session/run.ts` gained
+             # `extraLearnOfferFor`/`startExtraLearn`; `SessionIsland` offers
+             # "Learn one more ayah (~N min)" once the assembled queue is
+             # done and the engine's own fold still grants it. Doors 2/3, the
+             # adoption offer and the diminishing-returns nudge are
+             # deliberately NOT done — each needs its own UI surface. See
+             # DECISIONS.md v3-D98.
              # NOTE (v3-D97): `packages/engine/src/streak.ts#computeStreak()`/
              # `completedDayIndices()` (FR9 — pause-on-miss, never zeroes,
              # 19 tests) had ZERO production callers. Unlike prior nights this

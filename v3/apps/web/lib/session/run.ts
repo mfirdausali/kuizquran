@@ -48,6 +48,10 @@ import {
 import { rebuild } from "@engine/rebuild.ts";
 import { assembleQueue, type QueueItem } from "@engine/scheduler.ts";
 import { summarizeSession, type SessionSummary } from "@engine/sessionSummary.ts";
+import { atomKey } from "@engine/atom.ts";
+// FR6 Door 1 ("extra Learn", v3-D98) — see `extraLearnOfferFor`/`startExtraLearn`
+// below for why the summary screen, not the assembled queue, is where this lives.
+import { extraLearnGrant, type ExtraLearnGrant } from "@engine/freeplay.ts";
 // DEFECTS.md#B2 / v3-D26: gradeClassToWire() is "the ONE function" that may
 // resolve a grading decision to a wire Rung — see its own header. A hardcoded
 // `rung: full ? "S3" : "S2"` here would be B2's exact ternary shape reborn in
@@ -63,6 +67,11 @@ import {
   type AppendContext,
 } from "@/lib/idb/append";
 import { getEventsForSurah } from "@/lib/idb/read";
+// DEFECTS.md#B10 / v3-D99 — `answerCurrent`'s `optionIndex` is the DISPLAYED
+// (shuffled) slot a real tap reports, never the engine's raw, unshuffled
+// order. `assemblePass` is the SAME assembly `SessionIsland` renders the
+// bank from — see `answerCurrent`'s own comment for the full story.
+import { assemblePass } from "@/lib/onboarding/pass";
 
 /** Why a session could not start. Reported, never papered over with an empty
  *  drill — a learner staring at a blank card cannot tell "nothing due" from
@@ -377,9 +386,27 @@ export async function answerCurrent(
   const cur = currentItem(run, c);
   if (!cur) return run;
 
-  // The chosen SURFACE comes back out of the engine's own item. This module
-  // never authors it, which is what keeps scripture out of application code.
-  const choice = cur.options[optionIndex];
+  // DEFECTS.md#B10 / v3-D99 — `optionIndex` is the LOGICAL index a real tap
+  // reports (`components/quiz/QuizCard.tsx`'s own contract: "an index into
+  // the item's own options... never a verbatim index into the engine's raw
+  // order"), i.e. an index into the SHUFFLED display bank `assemblePass`
+  // builds — the SAME assembly `SessionIsland` renders from. `cur.options`
+  // (above) is the engine's RAW, UNSHUFFLED `[correct, ...distractors]`
+  // (`options.ts`: "display order is the UI's concern"); indexing THAT array
+  // by a shuffled slot number was exactly the drift v3-D57/D58 already found
+  // and fixed once in onboarding/the landing demo
+  // (`lib/demo/reconstruct.ts#applyTap` is the correct precedent this
+  // mirrors) — this module reintroduced it independently at build-plan step
+  // 18, ungated by any test that drives a real tap through the actual
+  // shuffle (`run.test.ts`'s own `playThrough` always submitted raw index 0,
+  // and the e2e suite's one `/session` tap explicitly does not care whether
+  // it is right or wrong), so it shipped silently on the ONLY graded path in
+  // the product. The chosen SURFACE comes back out of the engine's own item
+  // (via the Face `assemblePass` already resolved through `buildFace`) —
+  // this module still never authors Arabic, which is what keeps scripture
+  // out of application code.
+  const assembled = assemblePass(run.machine, c);
+  const choice = assembled?.item.options[optionIndex]?.text;
   if (choice === undefined) return run;
 
   const adv = advanceReconstruct(run.machine, c, choice);
@@ -494,6 +521,73 @@ export async function sessionSummaryOf(run: SessionRun): Promise<SessionSummary>
   const all = await getEventsForSurah(run.surah);
   const mine = all.filter((e) => e.ts >= run.startedAt);
   return summarizeSession(mine);
+}
+
+/**
+ * FR6 Door 1 — "extra Learn" (`packages/engine/src/freeplay.ts#extraLearnGrant`).
+ *
+ * `extraLearnGrant` was built and unit-tested three times over (v3-D97's own
+ * sweep found it, `freeplay.test.ts`'s 17 assertions) but had ZERO production
+ * callers anywhere in this app or in v2 — a learner who finished today's
+ * assembled queue was simply done, with no offer of one more gate-intact,
+ * cost-disclosed ayah the way FR6's own "three doors after session complete"
+ * describes. This is Door 1 only: Door 2 (weak-spot gym) and Door 3 (open
+ * practice) each need a real UI surface of their own (a ranked list, an
+ * any-ayah picker) that does not exist and is out of scope here; Door 1 needs
+ * none — it slots into the summary screen this app already has.
+ *
+ * Re-derives the fold the same way `assembleFor` does, AFTER the session's own
+ * commits have landed (`run.done` is true by the time a caller asks) — never
+ * from `run`'s own in-memory queue, which reflects what was ASSEMBLED at
+ * start, not what is true now that this sitting's Learn items are encoded.
+ */
+export async function extraLearnOfferFor(
+  run: SessionRun,
+  c: Corpus,
+  now: number,
+): Promise<ExtraLearnGrant> {
+  const prior = await getEventsForSurah(run.surah);
+  const atomsMap = rebuild(prior);
+  const atoms = [...atomsMap.values()];
+  const wordCounts = new Map<number, number>();
+  for (const w of c.words) {
+    wordCounts.set(w.ayah, (wordCounts.get(w.ayah) ?? 0) + 1);
+  }
+  const candidates = learnCandidatesFor(c, atomsMap);
+  return extraLearnGrant(atoms, run.surah, candidates, now, wordCounts);
+}
+
+/**
+ * Extend a COMPLETED run with the ONE Door-1 item `extraLearnOfferFor` just
+ * granted. `ayah` is passed in rather than re-derived here, so a caller always
+ * acts on exactly the offer it showed on screen, never a second, possibly
+ * different, re-ask. Pure — it appends no event itself; the ordinary
+ * `answerCurrent`/`settleAnswer` commit path takes over the moment the
+ * learner taps, identically to every other queue item (including its own
+ * "queue exhausted → done" ending, so a second Door-1 offer can follow the
+ * same way once this one is genuinely finished).
+ */
+export function startExtraLearn(run: SessionRun, c: Corpus, ayah: number): SessionRun {
+  const item: QueueItem = {
+    kind: "learn",
+    atomKey: atomKey(run.surah, "ayah", ayah),
+    ayah,
+    estMin: 0,
+  };
+  const queue = [...run.queue, item];
+  const cursor = queue.length - 1;
+  // The candidate is un-encoded by extraLearnGrant's own contract (it only
+  // ever offers `!encoded.has(ayah)`), so its strength is definitionally 0 —
+  // the same starting point a first-ever "learn" item gets inside the normal
+  // assembled queue.
+  return {
+    ...run,
+    queue,
+    cursor,
+    machine: machineFor(c, run.surah, item, 0),
+    lastTap: null,
+    done: false,
+  };
 }
 
 // --- small helpers ----------------------------------------------------------

@@ -41,13 +41,16 @@ import {
   answerCurrent,
   clearReveal,
   currentItem,
+  extraLearnOfferFor,
   sessionSummaryOf,
+  startExtraLearn,
   startSession,
   SessionCommitFailure,
   type SessionRun,
   type SessionUnavailable,
 } from "@/lib/session/run";
 import type { SessionSummary } from "@engine/sessionSummary.ts";
+import type { ExtraLearnGrant } from "@engine/freeplay.ts";
 
 export interface SessionIslandProps {
   /** Which surah this session drills. Chosen at onboarding, passed in as data —
@@ -71,6 +74,11 @@ export function SessionIsland({ surah }: SessionIslandProps) {
   const [run, setRun] = useState<SessionRun | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
   const [busy, setBusy] = useState(false);
+  // FR6 Door 1 ("extra Learn", v3-D98) — the offer this DONE session's own
+  // fold makes for one more gate-intact, cost-disclosed ayah. Computed only
+  // once the summary is reached (see the effect below); null before that, and
+  // reset the moment the learner either extends into it or finishes it.
+  const [extraOffer, setExtraOffer] = useState<ExtraLearnGrant | null>(null);
 
   // Load the corpus, then start (or RESUME) the session. Resume is not a
   // separate path: the queue is derived from the fold of the event log, so a
@@ -251,6 +259,35 @@ export function SessionIsland({ surah }: SessionIslandProps) {
     setRun((r) => (r ? clearReveal(r) : r));
   }, []);
 
+  // FR6 Door 1 — once the assembled queue is genuinely done, ask the engine
+  // (via `extraLearnOfferFor`, which re-derives the fold — never this
+  // component deciding anything) whether one more gate-intact ayah is on
+  // offer. A fetch failure here must never block the summary the learner
+  // already earned — same "cache warm, never a precondition" discipline the
+  // entitlement snapshot effect above uses (#103).
+  useEffect(() => {
+    if (phase.kind !== "summary" || !run || !corpus) return;
+    let alive = true;
+    void extraLearnOfferFor(run, corpus, Date.now())
+      .then((offer) => {
+        if (alive) setExtraOffer(offer);
+      })
+      .catch(() => {
+        if (alive) setExtraOffer(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [phase, run, corpus]);
+
+  const onExtraLearn = useCallback(() => {
+    if (!run || !corpus || !extraOffer?.granted || extraOffer.ayah === null) return;
+    const extended = startExtraLearn(run, corpus, extraOffer.ayah);
+    setExtraOffer(null);
+    setRun(extended);
+    setPhase({ kind: "drilling" });
+  }, [run, corpus, extraOffer]);
+
   if (phase.kind === "loading") {
     return <p className="caption">Preparing today&apos;s session…</p>;
   }
@@ -302,6 +339,13 @@ export function SessionIsland({ surah }: SessionIslandProps) {
             ? ` · ${Math.round(summary.recall * 100)}% recall`
             : ""}
         </p>
+        {/* FR6 Door 1: only ever shown once the engine itself grants it — this
+            component never decides whether one more ayah fits the gate. */}
+        {extraOffer?.granted && extraOffer.ayah !== null ? (
+          <button type="button" className="btn" onClick={onExtraLearn}>
+            Learn one more ayah (~{extraOffer.costMin} min)
+          </button>
+        ) : null}
       </div>
     );
   }

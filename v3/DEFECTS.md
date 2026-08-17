@@ -4,10 +4,82 @@ Every one verified in source, not inferred. Each names its owning milestone and
 the regression test that closes it.
 
 **B1–B6** are v2 engine/data defects carried into the port. **B7–B9** were found
-by executing the v2 harness. **E-01…E-08** are multi-surah defects that only
-manifest once a second surah exists.
+by executing the v2 harness. **B10** was found in v3's own session loop
+(build-plan step 18), independent of the v2 port. **E-01…E-08** are
+multi-surah defects that only manifest once a second surah exists.
 
 ---
+
+## B10 — a tap graded against the engine's raw order, not the shuffled bank the learner actually saw ✅ CLOSED (build-plan step 18, v3-D99)
+
+`lib/session/run.ts#answerCurrent(run, c, optionIndex, ctx)` did
+`cur.options[optionIndex]`, where `cur = currentItem(run, c)` exposes the
+engine's RAW, UNSHUFFLED `[correct, ...distractors]` order (`options.ts`'s own
+docstring: "display order is the UI's concern"). But `optionIndex` is the
+LOGICAL index a real tap reports — an index into the SHUFFLED display bank
+`lib/onboarding/pass.ts#assemblePass` builds and `SessionIsland` renders from
+(`components/quiz/QuizCard.tsx`'s own prop contract: "an index into the item's
+own options... the caller commits this to the log and decides correctness
+against the item's own correctIndex").
+
+⇒ Tapping the tile the learner is SHOWN as correct was graded against
+whichever face the shuffle happened to leave at RAW slot 0 — correct only
+when that coincided, which a fresh corpus check found true for 0 of 4 blanks
+of 112:1. A real learner's genuinely correct taps were routinely recorded as
+slips (damaging strength on evidence that was never wrong), and the
+reconstruction pass could stall outright, since a wrong-graded tap never
+advances the blank. This is the ONLY graded path in the shipped product — the
+same severity class as B6, on the surface B6 was originally about.
+
+**This is the EXACT drift v3-D57/D58 already found and fixed once**, in
+onboarding screen 2 and the landing demo — `lib/demo/reconstruct.ts#applyTap`
+correctly resolves `step.item.options[optionIndex].text` (the shuffled Face's
+own text), never a raw-order lookup. The session loop (built later, at step
+18) reintroduced the identical defect independently.
+
+**Why nothing caught it:** `lib/session/run.test.ts`'s own `playThrough`
+helper submitted `currentItem(...).correctIndex` directly — always 0, by
+construction of the raw array — bypassing both the DOM and the shuffle
+entirely, so 15+ tests exercised "always tap raw index 0" and never noticed it
+meant something different once real UI wiring was involved. The Playwright
+e2e suite's one `/session` tap explicitly says "whether it is right or wrong
+does not matter here" (`e2e/first-session.test.ts`) — no e2e test drives a
+full, genuinely-correct multi-tap completion of the real session route.
+Component tests (`test/quiz.test.tsx`) test the cards in isolation with
+hand-fed `onAnswer` mocks, which cannot see this either.
+
+*Closes when:* `answerCurrent` resolves the tapped SURFACE from the same
+shuffled assembly the bank was rendered from, and a test drives a real
+shuffled-index tap (not raw index 0) through to a correct, advancing grade.
+
+**Fixed 2026-08-17 (v3-D99):** `answerCurrent` now calls
+`assemblePass(run.machine, c)` (the SAME assembly `SessionIsland` already used
+for rendering) and resolves `choice` from
+`assembled.item.options[optionIndex].text` — mirroring `applyTap`'s already-
+correct precedent exactly. `lib/session/run.test.ts`'s `playThrough` and every
+other direct `answerCurrent` caller in that file now go through a new
+`correctIndexFor(run, c)` helper (`assemblePass(...).item.correctIndex`)
+instead of the raw, always-0 `currentItem(...).correctIndex`.
+
+**Verified:**
+- RED confirmed by temporarily reverting the fix and re-running
+  `lib/session/run.test.ts`: 10 of 21 tests failed, including sessions that
+  never reached `done` at all (a genuinely correct tap graded wrong, so the
+  reconstruction stalled) — concrete proof of real-world impact, not a
+  hypothetical. Reverted byte-identically; 21/21 green again.
+- A dedicated regression test asserts a shuffled-correct tap where the raw
+  slot is provably **not** 0 (`assembled.item.correctIndex !== 0`, so the test
+  cannot pass vacuously on an identity shuffle) resolves `correct:true`.
+- A component-level test (`test/session-island.test.tsx`) drives real DOM taps
+  through `SessionIsland` via trial-and-error per blank (the same technique
+  the e2e suite's `completeFirstRecall` uses, and for the same reason — no
+  Arabic literal may be written to know the answer in advance) and confirms a
+  full ayah completes and the log shows `correct:true` throughout.
+- `TZ=UTC make test`: 1913 passing (was 1905), `make build` exit 0, boundaries
+  gate OK (179 files, sacred-text clause 4 clean over every changed file).
+
+See DECISIONS.md v3-D99 for the full write-up, including the FR6 Door-1 work
+that surfaced this while auditing the same call path.
 
 ## B9 — the CI build gate was a no-op ✅ CLOSED (M0)
 

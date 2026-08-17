@@ -4502,3 +4502,189 @@ for it is a distinct, larger piece of work than backing the one claim this
 run found, and is left named here rather than attempted tonight.
 `lib/corpus/load.ts`'s SSR override gap and `isQuestionDisabled()`
 (v3-D96) remain exactly as that entry left them — neither touched.
+
+---
+
+## Ratified 2026-08-17 (nightly) — the sweep found FR6 Door 1, and auditing its call path found a live grading defect on the only graded path in the product
+
+This run started per NIGHTLY.md's rule: `git status` showed a **detached
+HEAD** with the locally-cached `main`/`origin/main` refs both stale at
+`cab5d16` ("Phase 0 complete") — the identical "detached HEAD, stale local
+main" shape v3-D77/D78/D87/D89/D90/D91 have each hit. `git fetch origin main`
+showed `origin/main` force-updated to `5e0ca31` (v3-D97), which was also the
+checked-out commit — resolved with `git checkout -B main origin/main`, same
+as every prior occurrence. Recorded again, mechanically, per those entries'
+own instruction.
+
+### v3-D98 — FR6 Door 1 ("extra Learn"): `packages/engine/src/freeplay.ts` had ZERO production callers, in v2 or v3
+
+Per v3-D82 through v3-D97's established practice, a fresh, code-blind research
+agent swept for the next "mechanism built and unit-tested, zero production
+callers" instance, given the accumulated exclusion list (`EntitlementMachine
+::merge()`, `permitsIssuance`/`permitsReview`, `TrialAttribution`,
+`useWriterStatus()`, `describeCertification()`, `regionFromCountry()`,
+`AdminRole::OPERATOR`/`MODERATOR`, `rowAtomKey()`, step 30's E6/E7/E8, the
+RC-only session-loop architecture, `lib/corpus/load.ts`'s SSR override gap,
+`isQuestionDisabled()`, and v3-D97's own `computeStreak()`/
+`completedDayIndices()`, now wired).
+
+**Finding:** `packages/engine/src/freeplay.ts` — FR6 "Free practice &
+overflow (P1)", the PRD's "three doors after session complete" plus
+cold-success adoption and a diminishing-returns nudge — is five exported,
+fully-tested functions (`freeplay.test.ts`: 8 `it()` blocks, 17 assertions)
+with zero callers anywhere in `apps/web`, `v3/api`, or `worker`. Grepping v2
+(this build's own methodology for "was this ever shipped", per v3-D25) finds
+the identical shape — never wired there either. Unlike most instances this
+ledger has recorded, this isn't silent data corruption: invariant #5 already
+guarantees free-play evidence never mutates schedule state, so leaving it
+unwired is a genuine, undressed feature gap, not a bug dressed as done code.
+
+**Scope, decided before writing code:** wiring all three doors, the adoption
+offer AND the diminishing-returns nudge in one night is not "one step,
+fully" — it is the shape of several. Door 1 ("extra Learn" — `extraLearnGrant
+()`, gate-intact, cost-disclosed) is the one piece that slots into a surface
+that already exists (the post-session summary screen, `SessionIsland`'s
+`"summary"` phase) with no new route, picker, or ranked-list UI. Doors 2
+(weak-spot gym) and 3 (open practice) each need a UI surface that does not
+exist yet and are explicitly left for a future run.
+
+**Built**, in `apps/web/lib/session/run.ts`:
+- `extraLearnOfferFor(run, c, now)` — re-derives the fold the same way
+  `assembleFor` does (never from `run`'s own in-memory queue, which reflects
+  what was assembled at session START, not what is true now that this
+  sitting's own Learn items are encoded) and asks the engine's
+  `extraLearnGrant` whether one more gate-intact ayah is on offer.
+- `startExtraLearn(run, c, ayah)` — extends a DONE run with the offered item.
+  Appends nothing itself; the ordinary `answerCurrent`/`settleAnswer` commit
+  path takes over the moment the learner taps, identically to every other
+  queue item, including its own "queue exhausted → done" ending.
+
+`components/session/SessionIsland.tsx`: on reaching the summary phase, an
+effect calls `extraLearnOfferFor` (never blocking the summary the learner
+already earned, same "cache warm" discipline #103 established) and renders a
+`Learn one more ayah (~N min)` button via the ALREADY-shipped, previously
+unused `.btn` class when granted — no new CSS, no new route. The component
+still decides nothing: it renders exactly what the engine's offer says.
+
+**Verified:**
+- `lib/session/run.test.ts`: 4 new tests. A virgin log grants the first
+  mushaf-order candidate (`ayah: 1`, cost derived from the real corpus, not
+  hardcoded). A real first session on the 111-ayah surah 12 — chosen because
+  surah 112 is small enough that a fresh learner's first session already fits
+  all 4 of its ayat inside the default 8-minute budget, leaving nothing for
+  Door 1 to ever offer — leaves candidates behind and Door 1 offers the next
+  one. Once every ayah is genuinely encoded (112, naturally exhausted in one
+  sitting), the offer reports `granted:false, reason:"nothing left to
+  Learn"`. `startExtraLearn` extends a DONE run and the extension finishes
+  through the ordinary commit path, landing exactly one `ayah_produced` for
+  the offered ayah.
+- `test/session-island.test.tsx`: 2 new tests, driving REAL DOM taps (see
+  v3-D99 below for why this took real engineering to get right). The CTA
+  renders with the correctly-derived cost, clicking it returns to drilling on
+  the offered ayah (not a re-render of the just-finished one), and finishing
+  it lands a second `ayah_produced` for a different ayah. A second test seeds
+  the surah to full exhaustion and confirms the CTA never renders.
+- Mutation-verified: forcing the render condition to `false` fails exactly
+  the "finds the button" assertion; reverted.
+
+**Deliberately NOT done:** Doors 2/3, the cold-success adoption offer, and
+the diminishing-returns nudge (named above). `atRisk`/`pausedOnMiss`/
+`makeupAvailable` remain unsurfaced (v3-D97's own scope note, unchanged).
+
+### v3-D99 — DEFECTS.md#B10: `answerCurrent` graded a tap against the engine's raw order, not the shuffled bank the learner actually saw
+
+While tracing exactly what `SessionIsland`'s `onAnswer(index)` does with the
+index a real tap reports, in order to wire Door 1's continuation correctly, I
+found `lib/session/run.ts#answerCurrent` resolves the tapped surface via
+`cur.options[optionIndex]` — `cur = currentItem(run, c)`, whose `options` is
+the engine's RAW `[correct, ...distractors]` order (`options.ts`: "display
+order is the UI's concern"). But `optionIndex` is not a raw index: it is the
+LOGICAL index a real tap reports, into the SHUFFLED bank
+`lib/onboarding/pass.ts#assemblePass` builds and `SessionIsland` actually
+renders (`components/quiz/QuizCard.tsx`'s own prop doc: "an index into the
+item's own options... the caller commits this to the log and decides
+correctness against the item's own correctIndex").
+
+I did not take this on faith. A standalone diagnostic against the real,
+compiled 112 corpus (`assemblePass`'s shuffled `correctIndex` vs. what the raw
+lookup at that same index resolves to) found **0 of 4 blanks of 112:1** where
+the two agreed — tapping the tile shown as correct was graded against the
+engine's raw slot 0, whichever face the shuffle happened to leave there.
+
+**This is the identical drift v3-D57/D58 already found and fixed once**, in
+onboarding screen 2 and the landing demo (that entry's own words: "The engine
+returns `[correct, ...distractors]` — correct ALWAYS at index 0... Onboarding
+seed-shuffled it. The landing demo did not... tapping the first tile four
+times produced a flawless reconstruction"). `lib/demo/reconstruct.ts#applyTap`
+is the already-correct precedent: `step.item.options[optionIndex].text`, the
+shuffled Face's own text, never a raw-order lookup. The session loop —
+`SessionIsland`, build-plan step 18, landed AFTER v3-D57/D58 — reintroduced
+the same defect independently, on the ONE route a real learner is actually
+graded through.
+
+**Why nothing caught it for five days:** `run.test.ts`'s own `playThrough`
+helper called `answerCurrent(run, c, currentItem(run, c).correctIndex, ...)`
+— always 0 by construction of the raw array, so it bypassed the DOM and the
+shuffle completely across 15+ existing tests, all green, all "proving"
+nothing about the actual index space a tap arrives in. The Playwright e2e
+suite's one `/session` tap is explicit that "whether it is right or wrong
+does not matter here" (`e2e/first-session.test.ts`) — no e2e test drives a
+full, genuinely-correct completion of the real session route. `test/quiz.test
+.tsx` tests the cards in isolation with hand-fed `onAnswer` mocks. Three
+different test layers, three different reasons each one structurally could
+not see this.
+
+**Fixed:** `answerCurrent` now calls the SAME `assemblePass(run.machine, c)`
+`SessionIsland` already used for rendering, and resolves `choice` from
+`assembled.item.options[optionIndex].text` — mirroring `applyTap` exactly.
+`run.test.ts`'s `playThrough` and every other direct `answerCurrent` call in
+that file now go through a new `correctIndexFor(run, c)` helper
+(`assemblePass(...).item.correctIndex`) instead of the raw, always-0
+`currentItem(...).correctIndex`.
+
+**Verified, RED then green:**
+- Reverted the fix, re-ran `lib/session/run.test.ts`: **10 of 21 tests
+  failed**, including sessions that never reached `done` at all — a
+  genuinely correct tap graded wrong stalls the reconstruction, since a
+  wrong-graded tap never advances the blank. This is not a hypothetical
+  read of the diff; it is what a real learner's correct taps did under the
+  shipped code. Reverted byte-identically; 21/21 green again.
+- A dedicated regression test asserts, and FIRST CONFIRMS ITS OWN
+  PRECONDITION (`assembled.item.correctIndex !== 0`, so it cannot pass
+  vacuously against an identity shuffle), that a shuffled-correct tap
+  resolves `correct:true` end to end, including the persisted event.
+- `test/session-island.test.tsx` gained a real-DOM trial-and-error driver
+  (mirroring the e2e suite's own `completeFirstRecall`, for the identical
+  reason: this file cannot know the correct answer without writing Quranic
+  Arabic as a literal) that completes a full ayah through `SessionIsland` and
+  confirms every landed tap is `correct:true` — this is also what makes
+  v3-D98's Door-1 component tests possible at all; before this fix, a
+  DOM-driven multi-tap completion could not reliably reach the summary
+  screen.
+- `TZ=UTC make test`: **1913 passing** (was 1905; +6 from this entry, +2 from
+  v3-D98) — 255 v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler +
+  417 engine + 61 fold-runner + 750 apps/web. `check-test-floor.mjs`: OK,
+  1913 >= floor 1899 (+14 margin, `TEST-FLOOR` left unmoved, same discipline
+  as every prior entry). `TZ=UTC make build`: exit 0, 18 routes, boundaries
+  gate OK (179 files, sacred-text clause 4 clean over every changed file, no
+  Arabic codepoint introduced anywhere in this diff).
+- No `v1/**`/`v2/**` edit (`git diff --stat -- v1 v2` empty at commit time;
+  `v2/tsconfig.tsbuildinfo`'s build-side regeneration reverted before
+  staging, the same housekeeping v3-D81 onward each record).
+
+**Blast radius, checked exhaustively:** `grep -rln "answerCurrent"` across
+`apps/web` returns exactly four files — `run.ts` (the fix), `run.test.ts`
+(the helper update), `SessionIsland.tsx` (already correct — it forwards the
+DOM's shuffled index unchanged; the bug was entirely inside `answerCurrent`'s
+own resolution, so the component needed no change), and a comment in
+`test/session-island.test.tsx`. No other caller exists.
+
+**Explicitly NOT done, named so a future run does not re-discover these as
+new:** this run did not audit every OTHER `onAnswer`-shaped wiring in the app
+for the same drift (`ChoiceCard`/`LocateChoiceCard`/`OrderTilesCard` each
+have their own `onAnswer(index)`/`onTap(index)` contract) — those are not
+reached by `answerCurrent` at all (`SessionIsland` only ever renders
+`sequenceFill`), so B10 as found does not implicate them, but the SHAPE of
+this defect (a caller re-deriving "the current item" independently of the
+assembly that was actually rendered) is worth a dedicated sweep of its own
+un-scoped scope for a future night, not attempted here.

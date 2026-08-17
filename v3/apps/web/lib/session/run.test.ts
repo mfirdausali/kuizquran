@@ -40,6 +40,7 @@ import type { Corpus } from "@engine/types.ts";
 import { getAllEvents } from "@/lib/idb/read";
 import { resetDbForTests } from "@/lib/idb/db";
 import { writeLock } from "@/lib/idb/writeLock";
+import { assemblePass } from "@/lib/onboarding/pass";
 
 // A seam for the commit-before-paint test alone. When null (every other test)
 // the REAL append runs untouched, so nothing here weakens the other assertions.
@@ -84,6 +85,8 @@ import {
   currentItem,
   answerCurrent,
   sessionSummaryOf,
+  extraLearnOfferFor,
+  startExtraLearn,
   SessionCommitFailure,
   type SessionRun,
 } from "./run";
@@ -112,10 +115,47 @@ beforeAll(() => {
     throw new Error(`No 112 corpus at ${STAGED} or ${COMPILED}. Run \`make compile-corpus\`.`);
   }
   CORPUS = JSON.parse(readFileSync(path, "utf8")) as Corpus;
+
+  const path12 = existsSync(STAGED_12) ? STAGED_12 : COMPILED_12;
+  if (!existsSync(path12)) {
+    throw new Error(`No 12 corpus at ${STAGED_12} or ${COMPILED_12}. Run \`make compile-corpus\`.`);
+  }
+  CORPUS_12 = JSON.parse(readFileSync(path12, "utf8")) as Corpus;
 });
 
 function corpus(): Corpus {
   return CORPUS;
+}
+
+// Surah 12 (Yusuf, 111 ayat) — needed ONLY for the Door-1 describe block
+// below. Surah 112 has just 4 ayat and ~15 words total, so a fresh learner's
+// very first session already fits every one of its ayat inside the default
+// 8-minute budget (scheduler.ts's DEFAULT_BUDGET) and encodes the whole
+// surah in one sitting — there is never anything left for FR6's "extra
+// Learn" door to offer. 12 is large enough (1777 words / 111 ayat) that a
+// first session's budget-fitted queue can only ever cover a handful of
+// ayat, leaving real candidates behind — the actual shape Door 1 exists for.
+const SURAH_12 = 12;
+const STAGED_12 = resolve(HERE, "../../public/corpus/12.json");
+const COMPILED_12 = resolve(HERE, "../../../../packages/corpus-compiler/output/12/corpus.json");
+let CORPUS_12: Corpus;
+
+function corpus12(): Corpus {
+  return CORPUS_12;
+}
+
+/** The DISPLAYED (shuffled) correct index for the run's current blank — the
+ *  SAME assembly `SessionIsland` renders the bank from, and therefore the
+ *  same index space `answerCurrent`'s `optionIndex` actually means (v3-D99 /
+ *  DEFECTS.md#B10). NEVER `currentItem(...).correctIndex`: that is the
+ *  engine's raw, unshuffled `[correct, ...distractors]` order (always 0),
+ *  which `answerCurrent` stopped accepting once B10 closed — passing it
+ *  taps whichever face the shuffle happened to put at slot 0, correct only
+ *  by coincidence. */
+function correctIndexFor(run: SessionRun, c: Corpus): number {
+  const assembled = assemblePass(run.machine, c);
+  if (!assembled) throw new Error("no current item to answer");
+  return assembled.item.correctIndex;
 }
 
 /** Drive a run to completion, answering every item CORRECTLY. Returns the
@@ -126,8 +166,7 @@ async function playThrough(run: SessionRun, c: Corpus) {
   let taps = 0;
   let cur = currentItem(run, c);
   while (cur && taps < 500) {
-    const correctIndex = cur.correctIndex;
-    run = await answerCurrent(run, c, correctIndex, { now: T0 + taps * 1000, tz: TZ });
+    run = await answerCurrent(run, c, correctIndexFor(run, c), { now: T0 + taps * 1000, tz: TZ });
     taps++;
     cur = currentItem(run, c);
   }
@@ -211,7 +250,8 @@ describe("v3-D67 — a learner can complete a session, and the log proves it", (
     expect(cur).not.toBeNull();
     if (!cur) return;
 
-    const wrong = cur.correctIndex === 0 ? 1 : 0;
+    const correct = correctIndexFor(started.run, c);
+    const wrong = correct === 0 ? 1 : 0;
     await answerCurrent(started.run, c, wrong, { now: T0 + 500, tz: TZ });
 
     const events = await getAllEvents();
@@ -250,6 +290,75 @@ describe("v3-D67 — a learner can complete a session, and the log proves it", (
     const summary = await sessionSummaryOf(run);
     expect(summary.ayatCompleted).toBe(produced.length);
     expect(summary.taps).toBeGreaterThan(0);
+  });
+});
+
+// v3-D99 — DEFECTS.md#B10: `answerCurrent` graded against the engine's RAW,
+// unshuffled `[correct, ...distractors]` order (`cur.options[optionIndex]`),
+// but `optionIndex` is the LOGICAL index a real tap reports — an index into
+// the SHUFFLED display bank `lib/onboarding/pass.ts#assemblePass` builds and
+// `SessionIsland` renders from (`components/quiz/QuizCard.tsx`'s own prop
+// contract: "an index into the item's own options... the caller commits
+// this to the log and decides correctness against the item's own
+// correctIndex"). This is the EXACT drift v3-D57/D58 already found once in
+// onboarding/the landing demo (`lib/demo/reconstruct.ts#applyTap` correctly
+// resolves `step.item.options[optionIndex].text` — the shuffled Face's own
+// text — never a raw-order lookup) — the session loop reintroduced it
+// independently at build-plan step 18. Nothing caught it: this file's own
+// `playThrough` always submitted the RAW index 0 directly (bypassing the
+// shuffle and the DOM entirely), and the e2e suite's one `/session` tap
+// explicitly says "whether it is right or wrong does not matter here". On
+// the shipped `/session` route, tapping the DISPLAYED correct tile was
+// graded against a raw-order string that only coincidentally matched it —
+// see this run's own diagnostic against a real corpus: all 4/4 blanks of
+// 112:1 mismatched.
+describe("v3-D99 — DEFECTS.md#B10: a tap is graded against the DISPLAYED option, not the engine's raw order", () => {
+  it("tapping the shuffled-correct slot is recorded correct:true and the ayah advances", async () => {
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+
+    const { run, taps } = await playThrough(started.run, c);
+    expect(taps).toBeGreaterThan(0);
+    expect(run.done).toBe(true);
+
+    const events = await getAllEvents();
+    const reconstructTaps = events.filter((e) => e.type === "reconstruct_tap");
+    expect(reconstructTaps.length).toBeGreaterThan(0);
+    // Every tap this run submitted was the DISPLAYED correct slot
+    // (`correctIndexFor`, above) — a caller that graded against the raw,
+    // unshuffled order instead would record most of these as slips, and the
+    // reconstruction would stall rather than reach `done`.
+    for (const t of reconstructTaps) {
+      expect(t.correct).toBe(true);
+    }
+  });
+
+  it("a shuffled-correct index that lands on RAW slot >0 still resolves to the true correct surface, not a distractor", async () => {
+    // Isolates the exact failure mode: find a blank where the shuffle moved
+    // the correct face away from raw slot 0 (112:1 always has one — the
+    // engine never shuffles, so this is a property of `displayOrder`, not
+    // luck), then submit ONLY that one shuffled index and assert the ENGINE
+    // itself agrees it was correct (not just that no error was thrown).
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+
+    const assembled = assemblePass(started.run.machine, c);
+    if (!assembled) throw new Error("an item must be served");
+    // Confirms the test fixture actually exercises the bug's precondition —
+    // a vacuous run (shuffle happened to be identity) would prove nothing.
+    expect(assembled.item.correctIndex).not.toBe(0);
+
+    const next = await answerCurrent(started.run, c, assembled.item.correctIndex, {
+      now: T0 + 100,
+      tz: TZ,
+    });
+
+    expect(next.lastTap).toEqual({ index: assembled.item.correctIndex, correct: true });
+    const events = await getAllEvents();
+    const tap = events.find((e) => e.type === "reconstruct_tap");
+    expect(tap?.correct).toBe(true);
   });
 });
 
@@ -317,7 +426,7 @@ describe("commit before paint (invariant #2)", () => {
       return out;
     };
 
-    const next = await answerCurrent(started.run, c, cur.correctIndex, {
+    const next = await answerCurrent(started.run, c, correctIndexFor(started.run, c), {
       now: T0 + 100,
       tz: TZ,
     });
@@ -340,7 +449,7 @@ describe("commit before paint (invariant #2)", () => {
     const cur = currentItem(started.run, c);
     if (!cur) throw new Error("an item must be served");
 
-    const next = await answerCurrent(started.run, c, cur.correctIndex, {
+    const next = await answerCurrent(started.run, c, correctIndexFor(started.run, c), {
       now: T0 + 100,
       tz: TZ,
     });
@@ -380,7 +489,7 @@ describe("edge case #74 — a retryable append failure can be retried without do
 
     let caught: unknown;
     try {
-      await answerCurrent(started.run, c, cur.correctIndex, { now: T0 + 100, tz: TZ });
+      await answerCurrent(started.run, c, correctIndexFor(started.run, c), { now: T0 + 100, tz: TZ });
     } catch (err) {
       caught = err;
     }
@@ -425,7 +534,7 @@ describe("edge case #74 — a retryable append failure can be retried without do
 
     let failure: SessionCommitFailure | undefined;
     try {
-      await answerCurrent(started.run, c, cur.correctIndex, { now: T0 + 100, tz: TZ });
+      await answerCurrent(started.run, c, correctIndexFor(started.run, c), { now: T0 + 100, tz: TZ });
     } catch (err) {
       if (err instanceof SessionCommitFailure) failure = err;
       else throw err;
@@ -471,7 +580,7 @@ describe("edge case #74 — a retryable append failure can be retried without do
     let taps = 0;
     while (cur && taps < 500 && !failure) {
       try {
-        run = await answerCurrent(run, c, cur.correctIndex, { now: T0 + taps * 1000, tz: TZ });
+        run = await answerCurrent(run, c, correctIndexFor(run, c), { now: T0 + taps * 1000, tz: TZ });
         taps++;
         cur = currentItem(run, c);
       } catch (err) {
@@ -505,7 +614,7 @@ describe("edge case #74 — a retryable append failure can be retried without do
 
     let caught: unknown;
     try {
-      await answerCurrent(started.run, c, cur.correctIndex, { now: T0 + 100, tz: TZ });
+      await answerCurrent(started.run, c, correctIndexFor(started.run, c), { now: T0 + 100, tz: TZ });
     } catch (err) {
       caught = err;
     }
@@ -525,7 +634,7 @@ describe("resume (edge case #93) — a reload does not lose the session", () => 
 
     const cur = currentItem(started.run, c);
     if (!cur) throw new Error("an item must be served");
-    await answerCurrent(started.run, c, cur.correctIndex, { now: T0 + 100, tz: TZ });
+    await answerCurrent(started.run, c, correctIndexFor(started.run, c), { now: T0 + 100, tz: TZ });
 
     // Simulate a reload: throw away the in-memory run, keep only the database.
     const resumed = await startSession({ surah: SURAH, now: T0 + 200, tz: TZ }, c);
@@ -584,5 +693,103 @@ describe("DEFECTS.md#B2 / v3-D26 — every wire rung is resolved by gradeClassTo
     for (const e of produced) {
       expect(["S2", "S3"]).toContain(e.rung);
     }
+  });
+});
+
+// v3-D98 — FR6 Door 1: `packages/engine/src/freeplay.ts#extraLearnGrant` was
+// real, pure, unit-tested three times over (v3-D97's own sweep found it) and
+// had ZERO production callers anywhere in this app. A learner who finished
+// today's assembled queue simply saw "Session complete" with no offer of one
+// more gate-intact, cost-disclosed ayah — the exact "mechanism built and
+// unit-tested, zero production callers" shape v3-D82..D97 each closed one
+// instance of.
+describe("v3-D98 — Door 1, 'extra Learn' after the assembled queue is done", () => {
+  it("offers nothing before the mastery gate window opens the FIRST candidate is un-encoded — a virgin log grants the first mushaf-order ayah", async () => {
+    const c = corpus();
+    const offer = await extraLearnOfferFor(
+      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true },
+      c,
+      T0,
+    );
+    expect(offer.granted).toBe(true);
+    expect(offer.ayah).toBe(1);
+    expect(offer.costMin).toBeGreaterThan(0);
+  });
+
+  it("a real first session (budget-limited on the 111-ayah surah) leaves candidates behind, and Door 1 offers the NEXT one", async () => {
+    const c = corpus12();
+    const started = await startSession({ surah: SURAH_12, now: T0, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+    const { run, taps } = await playThrough(started.run, c);
+    expect(taps).toBeGreaterThan(0);
+    expect(run.done).toBe(true);
+
+    // What the FIRST session actually encoded, derived from the real log —
+    // never a hardcoded ayah number, which would freeze a corpus-cost detail
+    // this test has no business asserting.
+    const events = await getAllEvents();
+    const encoded = new Set(
+      events.filter((e) => e.type === "ayah_produced").map((e) => e.ayah),
+    );
+    // The 8-minute default budget must not have swallowed the whole surah, or
+    // this test is not exercising the scenario it claims to (see the corpus12
+    // comment above for why 12, not 112, is used here).
+    expect(encoded.size).toBeGreaterThan(0);
+    expect(encoded.size).toBeLessThan(111);
+
+    const offer = await extraLearnOfferFor(run, c, T0 + taps * 1000);
+    expect(offer.granted).toBe(true);
+    expect(offer.ayah).not.toBeNull();
+    expect(encoded.has(offer.ayah!)).toBe(false);
+    expect(offer.costMin).toBeGreaterThan(0);
+  });
+
+  it("reports 'nothing left to Learn' once every ayah in the surah is already encoded", async () => {
+    // Surah 112 is small enough that a single natural session already learns
+    // every one of its 4 ayat (see the corpus12 comment above) — the other
+    // half of Door 1's contract: it must not keep offering once there is
+    // genuinely nothing left.
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+    const { run } = await playThrough(started.run, c);
+    expect(run.done).toBe(true);
+
+    const offer = await extraLearnOfferFor(run, c, T0 + 10_000);
+    expect(offer.granted).toBe(false);
+    expect(offer.ayah).toBeNull();
+    expect(offer.reason).toBe("nothing left to Learn");
+  });
+
+  it("startExtraLearn extends a DONE run with the offered ayah, and it finishes exactly like any other queue item", async () => {
+    const c = corpus12();
+    const started = await startSession({ surah: SURAH_12, now: T0, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+    const first = await playThrough(started.run, c);
+    expect(first.run.done).toBe(true);
+
+    const now2 = T0 + first.taps * 1000;
+    const offer = await extraLearnOfferFor(first.run, c, now2);
+    expect(offer.granted).toBe(true);
+    const offeredAyah = offer.ayah!;
+
+    const extended = startExtraLearn(first.run, c, offeredAyah);
+    expect(extended.done).toBe(false);
+    expect(extended.queue.length).toBe(first.run.queue.length + 1);
+    expect(extended.queue[extended.cursor]!.ayah).toBe(offeredAyah);
+    expect(extended.machine.ayah).toBe(offeredAyah);
+
+    // Playing THIS through must land a real ayah_produced for the offered
+    // ayah and end the run done again — Door 1 reuses the ordinary commit
+    // path, not a parallel one that could drift from it (invariant #2).
+    const second = await playThrough(extended, c);
+    expect(second.taps).toBeGreaterThan(0);
+    expect(second.run.done).toBe(true);
+
+    const events = await getAllEvents();
+    const producedForOffered = events.filter(
+      (e) => e.type === "ayah_produced" && e.ayah === offeredAyah,
+    );
+    expect(producedForOffered.length).toBe(1);
   });
 });
