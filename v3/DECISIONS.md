@@ -4791,3 +4791,110 @@ test coverage meant nothing ever exercised the real path string.
 three uncomputed `SystemHealthController::METRICS` members; a "coverage
 alerts" affordance beyond the degraded banner, if BUILD-PLAN's phrase meant
 something more specific than what shipped here.
+
+---
+
+## Ratified 2026-08-17 (nightly, later still) — DEFECTS.md#B11: the day-1 cold gate could never actually be passed
+
+This run started per NIGHTLY.md's rule: HEAD was DETACHED at `8bc5b0c`
+(v3-D100), one commit ahead of the locally-cached `main`/`origin/main` refs
+both pointing at `7295325` (v3-D99) — the same "detached HEAD, stale local
+main" shape a dozen prior entries have hit, except this time the detached
+commit was never merged forward at all: `git merge-base --is-ancestor
+7295325 8bc5b0c` confirmed it as a clean fast-forward, so `git checkout main
+&& git merge --ff-only 8bc5b0c && git push` recovered v3-D100's work (System
+Health admin frontend) before anything else started. Recorded here because
+it is a NEW failure shape for this ledger — not a stale ref pointing behind
+a commit that landed, but a genuinely finished, verified commit that a prior
+run simply never pushed to `main`. A future run should treat "HEAD ahead of
+local `main`, and `main` ahead of nothing further" as its own case: check
+`git merge-base --is-ancestor <local-main> HEAD` before assuming the usual
+`checkout -B main origin/main` reconciliation is the fix — that command
+would have DISCARDED v3-D100 had it been applied here instead.
+
+Per v3-D82 through v3-D100's established practice, a fresh, code-blind
+research agent (Explore) was dispatched to sweep for the next "mechanism
+built and unit-tested, zero production callers" instance, given the full
+accumulated exclusion list (`EntitlementMachine::merge()`,
+`permitsIssuance`/`permitsReview`, `TrialAttribution`, `useWriterStatus()`,
+`describeCertification()`, `regionFromCountry()`, `AdminRole::
+OPERATOR`/`MODERATOR`, `rowAtomKey()`, the RC-only session-loop architecture
+as ratified design, step 30's E6/E7/E8, `lib/corpus/load.ts`'s SSR override
+gap, `isQuestionDisabled()`, `computeStreak()`/`completedDayIndices()` (now
+wired), freeplay.ts Door 1 (now wired, Doors 2/3 deliberately open), B10
+(fixed), the System Health frontend (now wired), and FirstRecall/ExplainTrace
+(swept, clean)).
+
+**Finding:** not a zero-caller mechanism this time, but the same *shape* of
+defect B10/B2 already named — a caller re-deriving/misrouting a grading
+decision instead of using the dedicated resolver. `lib/session/run.ts
+#answerAfterTap` always emitted `ayah_produced` for a completed reconstruction
+pass, even when the completed queue item was a due day-1 cold **gate**
+(`run.queue[run.cursor].kind === "gate"`, read once by `machineFor` a few
+lines above to size the reconstruction full, never checked again at commit
+time). `gate.ts#applyGateResult()` — the only place `AtomState.gatePassed`
+is ever set `true` — is folded exclusively from a dedicated `gate_result`
+event; a mis-emitted S3 `ayah_produced` instead hits the ordinary fold branch,
+which re-arms the SAME gate for the next learning-day. Since
+`unlockPermitted()`'s default `gateTolerance` is 0, this meant a default-pace
+learner who completed one ayah's Learn could NEVER unlock a second ayah — the
+gate reappeared, was "passed" from the learner's point of view, and silently
+re-scheduled itself for tomorrow, forever, with no error surfaced anywhere.
+
+Independently verified before writing any code, not taken on the sweep
+agent's word: read `gate.ts`, `rebuild.ts`'s `gate_result` branch,
+`scheduler.ts`'s queue-item `kind` classification, and `answerAfterTap`
+directly; confirmed via a throwaway diagnostic test that a first session on
+surah 112 only ever produces S2 (partial) completions (each ayah has 3-4
+words, Learn band blanks 1), so no naturally-reachable single-session
+scenario schedules a gate — the RED test therefore seeds the post-encoding
+state via the SAME public `append()` a genuine Carry-band completion uses
+(an `ayah_produced`/S3 event), never a fabricated internal atom shape.
+
+**Fixed:** `answerAfterTap` now emits `gate_result`
+(`rung: gradeClassToWire("gate")`, `correct: adv.correct`) instead of
+`ayah_produced` when the completed item's `kind` is `"gate"`.
+
+**Verified, RED then green:**
+- `lib/session/run.test.ts` gained one test: seed an S3 `ayah_produced` for
+  ayah 1 (scheduling a cold gate for the next learning-day), start a session
+  exactly one learning-day later (not two — a >=2-day gap classifies as a
+  "makeup" item instead, a different scheduler.ts branch), confirm the
+  assembled queue's first item is genuinely `kind: "gate"`, play it through
+  correctly, and assert a `gate_result` event lands (never a second
+  `ayah_produced` for the same ayah) and the rebuilt atom is
+  `gatePassed: true`.
+- Confirmed RED against the unfixed source: `git stash push -- lib/session/
+  run.ts` (kept the test), re-ran — the new test failed on exactly
+  `gateResults.length` being 0 (all other 21 tests in the file stayed green).
+  `git stash pop` restored the fix; 22/22 green again.
+- `TZ=UTC make test`: **1935 passing** (was 1934) — 255 v2 vitest + 47
+  v2/api + 272 v3/api + 111 corpus-compiler + 417 engine + 61 fold-runner +
+  **772** apps/web (was 771, +1 — exactly this run's new test).
+  `check-test-floor.mjs`: OK, 1935 >= floor 1899 (+36 margin, `TEST-FLOOR`
+  left unmoved, same discipline as every prior entry).
+- `TZ=UTC make build`: exit 0, 19 routes (unchanged — no route file
+  touched), boundaries gate OK (185 files, sacred-text clause clean over
+  every changed file, no Arabic codepoint introduced — checked
+  programmatically against every range INVARIANTS.md's Absolute B names).
+- No `v1/**`/`v2/**` edit — `v2/tsconfig.tsbuildinfo`'s build-side
+  regeneration reverted before staging, the same housekeeping v3-D81 onward
+  each record; `git diff --stat -- v1 v2` empty at commit time.
+
+**Explicitly NOT done, named so a future run does not re-discover this as
+new:** `sessionSummary.ts#summarizeSession` counts `ayatCompleted` only from
+`ayah_complete`/`ayah_produced` events, so a session whose only completed
+item was a passed gate now shows 0 ayat completed on the summary screen
+(previously it wrongly counted as 1, purely because the gate was mis-emitted
+as `ayah_produced`). No existing test exercises this combination, and
+whether/how the completion screen should credit a passed gate separately is
+a small UI question, not part of this fix. This run's sweep also did not
+re-examine `gateForgiveness()`/`demoteToLearn()` (the forgiveness-ladder
+half of gate.ts) — `applyGateResult` can now be reached with `passed: true`,
+but nothing in the current session loop can ever produce `passed: false`
+(a wrong tap during a gate reconstruction is a slip that does not advance,
+per `advanceReconstruct`'s own design, so a gate item, once started, is
+always eventually completed correctly) — whether/how a genuine gate FAILURE
+should ever be recorded (timeout? abandon-and-resume? a slip-count
+threshold?) is an open product question this fix does not answer, left
+exactly where gate.ts's own header left it.

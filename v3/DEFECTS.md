@@ -4,11 +4,66 @@ Every one verified in source, not inferred. Each names its owning milestone and
 the regression test that closes it.
 
 **B1–B6** are v2 engine/data defects carried into the port. **B7–B9** were found
-by executing the v2 harness. **B10** was found in v3's own session loop
+by executing the v2 harness. **B10, B11** were found in v3's own session loop
 (build-plan step 18), independent of the v2 port. **E-01…E-08** are
 multi-surah defects that only manifest once a second surah exists.
 
 ---
+
+## B11 — the day-1 cold gate could never actually be PASSED ✅ CLOSED (build-plan step 18, v3-D101)
+
+`lib/session/run.ts#answerAfterTap` always emitted `type: "ayah_produced"` for
+a completed reconstruction pass, regardless of whether the just-completed
+queue item was an ordinary "learn"/"review" item or a due day-1 cold **gate**
+item (`run.queue[run.cursor].kind === "gate"` — read once by `machineFor` to
+size the reconstruction as full-ayah, but never checked again at commit time).
+
+`gate.ts#applyGateResult()` is the ONLY place `AtomState.gatePassed` is ever
+set `true`, and it is folded exclusively from a `gate_result` event
+(`rebuild.ts:88-100`). A mis-emitted `ayah_produced` with rung S3 instead hits
+the `"ayah_produced"` fold branch, which — because the rung is S3 — calls
+`scheduleGate()` AGAIN, re-arming the identical gate for the next
+learning-day. `gatePassed` never becomes `true`.
+
+⇒ Since `unlockPermitted()`'s default `gateTolerance` is 0 (pace.ts's
+"steady" mode), a default-pace learner who completed their first ayah's Learn
+could never unlock a second ayah: every day the same cold gate reappeared,
+was answered correctly, and was silently re-scheduled for tomorrow — an
+infinite loop with no learner-visible error. Same shape as B10/B2: a caller
+re-deriving/misrouting a grading decision instead of routing through the
+dedicated, tested resolver.
+
+**Why nothing caught it:** no test anywhere — engine-level or `run.test.ts`
+— drove a "learn → next learning-day → complete the due gate" scenario
+through the real session loop; `gate.ts`'s own 13 tests exercise
+`applyGateResult`/`scheduleGate` in isolation, never through `run.ts`.
+
+**Fixed:** `answerAfterTap` now checks `run.queue[run.cursor]?.kind ===
+"gate"` and, when true, emits `gate_result` (`rung: gradeClassToWire("gate")`,
+`correct: adv.correct`) instead of `ayah_produced`.
+
+**Verified:**
+- RED confirmed by reverting the fix (`git stash` of the source file only,
+  test kept) and re-running `run.test.ts`: the new test failed on exactly
+  `gateResults.length` being 0; reverted byte-identically, 22/22 green again.
+- A regression test seeds a genuine S3 `ayah_produced` (the same public
+  `append()` a real Carry-band completion uses, never a fabricated internal
+  atom shape), advances to the next learning-day, confirms the assembled
+  queue actually opens with a `"gate"` item, plays it through correctly, and
+  asserts both a `gate_result` event lands (never a second `ayah_produced`
+  for the same ayah) and the rebuilt atom is `gatePassed: true`.
+- `TZ=UTC make test`: 1935 passing (was 1934), floor 1899 satisfied (+36
+  margin). `TZ=UTC make build`: exit 0, 19 routes (unchanged). No `v1/**`/
+  `v2/**` edit, no Arabic codepoint introduced.
+
+**Explicitly not addressed, named so a future run doesn't re-discover it as
+new:** `sessionSummary.ts#summarizeSession` counts `ayatCompleted` only from
+`ayah_complete`/`ayah_produced` events, so a session whose only work was a
+passed gate now shows 0 ayat completed on the summary screen (previously it
+wrongly counted as 1, only because the gate was mis-emitted as
+`ayah_produced`). No existing test asserts on this combination. Whether/how
+the completion screen should credit a passed gate is a small, separate UI
+question, not part of this fix's scope.
 
 ## B10 — a tap graded against the engine's raw order, not the shuffled bank the learner actually saw ✅ CLOSED (build-plan step 18, v3-D99)
 

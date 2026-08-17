@@ -53,14 +53,42 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 1934 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 1935 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 771 apps/web. (v3-D100, 2026-08-17)
+             # + 417 engine + 61 fold-runner + 772 apps/web. (v3-D101, 2026-08-17)
              # `make test` enforces v3-D95's test-count floor (`v3/TEST-FLOOR`,
              # currently 1899, so the margin above is intentionally not yet
              # banked into the floor) — a suite that silently shrinks (deleted
              # test file, stray `.skip`) now fails the build even though every
              # test that DID run still passed.
+             # NOTE (v3-D101): DEFECTS.md#B11 — the day-1 cold gate (FR3,
+             # gate.ts) could never actually be PASSED on the shipped
+             # `/session` route. `lib/session/run.ts#answerAfterTap` always
+             # emitted `ayah_produced` for a completed reconstruction pass,
+             # even when the completed queue item was a due gate
+             # (`run.queue[cursor].kind === "gate"`, read once by `machineFor`
+             # to size the reconstruction, never checked again at commit
+             # time). `gate.ts#applyGateResult()` — the only place
+             # `gatePassed` is ever set true — is folded exclusively from a
+             # dedicated `gate_result` event; the mis-emitted S3
+             # `ayah_produced` instead re-armed the SAME gate for the next
+             # learning-day (rebuild.ts's ordinary rung-S3 branch calls
+             # `scheduleGate()` again). Since `unlockPermitted()`'s default
+             # tolerance is 0, a default-pace learner who completed one
+             # ayah's Learn could NEVER unlock a second ayah — the gate
+             # reappeared, was answered correctly, and silently rescheduled
+             # itself forever, with no error surfaced anywhere. Same shape as
+             # B10/B2: a caller re-deriving/misrouting a grading decision
+             # instead of the dedicated resolver. Fixed: `answerAfterTap` now
+             # emits `gate_result` (`correct: adv.correct`) instead of
+             # `ayah_produced` when the completed item's kind is "gate".
+             # Verified RED (reverting just the source, keeping the new
+             # test, reproduced the failure on exactly `gateResults.length
+             # === 0`) then green. NOT addressed: `sessionSummary.ts` still
+             # only counts `ayah_produced`/`ayah_complete` toward
+             # `ayatCompleted`, so a gate-only session shows 0 ayat completed
+             # on the summary screen — a small, separate UI question. See
+             # DEFECTS.md#B11 and DECISIONS.md v3-D101.
              # NOTE (v3-D100): `Admin\SystemHealthController` (build-plan step
              # 24 — "System Health: both checks, coverage alerts, degraded
              # banner, rebuild with mutex") had a fully-tested backend and ZERO

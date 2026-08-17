@@ -447,18 +447,41 @@ async function answerAfterTap(
   ctx: AppendContext,
 ): Promise<SessionRun> {
   if (adv.ayahProduced) {
-    const ayahEvent = {
-      type: "ayah_produced",
-      ts: ctx.now,
-      tz: ctx.tz,
-      surah: run.surah,
-      ayah: cur.ayah,
-      // A fully-blanked pass encodes as S3; a partial one as S2. The ENGINE
-      // decided which via `full` — this only resolves that GradeClass to its
-      // wire Rung via gradeClassToWire(), never a re-derived ternary (B2).
-      rung: gradeClassToWire(adv.full ? "s3_full" : "s2_partial"),
-      structured: true,
-    } as DrillEvent;
+    // DEFECTS.md#B10-shaped drift (v3-D101): a completed queue item's `kind`
+    // (`run.queue[run.cursor]`) is read once by `machineFor` to size the
+    // reconstruction (`full = q.kind === "gate"`) but was never read again
+    // here. A completed day-1 cold gate item was always emitted as an
+    // ordinary `ayah_produced`/S3, which `rebuild.ts` folds by calling
+    // `scheduleGate()` again rather than `applyGateResult()` — the ONLY
+    // place `gatePassed` is ever set true — so the gate silently re-armed
+    // for the next learning-day forever and a default-pace learner could
+    // never unlock a second ayah. `gate_result` is the dedicated wire event
+    // `rebuild.ts`/`gate.ts` already handle correctly; this only routes a
+    // completed gate item through it instead of re-deriving the outcome.
+    const isGate = run.queue[run.cursor]?.kind === "gate";
+    const ayahEvent = isGate
+      ? ({
+          type: "gate_result",
+          ts: ctx.now,
+          tz: ctx.tz,
+          surah: run.surah,
+          ayah: cur.ayah,
+          rung: gradeClassToWire("gate"),
+          correct: adv.correct,
+          structured: true,
+        } as DrillEvent)
+      : ({
+          type: "ayah_produced",
+          ts: ctx.now,
+          tz: ctx.tz,
+          surah: run.surah,
+          ayah: cur.ayah,
+          // A fully-blanked pass encodes as S3; a partial one as S2. The ENGINE
+          // decided which via `full` — this only resolves that GradeClass to its
+          // wire Rung via gradeClassToWire(), never a re-derived ternary (B2).
+          rung: gradeClassToWire(adv.full ? "s3_full" : "s2_partial"),
+          structured: true,
+        } as DrillEvent);
 
     return commitThenContinue(ayahEvent, ctx, null, () =>
       settleAnswer(run, c, cur, adv, optionIndex),

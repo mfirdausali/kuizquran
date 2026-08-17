@@ -35,9 +35,12 @@ import { IDBFactory } from "fake-indexeddb";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Corpus } from "@engine/types.ts";
+import type { Corpus, DrillEvent } from "@engine/types.ts";
+import { rebuild } from "@engine/rebuild.ts";
+import { atomKey } from "@engine/atom.ts";
 
 import { getAllEvents } from "@/lib/idb/read";
+import { append } from "@/lib/idb/append";
 import { resetDbForTests } from "@/lib/idb/db";
 import { writeLock } from "@/lib/idb/writeLock";
 import { assemblePass } from "@/lib/onboarding/pass";
@@ -791,5 +794,101 @@ describe("v3-D98 — Door 1, 'extra Learn' after the assembled queue is done", (
       (e) => e.type === "ayah_produced" && e.ayah === offeredAyah,
     );
     expect(producedForOffered.length).toBe(1);
+  });
+});
+
+// v3-D101 — the day-1 cold gate (FR3/invariant #9, gate.ts) can never actually
+// be PASSED on the shipped `/session` route. `gate.ts#applyGateResult()` is
+// the ONLY place `AtomState.gatePassed` is ever set true, and it is folded
+// exclusively from a `gate_result` event (rebuild.ts:88-100) — but
+// `answerAfterTap` in this module always emits `type: "ayah_produced"` for a
+// completed reconstruction pass, regardless of whether the queue item it just
+// completed was a "learn"/"review" item or a due "gate" item (`run.queue[cursor]
+// .kind === "gate"`, set by `machineFor`'s own `full = q.kind === "gate"`
+// clause a few lines above — read, but never checked again at commit time).
+//
+// Consequence, traced through the real fold: a completed gate item lands as
+// an S3-rung `ayah_produced`, which `rebuild.ts`'s "rung_complete"/
+// "ayah_produced" branch folds by calling `scheduleGate()` AGAIN (because
+// `e.rung === "S3"`) — re-arming the SAME gate for the next learning-day
+// rather than ever calling `applyGateResult()`. `gatePassed` stays `false`
+// forever. Since `unlockPermitted()`'s default `gateTolerance` is 0
+// (pace.ts's "steady" default), a learner who has completed one ayah's Learn
+// can NEVER unlock a second ayah — every day the same cold gate reappears,
+// gets "passed" from the learner's point of view, and silently re-schedules
+// itself for tomorrow. This is the same shape of defect as B10 (v3-D99) and
+// B2 (v3-D83): a caller re-deriving/misrouting a grading decision instead of
+// using the dedicated, tested resolver — on a path nothing in this file
+// exercised before tonight (grep confirms zero `gate_result`/`kind: "gate"`
+// references anywhere in this file prior to this block).
+describe("v3-D101 — the day-1 cold gate must actually be passable through the real session loop", () => {
+  it("completing a due cold gate emits gate_result and marks the atom gatePassed, not just re-armed for tomorrow", async () => {
+    const c = corpus();
+    const gatedAyah = 1;
+
+    // Seed the state a genuine Carry-band S3 completion leaves behind — the
+    // SAME wire event `answerAfterTap` itself emits for a full production —
+    // rather than grinding through the real spacing algorithm across many
+    // simulated days to reach one naturally. `append()` is the same public,
+    // production entry point every real tap commits through.
+    await append(
+      {
+        type: "ayah_produced",
+        ts: T0,
+        tz: TZ,
+        surah: SURAH,
+        ayah: gatedAyah,
+        rung: "S3",
+        structured: true,
+      } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+
+    const seededAtoms = rebuild(await getAllEvents());
+    const seededAtom = seededAtoms.get(atomKey(SURAH, "ayah", gatedAyah));
+    // Confirms the seed actually exercises this test's precondition — the
+    // atom is encoded with a gate due, not yet passed.
+    expect(seededAtom?.encoded).toBe(true);
+    expect(seededAtom?.gateDueAt).not.toBeNull();
+    expect(seededAtom?.gatePassed).toBe(false);
+
+    // Exactly one learning-day later — a normal next-day return (NOT a
+    // skipped-day make-up, which scheduler.ts classifies differently: a gap
+    // of >=2 learning-days routes through the "makeup" branch instead of the
+    // "gate" branch). T0 is 09:00 UTC, past DEFAULT_DAY_CONFIG's 04:30
+    // rollover, so T0 + 24h lands past the SAME rollover the next day —
+    // exactly one learning-day later, and past the gate's Aug-12 04:30 due
+    // time seeded above.
+    const day2 = T0 + 86_400_000;
+    const started = await startSession({ surah: SURAH, now: day2, tz: TZ }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+
+    // The assembled queue must open with the due gate (scheduler.ts's own
+    // FR3 order: make-ups → gates → reviews → learn).
+    const firstItem = started.run.queue[0];
+    expect(firstItem?.kind).toBe("gate");
+    expect(firstItem?.ayah).toBe(gatedAyah);
+
+    const { taps } = await playThrough(started.run, c);
+    expect(taps).toBeGreaterThan(0);
+
+    // The learner completed the gate CORRECTLY — `playThrough` always taps
+    // the shuffled-correct index (`correctIndexFor`, above). The wire must
+    // record a PASSED cold gate.
+    const events = await getAllEvents();
+    const gateResults = events.filter((e) => e.type === "gate_result");
+    expect(gateResults.length).toBeGreaterThan(0);
+    expect(gateResults.every((e) => e.correct === true)).toBe(true);
+    // The bug's exact wrong emission: a completed gate item must NEVER be
+    // recorded as a second ayah_produced for the same ayah.
+    const wrongEmissions = events.filter(
+      (e) => e.type === "ayah_produced" && e.ayah === gatedAyah && e.ts >= day2,
+    );
+    expect(wrongEmissions.length).toBe(0);
+
+    const atoms = rebuild(events);
+    const atom = atoms.get(atomKey(SURAH, "ayah", gatedAyah));
+    expect(atom?.gatePassed).toBe(true);
   });
 });
