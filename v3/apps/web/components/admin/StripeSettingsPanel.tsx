@@ -66,7 +66,7 @@ export function StripeSettingsPanel() {
     let alive = true;
     void (async () => {
       try {
-        const res = await apiFetch("/admin/stripe");
+        const res = await apiFetch("/api/admin/stripe");
         if (!alive) return;
         if (!res.ok) {
           setLoad({
@@ -93,7 +93,7 @@ export function StripeSettingsPanel() {
     setProbe(null);
     void (async () => {
       try {
-        const res = await apiFetch("/admin/stripe/test", { method: "POST" });
+        const res = await apiFetch("/api/admin/stripe/test", { method: "POST" });
         setProbe((await res.json()) as ProbeResult);
       } catch {
         setProbe({ ok: false, reason: "unreachable", message: "Could not reach the API." });

@@ -53,14 +53,34 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 1913 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 1934 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 750 apps/web. (v3-D99, 2026-08-17)
+             # + 417 engine + 61 fold-runner + 771 apps/web. (v3-D100, 2026-08-17)
              # `make test` enforces v3-D95's test-count floor (`v3/TEST-FLOOR`,
              # currently 1899, so the margin above is intentionally not yet
              # banked into the floor) — a suite that silently shrinks (deleted
              # test file, stray `.skip`) now fails the build even though every
              # test that DID run still passed.
+             # NOTE (v3-D100): `Admin\SystemHealthController` (build-plan step
+             # 24 — "System Health: both checks, coverage alerts, degraded
+             # banner, rebuild with mutex") had a fully-tested backend and ZERO
+             # frontend callers — `find "app/(admin)" -type f` returned only
+             # `/workbench` and `/settings/stripe`. New `lib/admin/health.ts` +
+             # `components/admin/SystemHealthPanel.tsx` +
+             # `app/(admin)/settings/health/page.tsx` give it a face, mirroring
+             # `loadFrontier`'s three-state discipline (#167: unknown is never
+             # painted as 0) and #168's queued-vs-failed rebuild distinction.
+             # Adjacent finding while building it: `StripeSettingsPanel.tsx`
+             # (zero prior test coverage) called `apiFetch("/admin/stripe")` —
+             # missing the `/api` prefix every other call site in this app
+             # uses — so the shipped Stripe settings screen 404'd before
+             # Laravel ever saw the request. Fixed both call sites; a
+             # regression test reproduces the bug against the unfixed
+             # component first (RED), then confirms the fix. This run also
+             # swept every other `onAnswer`-shaped wiring v3-D99 flagged as
+             # unaudited (`FirstRecall`, `ExplainTrace`) for B10's exact drift
+             # and found none — a genuine, verified negative. See
+             # DECISIONS.md v3-D100.
              # NOTE (v3-D99): DEFECTS.md#B10, found while wiring v3-D98 (below).
              # `lib/session/run.ts#answerCurrent` graded a tap against the
              # ENGINE'S RAW, unshuffled `[correct, ...distractors]` order

@@ -4688,3 +4688,106 @@ reached by `answerCurrent` at all (`SessionIsland` only ever renders
 this defect (a caller re-deriving "the current item" independently of the
 assembly that was actually rendered) is worth a dedicated sweep of its own
 un-scoped scope for a future night, not attempted here.
+
+### v3-D100 — System Health gets its missing admin frontend (build-plan step 24); an adjacent path bug found and fixed in the Stripe settings panel
+
+**What this run did first.** Picked up v3-D99's own named follow-on (audit
+every other `onAnswer`-shaped wiring for the same "caller re-derives the
+current item independently of what rendered" drift). Traced `QuizCard` →
+`ChoiceCard`/`LocateChoiceCard`/`OrderTilesCard` and both non-`SessionIsland`
+callers (`FirstRecall` for onboarding, `ExplainTrace` for the workbench
+preview). Both resolve the tapped surface from the SAME `assembled.item`/
+`p.item` object they render (`FirstRecall`: `assembled.item.options[index]`;
+`ExplainTrace`: `onAnswer` is the literal no-op `inert()`, nothing is graded).
+**No B10-class bug found** — a genuine, verified negative, named so a future
+run does not re-walk the same call graph.
+
+**What this run found instead**, continuing the sweep past that empty
+result: `Admin\SystemHealthController` (`GET /api/admin/health`, `POST
+/api/admin/health/rebuild-atom-cache`) — BUILD-PLAN step 24's "System Health
+(both checks, coverage alerts, degraded banner, rebuild with mutex)" — has
+been fully built and tested (`tests/Feature/Admin/SystemHealthTest.php`, 7
+tests incl. edge case #167's unknown-vs-zero distinction and #168's rebuild
+mutex) since the admin console landed, with **ZERO frontend callers**:
+`find "app/(admin)" -type f` returned only `/workbench` and
+`/settings/stripe`; `grep -rln "admin/health" apps/web` (excluding this
+controller's own PHP) returned nothing. The exact "mechanism built and
+unit-tested, zero production callers" class this build has now closed nine
+times running (v3-D82 through v3-D99), this time on the operator-facing side
+rather than the learner-facing one.
+
+**Built:**
+- `apps/web/lib/admin/health.ts` — `loadHealth()`/`rebuildAtomCache()`,
+  mirroring `lib/workbench/verifications.ts#loadFrontier`'s three-state
+  discipline exactly: failure is a STATE, never an exception; an unreported
+  check decodes to `status: "unknown"`, never fabricated as `0`.
+- `apps/web/components/admin/SystemHealthPanel.tsx` — renders the two REAL
+  checks (`fold_determinism_check`, `selection_determinism_check`) in a
+  table with #167's unknown/ok/divergent distinction visible per row, a
+  degraded banner (`role="alert"`) when any check is not a genuine `ok`, and
+  a rebuild button wired to the mutex-aware endpoint (#168: a 202/queued
+  response is reported as queued, never as silent success).
+- `apps/web/app/(admin)/settings/health/page.tsx` — the route, mirroring
+  `/settings/stripe`'s own shell exactly (same route group, same "no
+  client-side admin gate yet" posture already accepted for that screen).
+
+**Deliberately NOT done, stated rather than faked** (mirroring
+`ExplainTrace`'s own discipline about showing only what is real):
+`SystemHealthController::METRICS` registers `atom_cache_coverage`,
+`events_ingested_24h` and `dead_letter_depth` as closed-set members (kept
+apart from the forbidden engagement-bait metrics), but `index()` only ever
+computes the two determinism checks — the other three have no backend
+implementation to read from (there is, for instance, no dead-letter
+mechanism anywhere in this codebase yet for `dead_letter_depth` to report
+on). This panel renders exactly the two checks the API actually answers;
+inventing placeholder rows for the other three would be this build's own
+named "manufactures confidence" mistake. Also not done: the client-side
+admin route guard `/workbench`'s own header already named as missing — this
+screen inherits that same accepted gap, not a new one.
+
+**The adjacent bug, found while building the sibling panel to the correct
+pattern.** `StripeSettingsPanel.tsx` (shipped with the Stripe admin surface,
+no prior test file at all — confirmed: `find . -iname "*stripe*"` returns
+only the component and its page) called `apiFetch("/admin/stripe")` and
+`apiFetch("/admin/stripe/test", ...)` — missing the `/api` prefix every
+OTHER `apiFetch` call site in this app uses (`grep`'d all nine call sites;
+eight already carried `/api/...`, this one alone did not). Laravel's
+`bootstrap/app.php` `withRouting(api: routes/api.php)` prefixes every route
+in that file with `/api`, matching `SystemHealthTest`'s own
+`/api/admin/health`, so in any real deployment (no `/admin/*` rewrite exists
+— checked `next.config.mjs`) both Stripe panel requests 404 before Laravel
+ever saw them. The shipped Stripe settings screen has never actually loaded
+its data. Same root cause class as every prior "verification that runs on
+the author's machine is not verification" finding (v3-D38/45/49/50): zero
+test coverage meant nothing ever exercised the real path string.
+
+**Fixed:** both calls now target `/api/admin/stripe` and
+`/api/admin/stripe/test`.
+
+**Verified, RED then green, both fixes:**
+- `lib/admin/health.test.ts` (12 tests) and `test/system-health-panel.test.tsx`
+  (7 tests): confirmed RED by moving `health.ts`/deleting the component
+  reference respectively and re-running — `Failed to resolve import`,
+  "0 test" collection failures — then restored and reran green.
+- `test/stripe-settings-panel.test.tsx` (2 tests): written against the
+  UNFIXED component first — both failed with `expected '/admin/stripe' to
+  contain '/api/admin/stripe'`, a genuine reproduction of the live bug, not
+  a hypothetical read of the diff. Fixed the two call sites; reran green.
+- `TZ=UTC make test`: **1934 passing** (was 1913) — 255 v2 vitest + 47
+  v2/api + 272 v3/api + 111 corpus-compiler + 417 engine + 61 fold-runner +
+  **771 apps/web** (was 750, +21: 12 + 7 + 2). `check-test-floor.mjs`: OK,
+  1934 >= floor 1899 (+35 margin, `TEST-FLOOR` left unmoved). `TZ=UTC make
+  build`: exit 0, **19 routes** (was 18 — `/settings/health` is new),
+  boundaries gate OK (185 files, was 179), no Arabic codepoint introduced
+  anywhere in the diff (checked programmatically over every staged file's
+  full codepoint range, not a regex grep — `grep -P` chokes on the
+  U+FE70–FEFF range in this environment's PCRE build).
+- No `v1/**`/`v2/**` edit: `git diff --stat -- v1 v2` empty at commit time
+  (`v2/tsconfig.tsbuildinfo`'s build-side regeneration reverted before
+  staging, same housekeeping v3-D81 onward each record).
+
+**Still open, named for a future run:** the client-side admin auth gate
+(`/workbench`'s own long-standing gap, now shared by two more screens); the
+three uncomputed `SystemHealthController::METRICS` members; a "coverage
+alerts" affordance beyond the degraded banner, if BUILD-PLAN's phrase meant
+something more specific than what shipped here.
