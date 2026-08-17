@@ -53,7 +53,9 @@ import { ayahWords, wordGloss } from "@engine/corpus.ts";
 import type { Corpus, DrillEvent } from "@engine/types.ts";
 
 import { macroFactsFor } from "@/lib/macro/facts.ts";
+import { wordDiagnostics } from "@engine/heatmap.ts";
 import { ayahRow, buildProgressRows, seamRowFrom } from "@/lib/progress/rows";
+import { buildWordAccuracyRows } from "@/lib/progress/wordAccuracy";
 import { buildGraphNodes, isHighlighted } from "@/components/macro/graphNodes.ts";
 import { MacroPanel } from "@/components/macro/MacroPanel";
 import { RingDiagram } from "@/components/macro/RingDiagram";
@@ -133,6 +135,22 @@ function eventsFixture(): DrillEvent[] {
     { ...base, ts: start, correct: true, latency: 3_000 },
     { ...base, ts: start + 6_000, correct: true, latency: 5_000 },
     { ...base, ts: start + 40 * 60_000, correct: true, latency: 900_000 },
+  ];
+}
+
+/** Word-level taps on 12:4 (15 words), position-addressed — never text-typed.
+ *  Position 3: tapped twice, one slip (accuracy 50%). Position 7: tapped once,
+ *  correct (100%). Position 9: tapped once but PRETEST (invariant #3) — must
+ *  be excluded entirely, not counted as a 0%-accuracy tap. Every other
+ *  position of the 15 is never tapped and must not appear at all. */
+function wordTapEventsFixture(): DrillEvent[] {
+  const base = { surah: SURAH, ayah: AYAH, rung: "S1" as const, type: "tap" as const };
+  const start = NOW - 60_000;
+  return [
+    { ...base, ts: start, position: 3, correct: true, latency: 1_000 },
+    { ...base, ts: start + 1_000, position: 3, correct: false, latency: 1_200 },
+    { ...base, ts: start + 2_000, position: 7, correct: true, latency: 900 },
+    { ...base, ts: start + 3_000, position: 9, correct: false, pretest: true, latency: 1_100 },
   ];
 }
 
@@ -446,6 +464,45 @@ describe("how well you hold it (§10 + §15)", () => {
 });
 
 // ===========================================================================
+// 3a. TAP ACCURACY, WORD BY WORD — heatmap.ts#wordDiagnostics, previously
+// built and unit-tested (habit.test.ts) with ZERO production callers.
+// ===========================================================================
+
+describe("tap accuracy, word by word (previously unwired mechanism)", () => {
+  it("buildWordAccuracyRows drops untapped words and formats the tapped ones", () => {
+    const rows = buildWordAccuracyRows([
+      { position: 1, text: "x", accuracy: null, taps: 0 },
+      { position: 2, text: "x", accuracy: 0.5, taps: 2 },
+      { position: 3, text: "x", accuracy: 1, taps: 1 },
+    ]);
+    // Position 1 was never tapped — dropped, not printed as "0%" (rows.ts's
+    // own unmeasured-vs-zero rule, applied here).
+    expect(rows.map((r) => r.position)).toEqual([2, 3]);
+    expect(rows[0]).toEqual({ position: 2, accuracyLabel: "50%", tapsLabel: "2 taps" });
+    expect(rows[1]).toEqual({ position: 3, accuracyLabel: "100%", tapsLabel: "1 tap" });
+  });
+
+  it("against the real corpus + a real event log: only tapped positions survive, pretest excluded", () => {
+    const diagnostics = wordDiagnostics(corpus, wordTapEventsFixture(), AYAH);
+    // 15 words in 12:4; diagnostics has one entry per word regardless of taps.
+    expect(diagnostics.length).toBe(15);
+
+    const rows = buildWordAccuracyRows(diagnostics);
+    // Only positions 3 and 7 were genuinely tapped. Position 9's only tap was
+    // pretest (invariant #3: excluded from grading entirely) and the other 12
+    // words were never touched — none of the three may appear.
+    expect(rows.map((r) => r.position).sort((a, b) => a - b)).toEqual([3, 7]);
+
+    const p3 = rows.find((r) => r.position === 3)!;
+    const p7 = rows.find((r) => r.position === 7)!;
+    expect(p3.accuracyLabel).toBe("50%"); // 1 correct of 2 taps
+    expect(p3.tapsLabel).toBe("2 taps");
+    expect(p7.accuracyLabel).toBe("100%"); // 1 correct of 1 tap
+    expect(p7.tapsLabel).toBe("1 tap");
+  });
+});
+
+// ===========================================================================
 // 3b. THE FOUR STATES, AS RENDERED OUTPUT — edge case #73
 // ===========================================================================
 //
@@ -503,6 +560,31 @@ describe("the four states, as a learner sees them (#73)", () => {
     // the one straddling the 40-minute gap.
     expect(text).toContain("8s");
     expect(text).not.toMatch(/40m/);
+  });
+
+  it("ready with word taps: shows only the tapped words' accuracy, pretest excluded", () => {
+    const { container } = view({ status: "ready", data: wordTapEventsFixture() as LocalEventRow[] });
+    const text = container.textContent ?? "";
+    expect(text).toContain("Word 3");
+    expect(text).toContain("50%");
+    expect(text).toContain("2 taps");
+    expect(text).toContain("Word 7");
+    expect(text).toContain("100%");
+    expect(text).toContain("1 tap");
+    // Position 9's only tap was pretest — must not surface as a 0%-tapped word.
+    expect(text).not.toContain("Word 9");
+    // Never-tapped words (e.g. position 1) are dropped, not shown at "—" or "0%".
+    expect(text).not.toContain("Word 1 ");
+    expect(text).not.toMatch(/Word 1\b.*0%/);
+  });
+
+  it("ready with no word taps: says so plainly, never a table of absent measurements", () => {
+    const { container } = view({ status: "ready", data: eventsFixture() as LocalEventRow[] });
+    // eventsFixture() has no `position` field on any tap, so nothing folds
+    // into a word-level diagnostic.
+    const text = container.textContent ?? "";
+    expect(text).toMatch(/No word-level taps recorded/i);
+    expect(text).not.toMatch(/Word \d+/);
   });
 
   it("broken: says so and NAMES the reason — never a silent fall-back to empty", () => {
@@ -636,6 +718,12 @@ describe("the route is actually wired (not two stubs behind a green suite)", () 
     // And it never RE-DERIVES them. A half-life or a duration computed beside
     // the JSX is DEFECTS.md#B2's exact shape.
     expect(src).not.toMatch(/halfLifeDays|currentStrength|currentBand|formatDuration|86_?400/);
+  });
+
+  it("wires heatmap.ts#wordDiagnostics through the row-builder discipline, never re-deriving it", () => {
+    const src = readFileSync(resolve(WEB, "components/progress/AyahStatsIsland.tsx"), "utf8");
+    expect(src).toMatch(/wordDiagnostics\(/);
+    expect(src).toMatch(/buildWordAccuracyRows\(/);
   });
 
   it("renders the stage through StageBadge — the app's only stage renderer (#87)", () => {

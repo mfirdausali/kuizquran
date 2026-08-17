@@ -53,14 +53,38 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 1935 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 1940 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 772 apps/web. (v3-D101, 2026-08-17)
+             # + 417 engine + 61 fold-runner + 777 apps/web. (v3-D102, 2026-08-17)
              # `make test` enforces v3-D95's test-count floor (`v3/TEST-FLOOR`,
              # currently 1899, so the margin above is intentionally not yet
              # banked into the floor) — a suite that silently shrinks (deleted
              # test file, stray `.skip`) now fails the build even though every
              # test that DID run still passed.
+             # NOTE (v3-D102): `packages/engine/src/heatmap.ts#wordDiagnostics`
+             # (the ayah-detail route's "one tap deeper" per-word accuracy
+             # diagnostic, invariant #1: words are diagnostics, never the
+             # graded atom) had ZERO production callers, unit-tested since the
+             # heatmap landed (habit.test.ts) but never wired. Fixed:
+             # `AyahStatsIsland.tsx` now computes `wordDiagnostics()` alongside
+             # its existing row read and renders a "Tap accuracy, word by
+             # word" list via the new `lib/progress/wordAccuracy.ts` (rows.ts's
+             # own discipline: the component prints, never computes). A word
+             # never tapped is DROPPED, never printed as "0%" — the same
+             # unmeasured-vs-zero rule `rows.ts` already applies to the ayah
+             # figures above it. RED confirmed by reverting just the wiring
+             # (kept the new lib file, a legitimate standalone unit): 3 of 42
+             # `ayah-detail.test.tsx` tests failed on exactly the new
+             # assertions; reverted byte-identically, 42/42 green again.
+             # `growthCurve()` (heatmap.ts's other unwired export, a Progress
+             # Report growth-over-time curve, v2-D17/D20) and
+             # `packages/engine/src/test.ts`'s entire Test self-quiz feature
+             # (11 exported functions, real coverage, no `/test` route
+             # anywhere) were found by the same sweep and deliberately left
+             # for a future run — each needs its own UI surface, not a wiring
+             # fix. `TZ=UTC make test`: 1940 passing (was 1935), floor 1899
+             # satisfied (+41 margin). `TZ=UTC make build`: exit 0, 19 routes
+             # (unchanged). No v1/v2 edit, no Arabic codepoint introduced.
              # NOTE (v3-D101): DEFECTS.md#B11 — the day-1 cold gate (FR3,
              # gate.ts) could never actually be PASSED on the shipped
              # `/session` route. `lib/session/run.ts#answerAfterTap` always

@@ -1262,6 +1262,27 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Per-word tap accuracy on the ayah detail route — one row per word that has
+   actually been tapped. Mirrors .decay-list's discipline: a real list of
+   sentences, not a chart, and nothing rendered for a word with no taps. */
+.stat-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.stat-list__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
 /* Settings — PDPA export/delete (build-plan step 23, LAUNCH-CHECKLIST gate 19).
    `.settings-input` mirrors `.table-toolbar__input`'s tap-target and hairline
    discipline rather than inventing a new one; the restore-token field is the

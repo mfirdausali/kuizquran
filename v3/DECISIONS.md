@@ -4898,3 +4898,120 @@ always eventually completed correctly) — whether/how a genuine gate FAILURE
 should ever be recorded (timeout? abandon-and-resume? a slip-count
 threshold?) is an open product question this fix does not answer, left
 exactly where gate.ts's own header left it.
+
+---
+
+## Ratified 2026-08-17 (nightly, later still) — `heatmap.ts#wordDiagnostics`: another unwired mechanism, on the ayah detail route
+
+Per v3-D82 through v3-D101's established practice, a fresh, code-blind
+Explore agent swept for the next "mechanism built and unit-tested, zero
+production callers" instance, given the full accumulated exclusion list
+(`EntitlementMachine::merge()`, `permitsIssuance`/`permitsReview`,
+`TrialAttribution`, `useWriterStatus()`, `describeCertification()`,
+`regionFromCountry()`, `AdminRole::OPERATOR`/`MODERATOR`, `rowAtomKey()`, the
+RC-only session-loop architecture, step 30's E6/E7/E8, `lib/corpus/load.ts`'s
+SSR override gap, `isQuestionDisabled()`, `computeStreak()`/
+`completedDayIndices()` (wired), freeplay.ts Door 1 (wired), the System
+Health frontend (wired), FirstRecall/ExplainTrace (swept, clean), B10, and
+B11 (both fixed)).
+
+**Finding:** `packages/engine/src/heatmap.ts` exports three functions.
+`ayahHeatmap` is referenced only in *comments* in `lib/progress/rows.ts` and
+`lib/progress/retention.ts` explaining why it was deliberately NOT used
+(edge case #90 — an ayah-only heatmap would drop the N-1 connection atoms
+that are ~40% of a short surah's memory graph; `rows.ts` builds its rows from
+`expand()` instead) — so despite reading like a "wired" function in a naive
+grep, it too has zero real callers, but its non-use is a documented,
+reasoned decision, not a gap. Its two siblings are not documented at all:
+
+- `wordDiagnostics(corpus, events, ayah)` — per-word tap accuracy for one
+  ayah, excluding pretest taps (invariant #3), aggregated by POSITION so a
+  repeated word's two instances are never conflated. heatmap.ts's own
+  docstring: "one tap deeper on the heatmap... diagnostics only (not a
+  graded unit)."
+- `growthCurve(events, cfg?)` — a named v2 feature (v2-D17/D20), one point
+  per learning-day with a new first-encode, cumulative-encoded count.
+
+Both are exercised by real assertions in `packages/engine/test/habit.test.ts`
+(the `wordDiagnostics`/`growthCurve` describe blocks), and confirmed by grep
+to have zero callers anywhere under `apps/web/**`, `worker/**`, or `api/**`.
+
+`app/(app)/progress/page.tsx`'s own header is unusually explicit about scope
+— it names exactly what landed and what is a deliberate StubNote (the
+per-surah breakdown, the combined-load view, both blocked on a real
+enrollment model). Neither `wordDiagnostics` nor `growthCurve` appears in
+that accounting anywhere, which is what separates this from a scoped
+deferral: it is work nobody added to a page that already renders every other
+figure from the identical `(corpus, atoms, events, now)` input.
+
+**Scope, decided before writing code:** wiring both in one night is two
+separate UI decisions wearing one commit. `wordDiagnostics` slots into the
+ayah detail route's already-existing "HOW WELL YOU HOLD IT" card
+(`AyahStatsIsland.tsx`, already a client island reading this exact ayah's
+events) with no new route, no new fetch, no new component. `growthCurve`
+needs an actual chart/sparkline on `/progress` — a genuinely new rendering
+surface — and is left for a future run, alongside the sweep's secondary
+finding (`packages/engine/src/test.ts`'s entire "Test" self-quiz feature —
+11 exported functions, 146 lines of real coverage in `test.test.ts`, zero
+production callers, no `/test` route anywhere — flagged as possibly
+legitimate post-launch scope rather than a wiring bug, the same shape
+BUILD-PLAN uses to justify freeplay's Doors 2/3 staying open).
+
+**Built:**
+- `apps/web/lib/progress/wordAccuracy.ts` (new) — `buildWordAccuracyRows()`,
+  the presentation layer over `WordDiagnostic[]` that `rows.ts`'s own rule
+  requires ("the component never computes, it only prints"): drops any word
+  with zero taps (never prints "0%" for an untouched word — `rows.ts`'s own
+  unmeasured-vs-zero rule, applied here), formats the rest as
+  `{position, accuracyLabel, tapsLabel}`.
+- `AyahStatsIsland.tsx` — `rowsFor()` now also calls
+  `wordDiagnostics(corpus, events, ayah)` and `buildWordAccuracyRows()`;
+  `StatsBody` renders a new "Tap accuracy, word by word" list when any word
+  has been tapped, or a plain caption ("No word-level taps recorded for this
+  ayah yet") when none has. Referenced by POSITION only (`Word 3`, `Word
+  7`) — never the word's Arabic surface — so the sacred-text rendering
+  pipeline (`FaceText`/`buildFace`, already owning the existing WORD BY WORD
+  section) is not duplicated or bypassed.
+- `app/iman-ext.css` — `.stat-list`/`.stat-list__row`, mirroring
+  `.decay-list`/`.decay-row`'s existing discipline (a real list of
+  sentences, additive-only per the ext layer's own rules).
+
+**Verified:**
+- `test/ayah-detail.test.tsx`: 5 new tests. A pure unit test on
+  `buildWordAccuracyRows` (hand-built `WordDiagnostic[]`, no corpus). An
+  integration test against the real surah-12 fixture corpus and a
+  constructed event log (position 3 tapped twice, one slip; position 7
+  tapped once, correct; position 9's only tap is `pretest: true`) —
+  confirms exactly positions `[3, 7]` survive, with `50%`/`2 taps` and
+  `100%`/`1 tap` respectively, and that the pretest tap at position 9 is
+  excluded entirely rather than counted as a graded 0%. Two component tests
+  drive `AyahStatsView` with real DOM taps' worth of fixture data: the
+  "ready" state with word taps shows "Word 3"/"Word 7" with the right
+  numbers and never shows "Word 9" or a never-tapped position; the "ready"
+  state with no positional taps (the existing `eventsFixture()`, whose taps
+  carry no `position`) shows the plain "no word-level taps" caption and no
+  "Word N" text at all. A wiring test greps `AyahStatsIsland.tsx` for both
+  `wordDiagnostics(` and `buildWordAccuracyRows(`.
+- RED confirmed directly: `git stash` on `AyahStatsIsland.tsx` +
+  `iman-ext.css` only (kept the test file AND the new `wordAccuracy.ts`,
+  which is a legitimate standalone pure unit deserving its own coverage) and
+  reran — 3 of 42 tests failed, exactly the wiring test and the two new
+  "ready" component tests (the pure unit tests on `buildWordAccuracyRows`
+  and `wordDiagnostics` stayed green, correctly, since they test the lib
+  function directly rather than the wiring). `git stash pop` restored the
+  fix; 42/42 green again.
+- `TZ=UTC make test`: **1940 passing** (was 1935) — 255 v2 vitest + 47
+  v2/api + 272 v3/api + 111 corpus-compiler + 417 engine + 61 fold-runner +
+  **777** apps/web (was 772, +5 — exactly this run's new tests).
+  `check-test-floor.mjs`: OK, 1940 >= floor 1899 (+41 margin, `TEST-FLOOR`
+  left unmoved, same discipline as every prior entry).
+- `TZ=UTC make build`: exit 0, 19 routes (unchanged — no route file
+  touched, only an existing client island and a new pure `lib/` module).
+- No `v1/**`/`v2/**` edit. No Arabic codepoint introduced — the new code
+  never touches a corpus text field, only `position` (an integer) and
+  `accuracy`/`taps` (numbers derived from the event log).
+
+**Explicitly not addressed, named so a future run doesn't re-discover them
+as new:** `growthCurve()` (needs a new chart surface on `/progress`) and
+`packages/engine/src/test.ts`'s Test self-quiz feature (needs a new route
+end-to-end) remain unwired, on purpose — see "Scope" above.

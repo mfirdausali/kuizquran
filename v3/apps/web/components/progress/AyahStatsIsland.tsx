@@ -59,6 +59,7 @@
 import { useCallback } from "react";
 
 import { rebuild } from "@engine/rebuild.ts";
+import { wordDiagnostics } from "@engine/heatmap.ts";
 import type { Corpus } from "@engine/types.ts";
 import { getEventsForSurah, useLogState } from "@/lib/idb";
 import type { LocalEventRow, LogState } from "@/lib/idb";
@@ -68,6 +69,7 @@ import {
   seamRowFrom,
   type ProgressRow,
 } from "@/lib/progress/rows";
+import { buildWordAccuracyRows, type WordAccuracyRow } from "@/lib/progress/wordAccuracy";
 import { StageBadge } from "./StageBadge";
 
 export interface AyahStatsIslandProps {
@@ -177,9 +179,10 @@ interface StatsBodyProps {
   seam: ProgressRow | undefined;
   ayah: number;
   surah: number;
+  wordAccuracy: WordAccuracyRow[];
 }
 
-function StatsBody({ row, seam, ayah, surah }: StatsBodyProps) {
+function StatsBody({ row, seam, ayah, surah, wordAccuracy }: StatsBodyProps) {
   // An ayah outside this surah's range. A designed state, never a fabricated
   // set of zeros for an atom that does not exist.
   if (!row) {
@@ -251,6 +254,31 @@ function StatsBody({ row, seam, ayah, surah }: StatsBodyProps) {
         </div>
       ) : null}
 
+      {/* TAP ACCURACY, WORD BY WORD — heatmap.ts's own "one tap deeper"
+          diagnostic (invariant #1: words are diagnostics, never the graded
+          atom). Only words actually tapped appear; an untouched word is
+          dropped, never printed as "0%" — the same unmeasured-vs-zero rule
+          rows.ts follows for the ayah figures above. */}
+      {wordAccuracy.length > 0 ? (
+        <div className="stack stack--tight">
+          <h3 className="retention-subhead">Tap accuracy, word by word</h3>
+          <ul className="stat-list">
+            {wordAccuracy.map((w) => (
+              <li key={w.position} className="stat-list__row">
+                <span className="ltr-island">Word {w.position}</span>
+                <span>{w.accuracyLabel}</span>
+                <span>{w.tapsLabel}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <p className="caption">
+          No word-level taps recorded for this ayah yet — this fills in as you
+          drill it.
+        </p>
+      )}
+
       <p className="caption">
         These are the same numbers the scheduler reads. Time on task counts only
         measured attempts — a session you walked away from is discarded, not
@@ -276,5 +304,6 @@ function rowsFor(
     seam: seamRowFrom(rows, ayah),
     ayah,
     surah: corpus.meta.surah,
+    wordAccuracy: buildWordAccuracyRows(wordDiagnostics(corpus, events, ayah)),
   };
 }
