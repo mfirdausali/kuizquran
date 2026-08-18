@@ -53,14 +53,47 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 1940 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 1957 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 777 apps/web. (v3-D102, 2026-08-17)
+             # + 417 engine + 61 fold-runner + 794 apps/web. (v3-D103, 2026-08-18)
              # `make test` enforces v3-D95's test-count floor (`v3/TEST-FLOOR`,
              # currently 1899, so the margin above is intentionally not yet
              # banked into the floor) — a suite that silently shrinks (deleted
              # test file, stray `.skip`) now fails the build even though every
              # test that DID run still passed.
+             # NOTE (v3-D103): `packages/engine/src/heatmap.ts#growthCurve`
+             # (v2-D17/D20's Progress Report growth curve — one point per
+             # learning-day with a newly-encoded ayah, cumulative count) had
+             # ZERO production callers, unit-tested since the heatmap landed
+             # (habit.test.ts) but never wired — v3-D102's own sweep found it
+             # the previous run and deliberately deferred it, scoped exactly
+             # as "needs an actual chart/sparkline on /progress — a genuinely
+             # new rendering surface." That surface: new `lib/progress/growth.ts`
+             # (`buildGrowthSummary` — the same "component never computes, it
+             # only prints" split `retention.ts` already follows) +
+             # `components/progress/GrowthIsland.tsx` (a client island mirroring
+             # `RetentionIsland`'s four-state discipline, edge cases #72/#73) +
+             # `GrowthPanel.tsx`, wired into `/progress` as a new GROWTH card.
+             # Every bar carries a real, checkable `.sr-only` label ("3 encoded
+             # by day 2") beside its `aria-hidden` height — never colour/shape
+             # alone (§15/#87's rule, applied to a trend rather than a
+             # category) — and height is scaled off the curve's OWN maximum,
+             # floored at 6% so a small nonzero day is never rounded invisible
+             # (same discipline as `.dist-bar__fill`'s data-driven widths).
+             # RED confirmed: reverting just the page wiring (kept the new
+             # `growth.ts`/`GrowthPanel`/`GrowthIsland` files, all legitimate
+             # standalone units) failed 1 of 17 new `progress-growth.test.tsx`
+             # tests, exactly the wiring assertion; reverted byte-identically,
+             # 17/17 green again. `packages/engine/src/test.ts`'s entire Test
+             # self-quiz feature (11 exported functions, real coverage, no
+             # `/test` route anywhere) remains deliberately unwired — it needs
+             # a whole new route, not a card on an existing one. `TZ=UTC make
+             # test`: 1957 passing (was 1940, +17 — exactly this run's new
+             # tests). `TZ=UTC make build`: exit 0, 19 routes (unchanged). No
+             # v1/v2 edit, no Arabic codepoint introduced — every new line
+             # addresses a word by `position` (an integer) or a day by
+             # `ordinal`/`cumulativeEncoded` (integers derived from the event
+             # log), never corpus text.
              # NOTE (v3-D102): `packages/engine/src/heatmap.ts#wordDiagnostics`
              # (the ayah-detail route's "one tap deeper" per-word accuracy
              # diagnostic, invariant #1: words are diagnostics, never the

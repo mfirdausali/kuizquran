@@ -48,6 +48,7 @@ import { loadCorpus, AVAILABLE_SURAHS } from "@/lib/corpus/load";
 import { macroFactsFor } from "@/lib/macro/facts";
 import { MacroPanelIsland } from "@/components/macro/MacroPanelIsland";
 import { RetentionIsland } from "@/components/progress/RetentionIsland";
+import { GrowthIsland } from "@/components/progress/GrowthIsland";
 import { StubNote } from "@/components/shell/StubNote";
 
 /** Which surah this page reports on. A query param today; when a learner can
@@ -111,6 +112,23 @@ export default async function ProgressPage({
             </p>
           ) : (
             <RetentionIsland corpus={corpus} now={now} since={since} />
+          )}
+        </section>
+
+        <section className="card" aria-labelledby="growth-h">
+          <div className="card-header">
+            <h2 id="growth-h" style={{ margin: 0, fontSize: 12, fontWeight: 600 }}>
+              GROWTH
+            </h2>
+          </div>
+
+          {corpus === null ? (
+            <p className="stub-note">
+              No corpus is available for surah {surah} in this build, so there
+              is nothing to report on yet.
+            </p>
+          ) : (
+            <GrowthIsland surah={surah} />
           )}
         </section>
 

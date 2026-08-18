@@ -5015,3 +5015,122 @@ BUILD-PLAN uses to justify freeplay's Doors 2/3 staying open).
 as new:** `growthCurve()` (needs a new chart surface on `/progress`) and
 `packages/engine/src/test.ts`'s Test self-quiz feature (needs a new route
 end-to-end) remain unwired, on purpose — see "Scope" above.
+
+---
+
+### v3-D103 — `growthCurve()` gets the chart surface v3-D102 deferred: a new GROWTH card on `/progress`
+
+**What this run did first.** Reconciled a detached-HEAD state at session
+start: `main`/`origin/main` were both already at `475a700` (v3-D102), but the
+local checkout was on a stale `main` ref three commits behind until fetched
+and fast-forwarded — the exact "trust `git log`/origin over a stale local
+ref" caution NIGHTLY.md's own header now carries, confirmed harmless here
+(origin already had all three commits; no reconciliation work was lost).
+
+**What this run built.** v3-D102 found `packages/engine/src/heatmap.ts`'s
+`growthCurve()` — v2-D17/D20's Progress Report growth curve, one point per
+learning-day with a newly-encoded ayah, cumulative count — unit-tested since
+the heatmap landed (`habit.test.ts`) but with ZERO production callers, and
+scoped it out of that run's fix as needing "an actual chart/sparkline on
+`/progress` — a genuinely new rendering surface." This run built that
+surface, closing the last of the two exports v3-D102 named and left open
+(the second, `packages/engine/src/test.ts`'s Test self-quiz feature, needs a
+whole new route rather than a card on an existing one, and stays open).
+
+**Design, decided before writing code.** `retention.ts`/`RetentionPanel.tsx`
+on this same route already establish the pattern: a pure `lib/progress/*.ts`
+function owns every decision ("the component never computes, it only
+prints"), a `"use client"` island reads the log and handles all four states
+(pending/empty/ready/broken — edge cases #72/#73), and a presentational
+panel renders exactly what it is handed. `growth.ts` follows it exactly,
+with one simplification retention.ts doesn't have: `growthCurve()` needs no
+`now` — the curve is a pure function of the event log alone, so
+`GrowthIsland` takes only `surah`, no `now`/`since` props.
+
+The one real design decision: **what a bar chart's accessible text
+alternative looks like when the data is a TREND (many points) rather than a
+CATEGORY (four fixed bands, `RetentionPanel`'s own case).** Reference: v2's
+own `Progress.tsx` rendered the identical curve as bare divs with no text at
+all — `growth-curve` — a fixed number of unlabelled height-only bars. Porting
+that verbatim would repeat the "picture with no text alternative" shape §15
+exists to forbid, just with a trend instead of a category. Resolved by
+giving every bar a real, checkable sentence (`"3 encoded by day 2"`) as
+`.sr-only` text beside an `aria-hidden` bar, rather than a single caption
+summarizing the whole curve — so a screen reader gets one sentence per data
+point, the same resolution a sighted learner gets from the chart's shape,
+and a test can assert on each point rather than on a paraphrase. The bar
+container scrolls horizontally (`overflow-x: auto`) rather than capping to
+a fixed recent window (unlike `decayRows`' top-5), because — unlike a decay
+list ranked by severity — every point of a growth curve is equally "the
+record," and a long-carried surah's curve should never be silently
+truncated the way `HANDOVER.md`'s own history warns capped-N views can be
+mistaken for the whole.
+
+Each point's `ordinal` (1-based position in the curve) is what gets printed,
+never the engine's raw `learningDayIndex` — a large, meaningless integer to
+a learner ("day 20,672"). `heightPct` is floored at 6% (mirroring
+`.dist-bar__fill`'s own data-driven-not-fixed-scale discipline) so a small
+nonzero day is never rounded to a bar indistinguishable from zero.
+
+**Built:**
+- `apps/web/lib/progress/growth.ts` (new) — `buildGrowthSummary({surah,
+  events, cfg?})`, pure, wrapping `growthCurve()`. Returns `encodedCount`/
+  `encodedLabel` (mirrors v2's own "Growth" / "N encoded" header) and
+  `points: GrowthPoint[]`, each carrying `ordinal`, `day` (kept for a future
+  caller, never printed), `cumulativeEncoded`, `heightPct`, and `label`.
+- `apps/web/components/progress/GrowthPanel.tsx` (new) — presentational
+  only; no threshold, arithmetic, or filter (a wiring test greps the file
+  for `Math.(round|floor|ceil|max|min)` and `filter(` and asserts neither
+  appears, the same discipline `progress-retention.test.tsx` already checks
+  on `RetentionPanel.tsx`).
+- `apps/web/components/progress/GrowthIsland.tsx` (new) — client island,
+  `"use client"` on line 1 (`isClient()` only reads the first five lines),
+  all four log states handled explicitly via `useLogState`/
+  `getEventsForSurah`.
+- `apps/web/app/(app)/progress/page.tsx` — one new `<section>` ("GROWTH"),
+  between RETENTION and the ring, following the existing corpus-null guard
+  (E-07) the RETENTION section already uses.
+- `apps/web/app/iman-ext.css` — `.growth-bars`/`.growth-bar-row`/
+  `.growth-bar`, additive-only, mirroring `.decay-list`/`.dist-bar`'s own
+  conventions (a real list, height/width driven by data).
+
+**Verified:**
+- `test/progress-growth.test.tsx` (new, 17 tests): `buildGrowthSummary`
+  pure-unit coverage (unmeasured zero-state, cumulative counts, 1-based
+  ordinals independent of the raw learning-day index, data-driven height
+  scaling — `[25,50,75,100]` off a curve whose own max is 4 — the 6%-floor
+  case, per-point label text, purity/referential-equality, and invariant
+  #5's free-play exclusion, pinning that this wiring adds no second
+  implementation that could drift from `growthCurve()`'s own guarantee);
+  `GrowthPanel` render tests (real total text, the designed zero-state
+  caption, `aria-hidden` on every `.growth-bar`, a real `.growth-bar-row__label`
+  per bar, data-driven `.growth-bar` heights, no engine decision in the
+  panel source); and the route-wiring tests (client directive position,
+  all four states present, the server page renders `GrowthIsland` and never
+  calls `rebuild()` itself).
+- RED confirmed directly: `git stash` on `app/(app)/progress/page.tsx` only
+  (kept the test file and all three new library/component files, each a
+  legitimate standalone unit) and reran — 1 of 17 failed, exactly the
+  `toMatch(/GrowthIsland/)` wiring assertion; `git stash pop` restored the
+  fix, 17/17 green again.
+- `TZ=UTC make test` (full monorepo, all seven suites, fresh dependency
+  install from a clean checkout): **1957 passing** (was 1940) — 255 v2
+  vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler + 417 engine + 61
+  fold-runner + **794** apps/web (was 777, +17 — exactly this run's new
+  tests). `check-test-floor.mjs`: OK, 1957 >= floor 1899 (+58 margin,
+  `TEST-FLOOR` left unmoved, same discipline as every prior entry).
+- `TZ=UTC make build`: exit 0, 19 routes (unchanged — no new route file,
+  only an existing page section and two new client-side modules).
+  `npm run gates`: locked-css OK, boundaries OK (191 files, up from 190 —
+  the new library/component/test files, no violation), corpus-morphology
+  and corpus-glyphs OK.
+- No `v1/**`/`v2/**` edit. No Arabic codepoint introduced — the new code
+  addresses a bar by `ordinal`/`day` (both integers) and a count by
+  `cumulativeEncoded` (an integer derived from the event log), never a
+  corpus text field.
+
+**Explicitly not addressed:** `packages/engine/src/test.ts`'s Test
+self-quiz feature (11 exported functions, real coverage in `test.test.ts`,
+zero production callers, no `/test` route anywhere) — v3-D102's other
+named-and-deferred finding — remains open. It needs a whole new route
+end-to-end, not a card on an existing one, and is left for a future run.

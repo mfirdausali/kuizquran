@@ -1283,6 +1283,37 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* The growth curve (v2-D17/D20's Progress Report card, wired v3-D103) — one
+   bar per learning-day that saw a new encode, height driven by the curve's
+   OWN maximum (never a fixed scale, same discipline as `.dist-bar__fill`
+   above). Each bar is `aria-hidden`; the real, checkable text sits beside it
+   as `.sr-only` so a screen reader gets the identical information a sighted
+   learner reads from the chart's shape. Horizontally scrollable rather than
+   capped, so a long-carried surah's full curve is never silently truncated. */
+.growth-bars {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 60px;
+  overflow-x: auto;
+}
+.growth-bar-row {
+  display: flex;
+  align-items: flex-end;
+  height: 100%;
+  flex: 0 0 auto;
+}
+.growth-bar {
+  display: block;
+  width: 6px;
+  min-height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--stage-carry);
+}
+
 /* Settings — PDPA export/delete (build-plan step 23, LAUNCH-CHECKLIST gate 19).
    `.settings-input` mirrors `.table-toolbar__input`'s tap-target and hairline
    discipline rather than inventing a new one; the restore-token field is the
