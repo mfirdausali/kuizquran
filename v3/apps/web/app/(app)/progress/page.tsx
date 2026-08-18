@@ -178,6 +178,26 @@ export default async function ProgressPage({
             Open the full list
           </Link>
         </section>
+
+        {/* v2 Phase 4 (v2-D13..D16), v3-D103's own named deferral: a
+            self-initiated mixed quiz, read-only by construction (rebuild.ts
+            has no fold branch for any test_* event — invariant #5). Entry
+            point lives here, beside the numbers it never moves, rather than
+            in the locked 4-tab bar (v3-D05 closes that bar at four). */}
+        <section className="card" aria-labelledby="test-cta-h">
+          <div className="card-header">
+            <h2 id="test-cta-h" style={{ margin: 0, fontSize: 12, fontWeight: 600 }}>
+              TEST
+            </h2>
+          </div>
+          <p className="caption">
+            A mixed self-check over ayat you choose. It never moves your
+            progress.
+          </p>
+          <Link href="/test" className="btn hit">
+            Take a Test
+          </Link>
+        </section>
       </div>
     </div>
   );

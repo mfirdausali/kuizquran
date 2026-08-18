@@ -53,14 +53,58 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 1957 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 1974 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 794 apps/web. (v3-D103, 2026-08-18)
+             # + 417 engine + 61 fold-runner + 811 apps/web. (v3-D104, 2026-08-18)
              # `make test` enforces v3-D95's test-count floor (`v3/TEST-FLOOR`,
              # currently 1899, so the margin above is intentionally not yet
              # banked into the floor) — a suite that silently shrinks (deleted
              # test file, stray `.skip`) now fails the build even though every
              # test that DID run still passed.
+             # NOTE (v3-D104): `packages/engine/src/test.ts` (v2 Phase 4, the
+             # Test self-quiz feature — vocab/cloze/junction/locate/produce +
+             # chaining-reorder over a learner-chosen range, read-only by
+             # construction: rebuild.ts has no fold branch for any test_*
+             # event) had 11 exported functions, unit-tested since it landed,
+             # and ZERO production callers — v3-D102/D103's own named,
+             # twice-deferred finding ("needs a whole new route end-to-end").
+             # That route now exists: new `lib/test/build.ts` (pure item
+             # selection, shuffle INJECTED for testability — one deliberate
+             # fix over v2's own algorithm: a reorder item's span is now
+             # bounded by the CHOSEN pool length too, not just the corpus
+             # tail, so a single-ayah range can no longer quiz ayat outside
+             # it) + `components/test/TestIsland.tsx`/`TestGate.tsx` (mirrors
+             # SessionIsland/SessionGate's split) + `app/(app)/test/page.tsx`,
+             # entry point on `/progress` (a new TEST card — v3-D05 already
+             # closed the 4-tab bar). Every rendered option bank uses the
+             # SAME seeded `displayOrder` every other quiz surface uses
+             # (never Math.random, unlike v2's `Test.tsx`) and every tap is
+             # followed by an explicit "Continue" (mirrors SessionIsland's
+             # own reveal discipline, never v2's `setTimeout(450)` auto-
+             # advance) — both chosen for consistency with this build's own
+             # established conventions, not because v2 was wrong to differ.
+             # A "produce" item nests a full reconstruct pass through the
+             # SAME engine functions the real session loop uses, but never
+             # appends a per-tap `reconstruct_tap` — only the whole pass
+             # becomes ONE `test_answer`, verified directly (a dedicated test
+             # drives every blank via trial-and-error and asserts zero
+             # `reconstruct_tap` events land anywhere in the log). Every
+             # `rung` is `gradeClassToWire("ungraded")`, never a literal —
+             # DEFECTS.md#B2's clause 14 gate passes on the first commit, not
+             # as a follow-up fix. `lib/test/build.test.ts` (13 tests) +
+             # `test/test-island.test.tsx` (4 tests, incl. folding the whole
+             # post-Test log and asserting zero atoms — invariant #5, proven
+             # against the real component's real log, not asserted in the
+             # abstract). `TZ=UTC make test`: 1974 passing (was 1957, +17 —
+             # exactly this run's new tests). `TZ=UTC make build`: exit 0, 20
+             # routes (was 19 — `/test` is new). No v1/v2 edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff was reverted before
+             # committing), no Arabic codepoint introduced. NOT addressed,
+             # named so a future run doesn't rediscover it: `testHistory()`
+             # (v2-D17's per-Test history on `/progress`) stays unwired — a
+             # learner sees the immediate score but no later record of it;
+             # the events are already durable, this is a new small panel, not
+             # a correctness gap. See DECISIONS.md v3-D104.
              # NOTE (v3-D103): `packages/engine/src/heatmap.ts#growthCurve`
              # (v2-D17/D20's Progress Report growth curve — one point per
              # learning-day with a newly-encoded ayah, cumulative count) had

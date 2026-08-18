@@ -5134,3 +5134,157 @@ self-quiz feature (11 exported functions, real coverage in `test.test.ts`,
 zero production callers, no `/test` route anywhere) — v3-D102's other
 named-and-deferred finding — remains open. It needs a whole new route
 end-to-end, not a card on an existing one, and is left for a future run.
+
+### v3-D104 — the Test self-quiz feature gets its route: `/test`, v3-D102/D103's own last-named deferral
+
+**What this run did first.** Reconciled the exact detached-HEAD/stale-local-ref
+pattern v3-D100/v3-D103 already describe: the container's checkout was a
+detached HEAD at `da95500` (v3-D103), while the local `main` ref was three
+commits stale. `git fetch origin main` showed `origin/main` was ALREADY at
+`da95500` — no work was lost, only the local ref needed fast-forwarding
+(`git checkout main && git merge --ff-only da95500`), confirmed harmless
+here exactly as v3-D103 predicted for the next run.
+
+**What this run built.** `packages/engine/src/test.ts` (v2 Phase 4,
+v2-D13..D16 — a self-initiated, READ-ONLY mixed quiz over a learner-chosen
+range: vocab/cloze/junction/locate/produce + chaining-reorder, reusing the
+SAME generators the Learn ladder already uses per invariant #6) had 11
+exported functions, real unit coverage since the day it landed, and ZERO
+production callers — the last of the two exports v3-D102's sweep found and
+explicitly deferred, named again in v3-D103 as needing "a whole new route
+end-to-end, not a card on an existing one." That route now exists: `/test`.
+
+**Design.** New `lib/test/build.ts` (`buildTestItems`/`itemAyah`/
+`ayahSnippet`) is the pure item-selection layer v2's own `Test.tsx` inlined
+directly into its component — extracted here so it is independently unit
+tested (13 tests) against the real compiled corpus, with the shuffle
+INJECTED rather than called internally, so a test can pin exact output
+against a stub permutation instead of asserting on randomness. One
+deliberate deviation from v2's own algorithm, not a straight port: v2's
+`buildItems` bounded a reorder item's span by `corpus.meta.ayahCount` alone,
+so a single-ayah pool (`[N]`) still built a 3-ayah reorder item spanning
+`N..N+2` — ayat OUTSIDE the range a learner just chose, for a feature billed
+as "a range you choose... it never moves your progress." `buildTestItems`
+additionally bounds the reorder span by `pool.length`, so a 1-ayah pool
+correctly builds none. This is new v3 construction, not a port of engine
+behaviour bound by parity, so the fix needed no oracle regeneration and no
+human sign-off — see `build.test.ts`'s own "never appends a reorder item
+over a single-ayah pool" case, which is RED against v2's original formula
+and green against this one.
+
+`components/test/TestIsland.tsx` + `TestGate.tsx` (mirroring
+`SessionIsland`/`SessionGate`'s own split exactly — enrollment read
+separated from the island so the island stays testable on plain props) +
+`app/(app)/test/page.tsx` give it a face. `TestGate` reads the SAME
+enrollment `SessionGate` does (`readChoices()`), so Test always drills the
+learner's own enrolled surah rather than a hardcoded one — v2 hardcoded
+`SURAH = 12`. Entry point lives on `/progress` (a new "TEST" card beside
+RETENTION/GROWTH), not the 4-tab bar — v3-D05 already closed that bar at
+four (Home/Library/Progress/Plan), and Test's own copy ("never moves your
+progress") reads naturally beside the numbers it explicitly does not touch.
+
+**Two design decisions that depart from v2's `Test.tsx`, both toward
+existing v3 convention rather than v2 parity:**
+
+1. **Seeded display, not `Math.random`, for every rendered option bank.**
+   `lib/onboarding/pass.ts#displayOrder`'s own header is explicit about why:
+   a re-render (a feedback flash, React's dev-mode double-render) must not
+   reshuffle tiles under the learner's finger. v2's `Test.tsx` used
+   `Math.random`-backed `shuffledArr` inside a `useMemo` keyed on the current
+   item's object identity for this — workable, but this build already has
+   the seeded primitive and every other quiz surface uses it, so `TestIsland`
+   reuses `displayOrder` directly, seeded on the item's stable index (or the
+   reconstruct pass's `blankIndex` for a produce item's nested bank). WHICH
+   `(kind, ayah)` pairs make the Test at all stays genuinely
+   `Math.random`-backed — `test.ts`'s own header calls that unpredictability
+   the whole point of a Test, and that decision is UI-layer by explicit
+   design (`buildTestItems` takes an injected `shuffle`, `randomShuffle` in
+   `TestIsland` is the one real, unseeded caller).
+2. **An explicit "Continue" after every tap, never a timed
+   `setTimeout(450)` auto-advance.** v2 auto-advances; `SessionIsland`'s own
+   `reveal`/`onContinue` discipline does not, and this build has consistently
+   preferred that pattern everywhere it appears since step 18. Beyond
+   consistency, it removes a real-clock dependency from every test in this
+   file — `test-island.test.tsx` drives a complete mixed Test, including a
+   full nested reconstruct pass, through nothing but `fireEvent.click`.
+
+**Read-only, by construction, not by convention (invariant #5).**
+`rebuild.ts#applyEvent` has no fold branch for `test_start`/`test_answer`/
+`test_result` — confirmed by asserting `rebuild(events).size === 0` after a
+complete Test run in `test-island.test.tsx`, over the SAME log a real
+component actually wrote. A "produce" item nests a full reconstruct pass
+(`initReconstruct`/`advanceReconstruct`/`nextReconstructItem`, the identical
+engine functions the real session loop uses) but — unlike the real session
+loop — never appends a `reconstruct_tap` per tap; only the whole pass's
+outcome becomes ONE `test_answer`. Verified directly: a dedicated test drives
+a produce item's every blank via trial-and-error (same technique
+`session-island.test.tsx`'s own `driveOneBlank` uses, since which tile is
+correct is not knowable without writing Quranic Arabic) and asserts ZERO
+`reconstruct_tap` events land anywhere in the log, and exactly ONE
+`test_answer` with `testKind: "produce"`. `advanceReconstruct` — never
+`===` — is still the only thing that decides a tap's correctness, so this
+surface carries no second, unaudited copy of B6's fix.
+
+**No hardcoded Rung.** Every `test_*` event's `rung` field is
+`gradeClassToWire("ungraded")` — never a literal `"S1"`/`"S4"` — closing
+DEFECTS.md#B2's `check-boundaries.mjs` clause 14 the moment this file was
+written, not as an afterthought. "ungraded" was picked over v2's own literal
+convention (`rung: "S1"`, matching the golden log's pretest tap) because it
+is the semantically exact GradeClass for a wire event that is, by
+construction, never folded — not a borrowed value that happens to share a
+wire byte.
+
+**Verified:**
+- `lib/test/build.test.ts` (new, 13 tests): pure coverage against the real
+  compiled 112 corpus — kind cycling, the junction-degrades-to-cloze case at
+  the range's last ayah, the reorder-span fix above (both directions), and
+  that the injected shuffle is actually USED (a reversed pool changes which
+  ayah lands on which kind).
+- `test/test-island.test.tsx` (new, 4 tests): starts a Test and confirms
+  `test_start` lands; completes a full mixed Test over surah 112's whole
+  4-ayah range end to end (RANGE picker → RUNNING → RESULT → "Done" →
+  `router.push("/progress")`), asserting exactly 5 `test_answer` events (one
+  per item, kinds pinned to the closed set with counts tolerant of the
+  genuinely-random junction/cloze draw — see the reorder-span note above for
+  why over-pinning that would be a flaky test, not a strict one) and one
+  `test_result`, then folds the WHOLE log and asserts zero atoms; a
+  produce-item-specific case over surah 67 (30 ayat, reaches the produce slot
+  a 4-ayah pool structurally cannot) proving zero `reconstruct_tap` events
+  and exactly one `test_answer`; and the single-ayah reorder-omission case.
+  Repeated 5× locally with no failures — the one place this feature is
+  genuinely non-deterministic (item selection) is exercised for real each
+  run, not stubbed, and the assertions are written to hold under either
+  draw.
+- `TZ=UTC make test` (full monorepo, all seven suites, fresh dependency
+  install + fresh corpus compile from a clean checkout): **1974 passing**
+  (was 1957) — 255 v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler +
+  417 engine + 61 fold-runner + **811** apps/web (was 794, +17 — exactly
+  this run's new tests). `check-test-floor.mjs`: OK, 1974 >= floor 1899
+  (+75 margin, `TEST-FLOOR` left unmoved, same discipline as every prior
+  entry).
+- `TZ=UTC make build`: exit 0, **20 routes** (was 19 — `/test` is new).
+  `npm run gates`: locked-css OK, boundaries OK (196 files, up from 191 —
+  clause 14's no-hardcoded-rung check and clause 13's no-engine-fixture
+  check both pass over every new file), corpus-morphology and corpus-glyphs
+  OK.
+- No `v1/**`/`v2/**` edit — a stray `v2/tsconfig.tsbuildinfo` build-cache
+  diff produced by running the suite was reverted before committing, per
+  the absolute rule. No Arabic codepoint introduced: every new line
+  addresses a word by `position`, an ayah by number, or a blank by
+  `blankIndex`/`data-blank-index` (all integers), and every rendered Arabic
+  string is read back out of a `TestItem`/`ReconstructState` the engine
+  already built at runtime — this file supplies none of its own.
+
+**Explicitly not addressed, named so a future run doesn't re-discover it as
+new:** `packages/engine/src/test.ts#testHistory` (the v2-D17 Progress
+Report's per-Test history list, already unit-tested) is still unwired — a
+learner who completes a Test sees the immediate score screen but no later
+record of it on `/progress`. This is the natural next increment, not a
+correctness gap: `test_result` events are already durable and readable via
+`getEventsForSurah`/`testHistory`, so nothing needs to change upstream, only
+a new small `lib/progress` panel in the same shape as `RetentionPanel`/
+`GrowthPanel`. Also unwired, unchanged since v3-D95's own retrace: the
+`disable` field / `isQuestionDisabled()` — a qari-disabled question can still
+surface in a Test (or the real session loop) today. This is a pre-existing,
+cross-cutting gap (v3-D96 named it too, for `fetchCorpus`'s override
+application), not something this route introduced or scoped to fix.
