@@ -51,7 +51,8 @@ import { summarizeSession, type SessionSummary } from "@engine/sessionSummary.ts
 import { atomKey } from "@engine/atom.ts";
 // FR6 Door 1 ("extra Learn", v3-D98) — see `extraLearnOfferFor`/`startExtraLearn`
 // below for why the summary screen, not the assembled queue, is where this lives.
-import { extraLearnGrant, type ExtraLearnGrant } from "@engine/freeplay.ts";
+// FR6 Door 2 ("weak-spot gym", v3-D106) — see `weakSpotOfferFor`/`startWeakSpotDrill`.
+import { extraLearnGrant, weakSpots, type ExtraLearnGrant, type WeakSpot } from "@engine/freeplay.ts";
 // DEFECTS.md#B2 / v3-D26: gradeClassToWire() is "the ONE function" that may
 // resolve a grading decision to a wire Rung — see its own header. A hardcoded
 // `rung: full ? "S3" : "S2"` here would be B2's exact ternary shape reborn in
@@ -608,6 +609,75 @@ export function startExtraLearn(run: SessionRun, c: Corpus, ayah: number): Sessi
     queue,
     cursor,
     machine: machineFor(c, run.surah, item, 0),
+    lastTap: null,
+    done: false,
+  };
+}
+
+/**
+ * FR6 Door 2 — "weak-spot gym" (`packages/engine/src/freeplay.ts#weakSpots`).
+ *
+ * `weakSpots` ranks every ENCODED atom by forgetting risk and has been real
+ * and unit-tested (`freeplay.test.ts`) since it landed alongside Door 1
+ * (v3-D98), but had zero production callers — that entry's own header named
+ * Door 2 and Door 3 explicitly out of scope: "each need[s] a real UI surface
+ * of their own (a ranked list, an any-ayah picker) that does not exist." This
+ * is that surface for Door 2 only; Door 3 (open practice) and the
+ * cold-success-adoption offer remain unwired, named here so a future run
+ * does not re-discover them as new.
+ *
+ * Only "ayah" atoms are offered: a "connection" atom (n→n+1) has no
+ * reconstruct surface in v3 — `bridge.ts` was atticked at the engine port and
+ * DEFECTS.md#E-08 records "there is nothing left to construct a seam FROM
+ * today" — so offering the top-risk CONNECTION would be an undrillable dead
+ * end. `weakSpots` is asked for more than one candidate so a connection
+ * ranked first does not silently swallow a drillable ayah ranked second.
+ *
+ * Re-derives the fold AFTER this session's own commits have landed, exactly
+ * like `extraLearnOfferFor` — never from `run`'s in-memory queue, which
+ * reflects what was assembled at start, not what is true now.
+ */
+export async function weakSpotOfferFor(run: SessionRun, now: number): Promise<WeakSpot | null> {
+  const prior = await getEventsForSurah(run.surah);
+  const atoms = [...rebuild(prior).values()];
+  const spots = weakSpots(atoms, now, 10);
+  return spots.find((s) => s.kind === "ayah") ?? null;
+}
+
+/**
+ * Extend a COMPLETED run with the offered weak spot as an ordinary REVIEW
+ * item. `ayah` is passed in rather than re-derived, so a caller always acts
+ * on exactly the spot it showed on screen, never a second, possibly
+ * different, re-ask.
+ *
+ * Unlike Door 1 (a fresh, un-encoded ayah, definitionally strength 0), this
+ * is a review of something already encoded — the engine must size the
+ * reconstruction (`blankCountFor`) off the atom's REAL current strength, so
+ * this re-derives it via `strengthOf`, never 0.
+ *
+ * `kind: "review"` (not a bespoke kind) is what makes this "full-weight
+ * evidence, structured:true" per FR6's own comment on `weakSpots`: it
+ * commits through the EXACT SAME `answerCurrent`/`settleAnswer`/
+ * `answerAfterTap` path an ordinary scheduled review does — there is no
+ * second, parallel grading rule for this door, so it can never drift from
+ * DEFECTS.md#B2's "gradeClassToWire is the ONE function" guarantee.
+ */
+export async function startWeakSpotDrill(run: SessionRun, c: Corpus, ayah: number): Promise<SessionRun> {
+  const prior = await getEventsForSurah(run.surah);
+  const atomsMap = rebuild(prior);
+  const item: QueueItem = {
+    kind: "review",
+    atomKey: atomKey(run.surah, "ayah", ayah),
+    ayah,
+    estMin: 0,
+  };
+  const queue = [...run.queue, item];
+  const cursor = queue.length - 1;
+  return {
+    ...run,
+    queue,
+    cursor,
+    machine: machineFor(c, run.surah, item, strengthOf(atomsMap, run.surah, ayah)),
     lastTap: null,
     done: false,
   };

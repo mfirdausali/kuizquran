@@ -45,12 +45,14 @@ import {
   sessionSummaryOf,
   startExtraLearn,
   startSession,
+  startWeakSpotDrill,
+  weakSpotOfferFor,
   SessionCommitFailure,
   type SessionRun,
   type SessionUnavailable,
 } from "@/lib/session/run";
 import type { SessionSummary } from "@engine/sessionSummary.ts";
-import type { ExtraLearnGrant } from "@engine/freeplay.ts";
+import type { ExtraLearnGrant, WeakSpot } from "@engine/freeplay.ts";
 
 export interface SessionIslandProps {
   /** Which surah this session drills. Chosen at onboarding, passed in as data —
@@ -79,6 +81,11 @@ export function SessionIsland({ surah }: SessionIslandProps) {
   // once the summary is reached (see the effect below); null before that, and
   // reset the moment the learner either extends into it or finishes it.
   const [extraOffer, setExtraOffer] = useState<ExtraLearnGrant | null>(null);
+  // FR6 Door 2 ("weak-spot gym", v3-D106) — the weakest carried atom this
+  // DONE session's own fold ranks highest-risk, offered as an extra REVIEW
+  // rep. Same lifecycle as `extraOffer`: computed only once the summary is
+  // reached, null before that and reset the moment the learner acts on it.
+  const [weakSpotOffer, setWeakSpotOffer] = useState<WeakSpot | null>(null);
 
   // Load the corpus, then start (or RESUME) the session. Resume is not a
   // separate path: the queue is derived from the fold of the event log, so a
@@ -288,6 +295,35 @@ export function SessionIsland({ surah }: SessionIslandProps) {
     setPhase({ kind: "drilling" });
   }, [run, corpus, extraOffer]);
 
+  // FR6 Door 2 — once the assembled queue is genuinely done, ask the engine
+  // (via `weakSpotOfferFor`, which re-derives the fold — never this
+  // component ranking risk itself) which carried atom is weakest right now.
+  // Same "never blocks the summary" discipline as Door 1's effect above.
+  useEffect(() => {
+    if (phase.kind !== "summary" || !run) return;
+    let alive = true;
+    void weakSpotOfferFor(run, Date.now())
+      .then((offer) => {
+        if (alive) setWeakSpotOffer(offer);
+      })
+      .catch(() => {
+        if (alive) setWeakSpotOffer(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [phase, run]);
+
+  const onPracticeWeakSpot = useCallback(() => {
+    if (!run || !corpus || !weakSpotOffer) return;
+    const ayah = weakSpotOffer.ref;
+    setWeakSpotOffer(null);
+    void startWeakSpotDrill(run, corpus, ayah).then((extended) => {
+      setRun(extended);
+      setPhase({ kind: "drilling" });
+    });
+  }, [run, corpus, weakSpotOffer]);
+
   if (phase.kind === "loading") {
     return <p className="caption">Preparing today&apos;s session…</p>;
   }
@@ -344,6 +380,13 @@ export function SessionIsland({ surah }: SessionIslandProps) {
         {extraOffer?.granted && extraOffer.ayah !== null ? (
           <button type="button" className="btn" onClick={onExtraLearn}>
             Learn one more ayah (~{extraOffer.costMin} min)
+          </button>
+        ) : null}
+        {/* FR6 Door 2: only ever shown once the engine itself ranks a weak
+            spot — this component never decides which atom is weakest. */}
+        {weakSpotOffer ? (
+          <button type="button" className="btn" onClick={onPracticeWeakSpot}>
+            Practice your weakest spot (ayah {weakSpotOffer.ref})
           </button>
         ) : null}
       </div>

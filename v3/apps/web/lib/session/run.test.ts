@@ -90,6 +90,8 @@ import {
   sessionSummaryOf,
   extraLearnOfferFor,
   startExtraLearn,
+  weakSpotOfferFor,
+  startWeakSpotDrill,
   SessionCommitFailure,
   type SessionRun,
 } from "./run";
@@ -794,6 +796,111 @@ describe("v3-D98 — Door 1, 'extra Learn' after the assembled queue is done", (
       (e) => e.type === "ayah_produced" && e.ayah === offeredAyah,
     );
     expect(producedForOffered.length).toBe(1);
+  });
+});
+
+// v3-D106 — FR6 Door 2: `packages/engine/src/freeplay.ts#weakSpots` was real,
+// pure, unit-tested since it landed alongside Door 1 (v3-D98) — that entry's
+// own header named Door 2 "out of scope here" pending "a real UI surface of
+// its own (a ranked list)." A learner who finished today's assembled queue
+// had no way to ask "what's my weakest carried atom right now?" and drill it
+// as a real, full-weight review — the exact "mechanism built and
+// unit-tested, zero production callers" shape v3-D82..D105 each closed one
+// instance of.
+describe("v3-D106 — Door 2, 'weak-spot gym' after the assembled queue is done", () => {
+  it("offers nothing before any atom is encoded — a virgin log has no weak spot to rank", async () => {
+    const offer = await weakSpotOfferFor(
+      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true },
+      T0,
+    );
+    expect(offer).toBeNull();
+  });
+
+  it("offers the ayah once it is genuinely ENCODED — a same-day S2 Learn touch does not count", async () => {
+    // blankCountFor's own contract (reconstruct.ts): the "learn" band blanks
+    // exactly ONE word regardless of total, so a fresh multi-word ayah's
+    // FIRST touch grades S2 (partial), never S3 — `update()` only sets
+    // `encoded: true` on an "s3"/"gate" outcome. A real first session on a
+    // multi-word-ayah surah therefore leaves NOTHING encoded yet, which is
+    // why this seeds a genuine Carry-band S3 completion directly (the same
+    // technique DEFECTS.md#B11's own test block below uses) rather than
+    // assuming one naturally falls out of `playThrough`.
+    const gatedAyah = 4;
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH_12, ayah: gatedAyah, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+    const seeded = rebuild(await getAllEvents());
+    expect(seeded.get(atomKey(SURAH_12, "ayah", gatedAyah))?.encoded).toBe(true);
+
+    const doneRun: SessionRun = {
+      surah: SURAH_12,
+      queue: [],
+      cursor: 0,
+      machine: {} as SessionRun["machine"],
+      startedAt: T0,
+      slips: 0,
+      lastTap: null,
+      done: true,
+    };
+    const offer = await weakSpotOfferFor(doneRun, T0 + 10_000);
+    expect(offer).not.toBeNull();
+    expect(offer!.kind).toBe("ayah");
+    expect(offer!.ref).toBe(gatedAyah);
+  });
+
+  it("startWeakSpotDrill extends a DONE run with the offered ayah as a REVIEW, sized off its REAL strength, and it finishes exactly like any other queue item", async () => {
+    const c = corpus12();
+    const gatedAyah = 4;
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH_12, ayah: gatedAyah, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+
+    const doneRun: SessionRun = {
+      surah: SURAH_12,
+      queue: [],
+      cursor: 0,
+      machine: {} as SessionRun["machine"],
+      startedAt: T0,
+      slips: 0,
+      lastTap: null,
+      done: true,
+    };
+    const offer = await weakSpotOfferFor(doneRun, T0 + 10_000);
+    expect(offer).not.toBeNull();
+    const offeredAyah = offer!.ref;
+    expect(offeredAyah).toBe(gatedAyah);
+
+    const extended = await startWeakSpotDrill(doneRun, c, offeredAyah);
+    expect(extended.done).toBe(false);
+    expect(extended.queue.length).toBe(doneRun.queue.length + 1);
+    expect(extended.queue[extended.cursor]!.kind).toBe("review");
+    expect(extended.queue[extended.cursor]!.ayah).toBe(offeredAyah);
+    expect(extended.machine.ayah).toBe(offeredAyah);
+    // Unlike Door 1's fresh candidate (strength definitionally 0, by
+    // `extraLearnGrant`'s own contract), this is a review of something
+    // already encoded — the reconstruction must be sized off its REAL
+    // current strength (the seeded S3 pass's own GAIN), never a hardcoded 0.
+    expect(extended.machine.strength).toBeGreaterThan(0);
+
+    const second = await playThrough(extended, c);
+    expect(second.taps).toBeGreaterThan(0);
+    expect(second.run.done).toBe(true);
+
+    const events = await getAllEvents();
+    const producedForOffered = events.filter(
+      (e) => e.type === "ayah_produced" && e.ayah === offeredAyah,
+    );
+    // The seed above is the FIRST production (how the ayah became a
+    // weak-spot candidate at all); the weak-spot rep is a SECOND, full-weight
+    // production of the same ayah — never a free-play echo that rebuild.ts
+    // silently drops (invariant #5).
+    expect(producedForOffered.length).toBe(2);
+    for (const e of producedForOffered) {
+      expect(e.structured).toBe(true);
+      expect(["S2", "S3"]).toContain(e.rung);
+    }
   });
 });
 

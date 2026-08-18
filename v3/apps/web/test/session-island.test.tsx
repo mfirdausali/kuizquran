@@ -459,3 +459,95 @@ describe("v3-D98 — Door 1 CTA on the real summary screen, actually wired", () 
     expect(screen.queryByRole("button", { name: /learn one more ayah/i })).toBeNull();
   });
 });
+
+// v3-D106 — FR6 Door 2 ("weak-spot gym"): `packages/engine/src/freeplay.ts
+// #weakSpots` was real, pure, unit-tested since it landed alongside Door 1
+// and had ZERO production callers — v3-D98's own header named it out of
+// scope pending "a real UI surface of its own (a ranked list)." `lib/session/
+// run.ts` gained `weakSpotOfferFor`/`startWeakSpotDrill` and `SessionIsland`
+// now calls the former on reaching the summary and wires the latter to a
+// button — this block proves the COMPONENT actually does that, mirroring the
+// Door 1 CTA block above exactly (already proven at the `run.ts` level, on a
+// real 111-ayah surah, in `lib/session/run.test.ts`).
+describe("v3-D106 — Door 2 CTA on the real summary screen, actually wired", () => {
+  it("offers 'Practice your weakest spot', and clicking it resumes drilling that ayah as a REVIEW", async () => {
+    installFetch();
+    const now = Date.now();
+    // `trivialOneItemRun` forces `full:true` — the day-1 cold-gate shape —
+    // so completing it encodes 112:1, which is exactly what makes it a
+    // weak-spot CANDIDATE at all: `weakSpots` only ranks ENCODED atoms.
+    startSessionOverride = () => Promise.resolve({ ok: true, run: trivialOneItemRun(corpus, now) });
+
+    render(<SessionIsland surah={SURAH} />);
+    await waitFor(() => expect(screen.getByTestId("session-drill")).toBeTruthy());
+
+    await completeSession();
+    await waitFor(() => expect(screen.getByTestId("session-summary")).toBeTruthy());
+
+    // The button only ever renders once the ENGINE ranks the offer — this
+    // component decides nothing, so the assertion is on the real,
+    // independently-derived offer, not a mocked one.
+    const cta = await screen.findByRole("button", { name: /practice your weakest spot/i });
+    expect(cta.textContent).toMatch(/ayah 1/);
+
+    fireEvent.click(cta);
+
+    // Back to drilling — the SAME ayah, this time as a review rep, never a
+    // parallel unaudited route (invariant #2: the ordinary commit path).
+    await waitFor(() => expect(screen.getByTestId("session-drill")).toBeTruthy());
+    expect(screen.queryByTestId("session-summary")).toBeNull();
+
+    await completeSession();
+    await waitFor(() => expect(screen.getByTestId("session-summary")).toBeTruthy());
+
+    const events = await getAllEvents();
+    const produced = events.filter((e) => e.type === "ayah_produced" && e.ayah === 1);
+    // Once from the original Learn, once from the weak-spot review.
+    expect(produced.length).toBe(2);
+    for (const e of produced) {
+      expect(e.structured).toBe(true);
+    }
+  });
+
+  it("never renders the CTA before any atom is encoded", async () => {
+    // `full: false` at strength 0 (the "learn" band) blanks exactly ONE word
+    // of the ayah (`blankCountFor`'s own contract in reconstruct.ts), so
+    // completing this pass grades S2 — `update()` only sets `encoded: true`
+    // on an S3/gate outcome. This reaches the real "summary" phase through
+    // the genuine commit path (never a hand-set `done: true` with no queue,
+    // which the component cannot actually reach that way — `phase` only
+    // becomes "summary" inside `commit()`'s own callback) while leaving
+    // nothing for `weakSpots` to rank.
+    installFetch();
+    const now = Date.now();
+    startSessionOverride = () =>
+      Promise.resolve({
+        ok: true,
+        run: {
+          surah: SURAH,
+          queue: [{ kind: "learn", atomKey: "112:ayah:2", ayah: 2, estMin: 1 }],
+          cursor: 0,
+          machine: initReconstruct(corpus, SURAH, 2, 0, { full: false }),
+          startedAt: now,
+          slips: 0,
+          lastTap: null,
+          done: false,
+        },
+      });
+
+    render(<SessionIsland surah={SURAH} />);
+    await waitFor(() => expect(screen.getByTestId("session-drill")).toBeTruthy());
+    await completeSession();
+    await waitFor(() => expect(screen.getByTestId("session-summary")).toBeTruthy());
+
+    // Confirms the precondition: this pass really did grade S2, not S3 — an
+    // encoding pass would make this test vacuous (the button SHOULD appear).
+    const events = await getAllEvents();
+    const produced = events.filter((e) => e.type === "ayah_produced" && e.ayah === 2);
+    expect(produced.length).toBe(1);
+    expect(produced[0]!.rung).toBe("S2");
+
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByRole("button", { name: /practice your weakest spot/i })).toBeNull();
+  });
+});

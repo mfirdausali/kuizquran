@@ -5409,3 +5409,174 @@ new:** the `disable` field / `isQuestionDisabled()` — a qari-disabled
 question can still surface in a Test (or the real session loop) today —
 remains unwired, unchanged since v3-D95's/v3-D104's own retrace. This card
 did not introduce it and was not scoped to fix it.
+
+---
+
+## Ratified 2026-08-18 (nightly) — FR6 Door 2 ("weak-spot gym") gets the UI surface v3-D98 named out of scope
+
+### v3-D106 — `packages/engine/src/freeplay.ts#weakSpots` had zero production callers; `/session`'s summary screen now offers it as a real, full-weight review
+
+**Re-derived state per NIGHTLY.md, not trusted from any stale line.** `git
+fetch origin main` confirmed HEAD (`f9f4096`, v3-D105) matched `origin/main`
+exactly — no staleness this time, but the checkout was genuinely COLD (no
+`node_modules`/`vendor` anywhere), and `make setup`'s FIRST composer install
+(`v2/api`) failed outright: GitHub's zip-download API timed out repeatedly
+(`curl error 28`) and composer's git-mirror fallback then exceeded its own
+300s per-package process timeout on `laravel/pint`, so `make setup` exited 1
+having installed nothing past that point. Retried each step individually with
+`COMPOSER_PROCESS_TIMEOUT=900` (composer's cache from the failed attempt made
+the retry fast — most packages were already synced) and the four `npm
+install`s in parallel; all green. Named here because HANDOVER.md's own
+"what only a human can do" list undercounts this class of friction — a cold
+checkout in this environment can need a manual composer-timeout override, not
+just patience.
+
+Re-derived the 32-step build order from `BUILD-PLAN.md` + `git log`: steps
+1–26 and 29 DONE, 27/28 human-content-gated (unchanged), step 30's engineering
+DONE with its remaining items (E6 fold-runner DB adapter, E7 mailer, E8
+Stripe fixtures) genuinely infra/calendar-gated, not sandbox-doable — matches
+every run since v3-D95's own re-verification. Per that established practice, a
+fresh, code-blind research agent swept for the next "mechanism built and
+unit-tested, zero production callers" instance, given the full accumulated
+exclusion list (`EntitlementMachine::merge()`, `permitsIssuance`/
+`permitsReview`, `TrialAttribution`, `useWriterStatus()`,
+`describeCertification()`, `regionFromCountry()`, `AdminRole::
+OPERATOR`/`MODERATOR`, `rowAtomKey()`, the RC-only session-loop architecture,
+step 30's E6/E7/E8, `lib/corpus/load.ts`'s SSR override gap,
+`isQuestionDisabled()` — both explicitly re-confirmed still open and still
+out of scope tonight, being genuine "invent a new contract" gaps rather than
+wiring fixes, see v3-D96/D105's own reasoning — `computeStreak()`/
+`completedDayIndices()`, freeplay.ts Door 1, the System Health frontend,
+FirstRecall/ExplainTrace, B10, B11, `heatmap.ts#ayahHeatmap`
+(deliberately unused, not a gap), `wordDiagnostics`, `growthCurve`,
+`test.ts`'s whole Test feature, and `testHistory()` — all wired or closed).
+
+**Finding, independently confirmed by hand before touching code:**
+`packages/engine/src/freeplay.ts` exports FIVE functions for FR6's "three
+doors after session complete" beyond `extraLearnGrant` (Door 1, wired
+v3-D98): `weakSpots` (Door 2), `openPracticePick` (Door 3),
+`coldSuccessAdoption`, and `diminishingReturns`. Grepping `apps/web`/`api`/
+`worker` for each name outside `freeplay.ts` itself and `freeplay.test.ts`
+returned nothing for all four — v3-D98's own header had already named this
+precisely: "Door 2 (weak-spot gym) and Door 3 (open practice) each need a
+real UI surface of their own (a ranked list, an any-ayah picker) that does
+not exist and is out of scope here." That gap is still exactly as described
+five nights later.
+
+**Scoped to Door 2 only**, for the same reason v3-D98 scoped to Door 1 only:
+Door 3 needs a genuinely new picker UI (any ayah × any drill shape) and
+`coldSuccessAdoption`/`diminishingReturns` are secondary refinements *of* a
+free-practice surface that does not exist yet — inventing all of it in one
+night would be starting several steps rather than finishing one (NIGHTLY.md's
+own rule). Door 2 was chosen over the other three because it is the one
+`freeplay.ts`'s own header marks distinct from ordinary free-play: "weak-spot
+gym is the exception — it's full-weight, structured:true, per FR6" — meaning
+it slots into the EXISTING graded commit path (`answerCurrent`/
+`settleAnswer`/`answerAfterTap`), exactly like Door 1 did, rather than
+requiring a new ungraded free-play write path Doors 3/4 would need.
+
+**Design, decided before writing code, mirroring Door 1's own precedent
+(`extraLearnOfferFor`/`startExtraLearn`) almost exactly:**
+- `lib/session/run.ts` gains `weakSpotOfferFor(run, now)` — re-derives the
+  fold AFTER the session's own commits have landed (never `run`'s in-memory
+  queue, which is stale the moment anything advances), asks the engine's own
+  `weakSpots(atoms, now, 10)` for the top-risk candidates, and returns the
+  first whose `kind === "ayah"`. Asking for 10 rather than 1 matters: a
+  top-ranked **connection** atom (n→n+1) has no reconstruct surface in v3 —
+  `bridge.ts` was atticked at the engine port and DEFECTS.md#E-08 records
+  "there is nothing left to construct a seam FROM today" — so surfacing it
+  as the offer would be an undrillable dead end; filtering to the first
+  drillable ayah instead means a connection ranked #1 never silently
+  swallows a real offer.
+- `startWeakSpotDrill(run, c, ayah)` extends the DONE run's queue with ONE
+  `{kind: "review", ...}` item, exactly Door 1's `startExtraLearn` shape,
+  with one deliberate difference: Door 1's fresh Learn candidate is
+  strength-0 by `extraLearnGrant`'s own contract, but a weak spot is
+  something ALREADY encoded — sizing its reconstruction (`blankCountFor`) off
+  a hardcoded 0 would blank far less than the atom's real band warrants, so
+  this re-derives the atom's REAL current strength via the existing
+  `strengthOf` helper. Because the extended item's `kind` is the same
+  `"review"` the scheduler already produces for ordinary spaced reviews, it
+  commits through the EXACT SAME `answerCurrent`/`settleAnswer`/
+  `answerAfterTap` path — no second, parallel grading rule, so it can never
+  drift from DEFECTS.md#B2's "gradeClassToWire is the ONE function"
+  guarantee, and it is definitionally "full-weight, structured:true"
+  (`answerAfterTap`'s tap/ayah-produced events hardcode `structured: true`
+  unconditionally, for every queue item).
+- `SessionIsland.tsx` mirrors Door 1's effect/handler/button shape exactly:
+  once `phase.kind === "summary"`, a fire-and-forget effect asks
+  `weakSpotOfferFor` (never blocking the summary the learner already
+  earned, same discipline as every other cache-warm/offer effect in this
+  file — #103); a "Practice your weakest spot (ayah N)" button renders only
+  when the engine actually returns an offer, and clicking it calls
+  `startWeakSpotDrill` and returns to `"drilling"`.
+
+**Verified:**
+- `lib/session/run.test.ts` (new `describe` block, 3 tests): a virgin log
+  offers nothing; an atom seeded as a genuine Carry-band S3 completion (the
+  SAME `append()`-based seeding technique DEFECTS.md#B11's own test block
+  uses, rather than grinding through the real spacing algorithm) is offered
+  by `weakSpotOfferFor`; `startWeakSpotDrill` extends the queue with a
+  `"review"` item sized off the atom's real (>0) strength, and playing it
+  through lands a SECOND `ayah_produced` for the same ayah with
+  `structured: true` and a real S2/S3 rung. One deliberate finding along the
+  way, worth recording so a future run doesn't re-derive it: a real FIRST
+  session on a multi-word-ayah surah leaves **nothing** encoded —
+  `blankCountFor`'s "learn" band blanks exactly one word regardless of total,
+  so a fresh ayah's first touch always grades S2, never S3, and `update()`
+  only sets `encoded: true` on an S3/gate outcome. The original draft of
+  this test assumed a first session on Yusuf would leave encoded candidates
+  behind (mirroring Door 1's own comment about UN-encoded candidates) and
+  failed for real (`expected null not to be null`) until corrected to seed
+  the encoded precondition directly.
+- `test/session-island.test.tsx` (new `describe` block, 2 tests): the button
+  renders and, clicked, resumes drilling the same ayah as a review, ending
+  with two real `ayah_produced` events for it, both `structured: true`; a
+  second test proves the button is genuinely conditional — an ayah whose
+  only pass graded S2 (never encoded) reaches summary via the real
+  `commit()` path (a hand-constructed `done: true` run with no queue was
+  tried first and found NOT to reach `phase.kind === "summary"` at all,
+  since that phase is only ever set inside `commit()`'s own callback —
+  corrected to drive one real S2 pass through `completeSession()` instead)
+  and shows no CTA.
+- RED confirmed both files by `git stash` of `run.ts`+`SessionIsland.tsx`
+  only (tests kept): `run.test.ts` failed all 3 new tests
+  (`weakSpotOfferFor is not a function`); `session-island.test.tsx` failed
+  the CTA-appears test (`findByRole` timeout) while the CTA-absent test
+  passed vacuously, as expected of a "must not appear" assertion against
+  code that cannot make it appear either way. `git stash pop` restored the
+  fix; both files green again.
+- `TZ=UTC make test` (full monorepo, all seven suites, fresh dependency
+  install from a genuinely cold checkout): **1995 passing** (was 1990) — 255
+  v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler + 417 engine + 61
+  fold-runner + **832** apps/web (was 827, +5 — exactly this run's new
+  tests: 3 in `run.test.ts`, 2 in `session-island.test.tsx`).
+  `check-test-floor.mjs`: OK, 1995 >= floor 1899 (+96 margin, `TEST-FLOOR`
+  left unmoved, same discipline as every prior entry).
+- `TZ=UTC make build`: exit 0, **20 routes (unchanged** — no new route file,
+  only an existing summary-screen section and two new `run.ts` exports).
+  `npm run gates`: locked-css OK, boundaries OK (200 files, unchanged file
+  count — no new files, only edits to four existing ones), corpus-morphology
+  and corpus-glyphs OK.
+- No `v1/**`/`v2/**` edit — a stray `v2/tsconfig.tsbuildinfo` build-cache
+  diff produced by running the suite was reverted before committing, same
+  discipline as every prior entry. No Arabic codepoint introduced (checked
+  programmatically against every range INVARIANTS.md's Absolute B names,
+  whole-file, over all four changed files): every new line addresses an
+  ayah by number, a strength/risk by float, or a rung by the closed
+  `GradeClass`/wire-`Rung` types — every rendered string ("Practice your
+  weakest spot (ayah N)") is composed from an integer read back out of the
+  engine's own `WeakSpot`, never authored corpus text.
+
+**Explicitly not addressed, named so a future run doesn't re-discover it as
+new:** Door 3 (`openPracticePick` — an any-ayah × any-drill picker) and
+`coldSuccessAdoption`/`diminishingReturns` (both refinements of a free-play
+surface that still does not exist) remain unwired. `diminishingReturns` in
+particular has no natural caller until SOME free-play surface exists to
+repeat drills against the same atom same-day — the ordinary scheduled queue
+cannot serve the same atom twice in one day by construction, so wiring it in
+isolation from Door 2/3 would have nothing real to measure. `lib/corpus/
+load.ts`'s SSR override gap and `isQuestionDisabled()`/the `disable` field
+remain exactly as open as v3-D96/D105 left them — this run re-confirmed both
+are still genuine "invent a new contract" gaps, not wiring fixes, and
+deliberately did not touch either.

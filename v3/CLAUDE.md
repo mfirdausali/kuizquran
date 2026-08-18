@@ -53,14 +53,41 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 1990 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 1995 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 827 apps/web. (v3-D105, 2026-08-18)
+             # + 417 engine + 61 fold-runner + 832 apps/web. (v3-D106, 2026-08-18)
              # `make test` enforces v3-D95's test-count floor (`v3/TEST-FLOOR`,
              # currently 1899, so the margin above is intentionally not yet
              # banked into the floor) — a suite that silently shrinks (deleted
              # test file, stray `.skip`) now fails the build even though every
              # test that DID run still passed.
+             # NOTE (v3-D106): `packages/engine/src/freeplay.ts#weakSpots` (FR6
+             # Door 2, "weak-spot gym") had ZERO production callers — v3-D98's
+             # own header named it out of scope, pending "a real UI surface of
+             # its own (a ranked list)." That surface now exists on the
+             # `/session` summary screen, alongside Door 1's own CTA: new
+             # `lib/session/run.ts#weakSpotOfferFor`/`startWeakSpotDrill`
+             # (mirroring `extraLearnOfferFor`/`startExtraLearn`'s exact
+             # shape) + a "Practice your weakest spot" button in
+             # `SessionIsland.tsx`. Unlike Door 1's fresh candidate
+             # (strength definitionally 0), a weak spot is something already
+             # encoded, so its reconstruction is sized off its REAL current
+             # strength; it commits through the same `answerCurrent`/
+             # `settleAnswer` path as an ordinary scheduled review
+             # (`kind: "review"`), so it is full-weight/`structured:true` by
+             # construction, never a second grading rule. Only "ayah"-kind
+             # weak spots are offered — a "connection" atom has no reconstruct
+             # surface in v3 (`bridge.ts` atticked, DEFECTS.md#E-08). RED
+             # confirmed by `git stash` of `run.ts`+`SessionIsland.tsx` only:
+             # `run.test.ts` failed all 3 new tests, `session-island.test.tsx`
+             # failed its CTA-appears test; `git stash pop` restored both to
+             # green. `TZ=UTC make test`: 1995 passing (was 1990, +5 — exactly
+             # this run's new tests). `TZ=UTC make build`: exit 0, 20 routes
+             # (unchanged). No v1/v2 edit, no Arabic codepoint introduced.
+             # Door 3 (open practice) and `coldSuccessAdoption`/
+             # `diminishingReturns` remain unwired — each needs a free-play
+             # surface that does not exist yet, named in DECISIONS.md v3-D106
+             # so a future run doesn't re-discover them as new.
              # NOTE (v3-D105): `packages/engine/src/test.ts#testHistory` (v2-D17
              # Progress Report's per-Test history list) had ZERO production
              # callers — v3-D104's own header named this precisely: "a learner
