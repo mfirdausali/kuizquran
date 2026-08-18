@@ -1314,6 +1314,29 @@
   background: var(--stage-carry);
 }
 
+/* Test history (v2-D17 Progress Report card, wired v3-D105) — mirrors
+   .decay-list's own discipline: a real list of sentences, newest first, one
+   row per completed Test. Two lines per row (range+score, then date/nudge)
+   rather than .decay-row's single line, since a Test result carries more to
+   say than one decay measurement does. */
+.test-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.test-history-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.test-history-row__meta { font-size: 12px; color: var(--text-muted); }
+
 /* Settings — PDPA export/delete (build-plan step 23, LAUNCH-CHECKLIST gate 19).
    `.settings-input` mirrors `.table-toolbar__input`'s tap-target and hairline
    discipline rather than inventing a new one; the restore-token field is the

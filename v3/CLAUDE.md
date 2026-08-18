@@ -53,14 +53,82 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 1974 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 1990 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 811 apps/web. (v3-D104, 2026-08-18)
+             # + 417 engine + 61 fold-runner + 827 apps/web. (v3-D105, 2026-08-18)
              # `make test` enforces v3-D95's test-count floor (`v3/TEST-FLOOR`,
              # currently 1899, so the margin above is intentionally not yet
              # banked into the floor) — a suite that silently shrinks (deleted
              # test file, stray `.skip`) now fails the build even though every
              # test that DID run still passed.
+             # NOTE (v3-D105): `packages/engine/src/test.ts#testHistory` (v2-D17
+             # Progress Report's per-Test history list) had ZERO production
+             # callers — v3-D104's own header named this precisely: "a learner
+             # who completes a Test sees the immediate score screen but no
+             # later record of it on /progress... the natural next increment,
+             # not a correctness gap... only a new small `lib/progress` panel
+             # in the same shape as `RetentionPanel`/`GrowthPanel`." That panel
+             # now exists: new `lib/progress/testHistory.ts`
+             # (`buildTestHistorySummary` — the same "component never
+             # computes, it only prints" split `retention.ts`/`growth.ts`
+             # already follow) + `components/progress/TestHistoryPanel.tsx`
+             # (presentational only) + `TestHistoryIsland.tsx` (mirrors
+             # `GrowthIsland`'s four-state discipline, edge cases #72/#73),
+             # wired into `/progress` as a new TEST HISTORY card, placed after
+             # the existing TEST call-to-action card.
+             #
+             # One real decision: `score` on a `test_result` event is
+             # documented (`types.ts`) and actually written
+             # (`TestIsland.tsx#finishTest`) as `correct ÷ total`, a 0..1
+             # ratio — never a raw count, unlike what v2's own `Progress.tsx`
+             # rendering implied by dividing `h.score / h.total` again. The
+             # correct COUNT is recovered once, in `testHistory.ts`
+             # (`Math.round(score * total)`), so no view re-derives it or
+             # repeats v2's own reading. Every row's score sentence
+             # (`"4 / 5 correct (80%)"`) mirrors `TestIsland.tsx`'s own
+             # result-screen wording exactly, so a learner reads the identical
+             # sentence on the day of a Test and later on /progress. The date
+             # label is `tz`-explicit (`Intl.DateTimeFormat` with `timeZone:
+             # tz`, `tz` resolved once server-side and passed down), the same
+             # convention `/plan`'s page and `lib/plan/forecast.ts#dateLabel`
+             # already use — never the machine's ambient zone (Absolute A's
+             # spirit, applied outside the engine where it isn't mandatory but
+             # is still the established house style).
+             #
+             # RED confirmed directly: `git stash` on
+             # `app/(app)/progress/page.tsx` only (kept the test file and all
+             # three new library/component files, each a legitimate
+             # standalone unit) and reran — 1 of 16 failed, exactly the
+             # `toMatch(/TestHistoryIsland/)` wiring assertion; `git stash
+             # pop` restored the fix, 16/16 green again.
+             #
+             # `TZ=UTC make test` (full monorepo, all seven suites, fresh
+             # dependency install from a clean checkout): **1990 passing**
+             # (was 1974) — 255 v2 vitest + 47 v2/api + 272 v3/api + 111
+             # corpus-compiler + 417 engine + 61 fold-runner + **827** apps/web
+             # (was 811, +16 — exactly this run's new tests).
+             # `check-test-floor.mjs`: OK, 1990 >= floor 1899 (+91 margin,
+             # `TEST-FLOOR` left unmoved, same discipline as every prior
+             # entry). `TZ=UTC make build`: exit 0, 20 routes (unchanged — no
+             # new route file, only an existing page section and two new
+             # client-side modules). `npm run gates`: locked-css OK,
+             # boundaries OK (200 files, up from 196 — no violation),
+             # corpus-morphology and corpus-glyphs OK.
+             #
+             # No `v1/**`/`v2/**` edit — a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff produced by running the suite was reverted
+             # before committing, same as v3-D104. No Arabic codepoint
+             # introduced: every new line addresses a surah/ayah by number, a
+             # score by `correct`/`total` (integers), or a timestamp by `ts`
+             # (a number) — every rendered string is composed from those,
+             # never from corpus text.
+             #
+             # Explicitly not addressed, named so a future run doesn't
+             # re-discover it as new: the `disable` field /
+             # `isQuestionDisabled()` (a qari-disabled question can still
+             # surface in a Test or the real session loop) remains unwired —
+             # unchanged since v3-D95's/v3-D104's own retrace, and not
+             # something this card introduced or was scoped to fix.
              # NOTE (v3-D104): `packages/engine/src/test.ts` (v2 Phase 4, the
              # Test self-quiz feature — vocab/cloze/junction/locate/produce +
              # chaining-reorder over a learner-chosen range, read-only by

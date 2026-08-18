@@ -5288,3 +5288,124 @@ a new small `lib/progress` panel in the same shape as `RetentionPanel`/
 surface in a Test (or the real session loop) today. This is a pre-existing,
 cross-cutting gap (v3-D96 named it too, for `fetchCorpus`'s override
 application), not something this route introduced or scoped to fix.
+
+### v3-D105 — `testHistory()` gets the panel v3-D104 named as the natural next increment: a TEST HISTORY card on `/progress`
+
+**What this run did first.** Reconciled a fully cold checkout: no
+`node_modules`/`vendor` anywhere in the tree, so `make setup` ran in full
+(composer installs for `v2/api` and `v3/api`, npm installs across `v2`,
+`v3/packages/corpus-compiler`, `v3/packages/engine`, `v3/worker/fold-runner`,
+`v3/apps/web`) before anything else could run. `git fetch origin main`
+confirmed the local checkout's detached `HEAD` already matched
+`origin/main` exactly (`512c43a`, v3-D104) — no reconciliation work was
+lost, only dependencies needed installing.
+
+**What this run built.** v3-D104's own closing paragraph named the next gap
+directly: `packages/engine/src/test.ts#testHistory` (v2-D17 Progress
+Report's per-Test history list — every `test_result` event, in log order)
+had real unit coverage since the day `test.ts` landed (`test.test.ts`) but
+ZERO production callers, and v3-D104 scoped it out explicitly as "the
+natural next increment, not a correctness gap: `test_result` events are
+already durable and readable via `getEventsForSurah`/`testHistory`, so
+nothing needs to change upstream, only a new small `lib/progress` panel in
+the same shape as `RetentionPanel`/`GrowthPanel`." This run built exactly
+that panel.
+
+**Design, decided before writing code.** `retention.ts`/`growth.ts` on this
+same route establish the pattern this follows exactly: a pure
+`lib/progress/*.ts` function owns every decision ("the component never
+computes, it only prints"), a `"use client"` island reads the log and
+handles all four states (pending/empty/ready/broken — edge cases #72/#73),
+and a presentational panel renders exactly what it is handed. `testHistory.ts`
+needs no corpus prop, the same as `growth.ts` — a Test's own `test_result`
+event already carries its range (`ayah`/`to`) and score, so the summary is a
+pure function of `(surah, events, tz)`.
+
+**The one real decision, found by reading the wire type, not by guessing.**
+`types.ts`'s own doc comment says `score` is `test_result: correct ÷ total,
+0..1` — a RATIO, never a raw count. Confirmed live at the write site:
+`components/test/TestIsland.tsx#finishTest` writes `score: results.length >
+0 ? correct / results.length : 0`. v2's own `Progress.tsx` rendered this
+field as if it were already a count (`Math.round((h.score / h.total) *
+100)}% ({h.score}/{h.total})`) — read literally, that is a ratio divided by
+a total again, and the raw ratio printed as a "score" numerator, which is
+not what a learner would read as "N correct out of M." `testHistory.ts`
+recovers the actual correct count once — `Math.round(r.score * r.total)` —
+so every row prints a real integer, in the same wording `TestIsland.tsx`'s
+own result screen already uses (`"{correct} / {total} correct ({pct}%)"`),
+rather than inventing a second phrasing or repeating v2's reading. The date
+label is `tz`-explicit (`Intl.DateTimeFormat` with an injected `timeZone`),
+mirroring `/plan`'s own convention (`lib/plan/forecast.ts#dateLabel`, `tz`
+resolved once server-side in the page and passed down) — not mandated by
+Absolute A outside the engine, but the established house style, and the
+same discipline avoids a date test that would be locale/host-dependent.
+
+**Built:**
+- `apps/web/lib/progress/testHistory.ts` (new) — `buildTestHistorySummary`,
+  wrapping the engine's `testHistory()`. Returns `count`/`countLabel`
+  ("3 Tests taken" / "No Tests taken yet"), `unmeasured`, and `rows`
+  (newest-first, mirroring v2's own display order), each row carrying
+  `rangeLabel` ("12:5–20", the same `${surah}:${ayah}` shape
+  `retention.ts`'s `DecayRow.reference` already uses for a single site,
+  extended with an en-dash for a range), `scoreLabel`, `dateLabel`, and
+  `sentToReviews`.
+- `apps/web/components/progress/TestHistoryPanel.tsx` (new) —
+  presentational only; a wiring test greps the file for
+  `Math.(round|floor|ceil|max|min)` and `filter(` and asserts neither
+  appears, the same discipline `progress-growth.test.tsx` already checks on
+  `GrowthPanel.tsx`.
+- `apps/web/components/progress/TestHistoryIsland.tsx` (new) — client
+  island, `"use client"` on line 1, all four log states handled explicitly
+  via `useLogState`/`getEventsForSurah`. Takes `tz` as a prop (passed
+  through unchanged to the pure summary) alongside `surah`.
+- `apps/web/app/(app)/progress/page.tsx` — one new `<section>` ("TEST
+  HISTORY"), placed after the existing TEST call-to-action card; `tz`
+  resolved once via `Intl.DateTimeFormat().resolvedOptions().timeZone` and
+  passed down, following the existing corpus-null guard (E-07) the other
+  cards already use.
+- `apps/web/app/iman-ext.css` — `.test-history-list`/`.test-history-row`/
+  `.test-history-row__meta`, additive-only, mirroring `.decay-list`'s own
+  discipline (a real list of sentences, newest first) rather than
+  `.growth-bars`' bar-chart shape, since a Test result is a sentence, not a
+  trend point.
+
+**Verified:**
+- `test/progress-test-history.test.tsx` (new, 16 tests): `buildTestHistorySummary`
+  pure-unit coverage (unmeasured zero-state, the score-ratio-to-count
+  recovery pinned against the documented wire semantics, range labelling,
+  newest-first ordering, `sentToReviews` carried per row, header
+  pluralization, the same-filter-as-the-engine's-own-`testHistory()` case,
+  purity/referential-equality); `TestHistoryPanel` render tests (real count
+  text, the designed zero-state caption, the real range+score sentence, the
+  sentToReviews line appearing only when true, no engine decision in the
+  panel source); and the route-wiring tests (client directive position, all
+  four states present, the server page renders `TestHistoryIsland` and never
+  calls `rebuild()` itself).
+- RED confirmed directly: `git stash` on `app/(app)/progress/page.tsx` only
+  (kept the test file and all three new library/component files, each a
+  legitimate standalone unit) and reran — 1 of 16 failed, exactly the
+  `toMatch(/TestHistoryIsland/)` wiring assertion; `git stash pop` restored
+  the fix, 16/16 green again.
+- `TZ=UTC make test` (full monorepo, all seven suites, fresh dependency
+  install from a genuinely cold checkout): **1990 passing** (was 1974) — 255
+  v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler + 417 engine + 61
+  fold-runner + **827** apps/web (was 811, +16 — exactly this run's new
+  tests). `check-test-floor.mjs`: OK, 1990 >= floor 1899 (+91 margin,
+  `TEST-FLOOR` left unmoved, same discipline as every prior entry).
+- `TZ=UTC make build`: exit 0, 20 routes (unchanged — no new route file,
+  only an existing page section and two new client-side modules).
+  `npm run gates`: locked-css OK, boundaries OK (200 files, up from 196 — no
+  violation), corpus-morphology and corpus-glyphs OK.
+- No `v1/**`/`v2/**` edit — a stray `v2/tsconfig.tsbuildinfo` build-cache
+  diff produced by running the suite was reverted before committing, same
+  discipline as v3-D104. No Arabic codepoint introduced: every new line
+  addresses a surah/ayah by number, a score by `correct`/`total` (integers
+  recovered from the wire's own documented ratio), or a timestamp by `ts` (a
+  number) — every rendered string is composed from those, never from corpus
+  text.
+
+**Explicitly not addressed, named so a future run doesn't re-discover it as
+new:** the `disable` field / `isQuestionDisabled()` — a qari-disabled
+question can still surface in a Test (or the real session loop) today —
+remains unwired, unchanged since v3-D95's/v3-D104's own retrace. This card
+did not introduce it and was not scoped to fix it.

@@ -49,6 +49,7 @@ import { macroFactsFor } from "@/lib/macro/facts";
 import { MacroPanelIsland } from "@/components/macro/MacroPanelIsland";
 import { RetentionIsland } from "@/components/progress/RetentionIsland";
 import { GrowthIsland } from "@/components/progress/GrowthIsland";
+import { TestHistoryIsland } from "@/components/progress/TestHistoryIsland";
 import { StubNote } from "@/components/shell/StubNote";
 
 /** Which surah this page reports on. A query param today; when a learner can
@@ -80,6 +81,10 @@ export default async function ProgressPage({
   // disagree about what day it is.
   const now = Date.now();
   const since = now - SINCE_WINDOW_MS;
+  // The same `/plan` page convention (`forecast.ts#dateLabel`'s own header):
+  // resolved once, server-side, and passed down explicitly — never read from
+  // the machine inside a date-formatting call.
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   const facts = corpus === null ? null : macroFactsFor(corpus);
 
@@ -197,6 +202,27 @@ export default async function ProgressPage({
           <Link href="/test" className="btn hit">
             Take a Test
           </Link>
+        </section>
+
+        {/* v2-D17 Progress Report's own "Test history" list — v3-D104's own
+            named deferral, closed here (v3-D105): `test.ts#testHistory` reads
+            durable `test_result` events off the log; this card is the first
+            thing that ever renders them. */}
+        <section className="card" aria-labelledby="test-history-h">
+          <div className="card-header">
+            <h2 id="test-history-h" style={{ margin: 0, fontSize: 12, fontWeight: 600 }}>
+              TEST HISTORY
+            </h2>
+          </div>
+
+          {corpus === null ? (
+            <p className="stub-note">
+              No corpus is available for surah {surah} in this build, so there
+              is nothing to report on yet.
+            </p>
+          ) : (
+            <TestHistoryIsland surah={surah} tz={tz} />
+          )}
         </section>
       </div>
     </div>
