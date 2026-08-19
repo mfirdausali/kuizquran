@@ -38,9 +38,11 @@ import { currentTz } from "@/lib/idb/append";
 import { writeLock } from "@/lib/idb/writeLock";
 import { refreshEntitlementSnapshot } from "@/lib/entitlement/sync";
 import {
+  acceptGateDemote,
   answerCurrent,
   clearReveal,
   currentItem,
+  demoteOfferFor,
   extraLearnOfferFor,
   sessionSummaryOf,
   startExtraLearn,
@@ -86,6 +88,15 @@ export function SessionIsland({ surah }: SessionIslandProps) {
   // rep. Same lifecycle as `extraOffer`: computed only once the summary is
   // reached, null before that and reset the moment the learner acts on it.
   const [weakSpotOffer, setWeakSpotOffer] = useState<WeakSpot | null>(null);
+  // v3-D107 — the gate forgiveness ladder's demote offer (v2-D08): once the
+  // CURRENT queue item is a due cold gate the engine has decided has failed
+  // DEMOTE_OFFER_AFTER_FAILS times running, this replaces the quiz card with
+  // "send this verse back to Learn" — tap-gated, never automatic. Null
+  // whenever `demoteOfferFor` says there is nothing to offer, INCLUDING the
+  // ayah the learner just chose "try the gate anyway" for this session
+  // (`dismissedDemoteAyah`), so declining does not re-ask on every render.
+  const [demoteOffer, setDemoteOffer] = useState<{ ayah: number } | null>(null);
+  const [dismissedDemoteAyah, setDismissedDemoteAyah] = useState<number | null>(null);
 
   // Load the corpus, then start (or RESUME) the session. Resume is not a
   // separate path: the queue is derived from the fold of the event log, so a
@@ -324,6 +335,45 @@ export function SessionIsland({ surah }: SessionIslandProps) {
     });
   }, [run, corpus, weakSpotOffer]);
 
+  // v3-D107 — ask the engine (via `demoteOfferFor`, which re-derives the
+  // fold — never this component reading `gateFails` itself, which clause 5
+  // would refuse to let it do) whether the CURRENT queue item is a due gate
+  // the ladder says to offer demoting. Re-checked whenever `run` changes
+  // (every tap, every advance to a new queue item), so a later gate item in
+  // the same session gets its own independent offer.
+  useEffect(() => {
+    if (phase.kind !== "drilling" || !run) {
+      setDemoteOffer(null);
+      return;
+    }
+    let alive = true;
+    void demoteOfferFor(run)
+      .then((offer) => {
+        if (!alive) return;
+        setDemoteOffer(offer && offer.ayah === dismissedDemoteAyah ? null : offer);
+      })
+      .catch(() => {
+        if (alive) setDemoteOffer(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [phase, run, dismissedDemoteAyah]);
+
+  const onAcceptDemote = useCallback(() => {
+    if (!run || !corpus || !demoteOffer) return;
+    setDemoteOffer(null);
+    commit(() =>
+      acceptGateDemote(run, corpus, { now: Date.now(), tz: currentTz() }),
+    );
+  }, [run, corpus, demoteOffer, commit]);
+
+  const onDismissDemote = useCallback(() => {
+    if (!demoteOffer) return;
+    setDismissedDemoteAyah(demoteOffer.ayah);
+    setDemoteOffer(null);
+  }, [demoteOffer]);
+
   if (phase.kind === "loading") {
     return <p className="caption">Preparing today&apos;s session…</p>;
   }
@@ -389,6 +439,29 @@ export function SessionIsland({ surah }: SessionIslandProps) {
             Practice your weakest spot (ayah {weakSpotOffer.ref})
           </button>
         ) : null}
+      </div>
+    );
+  }
+
+  // v3-D107 — shown INSTEAD of the quiz card: a learner offered this must
+  // never be shown a cold-gate reconstruction bank for an ayah the engine has
+  // already decided to offer sending back to Learn. Mirrors v2's own
+  // `Gate.tsx` `stage === "demote-offer"` wording and two-button shape.
+  if (phase.kind === "drilling" && demoteOffer) {
+    return (
+      <div className="stack" data-testid="session-gate-demote-offer">
+        <p className="caption" role="alert">
+          This verse has failed its cold gate several times.
+        </p>
+        <p className="caption">
+          You can send it back to Learn — it will be re-taught, not abandoned.
+        </p>
+        <button type="button" className="btn" onClick={onAcceptDemote}>
+          Send it back to Learn
+        </button>
+        <button type="button" className="btn btn--ghost" onClick={onDismissDemote}>
+          Try the gate anyway
+        </button>
       </div>
     );
   }

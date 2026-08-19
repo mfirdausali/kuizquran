@@ -53,14 +53,67 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 1995 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2003 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 832 apps/web. (v3-D106, 2026-08-18)
+             # + 417 engine + 61 fold-runner + 840 apps/web. (v3-D107, 2026-08-19)
              # `make test` enforces v3-D95's test-count floor (`v3/TEST-FLOOR`,
              # currently 1899, so the margin above is intentionally not yet
              # banked into the floor) — a suite that silently shrinks (deleted
              # test file, stray `.skip`) now fails the build even though every
              # test that DID run still passed.
+             # NOTE (v3-D107): DEFECTS.md#B12 — the day-1 cold gate (FR3,
+             # gate.ts) could never actually FAIL through the real session
+             # loop, which is the root cause of a second, deeper problem:
+             # `gate.ts#gateForgiveness()`/`demoteToLearn()` (v2-D08's
+             # forgiveness ladder) were real, unit-tested and fold-safe but
+             # structurally UNREACHABLE, not merely unwired.
+             # `advanceReconstruct` never advances on a wrong tap — a
+             # learner just retries the same blank until right — so
+             # `adv.correct` at the moment a pass completes is
+             # unconditionally `true`. `answerAfterTap`'s gate branch (post-
+             # B11, v3-D101) stamped `gate_result.correct: adv.correct` —
+             # always `true` — so a cold gate started with a slip and
+             # doggedly retried into completion recorded as a clean pass.
+             # `AtomState.gateFails` only ever increments on a REAL
+             # `gate_result:false`, so it could never exceed 0 in
+             # production and the ladder's `gateForgiveness()` could never
+             # return anything but `"cold"`. v2's own `pages/Gate.tsx` (read,
+             # never touched) has the missing piece — a local `slipped` flag
+             # deciding `passed = !slipped` at completion — never ported
+             # when the session loop landed. Fixed: `SessionRun` gained
+             # `gateSlipped`, set by any wrong tap while the current item is
+             # a due gate and reset per fresh queue item; `gate_result.
+             # correct` is now `!run.gateSlipped`. Also wired the demote half
+             # of the ladder on top of the now-reachable `gateFails`: new
+             # `lib/session/run.ts#demoteOfferFor`/`acceptGateDemote` +
+             # `SessionIsland.tsx`'s "send it back to Learn" surface,
+             # mirroring v2's `Gate.tsx#stage === "demote-offer"` exactly.
+             # RED confirmed at both the `run.ts` level (a deliberate mid-
+             # gate slip, recovered by retrying, previously recorded
+             # `correct: true`; now `false`) and the component level (the
+             # demote-offer UI tests failed against the unmodified
+             # `SessionIsland.tsx` before the wiring landed). `TZ=UTC make
+             # test`: 2003 passing (was 1995, +8 — exactly this run's new
+             # tests). `TZ=UTC make build`: exit 0, 20 routes (unchanged).
+             # `npm run gates`: all green. No v1/v2 edit, no Arabic
+             # codepoint introduced. NOT addressed, named so a future run
+             # doesn't re-discover it as new: the "rescaffold" ladder rung
+             # (`RESCAFFOLD_AFTER_FAILS = 2`, a lighter ungraded S2 warm-up
+             # pass before the next cold attempt) — v2's `Gate.tsx` runs it
+             # as a second reconstruction phase within the same gate visit,
+             # which `SessionRun`'s one-machine-per-item shape does not
+             # support without a real, separate state-machine extension; a
+             # learner with 2-3 consecutive fails still gets the ordinary
+             # full cold check today, not the lighter warm-up. Also found by
+             # this run's sweep and deliberately left for a future run:
+             # `floor.ts`'s entire FR9 2-minute floor session
+             # (`floorQueue`/`floorMinutes`, zero callers, needs its own
+             # `/home` CTA and a reduced-queue session entry point) and
+             # `activity.ts#lastActiveDayMs()` being re-derived by hand in
+             # `run.ts` instead of imported (harmless — the inline copy is
+             # byte-identical — but the same "re-derive instead of import"
+             # shape as v3-D83's `gradeClassToWire` finding). See
+             # DEFECTS.md#B12 and DECISIONS.md v3-D107.
              # NOTE (v3-D106): `packages/engine/src/freeplay.ts#weakSpots` (FR6
              # Door 2, "weak-spot gym") had ZERO production callers — v3-D98's
              # own header named it out of scope, pending "a real UI surface of

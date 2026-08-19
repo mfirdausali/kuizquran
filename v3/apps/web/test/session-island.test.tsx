@@ -36,10 +36,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { Corpus } from "@engine/types.ts";
+import type { Corpus, DrillEvent } from "@engine/types.ts";
 import { initReconstruct } from "@engine/reconstruct.ts";
+import { DEMOTE_OFFER_AFTER_FAILS } from "@engine/gate.ts";
 
-import { DB_NAME, openDb, resetDbForTests, writeLock, getAllEvents, RetryableAppendError } from "@/lib/idb";
+import { DB_NAME, openDb, resetDbForTests, writeLock, getAllEvents, append, RetryableAppendError } from "@/lib/idb";
 import { readEntitlementSnapshot } from "@/lib/entitlement/sync";
 import { resetApiFetchForTests } from "@/lib/sync/apiFetch";
 import { resetTokenForTests, setToken } from "@/lib/sync/token";
@@ -371,6 +372,7 @@ function trivialOneItemRun(c: Corpus, now: number): SessionRun {
     slips: 0,
     lastTap: null,
     done: false,
+    gateSlipped: false,
   };
 }
 
@@ -433,6 +435,7 @@ describe("v3-D98 — Door 1 CTA on the real summary screen, actually wired", () 
       slips: 0,
       lastTap: null,
       done: false,
+      gateSlipped: false,
     };
     // Play this seeding run to completion OFF-SCREEN, via the real (unmocked)
     // functions — mirrors run.test.ts's own playThrough, driven by the
@@ -532,6 +535,7 @@ describe("v3-D106 — Door 2 CTA on the real summary screen, actually wired", ()
           slips: 0,
           lastTap: null,
           done: false,
+          gateSlipped: false,
         },
       });
 
@@ -549,5 +553,122 @@ describe("v3-D106 — Door 2 CTA on the real summary screen, actually wired", ()
 
     await new Promise((r) => setTimeout(r, 20));
     expect(screen.queryByRole("button", { name: /practice your weakest spot/i })).toBeNull();
+  });
+});
+
+// v3-D107 — the gate forgiveness ladder's demote offer (v2-D08), the learner
+// surface for `lib/session/run.ts#demoteOfferFor`/`acceptGateDemote`. Proven
+// at the `run.ts` level (a real fold, no DOM) in `lib/session/run.test.ts`;
+// this block proves the COMPONENT actually shows and wires it, mirroring the
+// Door 1/Door 2 CTA blocks above.
+const SEED_T0 = Date.UTC(2026, 7, 11, 9, 0, 0);
+const DAY = 86_400_000;
+
+/** A run whose current item is the DUE gate for 112:1, seeded so
+ *  `demoteOfferFor` genuinely returns an offer: `DEMOTE_OFFER_AFTER_FAILS`
+ *  real `gate_result:false` events already committed to IDB (via `append`,
+ *  the same public entry point every real tap uses — never a hand-built
+ *  atom), one per learning-day, before this run object is even constructed. */
+async function seedDemoteOffer(): Promise<void> {
+  await append(
+    { type: "ayah_produced", ts: SEED_T0, tz: "UTC", surah: SURAH, ayah: 1, rung: "S3", structured: true } as DrillEvent,
+    { now: SEED_T0, tz: "UTC" },
+  );
+  for (let day = 1; day <= DEMOTE_OFFER_AFTER_FAILS; day++) {
+    await append(
+      {
+        type: "gate_result",
+        ts: SEED_T0 + day * DAY,
+        tz: "UTC",
+        surah: SURAH,
+        ayah: 1,
+        rung: "S3",
+        correct: false,
+        structured: true,
+      } as DrillEvent,
+      { now: SEED_T0 + day * DAY, tz: "UTC" },
+    );
+  }
+}
+
+function gateRunFor(c: Corpus, now: number): SessionRun {
+  return {
+    surah: SURAH,
+    queue: [{ kind: "gate", atomKey: "112:ayah:1", ayah: 1, estMin: 1 }],
+    cursor: 0,
+    machine: initReconstruct(c, SURAH, 1, 1, { full: true }),
+    startedAt: now,
+    slips: 0,
+    lastTap: null,
+    done: false,
+    gateSlipped: false,
+  };
+}
+
+describe("v3-D107 — gate forgiveness: the demote offer, actually shown", () => {
+  it("shows 'send back to Learn' instead of the quiz card, and accepting it commits gate_demote and resumes the queue", async () => {
+    installFetch();
+    await seedDemoteOffer();
+    const now = Date.now();
+    startSessionOverride = () => Promise.resolve({ ok: true, run: gateRunFor(corpus, now) });
+
+    render(<SessionIsland surah={SURAH} />);
+
+    // The demote offer replaces the quiz card entirely — the learner is
+    // never shown a cold-gate reconstruction bank for an atom the engine has
+    // already decided to offer sending back to Learn.
+    const acceptBtn = await screen.findByRole("button", { name: /send.*back to learn/i });
+    expect(screen.queryByTestId("session-drill")).toBeNull();
+
+    fireEvent.click(acceptBtn);
+
+    // The only queue item was the gate; accepting the offer resolves it and
+    // the (now-empty) queue reaches summary via the ordinary commit path —
+    // never a parallel, unaudited route (invariant #2).
+    await waitFor(() => expect(screen.getByTestId("session-summary")).toBeTruthy());
+
+    const events = await getAllEvents();
+    const demote = events.find((e) => e.type === "gate_demote" && e.ayah === 1);
+    expect(demote).toBeDefined();
+
+    const { rebuild } = await import("@engine/rebuild.ts");
+    const { atomKey } = await import("@engine/atom.ts");
+    const atoms = rebuild(events);
+    const atom = atoms.get(atomKey(SURAH, "ayah", 1));
+    expect(atom?.encoded).toBe(false);
+    expect(atom?.gateFails).toBe(0);
+  });
+
+  it("'Try the gate anyway' dismisses the offer and serves the ordinary cold check", async () => {
+    installFetch();
+    await seedDemoteOffer();
+    const now = Date.now();
+    startSessionOverride = () => Promise.resolve({ ok: true, run: gateRunFor(corpus, now) });
+
+    render(<SessionIsland surah={SURAH} />);
+    const tryBtn = await screen.findByRole("button", { name: /try.*gate anyway/i });
+    fireEvent.click(tryBtn);
+
+    await waitFor(() => expect(screen.getByTestId("session-drill")).toBeTruthy());
+    expect(screen.queryByRole("button", { name: /send.*back to learn/i })).toBeNull();
+
+    const events = await getAllEvents();
+    expect(events.some((e) => e.type === "gate_demote")).toBe(false);
+  });
+
+  it("never shows the demote offer before DEMOTE_OFFER_AFTER_FAILS fails — the ordinary gate quiz card renders", async () => {
+    installFetch();
+    // No seeded fails at all: an atom that is encoded with a gate due, but
+    // gateFails still 0.
+    await append(
+      { type: "ayah_produced", ts: SEED_T0, tz: "UTC", surah: SURAH, ayah: 1, rung: "S3", structured: true } as DrillEvent,
+      { now: SEED_T0, tz: "UTC" },
+    );
+    const now = Date.now();
+    startSessionOverride = () => Promise.resolve({ ok: true, run: gateRunFor(corpus, now) });
+
+    render(<SessionIsland surah={SURAH} />);
+    await waitFor(() => expect(screen.getByTestId("session-drill")).toBeTruthy());
+    expect(screen.queryByRole("button", { name: /send.*back to learn/i })).toBeNull();
   });
 });

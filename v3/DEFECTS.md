@@ -4,9 +4,90 @@ Every one verified in source, not inferred. Each names its owning milestone and
 the regression test that closes it.
 
 **B1–B6** are v2 engine/data defects carried into the port. **B7–B9** were found
-by executing the v2 harness. **B10, B11** were found in v3's own session loop
-(build-plan step 18), independent of the v2 port. **E-01…E-08** are
+by executing the v2 harness. **B10, B11, B12** were found in v3's own session
+loop (build-plan step 18), independent of the v2 port. **E-01…E-08** are
 multi-surah defects that only manifest once a second surah exists.
+
+---
+
+## B12 — a cold gate could never actually FAIL ✅ CLOSED (build-plan step 18, v3-D107)
+
+Once B11 made a cold gate PASSABLE, this run's sweep found it could still never
+FAIL through the real session loop — the root cause of a second, deeper defect:
+`gate.ts#gateForgiveness()`/`demoteToLearn()` (v2-D08's forgiveness ladder) were
+real, unit-tested (`gate.test.ts`) and fold-safe (`rebuild.test.ts`'s own
+`gate_demote` block) but structurally UNREACHABLE — not merely unwired.
+
+`advanceReconstruct` (`reconstruct.ts`) never advances the blank index on a
+wrong tap; a learner simply retries the SAME blank until correct, so `adv.correct`
+is unconditionally `true` at the moment a reconstruction pass completes.
+`answerAfterTap`'s gate branch (post-B11) stamped `gate_result.correct:
+adv.correct` — always `true` — so a cold gate that started with a slip and was
+doggedly retried into completion was recorded as a clean pass. v2's own
+`pages/Gate.tsx` (the port source, read but never touched — never edited) got
+this right: a local `slipped` flag, set on any wrong tap during the cold stage,
+decides `passed = !slipped` at completion — "one pass, no partial credit... any
+slip fails the whole gate" (`Gate.tsx`'s own header). That flag was never ported.
+
+⇒ `AtomState.gateFails` only ever increments inside `applyGateResult`'s FAIL
+branch, reached only by a `gate_result` event whose `correct` is `false` — so
+`gateFails` could never exceed 0 in production, and `gateForgiveness()` could
+never return anything but `"cold"`. The forgiveness ladder WIREFRAME.md's own
+"cold gate — spine of the schedule" section promises ("after repeated fails the
+app *offers* to send the ayah back to Learn") had no possible trigger.
+
+**Why nothing caught it:** `gate.ts`'s own 13 tests exercise `applyGateResult`
+in isolation with a hand-passed `passed: false`, never through a real tap
+sequence; B11's own regression test (above) only drives the happy path
+("the learner completed the gate CORRECTLY").
+
+**Fixed:** `SessionRun` gained a `gateSlipped` field, reset whenever a new
+queue item becomes current and set `true` by any wrong tap while the current
+item is a due gate. `gate_result.correct` is now `!run.gateSlipped`, never
+`adv.correct`. `lib/session/run.ts` also gained `demoteOfferFor`/
+`acceptGateDemote` (the demote half of the ladder — see v3-D107 for why
+"rescaffold", the lighter S2 warm-up rung, is a deliberately separate,
+unaddressed gap) and `SessionIsland.tsx` now shows "send it back to Learn"
+instead of the quiz card once the engine's own fold says to offer it.
+
+**Verified:**
+- RED confirmed directly: a test drives one deliberate wrong tap mid cold-gate
+  pass, then recovers by retrying every blank correctly — against the
+  unfixed source this asserted `gate_result.correct === false` and failed
+  with `true`; against the fix it passes. A second test (the pre-existing
+  B11 happy path) confirms zero regression: a slip-free pass still records
+  `correct: true`.
+- `demoteOfferFor`/`acceptGateDemote` proven at the `run.ts` level (seeded via
+  4 real `gate_result:false` events, the same public `append()` entry point
+  every real tap commits through) and at the component level (RED confirmed:
+  the demote-offer UI tests failed against the unmodified `SessionIsland.tsx`
+  — `findByRole` timeouts on the new button — before the wiring landed).
+- `TZ=UTC make test`: 2003 passing (was 1995, +8 — exactly this run's new
+  tests: 5 in `run.test.ts`, 3 in `session-island.test.tsx`). `check-test-floor.mjs`:
+  OK, 2003 >= floor 1899 (+104 margin). `TZ=UTC make build`: exit 0, 20 routes
+  (unchanged). `npm run gates`: locked-css OK, boundaries OK (201 files
+  checked; this run created no new file — `git status` confirms only the 4
+  existing files listed above changed — so the count vs. a prior entry's 200
+  is pre-existing drift, not something introduced here; clause 5 does not
+  flag the new `gateForgiveness`/`.kind` reads since those live in `lib/`,
+  never `app/`/`components/`), corpus-morphology and
+  corpus-glyphs OK. No `v1/**`/`v2/**` edit (verified: `git status --porcelain`
+  clean on both trees before commit — a stray `v2/tsconfig.tsbuildinfo`
+  build-cache diff from running the suite was reverted, same discipline as
+  every prior entry). No Arabic codepoint introduced (checked directly against
+  the diff, and via `npm run gates`' own Arabic-codepoint grep, which passed):
+  every new line addresses an ayah by number, a fail count by integer, or a
+  `Rung` via `gradeClassToWire()`, never a literal.
+
+**Explicitly not addressed, named so a future run doesn't re-discover it as
+new:** the "rescaffold" rung of the ladder (`RESCAFFOLD_AFTER_FAILS = 2`, a
+lighter, ungraded S2 warm-up pass offered BEFORE the next cold attempt) is
+still unwired. v2's `Gate.tsx` implements this as a second, distinct
+reconstruction phase within the same gate visit; wiring it here would mean a
+queue item that transitions between two `ReconstructState` machines mid-item —
+a real, separate state-machine extension this run chose not to make alongside
+the root-cause slip-tracking fix. Between 2 and 4 consecutive fails, a learner
+today still gets the ordinary full cold check, not the lighter warm-up.
 
 ---
 

@@ -53,6 +53,10 @@ import { atomKey } from "@engine/atom.ts";
 // below for why the summary screen, not the assembled queue, is where this lives.
 // FR6 Door 2 ("weak-spot gym", v3-D106) — see `weakSpotOfferFor`/`startWeakSpotDrill`.
 import { extraLearnGrant, weakSpots, type ExtraLearnGrant, type WeakSpot } from "@engine/freeplay.ts";
+// v3-D107 — gate forgiveness ladder (v2-D08): see `demoteOfferFor`/
+// `acceptGateDemote` below for why `gateForgiveness`/`demoteToLearn` were
+// UNREACHABLE (not merely unwired) until this run's slip-tracking fix.
+import { gateForgiveness } from "@engine/gate.ts";
 // DEFECTS.md#B2 / v3-D26: gradeClassToWire() is "the ONE function" that may
 // resolve a grading decision to a wire Rung — see its own header. A hardcoded
 // `rung: full ? "S3" : "S2"` here would be B2's exact ternary shape reborn in
@@ -115,6 +119,19 @@ export interface SessionRun {
   readonly lastTap: { index: number; correct: boolean } | null;
   /** True once the queue is exhausted. */
   readonly done: boolean;
+  /**
+   * v3-D107 — true once ANY tap has slipped during the CURRENT queue item,
+   * IF that item is a due cold gate. Reset to `false` whenever a new queue
+   * item becomes current. A cold gate is "one pass, no partial credit" (v2's
+   * `pages/Gate.tsx`, the port source): `advanceReconstruct` never advances
+   * on a wrong tap, so a learner always eventually completes a gate item by
+   * retrying — `adv.correct` at that final, successful tap is always `true`
+   * and cannot by itself say whether an EARLIER tap in the same pass
+   * slipped. This flag is that missing memory; `gate_result.correct` is
+   * `!gateSlipped`, never `adv.correct`. Irrelevant (and left `false`) for
+   * non-gate items, which grade S2/S3 on completion regardless of slips.
+   */
+  readonly gateSlipped: boolean;
 }
 
 export type StartResult =
@@ -273,6 +290,7 @@ export async function startSession(input: StartInput, c: Corpus): Promise<StartR
       slips: 0,
       lastTap: null,
       done: false,
+      gateSlipped: false,
     },
   };
 }
@@ -468,7 +486,13 @@ async function answerAfterTap(
           surah: run.surah,
           ayah: cur.ayah,
           rung: gradeClassToWire("gate"),
-          correct: adv.correct,
+          // v3-D107: NEVER `adv.correct` — that is only whether the FINAL,
+          // completing tap was right, and a wrong tap never advances
+          // (advanceReconstruct), so it is unconditionally `true` here. A
+          // cold gate is "one pass, no partial credit" (v2's Gate.tsx): any
+          // slip anywhere in the pass fails the whole gate. `gateSlipped`
+          // is the memory of every earlier tap in THIS pass.
+          correct: !run.gateSlipped,
           structured: true,
         } as DrillEvent)
       : ({
@@ -505,9 +529,13 @@ async function settleAnswer(
   const lastTap = { index: optionIndex, correct: adv.correct };
 
   // A wrong tap is a slip: it does NOT advance, mirroring the engine's own
-  // behaviour. The learner stays on the blank until they get it.
+  // behaviour. The learner stays on the blank until they get it. v3-D107: if
+  // the item being drilled is a due cold gate, this slip must be remembered
+  // past the retry that follows — `gate_result`'s eventual `correct` reads
+  // this flag, never the completing tap alone.
   if (!adv.correct) {
-    return { ...run, slips, lastTap };
+    const isGate = run.queue[run.cursor]?.kind === "gate";
+    return { ...run, slips, lastTap, gateSlipped: isGate ? true : run.gateSlipped };
   }
 
   // The ayah is finished — move to the next queue item, or end the session.
@@ -525,6 +553,9 @@ async function settleAnswer(
       machine: machineFor(c, run.surah, nextQ, strengthOf(atomsMap, run.surah, nextQ.ayah)),
       slips,
       lastTap,
+      // A fresh queue item starts with a clean slate, regardless of what the
+      // PREVIOUS item's gate slip state was.
+      gateSlipped: false,
     };
   }
 
@@ -611,6 +642,7 @@ export function startExtraLearn(run: SessionRun, c: Corpus, ayah: number): Sessi
     machine: machineFor(c, run.surah, item, 0),
     lastTap: null,
     done: false,
+    gateSlipped: false,
   };
 }
 
@@ -680,6 +712,100 @@ export async function startWeakSpotDrill(run: SessionRun, c: Corpus, ayah: numbe
     machine: machineFor(c, run.surah, item, strengthOf(atomsMap, run.surah, ayah)),
     lastTap: null,
     done: false,
+    gateSlipped: false,
+  };
+}
+
+/**
+ * v3-D107 — gate forgiveness ladder (v2-D08), demote half only.
+ *
+ * `gateForgiveness()`/`demoteToLearn()` (`packages/engine/src/gate.ts`) were
+ * real and unit-tested since the engine port but UNREACHABLE in production —
+ * see this file's own `gateSlipped` field for why `gateFails` could never
+ * exceed 0 until this run. Now that a real slip can fail a gate, this offers
+ * "send this verse back to Learn" once the atom has failed
+ * `DEMOTE_OFFER_AFTER_FAILS` times running — mirroring v2's `Gate.tsx`
+ * `stage === "demote-offer"` exactly, tap-gated, never automatic
+ * (`gateForgiveness`'s own header: "the learner must tap to accept; never
+ * auto-demoted").
+ *
+ * Deliberately NOT implemented here: the "rescaffold" rung of the ladder (a
+ * lighter, ungraded S2 warm-up pass offered after `RESCAFFOLD_AFTER_FAILS`,
+ * BEFORE the next cold attempt). v2's `Gate.tsx` does this as a second,
+ * distinct reconstruction phase within the same gate visit; wiring it here
+ * would mean a queue item that transitions between two `ReconstructState`
+ * machines mid-item, a real (small) state-machine extension this run chose
+ * not to make alongside the root-cause slip-tracking fix. Between
+ * `RESCAFFOLD_AFTER_FAILS` (2) and `DEMOTE_OFFER_AFTER_FAILS` (4) fails, a
+ * learner today still gets the ordinary cold check, not the lighter warm-up
+ * — a real, named gap for a future run, not a silent one.
+ *
+ * Re-derives the fold fresh (never from `run`'s in-memory queue, which
+ * reflects what was assembled at the START of the session, before any of
+ * TODAY's own gate attempts could have changed `gateFails`) — same
+ * discipline as `weakSpotOfferFor`/`extraLearnOfferFor` above.
+ */
+export async function demoteOfferFor(run: SessionRun): Promise<{ ayah: number } | null> {
+  if (run.done) return null;
+  const q = run.queue[run.cursor];
+  if (!q || q.kind !== "gate") return null;
+  const prior = await getEventsForSurah(run.surah);
+  const atom = rebuild(prior).get(atomKey(run.surah, "ayah", q.ayah));
+  if (!atom) return null;
+  return gateForgiveness(atom) === "demote" ? { ayah: q.ayah } : null;
+}
+
+/**
+ * Accept a demote offer: commit `gate_demote` for the CURRENT gate item, then
+ * advance the queue past it exactly as a completed item would — this gate
+ * item is resolved, one way or the other, the moment this event lands.
+ * `ayah` is read off the run itself (never passed in and trusted), so a
+ * caller can only ever demote the gate it is actually looking at.
+ *
+ * A no-op (returns `run` unchanged, appends nothing) when the current item is
+ * not a due gate — mirrors every other `start*`/`accept*` entry point's
+ * "acts on exactly what it was shown" discipline rather than trusting a
+ * stale caller.
+ */
+export async function acceptGateDemote(
+  run: SessionRun,
+  c: Corpus,
+  ctx: AppendContext,
+): Promise<SessionRun> {
+  const q = run.queue[run.cursor];
+  if (!q || q.kind !== "gate") return run;
+
+  const demoteEvent = {
+    type: "gate_demote",
+    ts: ctx.now,
+    tz: ctx.tz,
+    surah: run.surah,
+    ayah: q.ayah,
+    // DEFECTS.md#B2: never a literal Rung. `gate_demote` is always S3 by
+    // gate.ts's own contract ("gates only ever apply to S3-encoded ayat").
+    rung: gradeClassToWire("gate"),
+  } as DrillEvent;
+
+  return commitThenContinue(demoteEvent, ctx, null, () => advancePastCurrent(run, c));
+}
+
+/** Move the cursor past the current queue item without grading anything —
+ *  `acceptGateDemote`'s own advance, since `gate_demote` has no `adv` to
+ *  read a next machine state from (unlike `settleAnswer`'s ordinary path). */
+async function advancePastCurrent(run: SessionRun, c: Corpus): Promise<SessionRun> {
+  const nextCursor = run.cursor + 1;
+  if (nextCursor >= run.queue.length) {
+    return { ...run, cursor: nextCursor, lastTap: null, gateSlipped: false, done: true };
+  }
+  const events = await getEventsForSurah(run.surah);
+  const atomsMap = rebuild(events);
+  const nextQ = run.queue[nextCursor]!;
+  return {
+    ...run,
+    cursor: nextCursor,
+    machine: machineFor(c, run.surah, nextQ, strengthOf(atomsMap, run.surah, nextQ.ayah)),
+    lastTap: null,
+    gateSlipped: false,
   };
 }
 

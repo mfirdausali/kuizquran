@@ -92,10 +92,13 @@ import {
   startExtraLearn,
   weakSpotOfferFor,
   startWeakSpotDrill,
+  demoteOfferFor,
+  acceptGateDemote,
   SessionCommitFailure,
   type SessionRun,
 } from "./run";
 import { RetryableAppendError } from "@/lib/idb/append";
+import { DEMOTE_OFFER_AFTER_FAILS } from "@engine/gate.ts";
 
 // A fixed clock. The frontend is ALLOWED Date.now(); the engine is not. Tests
 // pass time in explicitly so a run is reproducible and TZ-independent — the
@@ -712,7 +715,7 @@ describe("v3-D98 — Door 1, 'extra Learn' after the assembled queue is done", (
   it("offers nothing before the mastery gate window opens the FIRST candidate is un-encoded — a virgin log grants the first mushaf-order ayah", async () => {
     const c = corpus();
     const offer = await extraLearnOfferFor(
-      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true },
+      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true, gateSlipped: false },
       c,
       T0,
     );
@@ -810,7 +813,7 @@ describe("v3-D98 — Door 1, 'extra Learn' after the assembled queue is done", (
 describe("v3-D106 — Door 2, 'weak-spot gym' after the assembled queue is done", () => {
   it("offers nothing before any atom is encoded — a virgin log has no weak spot to rank", async () => {
     const offer = await weakSpotOfferFor(
-      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true },
+      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true, gateSlipped: false },
       T0,
     );
     expect(offer).toBeNull();
@@ -842,6 +845,7 @@ describe("v3-D106 — Door 2, 'weak-spot gym' after the assembled queue is done"
       slips: 0,
       lastTap: null,
       done: true,
+      gateSlipped: false,
     };
     const offer = await weakSpotOfferFor(doneRun, T0 + 10_000);
     expect(offer).not.toBeNull();
@@ -866,6 +870,7 @@ describe("v3-D106 — Door 2, 'weak-spot gym' after the assembled queue is done"
       slips: 0,
       lastTap: null,
       done: true,
+      gateSlipped: false,
     };
     const offer = await weakSpotOfferFor(doneRun, T0 + 10_000);
     expect(offer).not.toBeNull();
@@ -997,5 +1002,207 @@ describe("v3-D101 — the day-1 cold gate must actually be passable through the 
     const atoms = rebuild(events);
     const atom = atoms.get(atomKey(SURAH, "ayah", gatedAyah));
     expect(atom?.gatePassed).toBe(true);
+  });
+});
+
+// v3-D107 — the day-1 cold gate, once actually PASSABLE (v3-D101), still
+// could never actually FAIL through the real session loop, which is the root
+// cause of a second, deeper problem: `gate.ts#gateForgiveness()`/
+// `demoteToLearn()` (v2-D08's forgiveness ladder) were real, unit-tested
+// (gate.test.ts) and fold-safe (rebuild.test.ts's own `gate_demote` block)
+// but had ZERO production callers — and could not, structurally, ever gain
+// one: `AtomState.gateFails` only ever increments inside `applyGateResult`'s
+// FAIL branch (gate.ts:36-41), reached only by a `gate_result` event whose
+// `correct` is `false`.
+//
+// `advanceReconstruct` (reconstruct.ts:131-138) never advances the blank
+// index on a wrong tap — a learner simply retries the SAME blank until they
+// get it right, so `adv.correct` is unconditionally `true` at the moment
+// `ayahProduced` fires. `answerAfterTap`'s gate branch (line ~471, prior to
+// this fix) stamped `gate_result.correct: adv.correct` — always `true` — so
+// a cold gate that started with a slip and was doggedly retried into
+// completion was recorded as a clean pass. v2's own `pages/Gate.tsx` (the
+// port source, read but never touched) got this right: a local `slipped`
+// flag, set on any wrong tap during the "cold" stage, decides `passed =
+// !slipped` at completion — "one pass, no partial credit... any slip fails
+// the whole gate" (Gate.tsx's own header). That flag was never ported.
+//
+// Consequence: `gateFails` could never exceed 0 in production, so
+// `gateForgiveness()` could never return anything but "cold" — not merely
+// unwired, but UNREACHABLE. Fixing the slip-tracking bug is what makes the
+// forgiveness ladder wireable at all; wiring `demoteOfferFor`/
+// `acceptGateDemote` below is the "offer, never force, send it back to
+// Learn" surface WIREFRAME.md's own "cold gate — spine of the schedule"
+// section promises.
+describe("v3-D107 — a slip during a due cold gate must fail the gate, not silently pass it", () => {
+  it("one wrong tap anywhere in the pass, then finishing it by retrying, still records gate_result.correct:false", async () => {
+    const c = corpus();
+    const gatedAyah = 1;
+
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah: gatedAyah, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+
+    const day2 = T0 + 86_400_000;
+    const started = await startSession({ surah: SURAH, now: day2, tz: TZ }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    expect(started.run.queue[0]?.kind).toBe("gate");
+
+    // Slip on the very first blank...
+    let run = started.run;
+    const wrong0 = correctIndexFor(run, c) === 0 ? 1 : 0;
+    run = await answerCurrent(run, c, wrong0, { now: day2 + 100, tz: TZ });
+    expect(run.lastTap?.correct).toBe(false);
+
+    // ...then recover: retry the same blank correctly, and finish every
+    // remaining blank correctly too. A real learner is never locked out by
+    // one slip mid-pass (advanceReconstruct just re-serves the same blank).
+    let taps = 1;
+    let cur = currentItem(run, c);
+    while (cur && taps < 50) {
+      run = await answerCurrent(run, c, correctIndexFor(run, c), {
+        now: day2 + 200 + taps * 100,
+        tz: TZ,
+      });
+      taps++;
+      cur = currentItem(run, c);
+    }
+
+    const events = await getAllEvents();
+    const gateResults = events.filter((e) => e.type === "gate_result" && e.ts >= day2);
+    expect(gateResults.length).toBe(1);
+    // THE BUG, prior to the fix: this read `true`, because only the FINAL
+    // (successful) tap decided `adv.correct` — the earlier slip was invisible
+    // to the wire.
+    expect(gateResults[0]!.correct).toBe(false);
+
+    const atoms = rebuild(events);
+    const atom = atoms.get(atomKey(SURAH, "ayah", gatedAyah));
+    expect(atom?.gatePassed).toBe(false);
+    expect(atom?.gateFails).toBe(1);
+  });
+
+  it("a gate completed with zero slips still passes cleanly (no regression on the v3-D101 happy path)", async () => {
+    const c = corpus();
+    const gatedAyah = 1;
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah: gatedAyah, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+    const day2 = T0 + 86_400_000;
+    const started = await startSession({ surah: SURAH, now: day2, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+    await playThrough(started.run, c);
+
+    // NOTE: `playThrough`'s own taps are stamped `T0 + n*1000` (a fixed small
+    // offset from the SEED's T0, not from `day2`) — unlike the deliberate
+    // slip test above, which drives its own taps with `day2`-based
+    // timestamps. Filtering by `e.ts >= day2` here would silently exclude
+    // the very event this test checks; filter by type alone, as the
+    // pre-existing v3-D101 happy-path test above does.
+    const events = await getAllEvents();
+    const gateResults = events.filter((e) => e.type === "gate_result");
+    expect(gateResults.length).toBe(1);
+    expect(gateResults[0]!.correct).toBe(true);
+  });
+});
+
+// v3-D107 (continued) — the forgiveness ladder's learner-facing surface:
+// `demoteOfferFor` reads the SAME `gateForgiveness()` v2's `Gate.tsx` called,
+// and `acceptGateDemote` commits the SAME `gate_demote` event
+// `rebuild.ts`/`gate.ts#demoteToLearn` already fold correctly (proven since
+// the engine port, never reachable until now).
+describe("v3-D107 — gate forgiveness ladder: demoteOfferFor / acceptGateDemote", () => {
+  it("offers nothing before DEMOTE_OFFER_AFTER_FAILS consecutive fails", async () => {
+    const c = corpus();
+    const gatedAyah = 1;
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah: gatedAyah, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+    const day2 = T0 + 86_400_000;
+    const started = await startSession({ surah: SURAH, now: day2, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+    expect(started.run.queue[0]?.kind).toBe("gate");
+
+    expect(await demoteOfferFor(started.run)).toBeNull();
+  });
+
+  it("offers to send the ayah back to Learn after DEMOTE_OFFER_AFTER_FAILS consecutive gate fails, and acceptGateDemote clears its encoding", async () => {
+    const c = corpus();
+    const gatedAyah = 1;
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah: gatedAyah, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+
+    // DEMOTE_OFFER_AFTER_FAILS consecutive real cold-gate FAILS, one per
+    // learning-day — the exact wire shape a real learner's repeated slips
+    // now produce, per the fix above. Seeded directly via `append()` (the
+    // same public, production entry point every real tap commits through),
+    // rather than grinding through DEMOTE_OFFER_AFTER_FAILS full simulated
+    // sessions, mirroring v3-D101/v3-D106's own seeding discipline.
+    for (let day = 1; day <= DEMOTE_OFFER_AFTER_FAILS; day++) {
+      await append(
+        {
+          type: "gate_result",
+          ts: T0 + day * 86_400_000,
+          tz: TZ,
+          surah: SURAH,
+          ayah: gatedAyah,
+          rung: "S3",
+          correct: false,
+          structured: true,
+        } as DrillEvent,
+        { now: T0 + day * 86_400_000, tz: TZ },
+      );
+    }
+
+    const seededAtoms = rebuild(await getAllEvents());
+    const seededAtom = seededAtoms.get(atomKey(SURAH, "ayah", gatedAyah));
+    expect(seededAtom?.gateFails).toBe(DEMOTE_OFFER_AFTER_FAILS);
+
+    const dueDay = T0 + (DEMOTE_OFFER_AFTER_FAILS + 1) * 86_400_000;
+    const started = await startSession({ surah: SURAH, now: dueDay, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+    expect(started.run.queue[0]?.kind).toBe("gate");
+    expect(started.run.queue[0]?.ayah).toBe(gatedAyah);
+
+    const offer = await demoteOfferFor(started.run);
+    expect(offer).toEqual({ ayah: gatedAyah });
+
+    await acceptGateDemote(started.run, c, { now: dueDay + 500, tz: TZ });
+
+    const events = await getAllEvents();
+    expect(
+      events.some((e) => e.type === "gate_demote" && e.ayah === gatedAyah && e.ts === dueDay + 500),
+    ).toBe(true);
+
+    // demoteToLearn's own contract (gate.test.ts): re-learned, not
+    // abandoned — encoding and gate state clear, gateFails resets, nothing
+    // else is touched.
+    const atomsAfterDemote = rebuild(events);
+    const atomAfterDemote = atomsAfterDemote.get(atomKey(SURAH, "ayah", gatedAyah));
+    expect(atomAfterDemote?.encoded).toBe(false);
+    expect(atomAfterDemote?.gatePassed).toBe(false);
+    expect(atomAfterDemote?.gateFails).toBe(0);
+  });
+
+  it("acceptGateDemote is a no-op when the current item is not a due gate", async () => {
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+    // A virgin log's first item is "learn", never "gate".
+    expect(started.run.queue[0]?.kind).not.toBe("gate");
+
+    const before = await getAllEvents();
+    const after = await acceptGateDemote(started.run, c, { now: T0 + 500, tz: TZ });
+    const events = await getAllEvents();
+
+    expect(events.length).toBe(before.length);
+    expect(events.some((e) => e.type === "gate_demote")).toBe(false);
+    expect(after).toBe(started.run);
   });
 });

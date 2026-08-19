@@ -5580,3 +5580,89 @@ load.ts`'s SSR override gap and `isQuestionDisabled()`/the `disable` field
 remain exactly as open as v3-D96/D105 left them — this run re-confirmed both
 are still genuine "invent a new contract" gaps, not wiring fixes, and
 deliberately did not touch either.
+
+### v3-D107 — the day-1 cold gate could never actually FAIL; DEFECTS.md#B12, the root cause blocking the gate forgiveness ladder (v2-D08) since it was ported
+
+**Re-derived state per NIGHTLY.md.** The checkout started on a DETACHED HEAD
+(`508690b`, v3-D106) that was already 7 commits ahead of the local `main`
+branch ref, though `origin/main` itself had already caught up to the same
+commit by the time this run fetched — so no orphaned work, but `git branch -f
+main HEAD && git checkout main` was still needed to leave the ref itself
+pointing at the right commit rather than staying detached. Checkout was cold
+(no `node_modules`/`vendor`), and `make setup` hit the same GitHub-zip-timeout
+→ composer-git-mirror-timeout failure v3-D106 already named — retried
+per-package with `COMPOSER_PROCESS_TIMEOUT=900`, same fix, all green.
+`TZ=UTC make test` on the unmodified tree: **1995 passing**, matching
+`CLAUDE.md`'s own claimed number exactly — genuinely green before any new
+work started.
+
+Re-derived the 32-step order: unchanged from v3-D106's own re-derivation
+(steps 1–26/29 DONE, 27/28 human-content-gated, 30's remaining engineering
+infra/calendar-gated). Per established practice, dispatched a fresh,
+code-blind sweep for the next "mechanism built and unit-tested, zero
+production callers" instance, given the accumulated exclusion list through
+v3-D106. It came back with three NEW candidates (not previously named by any
+prior entry): `gate.ts#gateForgiveness()`/`demoteToLearn()`/the `gate_demote`
+event (the v2-D08 forgiveness ladder — `gate.ts`'s own header names it
+precisely, and `rebuild.ts` already folds `gate_demote` correctly, but
+nothing anywhere called any of it); `floor.ts`'s entire FR9 "2-minute floor
+session" (`floorQueue`/`floorMinutes`); and `activity.ts#lastActiveDayMs()`
+being re-derived by hand in `run.ts` instead of imported (same shape as
+v3-D83's `gradeClassToWire` re-derivation, but harmless — the inline copy is
+byte-identical).
+
+**Chose the forgiveness ladder — and before wiring it, checked WHY it had
+zero callers, rather than assuming "just unwired."** `AtomState.gateFails`
+only increments inside `gate.ts#applyGateResult`'s FAIL branch, which is
+reached only by a `gate_result` event carrying `correct: false`. Tracing
+every caller of that event type in `lib/session/run.ts#answerAfterTap` (the
+ONLY place in production that ever emits one, since B11 landed) found it
+stamps `correct: adv.correct` — and `adv.correct`, at the exact moment a
+reconstruction pass completes, is UNCONDITIONALLY `true`, because
+`advanceReconstruct` (`reconstruct.ts`) never advances the blank index on a
+wrong tap: a learner just retries the same blank until right. So a cold gate
+that started with a slip and was doggedly retried into completion was
+recorded as a clean pass — `gateFails` could never exceed 0 in production,
+`gateForgiveness()` could never return anything but `"cold"`, and the ladder
+was not merely unwired but structurally UNREACHABLE. v2's own `pages/
+Gate.tsx` (read, never touched) has the missing piece: a local `slipped` flag
+set on any wrong tap during the cold stage, deciding `passed = !slipped` at
+completion — "one pass, no partial credit... any slip fails the whole gate."
+That flag was never ported when the session loop landed at step 18.
+
+**Fixed the root cause, then wired the demote half of the ladder on top of
+it** — see DEFECTS.md#B12 for the full defect writeup, the fix (`SessionRun`
+gained `gateSlipped`; `gate_result.correct` is now `!run.gateSlipped`, never
+`adv.correct`) and the new `demoteOfferFor`/`acceptGateDemote` exports plus
+`SessionIsland.tsx`'s new "send it back to Learn" surface, RED-confirmed both
+at the `run.ts` level and the component level.
+
+**Deliberately NOT wired: the "rescaffold" rung** (`RESCAFFOLD_AFTER_FAILS =
+2`, a lighter ungraded S2 warm-up pass offered before the next cold attempt,
+between 2 and 4 consecutive fails). v2's `Gate.tsx` implements this as a
+second, distinct reconstruction phase live within the same gate visit — the
+learner completes an ungraded warm-up pass, THEN the real cold check is
+served, both inside one visit to the gate. Porting that faithfully means a
+queue item that transitions between two `ReconstructState` machines mid-item,
+which `SessionRun`'s current shape (one `machine` per queue item, advanced
+only by `settleAnswer`'s cursor-advance branch) does not support without a
+real, separate extension. Named here rather than silently skipped: a learner
+with 2-3 consecutive gate fails today still gets the ordinary full cold
+check, not the intended lighter warm-up.
+
+**Verified** (full numbers in DEFECTS.md#B12): `TZ=UTC make test`: **2003
+passing** (was 1995, +8). `check-test-floor.mjs`: OK, 2003 >= floor 1899
+(+104 margin, `TEST-FLOOR` left unmoved). `TZ=UTC make build`: exit 0, 20
+routes (unchanged). `npm run gates`: all green. No `v1/**`/`v2/**` edit (a
+stray `v2/tsconfig.tsbuildinfo` build-cache diff was reverted before
+committing, same discipline as every prior entry). No Arabic codepoint
+introduced.
+
+**Explicitly not addressed, named so a future run doesn't re-discover it as
+new:** the rescaffold rung (above); `floor.ts`'s FR9 2-minute floor session
+(this sweep's second candidate, untouched — needs its own `/home` CTA and a
+reduced-queue entry point into the session loop, a real, separate wiring
+task); `activity.ts#lastActiveDayMs()` vs. `run.ts`'s inline re-derivation
+(third candidate, harmless but unfixed — a one-line import swap for a future
+run); Door 3/`coldSuccessAdoption`/`diminishingReturns`/the SSR override
+gap/`isQuestionDisabled()` all remain exactly as open as v3-D106 left them.
