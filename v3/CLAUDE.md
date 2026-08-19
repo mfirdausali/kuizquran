@@ -53,9 +53,59 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2016 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2030 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 853 apps/web. (v3-D109, 2026-08-19)
+             # + 417 engine + 61 fold-runner + 867 apps/web. (v3-D110, 2026-08-19)
+             # NOTE (v3-D110): DEFECTS.md#B13 — the `disable` override field
+             # reached NO learner, for two reasons that hid each other.
+             # `applyOverrides()` returns `{corpus, disabled, groups}` but
+             # `lib/corpus/client.ts#fetchCorpus` took only `.corpus`, so
+             # `overrides.ts#isQuestionDisabled()` had ZERO production callers;
+             # and v3's port of `v2/src/pages/Test.tsx#buildItems` into
+             # `lib/test/build.ts#buildTestItems` dropped that function's
+             # `disabled` parameter, its post-generation filter AND its
+             # `itemDisableKey` helper — all three. An admin/qari disabling a
+             # broken question through the already-shipped, already-admin-gated
+             # `POST /api/overrides` changed nothing a learner ever saw.
+             # Fixed both halves: new `fetchEffectiveCorpus()` +
+             # `EffectiveCorpus {corpus, disabled}` (with `fetchCorpus`
+             # delegating to it, object-identity asserted so every existing
+             # caller is unchanged by construction); `itemDisableKey` ported
+             # verbatim and exported; `buildTestItems` takes `disabled` as a
+             # REQUIRED parameter — a default `[]` would re-create the defect
+             # by omission, which is exactly how it was lost. Scope matches the
+             # port source deliberately: v2's own `Drill.tsx` does not consult
+             # `isQuestionDisabled` either, because the session loop's graded
+             # surface is a reconstruct pass over ONE ayah's own words, not a
+             # question-bank draw, so there is no per-question selection for a
+             # `disable` row to act on (named in `fetchCorpus`'s docblock so a
+             # future run doesn't misread the narrower call site as an
+             # oversight). RED confirmed TWICE by `git stash` of the three
+             # source files only, every new test kept: 23 of 30 unit tests
+             # failed on exactly `fetchEffectiveCorpus is not a function` and
+             # the missing filter/helper; separately, the component test failed
+             # on exactly its `testKind === "vocab"` assertion with the
+             # cache-reset already in place, proving the RED is the WIRING, not
+             # test isolation. That component test disables "vocab" ayah-wide
+             # across all four ayat of 112 and cannot pass vacuously (vocab is
+             # KIND_ORDER slot 0, so an unfiltered Test always contains one).
+             # `TZ=UTC make test`: 2030 passing (was 2016, +14 — exactly this
+             # run's new tests: 9 + 4 + 1; no other suite moved).
+             # `check-test-floor.mjs`: OK, 2030 >= floor 1899 (+131 margin,
+             # TEST-FLOOR left unmoved). `TZ=UTC make build`: exit 0, 20 routes
+             # (unchanged). `npm run gates`: all green (fonts degraded-but-
+             # non-blocking, pre-existing). `npx tsc --noEmit` clean. No
+             # v1/v2 edit, no Arabic codepoint (all 429 added lines swept
+             # directly across Arabic/Supplement/Extended-A/both Presentation
+             # Forms blocks). ALSO FIXED: `test/test-island.test.tsx` never
+             # reset `lib/corpus/client.ts`'s module cache — harmless while
+             # that cache held only parsed bytes, NOT harmless once it holds a
+             # resolved override DECISION, since one test's override-free
+             # corpus then leaks into the next test's override-carrying one.
+             # NOT addressed, named so a future run doesn't re-discover it:
+             # the SSR override gap (`lib/corpus/load.ts`, v3-D96's own
+             # deferral) is unchanged. With this entry every field of the
+             # override layer reaches a learner. See DECISIONS.md v3-D110.
              # `make test` enforces v3-D95's test-count floor (`v3/TEST-FLOOR`,
              # currently 1899, so the margin above is intentionally not yet
              # banked into the floor) — a suite that silently shrinks (deleted

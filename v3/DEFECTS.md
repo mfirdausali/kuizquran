@@ -5,8 +5,67 @@ the regression test that closes it.
 
 **B1–B6** are v2 engine/data defects carried into the port. **B7–B9** were found
 by executing the v2 harness. **B10, B11, B12** were found in v3's own session
-loop (build-plan step 18), independent of the v2 port. **E-01…E-08** are
-multi-surah defects that only manifest once a second surah exists.
+loop (build-plan step 18), independent of the v2 port. **B13** is a port
+omission in the Test route (build-plan step 15's override layer, consumed at
+step 18+). **E-01…E-08** are multi-surah defects that only manifest once a
+second surah exists.
+
+---
+
+## B13 — the `disable` override reached no learner ✅ CLOSED (build-plan step 15, v3-D110)
+
+The override layer's four fields are closed-set-validated on both sides
+(`OverridesController::CLOSED_FIELDS = ['gloss','distractor','group','disable']`).
+Three reached a learner. `disable` never did, for two independent reasons that
+hid each other:
+
+1. **The list was discarded at the one call site that existed to use it.**
+   `applyOverrides()` returns `{corpus, disabled, groups}`, but
+   `lib/corpus/client.ts#fetchCorpus` took only `.corpus`
+   (`applyOverrides(raw, overrides).corpus`). So
+   `overrides.ts#isQuestionDisabled()` had **zero production callers** —
+   `grep -rln isQuestionDisabled apps/web` returned nothing.
+2. **v3's port dropped the filter.** `lib/test/build.ts#buildTestItems` is a
+   port of `v2/src/pages/Test.tsx#buildItems`, whose third parameter IS
+   `disabled` and which ends with an explicit post-generation filter plus an
+   `itemDisableKey` helper. The v3 port dropped the parameter, the filter and
+   the helper. Nothing noticed, because the list had no route to the function
+   anyway.
+
+⇒ An admin or qari who disabled a broken question through the already-shipped,
+already-admin-gated `POST /api/overrides` changed nothing about what any
+learner saw. `lib/overrides/fetch.ts`'s own header already claimed otherwise
+("a disabled broken question... never reached a learner") — false when
+written, the same shape as v3-D90's false docblock claim.
+
+**Why nothing caught it:** the Laravel side tests the write path and the
+engine tests `applyOverrides`/`isQuestionDisabled` in isolation with a
+hand-passed list; `lib/test/build.test.ts` tested exactly the signature the
+port shipped, so it could not miss a parameter that was never there.
+
+**Fixed:** `fetchEffectiveCorpus()` + `EffectiveCorpus {corpus, disabled}`
+(with `fetchCorpus` delegating, identity-asserted); `itemDisableKey` ported
+verbatim and exported; `buildTestItems` takes `disabled` as a **required**
+parameter (a default `[]` would re-create the defect by omission);
+`TestIsland` threads it.
+
+**Verified:** RED confirmed twice by `git stash` of the three source files
+only, tests kept — 23 of 30 unit tests failed, and the component test failed
+separately on exactly its `testKind === "vocab"` assertion, proving the RED
+is the wiring rather than test isolation. The component test disables "vocab"
+ayah-wide over all four ayat of 112; it cannot pass vacuously, since vocab is
+`KIND_ORDER` slot 0 and an unfiltered Test always contains one. `TZ=UTC make
+test`: 2030 passing (was 2016, +14 — exactly this run's new tests). `make
+build`: exit 0, 20 routes (unchanged). Gates green. No v1/v2 edit, no Arabic
+codepoint (429 added lines swept directly).
+
+**Scope, deliberate:** v2's `Drill.tsx` does not consult `isQuestionDisabled`
+either, and the session loop's graded surface is a reconstruct pass over one
+ayah's own words — not a question-bank draw — so there is no per-question
+selection for a `disable` row to act on. Named in `fetchCorpus`'s docblock so
+the narrower call site is not later misread as an oversight.
+
+See DECISIONS.md v3-D110.
 
 ---
 

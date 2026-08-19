@@ -130,6 +130,104 @@ describe("fetchCorpus applies overrides — the unwired read half of the overrid
     expect(patched!.words.length).toBe(corpus.words.length);
   });
 
+  it("DISCARDS nothing a caller needs — `fetchEffectiveCorpus` surfaces the disabled list too", async () => {
+    // `applyOverrides` returns {corpus, disabled, groups}; `fetchCorpus` took
+    // only `.corpus`, so the `disable` field — a real, admin-writable,
+    // Laravel-validated override kind (`OverridesController::CLOSED_FIELDS`)
+    // — reached no caller anywhere and `isQuestionDisabled()` had zero
+    // production callers. This is the read side of that gap.
+    installFetch([
+      {
+        id: 1,
+        surah: SURAH,
+        ayah: 2,
+        position: null,
+        questionType: "locate",
+        field: "disable",
+        payload: { disabled: true },
+        editorId: null,
+        note: null,
+        createdAt: 1,
+      },
+    ]);
+
+    const { fetchEffectiveCorpus } = await import("@/lib/corpus/client");
+    const effective = await fetchEffectiveCorpus(SURAH);
+    expect(effective).not.toBeNull();
+    expect(effective!.disabled).toEqual([{ ayah: 2, position: null, questionType: "locate" }]);
+  });
+
+  it("a later re-enabling row (disabled:false) leaves the list empty", async () => {
+    installFetch([
+      {
+        id: 1,
+        surah: SURAH,
+        ayah: 2,
+        position: null,
+        questionType: "locate",
+        field: "disable",
+        payload: { disabled: true },
+        editorId: null,
+        note: null,
+        createdAt: 1,
+      },
+      {
+        id: 2,
+        surah: SURAH,
+        ayah: 2,
+        position: null,
+        questionType: "locate",
+        field: "disable",
+        payload: { disabled: false },
+        editorId: null,
+        note: null,
+        createdAt: 2,
+      },
+    ]);
+    const { fetchEffectiveCorpus } = await import("@/lib/corpus/client");
+    const effective = await fetchEffectiveCorpus(SURAH);
+    expect(effective!.disabled).toEqual([]);
+  });
+
+  it("degrades to an EMPTY disabled list when the overrides fetch fails — never blocks", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = String(url);
+        if (path.startsWith("/corpus/")) {
+          return { ok: true, json: async () => corpus } as Response;
+        }
+        return new Response("server error", { status: 500 });
+      }),
+    );
+    const { fetchEffectiveCorpus } = await import("@/lib/corpus/client");
+    const effective = await fetchEffectiveCorpus(SURAH);
+    expect(effective).not.toBeNull();
+    expect(effective!.disabled).toEqual([]);
+    expect(effective!.corpus.words.length).toBe(corpus.words.length);
+  });
+
+  it("`fetchCorpus` still returns exactly the patched corpus — existing callers unchanged", async () => {
+    installFetch([
+      {
+        id: 1,
+        surah: SURAH,
+        ayah: 1,
+        position: 1,
+        questionType: "s1",
+        field: "gloss",
+        payload: { lang: "en", text: MARKER },
+        editorId: null,
+        note: null,
+        createdAt: 1,
+      },
+    ]);
+    const { fetchCorpus, fetchEffectiveCorpus } = await import("@/lib/corpus/client");
+    const viaCorpus = await fetchCorpus(SURAH);
+    const viaEffective = await fetchEffectiveCorpus(SURAH);
+    expect(viaCorpus).toBe(viaEffective!.corpus);
+  });
+
   it("leaves an unrelated word's gloss untouched", async () => {
     installFetch([
       {

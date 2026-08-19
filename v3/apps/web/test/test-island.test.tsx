@@ -83,6 +83,13 @@ beforeEach(async () => {
   resetApiFetchForTests();
   resetTokenForTests();
   setToken("test-token");
+  // `lib/corpus/client.ts`'s module-level cache now holds the RESOLVED
+  // override effect (corpus + disabled list), not just parsed bytes, so one
+  // test's override-free corpus would otherwise leak into the next test's
+  // override-carrying one. Same discipline `onboarding.test.tsx` and
+  // `home-today.test.tsx` already follow.
+  const client = await import("@/lib/corpus/client");
+  client.__resetCorpusCache();
 });
 
 afterEach(() => {
@@ -98,6 +105,30 @@ function installFetch(corpus: Corpus) {
     vi.fn(async (url: string) => {
       if (url.startsWith("/corpus/")) {
         return { ok: true, json: async () => corpus } as Response;
+      }
+      return new Response("{}", { status: 200 });
+    }),
+  );
+}
+
+/** Like `installFetch`, but `/api/overrides` answers with real rows so the
+ *  `disable` half of the override layer is exercised end to end — the write
+ *  path (`POST /api/overrides`, admin-gated, `field: "disable"`) has shipped
+ *  since build-plan step 15 and until now reached no learner-facing decision
+ *  anywhere. */
+function installFetchWithOverrides(corpus: Corpus, overrides: unknown[]) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      const path = String(url);
+      if (path.startsWith("/corpus/")) {
+        return { ok: true, json: async () => corpus } as Response;
+      }
+      if (path.includes("/api/overrides")) {
+        return new Response(JSON.stringify({ overrides }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
       }
       return new Response("{}", { status: 200 });
     }),
@@ -301,5 +332,42 @@ describe("TestIsland — the mixed self-check, end to end", () => {
     expect(answers.length).toBe(1);
     expect(answers[0]!.testKind).toBe("vocab");
     expect(answers.every((e) => e.ayah === 1 || e.testKind !== "reorder")).toBe(true);
+  });
+
+  // The seam-level proof for the disable override. `buildTestItems`' own unit
+  // tests prove the FILTER; this proves the WIRING — that a row served by the
+  // real `/api/overrides` read path actually reaches the real builder through
+  // the real component, which is precisely the step that was missing.
+  it("a qari-disabled question kind never surfaces in a real Test", async () => {
+    // Ayah-wide (position null) "vocab" disables across every ayah of 112.
+    // vocab is KIND_ORDER slot 0, so an unfiltered Test over the full range
+    // ALWAYS contains one whatever the shuffle does — the assertion below
+    // cannot pass vacuously.
+    const overrides = [1, 2, 3, 4].map((ayah, i) => ({
+      id: i + 1,
+      surah: 112,
+      ayah,
+      position: null,
+      questionType: "vocab",
+      field: "disable",
+      payload: { disabled: true },
+      editorId: null,
+      note: null,
+      createdAt: i + 1,
+    }));
+    installFetchWithOverrides(corpus112, overrides);
+    render(<TestIsland surah={112} glossLang="en" />);
+
+    await screen.findByTestId("test-range");
+    fireEvent.click(screen.getByRole("button", { name: /start test/i }));
+    await waitForRunning();
+
+    await completeTest();
+    await screen.findByTestId("test-result");
+
+    const events = await getAllEvents();
+    const answers = events.filter((e) => e.type === "test_answer");
+    expect(answers.length).toBeGreaterThan(0); // the Test still ran
+    expect(answers.some((e) => e.testKind === "vocab")).toBe(false);
   });
 });

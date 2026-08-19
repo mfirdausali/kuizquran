@@ -67,6 +67,7 @@ import { useRouter } from "next/navigation";
 import type { Corpus, DrillEvent, GlossLang } from "@engine/types.ts";
 import { rebuild } from "@engine/rebuild.ts";
 import { gradeClassToWire } from "@engine/gradeClass.ts";
+import type { DisabledQuestion } from "@engine/overrides.ts";
 import {
   advanceReconstruct,
   initReconstruct,
@@ -81,7 +82,7 @@ import {
   type TestItem,
 } from "@engine/test.ts";
 
-import { fetchCorpus } from "@/lib/corpus/client";
+import { fetchEffectiveCorpus } from "@/lib/corpus/client";
 import { append, currentTz } from "@/lib/idb/append";
 import { getEventsForSurah } from "@/lib/idb/read";
 import { writeLock } from "@/lib/idb/writeLock";
@@ -130,6 +131,11 @@ interface Feedback {
 export function TestIsland({ surah, glossLang }: TestIslandProps) {
   const router = useRouter();
   const [corpus, setCorpus] = useState<Corpus | null>(null);
+  // The resolved active-disable list (v2-D21/D55). Held beside the corpus
+  // because it is a decision ABOUT the corpus that the bytes cannot carry —
+  // `buildTestItems` is the one consumer, and it takes it as a required
+  // argument so this can never be silently dropped again.
+  const [disabled, setDisabled] = useState<DisabledQuestion[]>([]);
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
   const [defaultPool, setDefaultPool] = useState<number[]>([]);
   const [from, setFrom] = useState<number | null>(null);
@@ -161,13 +167,15 @@ export function TestIsland({ surah, glossLang }: TestIslandProps) {
 
     async function beginAsWriter(): Promise<void> {
       try {
-        const c = await fetchCorpus(surah);
+        const effective = await fetchEffectiveCorpus(surah);
         if (!alive) return;
-        if (!c) {
+        if (!effective) {
           setPhase({ kind: "unavailable" });
           return;
         }
+        const c = effective.corpus;
         setCorpus(c);
+        setDisabled(effective.disabled);
         const events = await getEventsForSurah(surah);
         if (!alive) return;
         const atoms = [...rebuild(events).values()];
@@ -247,7 +255,7 @@ export function TestIsland({ surah, glossLang }: TestIslandProps) {
     const hi = Math.max(from, to);
     const pool: number[] = [];
     for (let a = lo; a <= hi; a++) pool.push(a);
-    const built = buildTestItems(corpus, surah, pool, glossLang, randomShuffle);
+    const built = buildTestItems(corpus, surah, pool, glossLang, disabled, randomShuffle);
     setItems(built);
     setIndex(0);
     setResults([]);

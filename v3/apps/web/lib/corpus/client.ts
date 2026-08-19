@@ -42,7 +42,7 @@
 // paint instead of an infinite spinner.
 
 import type { Corpus } from "@engine/types.ts";
-import { applyOverrides } from "@engine/overrides.ts";
+import { applyOverrides, type DisabledQuestion } from "@engine/overrides.ts";
 import { fetchOverrides } from "@/lib/overrides/fetch.ts";
 
 /** Surahs staged into `public/corpus/` by `scripts/stage-corpus.mjs`.
@@ -67,7 +67,31 @@ export const DEMO_AYAH = 1;
 /** Parsed once per page load. The corpus is static content-addressed data, so
  *  a second surface asking for the same surah re-uses the parse rather than
  *  re-fetching 16 KB and re-parsing it. */
-const cache = new Map<number, Corpus>();
+const cache = new Map<number, EffectiveCorpus>();
+
+/**
+ * A corpus AND the override decisions a caller cannot get from the corpus
+ * bytes alone.
+ *
+ * `applyOverrides` returns three things — a patched `corpus`, the resolved
+ * active `disabled` list, and the raw `groups` audit rows. `fetchCorpus`
+ * originally took only `.corpus`, which meant the `disable` field — a real,
+ * admin-writable, Laravel-validated override kind
+ * (`OverridesController::CLOSED_FIELDS`) — reached no caller anywhere, and
+ * `overrides.ts#isQuestionDisabled()` had zero production callers. A qari who
+ * disabled a broken question through the shipped write path changed nothing a
+ * learner ever saw.
+ *
+ * `groups` is deliberately NOT surfaced here: its resolved effect already
+ * lives ON the corpus (`CorpusWord.groupPositions`, read by `ladder.ts`), so
+ * the raw rows are an admin-audit concern, not a learner-serving one.
+ */
+export interface EffectiveCorpus {
+  corpus: Corpus;
+  /** Active (latest-per-key, not re-enabled) disables — pass to
+   *  `isQuestionDisabled()`, or to `lib/test/build.ts#buildTestItems`. */
+  disabled: DisabledQuestion[];
+}
 
 /**
  * A corpus is only usable if it can actually produce a pass. An empty or
@@ -105,7 +129,7 @@ function usable(value: unknown): value is Corpus {
  * account is required for it to succeed) — the two egress rules are about
  * different resources, not in tension.
  */
-export async function fetchCorpus(surah: number): Promise<Corpus | null> {
+export async function fetchEffectiveCorpus(surah: number): Promise<EffectiveCorpus | null> {
   const cached = cache.get(surah);
   if (cached) return cached;
   if (!CLIENT_SURAHS.includes(surah)) return null;
@@ -124,12 +148,33 @@ export async function fetchCorpus(surah: number): Promise<Corpus | null> {
   }
 
   // Never blocks and never throws (fetchOverrides's own discipline): a
-  // corrections fetch that fails leaves the raw corpus in place rather than
-  // failing the whole session.
+  // corrections fetch that fails leaves the raw corpus in place — and an
+  // EMPTY disabled list — rather than failing the whole session. Degrading
+  // "open" on `disabled` is the same call every other background fetch here
+  // makes: a learner drilling a question a qari has since disabled is a
+  // smaller harm than a learner who cannot drill at all.
   const overrides = await fetchOverrides(surah);
-  const patched = overrides.length > 0 ? applyOverrides(raw, overrides).corpus : raw;
-  cache.set(surah, patched);
-  return patched;
+  const effective: EffectiveCorpus =
+    overrides.length > 0
+      ? (() => {
+          const resolved = applyOverrides(raw, overrides);
+          return { corpus: resolved.corpus, disabled: resolved.disabled };
+        })()
+      : { corpus: raw, disabled: [] };
+  cache.set(surah, effective);
+  return effective;
+}
+
+/**
+ * The patched corpus alone, for the callers that make no per-question
+ * decision (the landing demo, onboarding screen 2, the session loop's
+ * reconstruct pass — a reconstruct is one ayah's own words, not a
+ * question-bank draw, so there is nothing for a `disable` row to select).
+ * Delegates to `fetchEffectiveCorpus` and shares its cache.
+ */
+export async function fetchCorpus(surah: number): Promise<Corpus | null> {
+  const effective = await fetchEffectiveCorpus(surah);
+  return effective ? effective.corpus : null;
 }
 
 /** Test seam ONLY — the module-level cache would otherwise leak one test's

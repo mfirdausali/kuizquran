@@ -25,6 +25,7 @@
 
 import type { Corpus, GlossLang } from "@engine/types.ts";
 import { ayahWords } from "@engine/corpus.ts";
+import { isQuestionDisabled, type DisabledQuestion } from "@engine/overrides.ts";
 import {
   clozeItem,
   junctionTestItem,
@@ -48,6 +49,33 @@ const ITEM_COUNT = 6;
 const KIND_ORDER: readonly TestItemKind[] = ["vocab", "cloze", "junction", "locate", "produce"];
 
 /**
+ * The (ayah, position) an override's `disable` row targets for one TestItem.
+ * `position` is null for kinds that are not a single-word probe (v2-D55:
+ * disable resolution is scoped to what the override editor can express) —
+ * an ayah-wide row (`position: null`) then covers every position of that
+ * questionType, which is `isQuestionDisabled`'s own rule.
+ *
+ * Ported verbatim from `v2/src/pages/Test.tsx#itemDisableKey` (read-only port
+ * source, never edited). It is exported because the disable decision it
+ * encodes is the same one the admin/qari side must be able to express: the
+ * key shape IS the contract between the two halves.
+ */
+export function itemDisableKey(item: TestItem): { ayah: number; position: number | null } {
+  switch (item.kind) {
+    case "vocab":
+      return { ayah: item.ayah, position: item.position };
+    case "cloze":
+      return { ayah: item.ayah, position: item.blankPosition };
+    case "junction":
+      return { ayah: item.from, position: null };
+    case "reorder":
+      return { ayah: item.ayahs[0]!, position: null };
+    default:
+      return { ayah: item.ayah, position: null };
+  }
+}
+
+/**
  * Build one mixed Test over `pool` (an inclusive ascending ayah range).
  * Mirrors v2's own `buildItems` (`v2/src/pages/Test.tsx`): up to `ITEM_COUNT`
  * items cycling `KIND_ORDER` against a shuffled draw from the pool, a
@@ -56,12 +84,18 @@ const KIND_ORDER: readonly TestItemKind[] = ["vocab", "cloze", "junction", "loca
  * item is appended whenever the range spans at least 2 consecutive ayat.
  * The final order is shuffled again so the reorder item (always built last)
  * does not always land last on screen.
+ *
+ * `disabled` is the resolved active-disable list from
+ * `applyOverrides(...).disabled` — REQUIRED, never defaulted, so a caller
+ * cannot silently opt out of qari corrections the way v3's original port of
+ * this function did by simply omitting the parameter.
  */
 export function buildTestItems(
   corpus: Corpus,
   surah: number,
   pool: readonly number[],
   lang: GlossLang,
+  disabled: readonly DisabledQuestion[],
   shuffle: Shuffle,
 ): TestItem[] {
   if (pool.length === 0) return [];
@@ -106,7 +140,19 @@ export function buildTestItems(
   const reorderCount = Math.min(3, pool.length, corpus.meta.ayahCount - reorderFrom + 1);
   if (reorderCount >= 2) items.push(reorderItem(reorderFrom, reorderCount));
 
-  return shuffle(items);
+  // v2-D21/D55, verbatim from the port source's own comment: "a qari-disabled
+  // question never surfaces in a Test — filtered out post-generation rather
+  // than backfilled (a Test that started with a disabled item just runs
+  // slightly shorter; no silent replacement item)." Backfilling would defeat
+  // the point: the reason a question is disabled is that it is WRONG, and
+  // reaching for a replacement at the same coordinate risks serving the next
+  // variant of the same bad item.
+  const live = items.filter((it) => {
+    const key = itemDisableKey(it);
+    return !isQuestionDisabled([...disabled], key.ayah, key.position, it.kind);
+  });
+
+  return shuffle(live);
 }
 
 /** The ayah a `test_answer`/wire event should be stamped against — a

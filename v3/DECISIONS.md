@@ -5972,3 +5972,146 @@ override gap (`lib/corpus/load.ts`)/`isQuestionDisabled()` all remain
 exactly as open as v3-D106/D107/D108 left them — this run's scope was the
 rescaffold rung alone, DEFECTS.md#B12's own last named gap, which is now
 fully closed.
+
+---
+
+### v3-D110 — the `disable` override reached no learner: `isQuestionDisabled()` had zero callers, and v3's port of v2's `buildItems` silently dropped the filter
+
+**The finding.** The override layer has four fields, closed-set-validated on
+both sides (`OverridesController::CLOSED_FIELDS = ['gloss','distractor',
+'group','disable']`). Three of them reach a learner. The fourth never did.
+
+`applyOverrides()` returns `{corpus, disabled, groups}`. v3-D96 wired the
+read path — `lib/corpus/client.ts#fetchCorpus` fetches `/api/overrides` and
+applies them — but took **only `.corpus`** off the result (`client.ts:130`,
+`applyOverrides(raw, overrides).corpus`). The resolved `disabled` list was
+computed and thrown away at the exact call site that existed to consume it,
+so `overrides.ts#isQuestionDisabled()` had **zero production callers**
+anywhere in the repo (verified: `grep -rln isQuestionDisabled apps/web`
+returned nothing).
+
+⇒ An admin or qari who disabled a broken question through the **already
+shipped, already admin-gated, already tested** `POST /api/overrides` write
+path changed nothing at all about what any learner saw. The row was
+written, validated, stored, synced to the client, resolved by
+`applyOverrides` into an accurate `disabled` list — and then dropped on the
+floor one line before it could matter. This is the same shape as v3-D90:
+`lib/overrides/fetch.ts`'s own module header already CLAIMED it fixed this
+("a qari/admin correction — a fixed gloss, a swapped distractor, **a
+disabled broken question** — never reached a learner"), and the disable
+third of that sentence was false when written.
+
+**The second half, and the more provable one.** `lib/test/build.ts
+#buildTestItems` is a port of `v2/src/pages/Test.tsx#buildItems` (read-only
+port source, parity SHA `c34f5c3`, never edited). The v2 original takes
+`disabled: DisabledQuestion[]` as its third parameter and ends with an
+explicit filter under its own comment (`Test.tsx:114`): *"v2-D21/D55: a
+qari-disabled question never surfaces in a Test — filtered out
+post-generation rather than backfilled (a Test that started with a disabled
+item just runs slightly shorter; no silent replacement item)."* It also
+carries a helper, `itemDisableKey`, mapping each TestItem kind to the
+(ayah, position) a disable row targets. **v3's port dropped the parameter,
+the filter and the helper**, all three, and nothing noticed because the
+`disabled` list had no way to reach the function anyway. The two halves of
+this defect hid each other.
+
+**Fixed, both halves.**
+
+1. `lib/corpus/client.ts` gained `fetchEffectiveCorpus()` returning a new
+   `EffectiveCorpus {corpus, disabled}`; `fetchCorpus()` now delegates to it
+   and returns `.corpus`, so every existing caller is unchanged by
+   construction (a test asserts the two return the *same object identity*).
+   The module cache holds the resolution, not just the bytes. `groups` is
+   deliberately still not surfaced: its resolved effect already lives ON the
+   corpus as `CorpusWord.groupPositions` (read by `ladder.ts`), so the raw
+   rows are an admin-audit concern, not a learner-serving one.
+2. `lib/test/build.ts` gained `itemDisableKey()` (ported verbatim from
+   `Test.tsx`, and exported — the key shape IS the contract between the
+   admin side that writes a disable and the learner side that honours it)
+   and a `disabled` parameter on `buildTestItems`, **required, never
+   defaulted**. A default `[]` would have re-created the exact defect: a
+   caller silently opting out of qari corrections by omission is how this
+   got lost in the first place.
+3. `components/test/TestIsland.tsx` holds the list beside the corpus and
+   passes it in.
+
+**Scope, deliberately.** v2's own `Drill.tsx` does **not** consult
+`isQuestionDisabled` — only `Test.tsx` does — and this run matched that
+boundary rather than widening it. The reason is structural, not deference:
+the session loop's graded surface is a *reconstruct pass over one ayah's own
+words*, not a draw from a question bank, so there is no per-question
+selection for a `disable` row to act on. `fetchCorpus`'s docblock now says
+this explicitly so a future run does not read the narrower call site as an
+oversight.
+
+**Verified.**
+- **RED confirmed twice, both by `git stash` of the three source files ONLY
+  (every new test kept on disk).** (a) `lib/test/build.test.ts` +
+  `test/corpus-client-overrides.test.ts`: **23 of 30 failed**, on exactly
+  `fetchEffectiveCorpus is not a function` and the missing filter/helper;
+  `git stash pop` restored them byte-identically (`git diff` empty) and all
+  30 passed. (b) The component-level test, re-run separately against the
+  unfixed sources with the cache-reset fix already in place, failed on
+  exactly `expect(answers.some(e => e.testKind === "vocab")).toBe(false)` —
+  proving the RED is the WIRING, not the test's own isolation.
+- The component test disables "vocab" ayah-wide across all four ayat of 112
+  and asserts no `test_answer` of that kind lands. It **cannot pass
+  vacuously**: vocab is `KIND_ORDER` slot 0, so an unfiltered Test over the
+  full range always contains one, whatever the shuffle does. A companion
+  assertion (`answers.length > 0`) proves the Test still ran rather than
+  being emptied by a bug.
+- Five filter cases prove the *scoping* rather than just the dropping: a
+  position-scoped disable removes exactly one item and leaves the others'
+  order intact (no silent replacement); an ayah-wide (`position: null`) row
+  covers every position; a different `questionType` at the same coordinate
+  filters nothing; a different position of the same type filters nothing;
+  and disabling everything yields an empty Test rather than a fabricated
+  one. Four more pin `itemDisableKey` per kind — notably that cloze scopes
+  to its **blank** position, not its ayah's first word.
+- A `disabled: false` re-enabling row resolves to an empty list (precedence
+  is `applyOverrides`'s job, asserted through the real read path).
+- A failed overrides fetch degrades to an **empty** disabled list, never a
+  throw — the same never-blocks discipline as every other background fetch
+  here. This degrades *open*, and that is a deliberate call: a learner
+  drilling a question a qari has since disabled is a smaller harm than a
+  learner who cannot drill at all (#103).
+- `TZ=UTC make test` (full monorepo, all seven suites): **2030 passing**
+  (was 2016, **+14** — exactly this run's new tests: 9 in `build.test.ts`,
+  4 in `corpus-client-overrides.test.ts`, 1 in `test-island.test.tsx`; no
+  other suite's count moved). `check-test-floor.mjs`: OK, 2030 >= floor
+  1899 (+131 margin, `TEST-FLOOR` left unmoved, same discipline as every
+  prior entry). `TZ=UTC make build`: exit 0, **20 routes** (unchanged).
+  `npm run gates`: locked-css OK, fonts degraded-but-non-blocking
+  (pre-existing, unrelated), boundaries OK (200 files), corpus-morphology
+  and corpus-glyphs OK. `npx tsc --noEmit`: clean (`Version 5.9.3`
+  confirmed).
+- No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache
+  diff was reverted before committing, same discipline as every prior
+  entry). No Arabic codepoint introduced: swept all 429 added lines
+  directly with a Unicode-range scan over Arabic, Arabic Supplement,
+  Arabic Extended-A and both Presentation Forms blocks — zero matches —
+  plus `\u06xx`-escape and `fromCharCode` greps, plus `npm run gates`' own
+  Arabic grep, which passed. Every new line addresses an ayah/position by
+  number or a question kind by closed-set value, never corpus text.
+
+**A test-isolation bug found while doing this, worth naming.**
+`test/test-island.test.tsx` never reset `lib/corpus/client.ts`'s
+module-level cache between tests. That was harmless while the cache held
+only parsed bytes; it stops being harmless the moment the cache holds a
+*resolved override effect*, because one test's override-free corpus then
+leaks into the next test's override-carrying one — which is exactly how the
+new component test first failed. Added the `__resetCorpusCache()` call
+every other suite (`onboarding.test.tsx`, `home-today.test.tsx`) already
+makes. Flagged because it is a general hazard of caching a *decision*
+rather than *data*, not a one-off.
+
+**Explicitly not addressed, named so a future run doesn't re-discover it as
+new:** the SSR override gap (`lib/corpus/load.ts` still serves the raw
+corpus to `/plan`/`/progress`/`/surah/[surah]`/`/workbench` — v3-D96's own
+named deferral, unchanged, and it needs a Next-server-to-Laravel HTTP
+pattern this codebase has never established); `activity.ts#lastActiveDayMs()`'s
+inline re-derivation (v3-D107); `floorQueue`'s cross-surah forgetting-risk
+read (v3-D108); Door 3 (open practice)/`coldSuccessAdoption`/
+`diminishingReturns` (v3-D106). With this entry, **every field of the
+override layer now reaches a learner**, which closes the last item on
+v3-D95/D104/D105's own repeatedly-carried "still unwired" list.
