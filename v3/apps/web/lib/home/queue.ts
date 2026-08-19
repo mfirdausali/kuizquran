@@ -41,14 +41,20 @@
 import type { Corpus } from "@engine/types.ts";
 import { completedDayIndices, computeStreak } from "@engine/streak.ts";
 import { DEFAULT_DAY_CONFIG } from "@engine/daybound.ts";
+import { floorQueue, floorMinutes } from "@engine/floor.ts";
 
-import { assembleFor } from "@/lib/session/run";
+import { assembleFor, type AssembledQueue } from "@/lib/session/run";
 import { OFFERED_SURAHS, surahLabel } from "@/lib/onboarding/surahs";
 import { currentTz } from "@/lib/idb";
 
 /** The route a learner takes into today's work. Named once so no view spells
  *  it, and so the CTA cannot point somewhere the dashboard did not decide. */
 export const SESSION_HREF = "/session";
+
+/** FR9's 2-minute floor session (v3-D108) — a SEPARATE entry point from the
+ *  ordinary daily assembly, never the same route with a hidden mode the
+ *  learner can't see coming. */
+export const FLOOR_SESSION_HREF = "/session?mode=floor";
 
 /**
  * ONE ENROLLED SURAH, FULLY DECIDED.
@@ -97,6 +103,19 @@ export interface HomeSurahRow {
    * FAQ promises today.
    */
   readonly streakLabel: string | null;
+  /**
+   * FR9's 2-minute floor session (`packages/engine/src/floor.ts`) — "the
+   * smallest viable session — ALWAYS offered, ALWAYS finishable, NEVER
+   * empty" per its own header, EXCEPT on a genuinely virgin surah (nothing
+   * ever due, nothing ever encoded), where `null` here means there is
+   * nothing to offer. Deliberately independent of `ctaEnabled`/`dueCount`:
+   * a learner with ten items due but two minutes to spare should see this
+   * too, not only a learner with nothing due — "the worst days" `floor.ts`'s
+   * own header names are short-on-time days, not only empty-queue days.
+   * `minutes` is `floorMinutes()`'s own estimate, already rounded to a whole
+   * number a learner can read at a glance.
+   */
+  readonly floorOffer: { readonly count: number; readonly minutes: number } | null;
 }
 
 export interface BuildHomeSurahInput {
@@ -137,7 +156,24 @@ export async function buildHomeSurah(
     ctaHref: SESSION_HREF,
     ctaLabel: "Start today's session",
     streakLabel: streakLabelFor(assembled.prior, now),
+    floorOffer: floorOfferFor(assembled.atoms, now),
   };
+}
+
+/**
+ * FR9's floor offer, re-deriving from the SAME fold `assembleFor` already
+ * produced (no second log read). Filtered to `kind === "ayah"` atoms —
+ * see `startFloorSession`'s own doc comment (`lib/session/run.ts`) for why a
+ * "connection" atom must never be offered here.
+ */
+function floorOfferFor(
+  atoms: AssembledQueue["atoms"],
+  now: number,
+): HomeSurahRow["floorOffer"] {
+  const ayahAtoms = [...atoms.values()].filter((a) => a.kind === "ayah");
+  const items = floorQueue(ayahAtoms, now);
+  if (items.length === 0) return null;
+  return { count: items.length, minutes: Math.max(1, Math.round(floorMinutes(items))) };
 }
 
 /**

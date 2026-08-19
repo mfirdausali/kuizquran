@@ -672,3 +672,33 @@ describe("v3-D107 — gate forgiveness: the demote offer, actually shown", () =>
     expect(screen.queryByRole("button", { name: /send.*back to learn/i })).toBeNull();
   });
 });
+
+// v3-D108 — FR9's 2-minute floor session, the mode this route now supports
+// alongside the ordinary daily assembly (`?mode=floor`). This proves the
+// COMPONENT-LEVEL wiring — that passing `mode="floor"` actually calls
+// `startFloorSession` rather than the ordinary `startSession` — through the
+// REAL `lib/session/run.ts` (no mock override here: the seam above is
+// `startSession`-only, on purpose, so this block exercises the genuine
+// function).
+describe("v3-D108 — SessionIsland mode='floor' drills FR9's floor session, not the ordinary assembly", () => {
+  it("shows the floor-specific unavailable message on a virgin log — nothing has ever been encoded to check in on", async () => {
+    installFetch();
+    render(<SessionIsland surah={SURAH} mode="floor" />);
+    await waitFor(() =>
+      expect(screen.getByText(/nothing to check in on yet/i)).toBeTruthy(),
+    );
+    expect(screen.queryByTestId("session-drill")).toBeNull();
+  });
+
+  it("drills a real floor session once something is encoded — the same graded path, a smaller queue", async () => {
+    installFetch();
+    const seedT0 = Date.now() - 3 * 24 * 60 * 60 * 1000;
+    await append(
+      { type: "ayah_produced", ts: seedT0, tz: "UTC", surah: SURAH, ayah: 1, rung: "S3", structured: true } as DrillEvent,
+      { now: seedT0, tz: "UTC" },
+    );
+
+    render(<SessionIsland surah={SURAH} mode="floor" />);
+    await waitFor(() => expect(screen.getByTestId("session-drill")).toBeTruthy());
+  });
+});

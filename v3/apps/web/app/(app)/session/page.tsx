@@ -28,16 +28,38 @@
 // as data.
 
 import { SessionGate } from "@/components/session/SessionGate";
+import type { SessionMode } from "@/lib/session/run";
 
-export default function SessionPage() {
+// v3-D108 — FR9's 2-minute floor session gets its own MODE on this SAME
+// route, `?mode=floor`, rather than a second `/session` page: the quiz loop,
+// its commit-before-paint discipline and its four render shapes are all
+// identical between a floor session and the ordinary one — only WHICH queue
+// `lib/session/run.ts` builds differs, and that decision already lives
+// there, never here (clause 5). Any value other than the literal "floor"
+// (including a garbage query string) falls back to the ordinary session,
+// same discipline edge case #78's route-param validation already uses
+// elsewhere in this app.
+function parseMode(raw: string | undefined): SessionMode {
+  return raw === "floor" ? "floor" : "full";
+}
+
+export default async function SessionPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ mode?: string }>;
+}) {
+  const { mode: rawMode } = await searchParams;
+  const mode = parseMode(rawMode);
+
   return (
     <div className="screen">
       <div className="stack">
         <header className="page-head">
-          <h1>Session</h1>
+          <h1>{mode === "floor" ? "Quick check-in" : "Session"}</h1>
           <p className="caption">
-            Today&apos;s mix — gates, reviews, and one new ayah if yesterday&apos;s
-            passed.
+            {mode === "floor"
+              ? "The smallest useful session — one or two items, about two minutes."
+              : "Today's mix — gates, reviews, and one new ayah if yesterday's passed."}
           </p>
         </header>
 
@@ -47,7 +69,7 @@ export default function SessionPage() {
               THE DRILL
             </h2>
           </div>
-          <SessionGate />
+          <SessionGate mode={mode} />
         </section>
       </div>
     </div>

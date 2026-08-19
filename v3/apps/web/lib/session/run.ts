@@ -49,6 +49,9 @@ import { rebuild } from "@engine/rebuild.ts";
 import { assembleQueue, type QueueItem } from "@engine/scheduler.ts";
 import { summarizeSession, type SessionSummary } from "@engine/sessionSummary.ts";
 import { atomKey } from "@engine/atom.ts";
+// FR9, the 2-minute floor session (v3-D108) — see `startFloorSession` below
+// for why this had zero production callers until now.
+import { floorQueue } from "@engine/floor.ts";
 // FR6 Door 1 ("extra Learn", v3-D98) — see `extraLearnOfferFor`/`startExtraLearn`
 // below for why the summary screen, not the assembled queue, is where this lives.
 // FR6 Door 2 ("weak-spot gym", v3-D106) — see `weakSpotOfferFor`/`startWeakSpotDrill`.
@@ -92,6 +95,11 @@ export interface StartInput {
   now: number;
   tz: string;
 }
+
+/** Which queue a session was started from — the ordinary daily assembly, or
+ *  FR9's 2-minute floor session (`startFloorSession`, below). Named once so
+ *  no caller has to spell out the string. */
+export type SessionMode = "full" | "floor";
 
 /**
  * One session in flight.
@@ -250,8 +258,76 @@ export async function startSession(input: StartInput, c: Corpus): Promise<StartR
   if (!assembled) {
     return { ok: false, unavailable: "no-corpus" };
   }
-  const { queue, atoms: atomsMap, prior } = assembled;
+  return startFromQueue(surah, now, tz, assembled.queue, assembled.atoms, assembled.prior, c);
+}
 
+/**
+ * FR9 — the 2-minute floor session
+ * (`packages/engine/src/floor.ts#floorQueue`/`floorMinutes`).
+ *
+ * `floorQueue` was real and engine-tested (`habit.test.ts`, `e01.test.ts`)
+ * since it landed but had ZERO production callers — v3-D107's own sweep found
+ * it and deliberately deferred it, named exactly as "needs its own /home CTA
+ * and a reduced-queue entry point into the session loop." This is that entry
+ * point: the SAME `session_start`/resume discipline as `startSession` (via
+ * the shared `startFromQueue` below), sourcing its queue from `floorQueue`
+ * instead of `assembleQueue` — the smallest viable session, at most ~2
+ * minutes, never empty once anything is due or encoded.
+ *
+ * Atoms are filtered to `kind === "ayah"` before reaching `floorQueue` —
+ * `floorQueue`'s own review/warm-up branches do not discriminate by atom
+ * kind, but a "connection" atom (n→n+1) has no reconstruct surface in v3
+ * (`bridge.ts` atticked at the engine port, DEFECTS.md#E-08 — "nothing left
+ * to construct a seam from"), so offering one would be an undrillable dead
+ * end. Same filter, same reasoning `weakSpotOfferFor` already applies to
+ * FR6 Door 2.
+ */
+export async function startFloorSession(input: StartInput, c: Corpus): Promise<StartResult> {
+  const { surah, now, tz } = input;
+
+  if (!Array.isArray(c.words) || c.words.length === 0) {
+    return { ok: false, unavailable: "no-corpus" };
+  }
+
+  const prior = await getEventsForSurah(surah);
+  const atomsMap = rebuild(prior);
+  const ayahAtoms = [...atomsMap.values()].filter((a) => a.kind === "ayah");
+  const items = floorQueue(ayahAtoms, now);
+
+  // FloorItem.kind is "gate" | "review" | "warmup". QueueItemKind has no
+  // "warmup" member — a warm-up is a review of an already-encoded atom, so it
+  // is graded as an ordinary "review" (full-weight, structured:true) through
+  // the exact same `answerCurrent`/`settleAnswer` path every other queue item
+  // uses. There is no second, bespoke grading rule for it, which is what
+  // keeps DEFECTS.md#B2's "gradeClassToWire is the ONE function" guarantee
+  // intact — the same discipline `startWeakSpotDrill` follows for FR6 Door 2.
+  const queue: QueueItem[] = items.map((i) => ({
+    kind: i.kind === "warmup" ? "review" : i.kind,
+    atomKey: i.atomKey,
+    ayah: i.ref,
+    estMin: i.estMin,
+  }));
+
+  return startFromQueue(surah, now, tz, queue, atomsMap, prior, c);
+}
+
+/**
+ * Shared by `startSession` and `startFloorSession`: given an already-built
+ * queue and the fold it came from, decide RESUME-vs-NEW (never re-emitting
+ * `session_start` for a session already open today) and build the initial
+ * `SessionRun`. Extracted so the two entry points cannot drift on the
+ * session_start/resume rule — the property `startSession`'s own header
+ * documents as load-bearing for `sessionSummaryOf`'s duration origin.
+ */
+async function startFromQueue(
+  surah: number,
+  now: number,
+  tz: string,
+  queue: readonly QueueItem[],
+  atomsMap: ReturnType<typeof rebuild>,
+  prior: Awaited<ReturnType<typeof getEventsForSurah>>,
+  c: Corpus,
+): Promise<StartResult> {
   if (queue.length === 0) {
     return { ok: false, unavailable: "nothing-due" };
   }

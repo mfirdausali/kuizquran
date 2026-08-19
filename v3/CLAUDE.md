@@ -53,14 +53,77 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2003 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2012 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 840 apps/web. (v3-D107, 2026-08-19)
+             # + 417 engine + 61 fold-runner + 849 apps/web. (v3-D108, 2026-08-19)
              # `make test` enforces v3-D95's test-count floor (`v3/TEST-FLOOR`,
              # currently 1899, so the margin above is intentionally not yet
              # banked into the floor) — a suite that silently shrinks (deleted
              # test file, stray `.skip`) now fails the build even though every
              # test that DID run still passed.
+             # NOTE (v3-D108): `packages/engine/src/floor.ts#floorQueue`/
+             # `floorMinutes` (FR9, "the 2-minute floor session" — a due cold
+             # gate, else the riskiest due review, else a guaranteed-win
+             # warm-up, capped at ~2 minutes, never empty once anything is due
+             # or encoded) were real and engine-tested (`habit.test.ts`,
+             # `e01.test.ts`) since they landed but had ZERO production
+             # callers — v3-D107's own sweep found this and deliberately
+             # deferred it, named exactly as "needs its own `/home` CTA and a
+             # reduced-queue entry point into the session loop." Built both.
+             # `lib/session/run.ts` gained `startFloorSession` (mirroring
+             # `startSession`'s exact `session_start`/resume discipline via a
+             # new shared `startFromQueue` helper both now call) and a
+             # `SessionMode` ("full" | "floor"). `FloorItem.kind: "warmup"` has
+             # no `QueueItemKind` of its own, so it is graded as an ordinary
+             # `"review"` — full-weight, `structured:true`, through the exact
+             # same `answerCurrent`/`settleAnswer` path every other queue item
+             # uses, never a second grading rule (same discipline v3-D106's
+             # `startWeakSpotDrill` already follows). Atoms are filtered to
+             # `kind === "ayah"` before reaching `floorQueue`, mirroring
+             # `weakSpotOfferFor`'s own E-08 reasoning — a "connection" atom
+             # has no reconstruct surface in v3. `/session` now takes a
+             # `?mode=floor` search param (`SessionGate`/`SessionIsland` both
+             # thread a `mode` prop down to it, defaulting to `"full"`), and
+             # `lib/home/queue.ts#buildHomeSurah` gained `floorOffer` —
+             # computed from the SAME fold `assembleFor` already produced, no
+             # second log read — surfaced on `/home` as a quiet "Short on
+             # time? Do a quick N-minute check-in instead" link, shown
+             # INDEPENDENTLY of `ctaEnabled`/`dueCount`: a learner with ten
+             # items due but two minutes to spare should see it too, not only
+             # a learner with nothing due — `floor.ts`'s own "worst days"
+             # framing is about short-on-time days, not only empty-queue days.
+             # RED confirmed three ways: `git stash` of `run.ts` alone failed
+             # exactly the 4 new `run.test.ts` cases (`startFloorSession is
+             # not a function`), 30/34 others unaffected; `git stash` of
+             # `lib/home/queue.ts` + `TodaySession.tsx` failed exactly the 2
+             # new floor-offer assertions in `home-today.test.tsx`, 11/13
+             # others unaffected. `TZ=UTC make test`: 2012 passing (was 2003,
+             # +9 — exactly this run's new tests: 4 in `run.test.ts`, 3 in
+             # `home-today.test.tsx`, 2 in `session-island.test.tsx`).
+             # `check-test-floor.mjs`: OK, 2012 >= floor 1899 (+113 margin).
+             # `TZ=UTC make build`: exit 0, 20 routes (unchanged — `/session`
+             # moved from static to dynamic rendering since it now reads a
+             # search param, but no route was added or removed). `npm run
+             # gates`: all green (locked-css, fonts degraded-but-non-blocking,
+             # boundaries 201 files — this run added no new file — corpus-
+             # morphology, corpus-glyphs). No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff was reverted before
+             # committing, same discipline as every prior entry). No Arabic
+             # codepoint introduced (checked directly against the diff with a
+             # Unicode-range sweep, and via `npm run gates`' own grep, which
+             # passed): every new line addresses an ayah/minute/count by
+             # number, never corpus text. NOT addressed, named so a future run
+             # doesn't re-discover it as new: the "rescaffold" ladder rung and
+             # `activity.ts#lastActiveDayMs()`'s inline re-derivation (both
+             # named by v3-D107, untouched by this run — out of this step's
+             # scope); FR9's `floorQueue`'s own review/warm-up branches read
+             # forgetting-risk off ANY encoded ayah atom regardless of which
+             # surah the learner is enrolled in TODAY — moot at single-surah
+             # launch scope (`assembleFor`/`getEventsForSurah` already scope
+             # the fold to one surah before this module ever sees it), but
+             # worth re-checking once multi-surah enrollment (HANDOVER.md's
+             # own still-open gap) exists. See DEFECTS.md and DECISIONS.md
+             # v3-D108.
              # NOTE (v3-D107): DEFECTS.md#B12 — the day-1 cold gate (FR3,
              # gate.ts) could never actually FAIL through the real session
              # loop, which is the root cause of a second, deeper problem:

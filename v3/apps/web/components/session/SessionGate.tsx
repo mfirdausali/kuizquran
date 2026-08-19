@@ -18,13 +18,21 @@ import Link from "next/link";
 import { readChoices } from "@/lib/onboarding/choices";
 import { SessionIsland } from "@/components/session/SessionIsland";
 import { ONBOARDING_HREF } from "@/lib/onboarding/surahs";
+import type { SessionMode } from "@/lib/session/run";
 
 type State =
   | { kind: "loading" }
   | { kind: "not-enrolled" }
   | { kind: "ready"; surah: number };
 
-export function SessionGate() {
+export interface SessionGateProps {
+  /** Which queue to drill — the ordinary daily assembly, or FR9's floor
+   *  session. Read from `/session`'s own `?mode=` and passed straight down;
+   *  this component decides nothing about it. */
+  mode?: SessionMode;
+}
+
+export function SessionGate({ mode = "full" }: SessionGateProps) {
   const [state, setState] = useState<State>({ kind: "loading" });
 
   useEffect(() => {
@@ -60,5 +68,5 @@ export function SessionGate() {
     );
   }
 
-  return <SessionIsland surah={state.surah} />;
+  return <SessionIsland surah={state.surah} mode={mode} />;
 }

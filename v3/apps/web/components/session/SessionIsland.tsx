@@ -46,10 +46,12 @@ import {
   extraLearnOfferFor,
   sessionSummaryOf,
   startExtraLearn,
+  startFloorSession,
   startSession,
   startWeakSpotDrill,
   weakSpotOfferFor,
   SessionCommitFailure,
+  type SessionMode,
   type SessionRun,
   type SessionUnavailable,
 } from "@/lib/session/run";
@@ -60,6 +62,10 @@ export interface SessionIslandProps {
   /** Which surah this session drills. Chosen at onboarding, passed in as data —
    *  this component never picks. */
   surah: number;
+  /** FR9 (v3-D108): "full" starts the ordinary daily assembly, "floor" starts
+   *  the 2-minute floor session. Decided by the route (`?mode=`), never by
+   *  this component. */
+  mode?: SessionMode;
 }
 
 type Phase =
@@ -73,7 +79,7 @@ type Phase =
   | { kind: "drilling" }
   | { kind: "summary"; summary: SessionSummary };
 
-export function SessionIsland({ surah }: SessionIslandProps) {
+export function SessionIsland({ surah, mode = "full" }: SessionIslandProps) {
   const [corpus, setCorpus] = useState<Corpus | null>(null);
   const [run, setRun] = useState<SessionRun | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
@@ -129,7 +135,8 @@ export function SessionIsland({ surah }: SessionIslandProps) {
           return;
         }
         setCorpus(c);
-        const started = await startSession(
+        const start = mode === "floor" ? startFloorSession : startSession;
+        const started = await start(
           { surah, now: Date.now(), tz: currentTz() },
           c,
         );
@@ -193,7 +200,7 @@ export function SessionIsland({ surah }: SessionIslandProps) {
       alive = false;
       unsubscribe?.();
     };
-  }, [surah]);
+  }, [surah, mode]);
 
   const cur = useMemo(() => {
     if (!run || !corpus) return null;
@@ -405,10 +412,17 @@ export function SessionIsland({ surah }: SessionIslandProps) {
   if (phase.kind === "unavailable") {
     // Each reason gets its own words. "Nothing due" is success; "no corpus" is
     // a failure. A learner cannot tell them apart from one shared empty state.
+    // A floor session's OWN "nothing-due" is rarer and means something more
+    // specific than the ordinary session's — `floorQueue`'s own "never empty"
+    // guarantee only holds once at least one atom has ever been encoded.
+    const nothingDueMessage =
+      mode === "floor"
+        ? "There's nothing to check in on yet — learn your first ayah in a full session, then come back here."
+        : "Nothing is due right now. Come back later today.";
     return (
       <p className="caption">
         {phase.reason === "nothing-due"
-          ? "Nothing is due right now. Come back later today."
+          ? nothingDueMessage
           : "This surah is not available on this device yet."}
       </p>
     );

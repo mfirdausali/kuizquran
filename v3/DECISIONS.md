@@ -5666,3 +5666,149 @@ task); `activity.ts#lastActiveDayMs()` vs. `run.ts`'s inline re-derivation
 (third candidate, harmless but unfixed — a one-line import swap for a future
 run); Door 3/`coldSuccessAdoption`/`diminishingReturns`/the SSR override
 gap/`isQuestionDisabled()` all remain exactly as open as v3-D106 left them.
+
+### v3-D108 — FR9's 2-minute floor session, `floorQueue`/`floorMinutes`, gets its own `/home` CTA and session entry point
+
+**Re-derived state per NIGHTLY.md.** The checkout started detached at
+`f6f63c2` (v3-D107) — same shape as v3-D107's own re-derivation note:
+`origin/main` had already caught up to the same commit, so this was a stale
+local branch ref, not orphaned work. `git merge --ff-only origin/main` on
+`main` fixed it; no reconciliation needed. `make setup` hit the familiar
+composer git-mirror stall on the FIRST package (`v2/api`) — a `git clone
+--mirror` of a PHPUnit dependency, slow but not timed out — so
+`packages/corpus-compiler`, `packages/engine` and `apps/web` were installed
+directly and in parallel while `make setup` continued in the background, to
+get RED/GREEN test feedback without waiting on the full sequential chain
+(`make setup` finished on its own a few minutes later, well before it was
+needed for the full `make test`/`make build` gates). `TZ=UTC make
+test` on the unmodified tree (once `make setup` finished): **2003 passing**,
+matching `CLAUDE.md`'s own claimed number exactly.
+
+Re-derived the 32-step order: unchanged from v3-D107's own re-derivation
+(steps 1–26/29 DONE, 27/28 human-content-gated, 30's remaining engineering
+infra/calendar-gated). v3-D107's own "explicitly not addressed" list named
+three candidates for a future run; picked the middle one — `floor.ts`'s FR9
+2-minute floor session — since the other two are smaller in scope (a one-line
+import swap) or larger (a genuine new reconstruct-state-machine extension),
+and this one is scoped exactly like the last several nights' pattern: a real,
+engine-tested mechanism (`packages/engine/src/floor.ts#floorQueue`/
+`floorMinutes`, covered by `habit.test.ts` and `e01.test.ts` since it
+landed) with zero production callers, named by its own predecessor as
+needing "its own `/home` CTA and a reduced-queue entry point into the
+session loop."
+
+**What `floorQueue` does** (unchanged, engine-side — this run added no engine
+code): given an atoms array and `now`, it returns at most ~2 minutes of the
+highest-value work there is — priority 1 a due cold gate, priority 2 the
+single riskiest due review that still fits, priority 3 (only if nothing else
+qualifies) a warm-up rep on the strongest carried atom, so a learner never
+sees a genuinely empty floor session once anything has ever been due or
+encoded.
+
+**Wired, in `lib/session/run.ts`:**
+- A new `SessionMode = "full" | "floor"` type.
+- `startSession` refactored (no behavior change — proven by the untouched
+  30/34 tests in `run.test.ts` staying green) to delegate its RESUME/
+  `session_start` logic to a new shared `startFromQueue` helper, so the two
+  entry points cannot independently drift on that rule the way two hand-
+  copied implementations eventually would.
+- `startFloorSession(input, c)`: reads the surah's event log, rebuilds atoms,
+  filters to `kind === "ayah"` (a "connection" atom has no reconstruct
+  surface in v3 — `bridge.ts` atticked, DEFECTS.md#E-08 — so offering one
+  would be an undrillable dead end; same reasoning `weakSpotOfferFor` already
+  applies for FR6 Door 2), calls `floorQueue`, and maps its `FloorItem[]`
+  onto ordinary `QueueItem[]`. `FloorItem.kind: "warmup"` has no
+  `QueueItemKind` counterpart — mapped to `"review"`, since a warm-up is a
+  review of an already-encoded atom and grading it via the SAME
+  `answerCurrent`/`settleAnswer`/`answerAfterTap` path every other queue item
+  uses (never a bespoke rule) is what keeps DEFECTS.md#B2's "gradeClassToWire
+  is the ONE function" guarantee intact — identical discipline to
+  `startWeakSpotDrill`'s own `kind: "review"` choice for FR6 Door 2.
+
+**Wired, in the UI:**
+- `/session` (`app/(app)/session/page.tsx`) is now `async` and reads a
+  `searchParams` promise for `?mode=`, following `/drill`'s own established
+  precedent for this Next.js version's server-component search-param
+  contract (`{ searchParams: Promise<{...}> }`, `await`ed). Any value other
+  than the literal `"floor"` falls back to `"full"` — a garbage query string
+  degrades to the ordinary session, never a crash.
+- `SessionGate`/`SessionIsland` both gained an optional `mode` prop
+  (default `"full"`), threaded straight through with no decision made in
+  either component — `SessionIsland`'s mount effect picks `startFloorSession`
+  vs. `startSession` by a one-line ternary and nothing else changes: the
+  quiz loop, commit-before-paint discipline, and all four render shapes are
+  identical between a floor session and the ordinary one, only which queue
+  `run.ts` builds differs.
+- `lib/home/queue.ts#buildHomeSurah` gained `floorOffer: { count, minutes } |
+  null`, computed via `floorOfferFor()` from the SAME fold `assembleFor`
+  already produced for the due count (no second log read) — `null` only on a
+  genuinely virgin surah (nothing ever due, nothing ever encoded), matching
+  `floorQueue`'s own "never empty" guarantee's actual boundary condition.
+  `components/home/TodaySession.tsx` renders it as "Short on time? Do a quick
+  N-minute check-in instead" linking to `/session?mode=floor`, deliberately
+  shown REGARDLESS of `ctaEnabled`/`dueCount` — floor.ts's own header calls
+  this "the worst days," and a learner with ten items due but two minutes to
+  spare is exactly as much a worst-day case as a learner with nothing due,
+  so the offer does not hide itself behind the ordinary CTA's own on/off
+  switch.
+
+**Verified:**
+- RED confirmed twice, each isolating one half of the change: `git stash` of
+  `lib/session/run.ts` alone (keeping the new tests) reran `run.test.ts` and
+  failed exactly the 4 new `v3-D108` cases with `startFloorSession is not a
+  function`, while the pre-existing 30 stayed green — proof the refactor of
+  `startSession` itself introduced no regression. `git stash` of
+  `lib/home/queue.ts` + `components/home/TodaySession.tsx` alone reran
+  `test/home-today.test.tsx` and failed exactly the 2 new floor-offer
+  assertions (`findByRole("link", { name: /check-in/i })` timing out), the
+  pre-existing 11 unaffected. Both stashes popped byte-identically
+  (`git diff` empty before restoring), reran green.
+- The three `run.test.ts` cases cover the engine's own three priorities
+  end-to-end through the real entry point: a seeded, due cold gate leads a
+  floor session and grades through `gate_result` exactly like the ordinary
+  session (never a second grading path); once that gate is passed and
+  nothing else is due, a second floor session falls back to a `"review"`-
+  kind warm-up on the same atom, sized off its REAL strength (never a fresh
+  strength-0 "learn"); and `session_start`/resume follows the identical
+  same-day-dedup rule `startSession` already proves, via the shared
+  `startFromQueue` helper.
+- Two `session-island.test.tsx` cases prove the COMPONENT-level wiring
+  through the REAL (unmocked) `lib/session/run.ts` — `mode="floor"` on a
+  virgin log shows the floor-specific unavailable message and never reaches
+  `session-drill`; seeding one encoded ayah first reaches `session-drill` for
+  real.
+- `TZ=UTC make test` (full monorepo, all seven suites, from the freshly
+  completed `make setup`): **2012 passing** (was 2003) — 255 v2 vitest + 47
+  v2/api + 272 v3/api + 111 corpus-compiler + 417 engine + 61 fold-runner +
+  **849** apps/web (was 840, +9 — exactly this run's new tests: 4 in
+  `run.test.ts`, 3 in `home-today.test.tsx`, 2 in `session-island.test.tsx`).
+  `check-test-floor.mjs`: OK, 2012 >= floor 1899 (+113 margin, `TEST-FLOOR`
+  left unmoved, same discipline as every prior entry). `TZ=UTC make build`:
+  exit 0, 20 routes (unchanged — `/session` moved from static `○` to dynamic
+  `ƒ` rendering since it now reads a search param, but no route was added or
+  removed). `npm run gates`: locked-css OK, fonts degraded-but-non-blocking
+  (pre-existing, unrelated to this change), boundaries OK (201 files — this
+  run added no new file, only modified nine existing ones), corpus-morphology
+  and corpus-glyphs OK. `npx tsc --noEmit`: clean (`Version 5.9.3` confirmed,
+  not a stray TeX `tsc`).
+- No `v1/**`/`v2/**` edit: a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+  produced by running the suite was reverted before committing, same
+  discipline as every prior entry — `git status --porcelain` on both trees
+  was clean before the commit. No Arabic codepoint introduced: checked
+  directly against the diff with a Python Unicode-range sweep (Arabic block,
+  Arabic Supplement, Arabic Presentation Forms A/B — zero matches) in
+  addition to `npm run gates`' own grep, which passed; every new line
+  addresses an ayah/minute/count by number, never corpus text.
+
+**Explicitly not addressed, named so a future run doesn't re-discover it as
+new:** the rescaffold ladder rung and `activity.ts#lastActiveDayMs()`'s
+inline re-derivation — both named by v3-D107, untouched here, out of this
+step's scope. `floorQueue`'s review/warm-up branches read forgetting-risk off
+whatever atoms `getEventsForSurah`/`assembleFor` hand it, which is already
+scoped to ONE surah (the caller's own surah parameter) — correct at today's
+single-surah-enrollment launch scope, but worth re-checking once multi-surah
+enrollment (HANDOVER.md's own long-open gap) exists, since nothing in
+`floor.ts` itself is surah-aware beyond what its caller already filtered.
+Door 3 (open practice)/`coldSuccessAdoption`/`diminishingReturns`/the SSR
+override gap/`isQuestionDisabled()` all remain exactly as open as v3-D106/
+D107 left them — this run's sweep did not re-touch any of them.

@@ -85,6 +85,7 @@ vi.mock("@engine/gradeClass.ts", async (importOriginal) => {
 });
 import {
   startSession,
+  startFloorSession,
   currentItem,
   answerCurrent,
   sessionSummaryOf,
@@ -1204,5 +1205,138 @@ describe("v3-D107 — gate forgiveness ladder: demoteOfferFor / acceptGateDemote
     expect(events.length).toBe(before.length);
     expect(events.some((e) => e.type === "gate_demote")).toBe(false);
     expect(after).toBe(started.run);
+  });
+});
+
+// v3-D108 — FR9, the 2-minute floor session
+// (`packages/engine/src/floor.ts#floorQueue`/`floorMinutes`).
+//
+// `floorQueue` was real and engine-tested (`habit.test.ts`, `e01.test.ts`)
+// since it landed, but had ZERO production callers — v3-D107's own sweep
+// found it and deliberately deferred it, named exactly as "needs its own
+// /home CTA and a reduced-queue entry point into the session loop." This is
+// that entry point: `startFloorSession` mirrors `startSession` (same
+// `session_start`/resume discipline, via the shared `startFromQueue` helper)
+// but sources its queue from `floorQueue` instead of `assembleQueue` — the
+// smallest viable session, at most ~2 minutes, never empty once anything is
+// due or encoded.
+//
+// `floorQueue`'s own three priorities (a due gate > the riskiest due review >
+// a guaranteed-win warm-up) are ALREADY proven at the engine level; this
+// block proves the WIRING — that the real session loop actually calls it,
+// maps its items onto ordinary QueueItems, and that a floor session commits
+// through the exact same graded path (`answerCurrent`/`settleAnswer`/
+// `answerAfterTap`) an ordinary session does, never a second grading rule.
+describe("v3-D108 — FR9, the 2-minute floor session (floorQueue wired into a real entry point)", () => {
+  it("is unavailable (nothing-due) on a virgin log — nothing due, nothing encoded, nothing to warm up on", async () => {
+    const c = corpus();
+    const started = await startFloorSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    expect(started.ok).toBe(false);
+    if (started.ok) return;
+    expect(started.unavailable).toBe("nothing-due");
+  });
+
+  it("serves the due cold gate first, and completing it grades through gate_result exactly like the ordinary session", async () => {
+    const c = corpus();
+    const gatedAyah = 1;
+
+    // Same seeding technique as the v3-D101 block above: the wire shape a
+    // genuine Carry-band S3 completion leaves behind.
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah: gatedAyah, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+
+    const day2 = T0 + 86_400_000;
+    const started = await startFloorSession({ surah: SURAH, now: day2, tz: TZ }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+
+    // A due gate is priority 1 in floorQueue's own ordering — it must lead a
+    // floor session too, and the floor queue must stay small (never the full
+    // assembled queue's shape).
+    expect(started.run.queue[0]?.kind).toBe("gate");
+    expect(started.run.queue[0]?.ayah).toBe(gatedAyah);
+    expect(started.run.queue.length).toBeLessThanOrEqual(2);
+
+    const { taps } = await playThrough(started.run, c);
+    expect(taps).toBeGreaterThan(0);
+
+    const events = await getAllEvents();
+    const gateResults = events.filter((e) => e.type === "gate_result");
+    expect(gateResults.length).toBeGreaterThan(0);
+    expect(gateResults.every((e) => e.correct === true)).toBe(true);
+
+    const atoms = rebuild(events);
+    expect(atoms.get(atomKey(SURAH, "ayah", gatedAyah))?.gatePassed).toBe(true);
+  });
+
+  it("falls back to a warm-up on the strongest carried atom once its gate is already passed and nothing else is due", async () => {
+    const c = corpus();
+    const gatedAyah = 1;
+
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah: gatedAyah, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+    const day2 = T0 + 86_400_000;
+    const gateStart = await startFloorSession({ surah: SURAH, now: day2, tz: TZ }, c);
+    if (!gateStart.ok) throw new Error("gate floor session must start");
+    await playThrough(gateStart.run, c);
+
+    const passedAtoms = rebuild(await getAllEvents());
+    expect(passedAtoms.get(atomKey(SURAH, "ayah", gatedAyah))?.gatePassed).toBe(true);
+
+    // Immediately after (same instant): the gate is passed (no longer due)
+    // and forgetting risk on a just-touched atom is ~0 (below floor.ts's own
+    // 0.15 review threshold) — floorQueue's own "never empty" clause 3
+    // (habit.test.ts) falls back to a warm-up on the strongest carried atom.
+    const warmupStart = await startFloorSession({ surah: SURAH, now: day2, tz: TZ }, c);
+    expect(warmupStart.ok).toBe(true);
+    if (!warmupStart.ok) return;
+
+    // FloorItem.kind "warmup" has no QueueItemKind of its own — it is graded
+    // as an ordinary "review" (full-weight, structured:true), the same
+    // "no second grading rule" discipline `startWeakSpotDrill` follows for
+    // Door 2. It must NOT be a "gate" (no gate is due) and must be sized off
+    // the atom's REAL strength (already encoded), never a fresh strength-0
+    // "learn".
+    expect(warmupStart.run.queue[0]?.kind).toBe("review");
+    expect(warmupStart.run.queue[0]?.ayah).toBe(gatedAyah);
+    expect(warmupStart.run.machine.strength).toBeGreaterThan(0);
+
+    const { taps } = await playThrough(warmupStart.run, c);
+    expect(taps).toBeGreaterThan(0);
+
+    const events = await getAllEvents();
+    // The warm-up rep is a SECOND production of the same ayah — never a
+    // free-play echo the fold silently drops (invariant #5).
+    const produced = events.filter((e) => e.type === "ayah_produced" && e.ayah === gatedAyah);
+    expect(produced.length).toBe(2);
+    expect(produced.every((e) => e.structured === true)).toBe(true);
+  });
+
+  it("opens with its own session_start (or resumes today's), exactly like the ordinary session loop", async () => {
+    const c = corpus();
+    const gatedAyah = 1;
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah: gatedAyah, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+    const day2 = T0 + 86_400_000;
+    const started = await startFloorSession({ surah: SURAH, now: day2, tz: TZ }, c);
+    if (!started.ok) throw new Error("floor session must start");
+
+    const events = await getAllEvents();
+    const starts = events.filter((e) => e.type === "session_start" && e.ts === day2);
+    expect(starts.length).toBe(1);
+
+    // A same-day RESUME must not emit a second session_start.
+    const resumed = await startFloorSession({ surah: SURAH, now: day2 + 60_000, tz: TZ }, c);
+    expect(resumed.ok).toBe(true);
+    if (!resumed.ok) return;
+    expect(resumed.run.startedAt).toBe(day2);
+    const afterResume = await getAllEvents();
+    expect(afterResume.filter((e) => e.type === "session_start").length).toBe(1);
   });
 });

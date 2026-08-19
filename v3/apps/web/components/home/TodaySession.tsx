@@ -48,7 +48,7 @@ import Link from "next/link";
 import { readChoices } from "@/lib/onboarding/choices";
 import { ONBOARDING_HREF } from "@/lib/onboarding/surahs";
 import { fetchCorpus } from "@/lib/corpus/client";
-import { buildHomeSurah, type HomeSurahRow } from "@/lib/home/queue";
+import { buildHomeSurah, FLOOR_SESSION_HREF, type HomeSurahRow } from "@/lib/home/queue";
 
 type State =
   | { kind: "loading" }
@@ -186,6 +186,20 @@ export function TodaySession() {
               on purpose, and doing more today would not make it stick harder.
             </p>
           )}
+          {/* FR9's 2-minute floor session (v3-D108). Deliberately shown
+              regardless of `ctaEnabled` — "short on time" and "nothing due"
+              are different reasons to reach for the smallest useful session,
+              and `floorOffer` is null only when there is genuinely nothing to
+              offer (a virgin surah), never merely because the ordinary queue
+              is empty. */}
+          {row.floorOffer ? (
+            <p className="caption">
+              Short on time?{" "}
+              <Link href={FLOOR_SESSION_HREF}>
+                Do a quick {row.floorOffer.minutes}-minute check-in instead
+              </Link>
+            </p>
+          ) : null}
         </div>
       );
     }

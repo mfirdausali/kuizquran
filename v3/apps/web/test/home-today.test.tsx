@@ -44,6 +44,7 @@ import { rebuild } from "@engine/rebuild.ts";
 import { assembleQueue } from "@engine/scheduler.ts";
 import { completedDayIndices, computeStreak } from "@engine/streak.ts";
 import { DEFAULT_DAY_CONFIG } from "@engine/daybound.ts";
+import { floorQueue, floorMinutes } from "@engine/floor.ts";
 
 import { DB_NAME, append, currentTz, openDb, resetDbForTests, writeLock } from "@/lib/idb";
 import { getEventsForSurah } from "@/lib/idb/read";
@@ -290,6 +291,92 @@ describe("the quiet streak pill — backs the landing page's own FAQ claim", () 
     await waitFor(() => expect(screen.getByTestId("today-session")).toBeTruthy());
     const pill = await screen.findByText(expected as string);
     expect(pill.className).toContain("pill-streak");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v3-D108 — FR9's floor-session offer. `packages/engine/src/floor.ts
+// #floorQueue`/`floorMinutes` were real and engine-tested since they landed
+// but had ZERO production callers — this is that surface. As with the due
+// count and the streak above, the expectation is DERIVED from the engine's
+// own `floorQueue`/`floorMinutes`, run over the same event log the component
+// reads — never a hand-picked number the test chose itself.
+// ---------------------------------------------------------------------------
+async function engineFloorOffer(
+  surah: number,
+  now: number,
+): Promise<{ count: number; minutes: number } | null> {
+  const prior = await getEventsForSurah(surah);
+  const atomsMap = rebuild(prior);
+  const ayahAtoms = [...atomsMap.values()].filter((a) => a.kind === "ayah");
+  const items = floorQueue(ayahAtoms, now);
+  if (items.length === 0) return null;
+  return { count: items.length, minutes: Math.max(1, Math.round(floorMinutes(items))) };
+}
+
+describe("v3-D108 — the floor-session offer backs FR9's '2-minute floor session'", () => {
+  it("offers nothing for a freshly enrolled learner — nothing has ever been encoded to warm up on", async () => {
+    await enroll(SURAH);
+    serveCorpus();
+
+    const expected = await engineFloorOffer(SURAH, Date.now());
+    expect(expected).toBeNull();
+
+    render(<TodaySession />);
+    await waitFor(() => expect(screen.getByTestId("today-session")).toBeTruthy());
+    expect(screen.queryByRole("link", { name: /check-in/i })).toBeNull();
+  });
+
+  it("offers the floor session once something is encoded, pointing at the dedicated floor route", async () => {
+    await enroll(SURAH);
+    serveCorpus();
+
+    const t = Date.now() - 3 * 24 * 60 * 60 * 1000;
+    await addEvent({ type: "ayah_produced", ts: t, surah: SURAH, ayah: 1, rung: "S3" });
+
+    const expected = await engineFloorOffer(SURAH, Date.now());
+    // A guard on the oracle: a null offer here would make the assertions
+    // below vacuously satisfiable by a component that renders nothing.
+    expect(expected).not.toBeNull();
+
+    render(<TodaySession />);
+    await waitFor(() => expect(screen.getByTestId("today-session")).toBeTruthy());
+    const link = await screen.findByRole("link", { name: /check-in/i });
+    expect(link.getAttribute("href")).toBe("/session?mode=floor");
+    expect(link.textContent).toMatch(new RegExp(`\\b${expected!.minutes}-minute`, "i"));
+  });
+
+  it("keeps offering the floor session even when the ordinary due count has emptied out — 'short on time', not only 'nothing due'", async () => {
+    await enroll(SURAH);
+    serveCorpus();
+
+    // Same "carry the whole surah" setup as the §12 empty-CTA test above: the
+    // ordinary queue empties out, but the atoms it leaves behind are exactly
+    // what a floor session's warm-up branch reads.
+    const now = Date.now();
+    const ayat = [...new Set(corpus.words.map((w) => w.ayah))];
+    let seq = 0;
+    for (const ayah of ayat) {
+      for (let rep = 0; rep < 3; rep++) {
+        await addEvent({
+          type: "ayah_produced",
+          ts: now - 60_000 + seq++,
+          surah: SURAH,
+          ayah,
+          rung: "S3",
+        });
+      }
+    }
+
+    const expectedDue = await engineDueCount(SURAH, now);
+    expect(expectedDue).toBe(0);
+    const expectedFloor = await engineFloorOffer(SURAH, now);
+    expect(expectedFloor).not.toBeNull();
+
+    render(<TodaySession />);
+    await waitFor(() => expect(screen.getByText(/up to date/i)).toBeTruthy());
+    const link = await screen.findByRole("link", { name: /check-in/i });
+    expect(link.getAttribute("href")).toBe("/session?mode=floor");
   });
 });
 
