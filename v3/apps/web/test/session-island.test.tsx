@@ -373,6 +373,7 @@ function trivialOneItemRun(c: Corpus, now: number): SessionRun {
     lastTap: null,
     done: false,
     gateSlipped: false,
+    rescaffolding: false,
   };
 }
 
@@ -436,6 +437,7 @@ describe("v3-D98 — Door 1 CTA on the real summary screen, actually wired", () 
       lastTap: null,
       done: false,
       gateSlipped: false,
+      rescaffolding: false,
     };
     // Play this seeding run to completion OFF-SCREEN, via the real (unmocked)
     // functions — mirrors run.test.ts's own playThrough, driven by the
@@ -536,6 +538,7 @@ describe("v3-D106 — Door 2 CTA on the real summary screen, actually wired", ()
           lastTap: null,
           done: false,
           gateSlipped: false,
+          rescaffolding: false,
         },
       });
 
@@ -602,6 +605,7 @@ function gateRunFor(c: Corpus, now: number): SessionRun {
     lastTap: null,
     done: false,
     gateSlipped: false,
+    rescaffolding: false,
   };
 }
 

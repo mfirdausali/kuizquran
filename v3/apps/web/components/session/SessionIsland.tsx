@@ -494,6 +494,17 @@ export function SessionIsland({ surah, mode = "full" }: SessionIslandProps) {
 
   return (
     <div className="stack" data-testid="session-drill">
+      {/* v3-D109 — v2-D08's rescaffold rung: `run.rescaffolding` is read-only
+          presentation of state `lib/session/run.ts` already decided (never a
+          strength/schedule DECISION made here — clause 5 still holds), the
+          same discipline as the demote-offer banner above. Mirrors v2's
+          `Gate.tsx` wording exactly: "A lighter warm-up first — then the real
+          cold check." */}
+      {run?.rescaffolding ? (
+        <p className="caption" data-testid="session-rescaffold-hint">
+          A lighter warm-up first — then the real cold check.
+        </p>
+      ) : null}
       <QuizCard
         item={assembled.item}
         onAnswer={onAnswer}

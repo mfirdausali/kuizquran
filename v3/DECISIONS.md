@@ -5812,3 +5812,163 @@ enrollment (HANDOVER.md's own long-open gap) exists, since nothing in
 Door 3 (open practice)/`coldSuccessAdoption`/`diminishingReturns`/the SSR
 override gap/`isQuestionDisabled()` all remain exactly as open as v3-D106/
 D107 left them — this run's sweep did not re-touch any of them.
+
+### v3-D109 — the gate forgiveness ladder's last rung: "rescaffold" (v2-D08), DEFECTS.md#B12's own named deferral
+
+Re-derived the 32-step order from `git log` and `v3/HANDOVER.md` per
+NIGHTLY.md's own rule rather than trusting any stale line: HEAD was
+`02d29c6` (v3-D108). Steps 1–26 and 29 are complete; 27/28 are human-gated
+(scene-beat authoring, qari sessions); step 30's engineering is
+substantially done and what remains (a live host running `schedule:run`, an
+operational mailer, real staging data, the 7-night window declaration) is
+infra/calendar-gated, unchanged from every recent night's re-derivation.
+With no new BUILD-PLAN step available to start, this run picked up
+DEFECTS.md#B12's own named, twice-deferred gap instead — the same "mechanism
+real and tested, never wired" shape this build has hit repeatedly since
+v3-D82, except here the missing piece was never built at all, only
+described.
+
+`packages/engine/src/gate.ts#gateForgiveness()` (v2-D08's forgiveness
+ladder) has three rungs: "cold" (the ordinary day-1 check), "rescaffold"
+(`gateFails >= RESCAFFOLD_AFTER_FAILS`, 2 — a lighter, ungraded-for-pass/fail
+S2 warm-up pass FIRST), and "demote" (`gateFails >= DEMOTE_OFFER_AFTER_FAILS`,
+4 — offer to send the ayah back to Learn). v3-D107 wired the "demote" rung
+(`demoteOfferFor`/`acceptGateDemote`) and, in the same commit, wrote down
+exactly why it stopped there: "wiring [rescaffold] here would mean a queue
+item that transitions between two `ReconstructState` machines mid-item, a
+real (small) state-machine extension this run chose not to make alongside
+the root-cause slip-tracking fix." v2's own `pages/Gate.tsx` (the port
+source, read but never touched) has always implemented this correctly — a
+`stage` state machine with `"rescaffold"` as a genuine second phase before
+`"cold"`, the ONLY place `slipped` (this codebase's `gateSlipped`) is set,
+gated on `stage === "cold"` so a warm-up slip never counts. Between 2 and 4
+consecutive gate fails, a real learner in the shipped `/session` route was
+still getting the ordinary full cold check every time — the lighter
+warm-up WIREFRAME.md's own "cold gate — spine of the schedule" section
+promises simply never appeared.
+
+**Built the state-machine extension v3-D107 named and deferred.**
+`lib/session/run.ts` gained:
+
+- `machineForItem(c, surah, q, atomsMap)` — the ONE place that both builds
+  the reconstruct machine for a queue item AND decides whether it opens in
+  the rescaffold phase, so no caller can build one without the other. For a
+  `kind: "gate"` item, it looks up the atom via `atomKey(surah, "ayah",
+  q.ayah)` in the SAME `atomsMap` the caller's own fold already produced
+  (never a second read) and calls `gateForgiveness()` on it — the SAME
+  function `demoteOfferFor` already calls, so both rungs read one shared
+  source of truth. `"rescaffold"` returns a fresh `initReconstruct(...,
+  {full: false})` machine (sized off the atom's real strength, an ordinary
+  partial reconstruction — never the whole-ayah `full:true` a cold check
+  gets) plus `rescaffolding: true`; every other case (a non-gate item, or a
+  gate at "cold" or "demote") falls through to the existing `machineFor`
+  unchanged, `rescaffolding: false`.
+- A new `SessionRun.rescaffolding: boolean` field, threaded through every
+  site that already threads `gateSlipped` (`startFromQueue`,
+  `settleAnswer`'s advance-to-next-item branch, `advancePastCurrent`,
+  `startExtraLearn`, `startWeakSpotDrill` — the latter two always `false`,
+  since "learn"/"review" items are never gates) — the exact same
+  "true only for the CURRENT queue item, reset the moment a new one becomes
+  current" discipline `gateSlipped` already established.
+- `settleRescaffoldWarmup(run, c, cur, optionIndex)` — the in-place
+  transition. When the warm-up pass's `ayahProduced` fires (in
+  `answerAfterTap`, gated on `isGateItem && run.rescaffolding`), it commits
+  an ORDINARY graded `ayah_produced` (rung resolved via
+  `gradeClassToWire(adv.full ? "s3_full" : "s2_partial")` — never a literal,
+  DEFECTS.md#B2's own rule; always S2 here since the warm-up machine was
+  built `full: false`) and then, rather than advancing the cursor the way
+  `settleAnswer`'s ordinary path does, rebuilds a fresh `full: true` machine
+  for the SAME ayah at the SAME cursor position, off the atom's now-current
+  strength (the warm-up's own encoding may have just moved it), and clears
+  `rescaffolding`. This is the "transitions between two `ReconstructState`
+  machines mid-item" v3-D107 described — done, but never by mutating a
+  machine in place: `settleRescaffoldWarmup` returns a brand-new
+  `SessionRun`, the same immutable-state discipline every other function in
+  this file already follows.
+- `settleAnswer`'s wrong-tap branch now reads `isColdGate = kind === "gate"
+  && !run.rescaffolding` instead of `kind === "gate"` alone — mirroring
+  `Gate.tsx`'s own `stage === "cold" && !correct` gate on `slipped` exactly.
+  A slip during the warm-up is recorded as an ordinary wrong tap
+  (`lastTap.correct: false`, the reconstruction does not advance) but never
+  sets `gateSlipped`, so it can never fail the eventual `gate_result`.
+
+`SessionIsland.tsx` gained one small, read-only presentational hint: when
+`run?.rescaffolding` is true, a caption ("A lighter warm-up first — then the
+real cold check.", the same wording `Gate.tsx` uses) renders above the quiz
+card. This reads a decision `run.ts` already made — never a strength
+comparison, band test, or schedule decision made in the component, so
+`check-boundaries.mjs` clause 5 (B2's guard) is untouched by it.
+
+**Verified:**
+- RED confirmed directly: `git stash push -- apps/web/lib/session/run.ts
+  apps/web/components/session/SessionIsland.tsx` (keeping every new test),
+  then reran `vitest run lib/session/run.test.ts -t v3-D109` — all 4 new
+  cases failed, each on `expected undefined to be true/false` against
+  `.rescaffolding`, since the field did not exist on the unmodified
+  `SessionRun`; `git stash pop` restored the fix byte-identically (`git
+  diff` empty before vs. after), reran — 4/4 green, 34/34 pre-existing
+  `run.test.ts` cases unaffected (38/38 total).
+- The four cases, each seeded via `append()` (the same public, production
+  entry point every real tap commits through — mirroring v3-D101/D107's own
+  seeding discipline, never a fabricated internal atom shape) with
+  `RESCAFFOLD_AFTER_FAILS` real prior `gate_result:false` events one
+  learning-day apart:
+  1. A gate at the rescaffold rung opens `rescaffolding: true`. Driving
+     every blank correctly (timestamped from the due day forward, NEVER
+     `playThrough`'s own fixed `T0 + n*1000` offsets — those land BEFORE the
+     due day and would silently defeat an `e.ts >= dueDay` filter, the exact
+     trap v3-D107's own happy-path test comment already warns about; this
+     run hit it once, watched the assertion fail on a phantom "0 events"
+     result, and fixed the test rather than weakening the assertion) yields
+     exactly ONE `ayah_produced` (rung `S2`) for the warm-up, exactly ONE
+     `gate_result` (`correct: true`) for the cold check that followed, the
+     atom folds `gatePassed: true`, and `gateFails` resets to 0
+     (`applyGateResult`'s own contract).
+  2. A deliberate wrong tap on the warm-up's first blank leaves
+     `gateSlipped: false` (the assertion this test exists for) and,
+     finishing cleanly from there, the eventual `gate_result.correct` is
+     still `true` — proving a warm-up slip is genuinely never remembered as
+     a gate slip, not merely untested.
+  3. A clean warm-up followed by a deliberate slip DURING the real cold
+     check still fails the gate (`gate_result.correct: false`) and
+     increments `gateFails` to `RESCAFFOLD_AFTER_FAILS + 1` — the ladder
+     keeps counting past the rescaffold threshold rather than capping.
+  4. A gate below `RESCAFFOLD_AFTER_FAILS` still opens `rescaffolding:
+     false` — no regression on the ordinary path v3-D101/D107 already
+     covered.
+- `TZ=UTC make test` (full monorepo, all seven suites, from a freshly
+  completed `make setup` — both Laravel apps' composer installs needed a
+  retry with `COMPOSER_PROCESS_TIMEOUT=900` after a transient GitHub API
+  timeout on the first attempt, the same recurring environmental flake prior
+  entries in this file already document; nothing else was unusual): **2016
+  passing** (was 2012) —
+  255 v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler + 417 engine
+  + 61 fold-runner + **853** apps/web (was 849, +4 — exactly this run's 4
+  new `run.test.ts` cases; every other suite's count is unchanged, since
+  this run touched only `apps/web`). `check-test-floor.mjs`: OK, 2016 >=
+  floor 1899 (+117 margin, `TEST-FLOOR` left unmoved, same discipline as
+  every prior entry). `TZ=UTC make build`: exit 0, 20 routes (unchanged — no
+  route added or removed; `/session` was already dynamic since v3-D108).
+  `npm run gates`: locked-css OK, fonts degraded-but-non-blocking
+  (pre-existing, unrelated to this change), boundaries OK (200 files
+  checked — this run added no new file, only modified four existing ones),
+  corpus-morphology and corpus-glyphs OK. `npx tsc --noEmit`: clean
+  (`Version 5.9.3` confirmed, not a stray TeX `tsc`).
+- No `v1/**`/`v2/**` edit: `git status --porcelain -- v1 v2` empty
+  throughout, and `git diff --stat` against HEAD shows only the four
+  `apps/web` files this entry names. No Arabic codepoint introduced: swept
+  the full diff of those four files with a Python Unicode-range check
+  (Arabic block U+0600–06FF, Arabic Supplement, Presentation Forms A/B —
+  zero matches) in addition to `npm run gates`' own grep, which passed —
+  every new line addresses an ayah number, a rung via `gradeClassToWire()`
+  (never a literal), or a boolean/count, never corpus text.
+
+**Explicitly not addressed, named so a future run doesn't re-discover it as
+new:** `activity.ts#lastActiveDayMs()`'s inline re-derivation (named by
+v3-D107, still untouched); `floorQueue`'s cross-surah forgetting-risk read
+(named by v3-D108, unchanged, still moot at single-surah launch scope);
+Door 3 (open practice)/`coldSuccessAdoption`/`diminishingReturns`/the SSR
+override gap (`lib/corpus/load.ts`)/`isQuestionDisabled()` all remain
+exactly as open as v3-D106/D107/D108 left them — this run's scope was the
+rescaffold rung alone, DEFECTS.md#B12's own last named gap, which is now
+fully closed.

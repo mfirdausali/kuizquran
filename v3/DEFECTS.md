@@ -79,15 +79,23 @@ instead of the quiz card once the engine's own fold says to offer it.
   every new line addresses an ayah by number, a fail count by integer, or a
   `Rung` via `gradeClassToWire()`, never a literal.
 
-**Explicitly not addressed, named so a future run doesn't re-discover it as
-new:** the "rescaffold" rung of the ladder (`RESCAFFOLD_AFTER_FAILS = 2`, a
-lighter, ungraded S2 warm-up pass offered BEFORE the next cold attempt) is
-still unwired. v2's `Gate.tsx` implements this as a second, distinct
-reconstruction phase within the same gate visit; wiring it here would mean a
-queue item that transitions between two `ReconstructState` machines mid-item —
-a real, separate state-machine extension this run chose not to make alongside
-the root-cause slip-tracking fix. Between 2 and 4 consecutive fails, a learner
-today still gets the ordinary full cold check, not the lighter warm-up.
+**Explicitly not addressed at the time, named so a future run doesn't
+re-discover it as new:** the "rescaffold" rung of the ladder
+(`RESCAFFOLD_AFTER_FAILS = 2`, a lighter, ungraded-for-pass/fail S2 warm-up
+pass offered BEFORE the next cold attempt) was still unwired. v2's
+`Gate.tsx` implements this as a second, distinct reconstruction phase within
+the same gate visit; wiring it here would mean a queue item that transitions
+between two `ReconstructState` machines mid-item — a real, separate
+state-machine extension this run chose not to make alongside the root-cause
+slip-tracking fix. Between 2 and 4 consecutive fails, a learner would still
+get the ordinary full cold check, not the lighter warm-up.
+
+**Closed 2026-08-19 (v3-D109).** `lib/session/run.ts` gained
+`machineForItem()` (builds the reconstruct machine for a queue item AND
+decides the rescaffold phase together) and `settleRescaffoldWarmup()` (the
+in-place, same-cursor transition from the warm-up's completed
+`ayah_produced` to the real cold check's fresh `full:true` machine) — see
+DECISIONS.md v3-D109 for the full write-up.
 
 ---
 

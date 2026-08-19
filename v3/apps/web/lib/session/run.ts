@@ -140,6 +140,17 @@ export interface SessionRun {
    * non-gate items, which grade S2/S3 on completion regardless of slips.
    */
   readonly gateSlipped: boolean;
+  /**
+   * v3-D109 — v2-D08's gate-forgiveness ladder, rescaffold rung. `true` when
+   * the CURRENT queue item is a due cold gate presently doing its lighter,
+   * ungraded-for-pass/fail S2 warm-up pass (`RESCAFFOLD_AFTER_FAILS` <=
+   * `gateFails` < `DEMOTE_OFFER_AFTER_FAILS`) — BEFORE the real full cold
+   * check begins. Mirrors v2's `pages/Gate.tsx` exactly: `stage ===
+   * "rescaffold"`, and `slipped` (this file's `gateSlipped`) is only ever set
+   * while `stage === "cold"`, never during the warm-up. Always `false` for a
+   * non-gate item, or a gate at any other rung of the ladder.
+   */
+  readonly rescaffolding: boolean;
 }
 
 export type StartResult =
@@ -165,6 +176,35 @@ function machineFor(c: Corpus, surah: number, q: QueueItem, strength: number): R
   // sized by strength. The engine owns that sizing — this only names which.
   const full = q.kind === "gate";
   return initReconstruct(c, surah, q.ayah, strength, { full });
+}
+
+/**
+ * v3-D109 — build the reconstruct machine for a queue item AND decide the
+ * gate-forgiveness rescaffold rung, together, so every caller that starts or
+ * advances to a fresh item gets both right in one place. A gate item whose
+ * atom sits at the "rescaffold" rung (`gateForgiveness()`,
+ * `packages/engine/src/gate.ts`) gets a LIGHTER, non-full S2 warm-up machine
+ * first, mirroring v2's `pages/Gate.tsx` (`stage === "rescaffold"`); every
+ * other gate, and every non-gate item, is unaffected — `machineFor`'s own
+ * `full = kind === "gate"` rule still decides those.
+ */
+function machineForItem(
+  c: Corpus,
+  surah: number,
+  q: QueueItem,
+  atomsMap: ReturnType<typeof rebuild>,
+): { machine: ReconstructState; rescaffolding: boolean } {
+  if (q.kind === "gate") {
+    const atom = atomsMap.get(atomKey(surah, "ayah", q.ayah));
+    if (atom && gateForgiveness(atom) === "rescaffold") {
+      const strength = strengthOf(atomsMap, surah, q.ayah);
+      return {
+        machine: initReconstruct(c, surah, q.ayah, strength, { full: false }),
+        rescaffolding: true,
+      };
+    }
+  }
+  return { machine: machineFor(c, surah, q, strengthOf(atomsMap, surah, q.ayah)), rescaffolding: false };
 }
 
 /**
@@ -353,7 +393,7 @@ async function startFromQueue(
 
   const first = queue[0];
   if (!first) return { ok: false, unavailable: "nothing-due" };
-  const strength = strengthOf(atomsMap, surah, first.ayah);
+  const { machine, rescaffolding } = machineForItem(c, surah, first, atomsMap);
 
   return {
     ok: true,
@@ -361,12 +401,13 @@ async function startFromQueue(
       surah,
       queue,
       cursor: 0,
-      machine: machineFor(c, surah, first, strength),
+      machine,
       startedAt,
       slips: 0,
       lastTap: null,
       done: false,
       gateSlipped: false,
+      rescaffolding,
     },
   };
 }
@@ -542,6 +583,31 @@ async function answerAfterTap(
   ctx: AppendContext,
 ): Promise<SessionRun> {
   if (adv.ayahProduced) {
+    const isGateItem = run.queue[run.cursor]?.kind === "gate";
+
+    // v3-D109 — v2-D08's rescaffold rung: the pass that JUST completed was
+    // the lighter S2 warm-up (`run.rescaffolding`), not the real cold check.
+    // It commits as an ordinary graded `ayah_produced` (S2, since it was not
+    // `full`) exactly like any other partial reconstruct, and does NOT
+    // resolve this gate item — mirrors v2's `Gate.tsx`: `stage ===
+    // "rescaffold"` commits `ayah_produced` then re-arms the SAME ayah as
+    // `stage: "cold"`, never a `gate_result`. `settleRescaffoldWarmup`
+    // builds that real cold-check machine in place, same cursor.
+    if (isGateItem && run.rescaffolding) {
+      const warmupEvent = {
+        type: "ayah_produced",
+        ts: ctx.now,
+        tz: ctx.tz,
+        surah: run.surah,
+        ayah: cur.ayah,
+        rung: gradeClassToWire(adv.full ? "s3_full" : "s2_partial"),
+        structured: true,
+      } as DrillEvent;
+      return commitThenContinue(warmupEvent, ctx, null, () =>
+        settleRescaffoldWarmup(run, c, cur, optionIndex),
+      );
+    }
+
     // DEFECTS.md#B10-shaped drift (v3-D101): a completed queue item's `kind`
     // (`run.queue[run.cursor]`) is read once by `machineFor` to size the
     // reconstruction (`full = q.kind === "gate"`) but was never read again
@@ -553,7 +619,7 @@ async function answerAfterTap(
     // never unlock a second ayah. `gate_result` is the dedicated wire event
     // `rebuild.ts`/`gate.ts` already handle correctly; this only routes a
     // completed gate item through it instead of re-deriving the outcome.
-    const isGate = run.queue[run.cursor]?.kind === "gate";
+    const isGate = isGateItem;
     const ayahEvent = isGate
       ? ({
           type: "gate_result",
@@ -592,6 +658,34 @@ async function answerAfterTap(
   return settleAnswer(run, c, cur, adv, optionIndex);
 }
 
+/**
+ * v3-D109 — the warm-up pass for the CURRENT gate item just completed and its
+ * `ayah_produced` has landed. Transition IN PLACE — same cursor, same ayah —
+ * to the real full cold check; this gate item is not resolved yet. Mirrors
+ * v2's `Gate.tsx` exactly: `stage: "cold"`, `slipped` reset, a fresh `full:
+ * true` machine built off the atom's CURRENT strength (the warm-up may have
+ * just moved it). `adv.correct` is always `true` here — `ayahProduced` only
+ * ever fires on a correctly-completing tap — so `slips` is left untouched,
+ * same as `settleAnswer`'s own correct-tap branches.
+ */
+async function settleRescaffoldWarmup(
+  run: SessionRun,
+  c: Corpus,
+  cur: CurrentItem,
+  optionIndex: number,
+): Promise<SessionRun> {
+  const events = await getEventsForSurah(run.surah);
+  const atomsMap = rebuild(events);
+  const strength = strengthOf(atomsMap, run.surah, cur.ayah);
+  return {
+    ...run,
+    machine: initReconstruct(c, run.surah, cur.ayah, strength, { full: true }),
+    rescaffolding: false,
+    gateSlipped: false,
+    lastTap: { index: optionIndex, correct: true },
+  };
+}
+
 /** Compute the state a caller may paint a verdict from. Every commit this tap
  *  required has already landed durably by the time this runs. */
 async function settleAnswer(
@@ -608,25 +702,39 @@ async function settleAnswer(
   // behaviour. The learner stays on the blank until they get it. v3-D107: if
   // the item being drilled is a due cold gate, this slip must be remembered
   // past the retry that follows — `gate_result`'s eventual `correct` reads
-  // this flag, never the completing tap alone.
+  // this flag, never the completing tap alone. v3-D109: a slip during the
+  // gate-forgiveness ladder's RESCAFFOLD warm-up is never a gate slip — only
+  // the real cold check (`!run.rescaffolding`) counts, mirroring v2's
+  // `Gate.tsx`: `stage === "cold" && !correct` is the only place `slipped` is
+  // ever set.
   if (!adv.correct) {
-    const isGate = run.queue[run.cursor]?.kind === "gate";
-    return { ...run, slips, lastTap, gateSlipped: isGate ? true : run.gateSlipped };
+    const isColdGate = run.queue[run.cursor]?.kind === "gate" && !run.rescaffolding;
+    return { ...run, slips, lastTap, gateSlipped: isColdGate ? true : run.gateSlipped };
   }
 
   // The ayah is finished — move to the next queue item, or end the session.
   if (adv.ayahProduced) {
     const nextCursor = run.cursor + 1;
     if (nextCursor >= run.queue.length) {
-      return { ...run, machine: adv.state, cursor: nextCursor, slips, lastTap, done: true };
+      return {
+        ...run,
+        machine: adv.state,
+        cursor: nextCursor,
+        slips,
+        lastTap,
+        done: true,
+        rescaffolding: false,
+      };
     }
     const events = await getEventsForSurah(run.surah);
     const atomsMap = rebuild(events);
     const nextQ = run.queue[nextCursor]!;
+    const { machine, rescaffolding } = machineForItem(c, run.surah, nextQ, atomsMap);
     return {
       ...run,
       cursor: nextCursor,
-      machine: machineFor(c, run.surah, nextQ, strengthOf(atomsMap, run.surah, nextQ.ayah)),
+      machine,
+      rescaffolding,
       slips,
       lastTap,
       // A fresh queue item starts with a clean slate, regardless of what the
@@ -719,6 +827,8 @@ export function startExtraLearn(run: SessionRun, c: Corpus, ayah: number): Sessi
     lastTap: null,
     done: false,
     gateSlipped: false,
+    // A "learn" item is never a gate — the rescaffold ladder does not apply.
+    rescaffolding: false,
   };
 }
 
@@ -789,11 +899,17 @@ export async function startWeakSpotDrill(run: SessionRun, c: Corpus, ayah: numbe
     lastTap: null,
     done: false,
     gateSlipped: false,
+    // A "review" item is never a gate — the rescaffold ladder does not apply.
+    rescaffolding: false,
   };
 }
 
 /**
- * v3-D107 — gate forgiveness ladder (v2-D08), demote half only.
+ * v3-D107 — gate forgiveness ladder (v2-D08), demote half.
+ *
+ * v3-D109 closed the rescaffold rung this header used to describe as
+ * deliberately unimplemented — see `machineForItem`/`settleRescaffoldWarmup`
+ * above. What follows is the demote half only.
  *
  * `gateForgiveness()`/`demoteToLearn()` (`packages/engine/src/gate.ts`) were
  * real and unit-tested since the engine port but UNREACHABLE in production —
@@ -804,17 +920,6 @@ export async function startWeakSpotDrill(run: SessionRun, c: Corpus, ayah: numbe
  * `stage === "demote-offer"` exactly, tap-gated, never automatic
  * (`gateForgiveness`'s own header: "the learner must tap to accept; never
  * auto-demoted").
- *
- * Deliberately NOT implemented here: the "rescaffold" rung of the ladder (a
- * lighter, ungraded S2 warm-up pass offered after `RESCAFFOLD_AFTER_FAILS`,
- * BEFORE the next cold attempt). v2's `Gate.tsx` does this as a second,
- * distinct reconstruction phase within the same gate visit; wiring it here
- * would mean a queue item that transitions between two `ReconstructState`
- * machines mid-item, a real (small) state-machine extension this run chose
- * not to make alongside the root-cause slip-tracking fix. Between
- * `RESCAFFOLD_AFTER_FAILS` (2) and `DEMOTE_OFFER_AFTER_FAILS` (4) fails, a
- * learner today still gets the ordinary cold check, not the lighter warm-up
- * — a real, named gap for a future run, not a silent one.
  *
  * Re-derives the fold fresh (never from `run`'s in-memory queue, which
  * reflects what was assembled at the START of the session, before any of
@@ -871,15 +976,24 @@ export async function acceptGateDemote(
 async function advancePastCurrent(run: SessionRun, c: Corpus): Promise<SessionRun> {
   const nextCursor = run.cursor + 1;
   if (nextCursor >= run.queue.length) {
-    return { ...run, cursor: nextCursor, lastTap: null, gateSlipped: false, done: true };
+    return {
+      ...run,
+      cursor: nextCursor,
+      lastTap: null,
+      gateSlipped: false,
+      rescaffolding: false,
+      done: true,
+    };
   }
   const events = await getEventsForSurah(run.surah);
   const atomsMap = rebuild(events);
   const nextQ = run.queue[nextCursor]!;
+  const { machine, rescaffolding } = machineForItem(c, run.surah, nextQ, atomsMap);
   return {
     ...run,
     cursor: nextCursor,
-    machine: machineFor(c, run.surah, nextQ, strengthOf(atomsMap, run.surah, nextQ.ayah)),
+    machine,
+    rescaffolding,
     lastTap: null,
     gateSlipped: false,
   };

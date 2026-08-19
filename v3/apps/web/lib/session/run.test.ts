@@ -99,7 +99,7 @@ import {
   type SessionRun,
 } from "./run";
 import { RetryableAppendError } from "@/lib/idb/append";
-import { DEMOTE_OFFER_AFTER_FAILS } from "@engine/gate.ts";
+import { DEMOTE_OFFER_AFTER_FAILS, RESCAFFOLD_AFTER_FAILS } from "@engine/gate.ts";
 
 // A fixed clock. The frontend is ALLOWED Date.now(); the engine is not. Tests
 // pass time in explicitly so a run is reproducible and TZ-independent — the
@@ -716,7 +716,7 @@ describe("v3-D98 — Door 1, 'extra Learn' after the assembled queue is done", (
   it("offers nothing before the mastery gate window opens the FIRST candidate is un-encoded — a virgin log grants the first mushaf-order ayah", async () => {
     const c = corpus();
     const offer = await extraLearnOfferFor(
-      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true, gateSlipped: false },
+      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true, gateSlipped: false, rescaffolding: false },
       c,
       T0,
     );
@@ -814,7 +814,7 @@ describe("v3-D98 — Door 1, 'extra Learn' after the assembled queue is done", (
 describe("v3-D106 — Door 2, 'weak-spot gym' after the assembled queue is done", () => {
   it("offers nothing before any atom is encoded — a virgin log has no weak spot to rank", async () => {
     const offer = await weakSpotOfferFor(
-      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true, gateSlipped: false },
+      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true, gateSlipped: false, rescaffolding: false },
       T0,
     );
     expect(offer).toBeNull();
@@ -847,6 +847,7 @@ describe("v3-D106 — Door 2, 'weak-spot gym' after the assembled queue is done"
       lastTap: null,
       done: true,
       gateSlipped: false,
+      rescaffolding: false,
     };
     const offer = await weakSpotOfferFor(doneRun, T0 + 10_000);
     expect(offer).not.toBeNull();
@@ -872,6 +873,7 @@ describe("v3-D106 — Door 2, 'weak-spot gym' after the assembled queue is done"
       lastTap: null,
       done: true,
       gateSlipped: false,
+      rescaffolding: false,
     };
     const offer = await weakSpotOfferFor(doneRun, T0 + 10_000);
     expect(offer).not.toBeNull();
@@ -1338,5 +1340,254 @@ describe("v3-D108 — FR9, the 2-minute floor session (floorQueue wired into a r
     expect(resumed.run.startedAt).toBe(day2);
     const afterResume = await getAllEvents();
     expect(afterResume.filter((e) => e.type === "session_start").length).toBe(1);
+  });
+});
+
+// v3-D109 — the gate forgiveness ladder's REMAINING rung. v3-D107 closed
+// DEFECTS.md#B12 (a cold gate could actually fail) and wired the "demote"
+// half of `gate.ts#gateForgiveness()`, but explicitly left the "rescaffold"
+// rung unwired, named exactly as: "wiring it here would mean a queue item
+// that transitions between two ReconstructState machines mid-item, a real
+// (small) state-machine extension this run chose not to make." Between
+// RESCAFFOLD_AFTER_FAILS (2) and DEMOTE_OFFER_AFTER_FAILS (4) consecutive
+// gate fails, v2's own `pages/Gate.tsx` (read, never touched) serves a
+// LIGHTER, ungraded-for-pass/fail S2 warm-up pass FIRST — same ayah, same
+// gate item — before the real full cold check: "A lighter warm-up first —
+// then the real cold check." A wrong tap during the warm-up is ordinary
+// reconstruct feedback, never a gate slip (`Gate.tsx`: `stage === "cold" &&
+// !correct` is the only place `slipped` is ever set). Nothing in this file
+// exercised the "rescaffold" branch of `gateForgiveness()` before tonight —
+// grep confirms zero references to `RESCAFFOLD_AFTER_FAILS`/`rescaffolding`
+// anywhere in this file prior to this block.
+describe("v3-D109 — gate forgiveness ladder: the rescaffold rung (v2-D08)", () => {
+  it("failing a gate RESCAFFOLD_AFTER_FAILS times serves a lighter S2 warm-up before the real cold check, and completing both cleanly still passes the gate", async () => {
+    const c = corpus();
+    const gatedAyah = 1;
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah: gatedAyah, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+
+    // RESCAFFOLD_AFTER_FAILS consecutive real cold-gate FAILS, one per
+    // learning-day — seeded directly via `append()` (the same public,
+    // production entry point every real tap commits through), mirroring
+    // v3-D107's own seeding discipline for the demote rung.
+    for (let day = 1; day <= RESCAFFOLD_AFTER_FAILS; day++) {
+      await append(
+        {
+          type: "gate_result",
+          ts: T0 + day * 86_400_000,
+          tz: TZ,
+          surah: SURAH,
+          ayah: gatedAyah,
+          rung: "S3",
+          correct: false,
+          structured: true,
+        } as DrillEvent,
+        { now: T0 + day * 86_400_000, tz: TZ },
+      );
+    }
+
+    const seededAtoms = rebuild(await getAllEvents());
+    const seededAtom = seededAtoms.get(atomKey(SURAH, "ayah", gatedAyah));
+    expect(seededAtom?.gateFails).toBe(RESCAFFOLD_AFTER_FAILS);
+
+    const dueDay = T0 + (RESCAFFOLD_AFTER_FAILS + 1) * 86_400_000;
+    const started = await startSession({ surah: SURAH, now: dueDay, tz: TZ }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    expect(started.run.queue[0]?.kind).toBe("gate");
+    expect(started.run.queue[0]?.ayah).toBe(gatedAyah);
+    // THE assertion this test exists for: a gate at the "rescaffold" rung
+    // must open in the warm-up phase, not straight into the cold check.
+    expect(started.run.rescaffolding).toBe(true);
+
+    // Drive every blank of the gate item CORRECTLY, timestamped from `dueDay`
+    // forward (NOT `playThrough`'s own fixed `T0 + n*1000` offsets, which
+    // would land well BEFORE `dueDay` and defeat any `e.ts >= dueDay` filter
+    // below — the exact trap v3-D107's own happy-path test warns about).
+    // Stops the moment the cursor leaves the gate item (index 0).
+    let run = started.run;
+    let cur = currentItem(run, c);
+    let guard = 0;
+    while (cur && run.cursor === 0 && guard < 60) {
+      run = await answerCurrent(run, c, correctIndexFor(run, c), {
+        now: dueDay + 100 + guard * 100,
+        tz: TZ,
+      });
+      guard++;
+      cur = currentItem(run, c);
+    }
+    expect(guard).toBeGreaterThan(0);
+    // By the time the gate item is resolved, the warm-up phase is long over.
+    expect(run.rescaffolding).toBe(false);
+
+    const events = await getAllEvents();
+    // The warm-up pass commits as an ORDINARY S2 ayah_produced — never a
+    // second gate_result, and never S3 (it did not blank the whole ayah).
+    const warmupProds = events.filter(
+      (e) => e.type === "ayah_produced" && e.ayah === gatedAyah && e.ts >= dueDay,
+    );
+    expect(warmupProds.length).toBe(1);
+    expect(warmupProds[0]!.rung).toBe("S2");
+
+    // Exactly ONE gate_result — the real cold check that followed — and it
+    // passed, since neither phase had a slip.
+    const gateResults = events.filter((e) => e.type === "gate_result" && e.ts >= dueDay);
+    expect(gateResults.length).toBe(1);
+    expect(gateResults[0]!.correct).toBe(true);
+
+    const atoms = rebuild(events);
+    const atom = atoms.get(atomKey(SURAH, "ayah", gatedAyah));
+    expect(atom?.gatePassed).toBe(true);
+    // applyGateResult resets the forgiveness counter on a pass (gate.ts).
+    expect(atom?.gateFails).toBe(0);
+  });
+
+  it("a wrong tap during the warm-up is not a gate slip — only a slip in the real cold check can fail the gate", async () => {
+    const c = corpus();
+    const gatedAyah = 1;
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah: gatedAyah, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+    for (let day = 1; day <= RESCAFFOLD_AFTER_FAILS; day++) {
+      await append(
+        {
+          type: "gate_result",
+          ts: T0 + day * 86_400_000,
+          tz: TZ,
+          surah: SURAH,
+          ayah: gatedAyah,
+          rung: "S3",
+          correct: false,
+          structured: true,
+        } as DrillEvent,
+        { now: T0 + day * 86_400_000, tz: TZ },
+      );
+    }
+
+    const dueDay = T0 + (RESCAFFOLD_AFTER_FAILS + 1) * 86_400_000;
+    const started = await startSession({ surah: SURAH, now: dueDay, tz: TZ }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    expect(started.run.rescaffolding).toBe(true);
+
+    // Slip on the very first blank of the WARM-UP.
+    let run = started.run;
+    const wrong0 = correctIndexFor(run, c) === 0 ? 1 : 0;
+    run = await answerCurrent(run, c, wrong0, { now: dueDay + 100, tz: TZ });
+    expect(run.lastTap?.correct).toBe(false);
+    // THE assertion this test exists for: a warm-up slip must never be
+    // remembered as a gate slip.
+    expect(run.gateSlipped).toBe(false);
+
+    // Finish both the warm-up and the real cold check cleanly from here,
+    // timestamped from `dueDay` forward (never `playThrough`'s own
+    // `T0`-relative offsets — see the previous test's own comment).
+    let cur = currentItem(run, c);
+    let guard = 1;
+    while (cur && run.cursor === 0 && guard < 60) {
+      run = await answerCurrent(run, c, correctIndexFor(run, c), {
+        now: dueDay + 200 + guard * 100,
+        tz: TZ,
+      });
+      guard++;
+      cur = currentItem(run, c);
+    }
+
+    const events = await getAllEvents();
+    const gateResults = events.filter((e) => e.type === "gate_result" && e.ts >= dueDay);
+    expect(gateResults.length).toBe(1);
+    // Clean despite the warm-up slip — only a COLD-phase slip may fail it.
+    expect(gateResults[0]!.correct).toBe(true);
+  });
+
+  it("a slip during the REAL cold check (after a clean warm-up) still fails the gate", async () => {
+    const c = corpus();
+    const gatedAyah = 1;
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah: gatedAyah, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+    for (let day = 1; day <= RESCAFFOLD_AFTER_FAILS; day++) {
+      await append(
+        {
+          type: "gate_result",
+          ts: T0 + day * 86_400_000,
+          tz: TZ,
+          surah: SURAH,
+          ayah: gatedAyah,
+          rung: "S3",
+          correct: false,
+          structured: true,
+        } as DrillEvent,
+        { now: T0 + day * 86_400_000, tz: TZ },
+      );
+    }
+
+    const dueDay = T0 + (RESCAFFOLD_AFTER_FAILS + 1) * 86_400_000;
+    const started = await startSession({ surah: SURAH, now: dueDay, tz: TZ }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+
+    // Finish the warm-up cleanly, one tap at a time, until the machine
+    // transitions to the real cold check (`rescaffolding` flips to false).
+    let run = started.run;
+    let guard = 0;
+    while (run.rescaffolding && guard < 50) {
+      run = await answerCurrent(run, c, correctIndexFor(run, c), {
+        now: dueDay + 100 + guard * 100,
+        tz: TZ,
+      });
+      guard++;
+    }
+    expect(run.rescaffolding).toBe(false);
+    expect(run.queue[run.cursor]?.kind).toBe("gate");
+
+    // Now slip once during the REAL cold check.
+    const wrong0 = correctIndexFor(run, c) === 0 ? 1 : 0;
+    run = await answerCurrent(run, c, wrong0, { now: dueDay + 5_000, tz: TZ });
+    expect(run.gateSlipped).toBe(true);
+
+    // Recover by retrying every remaining blank correctly, timestamped from
+    // `dueDay` forward (never `playThrough`'s own `T0`-relative offsets).
+    let cur = currentItem(run, c);
+    let guard2 = 1;
+    while (cur && run.cursor === 0 && guard2 < 60) {
+      run = await answerCurrent(run, c, correctIndexFor(run, c), {
+        now: dueDay + 6_000 + guard2 * 100,
+        tz: TZ,
+      });
+      guard2++;
+      cur = currentItem(run, c);
+    }
+
+    const events = await getAllEvents();
+    const gateResults = events.filter((e) => e.type === "gate_result" && e.ts >= dueDay);
+    expect(gateResults.length).toBe(1);
+    expect(gateResults[0]!.correct).toBe(false);
+
+    const atoms = rebuild(events);
+    const atom = atoms.get(atomKey(SURAH, "ayah", gatedAyah));
+    expect(atom?.gatePassed).toBe(false);
+    // One MORE fail on top of the two seeded — the ladder keeps counting,
+    // never silently caps.
+    expect(atom?.gateFails).toBe(RESCAFFOLD_AFTER_FAILS + 1);
+  });
+
+  it("an ordinary cold gate (fewer than RESCAFFOLD_AFTER_FAILS fails) opens straight into the cold check, exactly as before", async () => {
+    const c = corpus();
+    const gatedAyah = 1;
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah: gatedAyah, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+    const day2 = T0 + 86_400_000;
+    const started = await startSession({ surah: SURAH, now: day2, tz: TZ }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    expect(started.run.queue[0]?.kind).toBe("gate");
+    expect(started.run.rescaffolding).toBe(false);
   });
 });

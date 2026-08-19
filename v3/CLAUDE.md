@@ -53,14 +53,94 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2012 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2016 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 849 apps/web. (v3-D108, 2026-08-19)
+             # + 417 engine + 61 fold-runner + 853 apps/web. (v3-D109, 2026-08-19)
              # `make test` enforces v3-D95's test-count floor (`v3/TEST-FLOOR`,
              # currently 1899, so the margin above is intentionally not yet
              # banked into the floor) — a suite that silently shrinks (deleted
              # test file, stray `.skip`) now fails the build even though every
              # test that DID run still passed.
+             # NOTE (v3-D109): `packages/engine/src/gate.ts#RESCAFFOLD_AFTER_FAILS`/
+             # `gateForgiveness()`'s "rescaffold" rung (v2-D08's gate-forgiveness
+             # ladder) was real and engine-tested since the port but had never
+             # been wired into the real session loop — DEFECTS.md#B12's own
+             # "explicitly not addressed" note named it exactly: "wiring it here
+             # would mean a queue item that transitions between two
+             # `ReconstructState` machines mid-item... a real (small)
+             # state-machine extension this run chose not to make." Built that
+             # extension. `lib/session/run.ts` gained `machineForItem()` (builds
+             # the reconstruct machine for a queue item AND decides the
+             # rescaffold phase together, consulting `gateForgiveness()` off the
+             # SAME atom the queue item's own fold produced) and
+             # `settleRescaffoldWarmup()` (the in-place transition, same cursor,
+             # same ayah, from the warm-up's completed `ayah_produced` to the
+             # real cold check's fresh `full:true` machine) — mirroring v2's
+             # `pages/Gate.tsx` exactly: `stage: "rescaffold"` commits an
+             # ordinary graded S2 `ayah_produced` then re-arms the SAME ayah as
+             # `stage: "cold"`, never a `gate_result` for the warm-up itself. A
+             # new `SessionRun.rescaffolding` field (mirroring `gateSlipped`'s
+             # own "true only for the CURRENT queue item, reset on every
+             # advance" discipline) tracks the phase; a wrong tap during the
+             # warm-up is deliberately NEVER remembered as a gate slip — only
+             # `!run.rescaffolding` gates count toward `gate_result.correct`,
+             # matching `Gate.tsx`'s own `stage === "cold" && !correct` rule for
+             # when `slipped` may be set. `SessionIsland.tsx` gained a small
+             # read-only hint ("A lighter warm-up first — then the real cold
+             # check.") when `run.rescaffolding` is true — presentation of a
+             # decision `run.ts` already made, never a decision made in the
+             # component (check-boundaries.mjs clause 5 still holds).
+             #
+             # RED confirmed directly: reran the 4 new `run.test.ts` cases
+             # against a `git stash` of `run.ts` + `SessionIsland.tsx` alone
+             # (keeping the new tests) — all 4 failed on exactly
+             # `started.run.rescaffolding` being `undefined` instead of the
+             # expected boolean; `git stash pop` restored the fix byte-
+             # identically, `git diff` empty, 4/4 green again, no regression on
+             # the other 34 cases in the file. The four cases prove: (1) a gate
+             # at the rescaffold rung opens in the warm-up phase and, once both
+             # the warm-up and the real cold check are completed cleanly,
+             # commits exactly ONE S2 `ayah_produced` (the warm-up) then exactly
+             # ONE passing `gate_result` (the cold check) — never a second
+             # gate_result, never an S3 warm-up; (2) a slip DURING the warm-up
+             # is recorded as an ordinary wrong tap but never sets
+             # `gateSlipped`, and the eventual cold-check pass still reads
+             # `correct:true`; (3) a slip during the REAL cold check (after a
+             # clean warm-up) still fails the gate and increments `gateFails`
+             # past the two seeded fails; (4) an ordinary gate below the
+             # rescaffold threshold still opens straight into the cold check,
+             # unchanged from v3-D107's own behavior — no regression on the
+             # non-rescaffold path.
+             #
+             # `TZ=UTC make test` (full monorepo, all seven suites, from a
+             # fully completed `make setup`): **2016 passing** (was 2012, +4 —
+             # exactly this run's 4 new `run.test.ts` cases; no other suite's
+             # count moved). `check-test-floor.mjs`: OK, 2016 >= floor 1899
+             # (+117 margin, `TEST-FLOOR` left unmoved, same discipline as
+             # every prior entry). `TZ=UTC make build`: exit 0, 20 routes
+             # (unchanged — no route added or removed). `npm run gates`:
+             # locked-css OK, fonts degraded-but-non-blocking (pre-existing,
+             # unrelated), boundaries OK (200 files checked), corpus-morphology
+             # and corpus-glyphs OK. `npx tsc --noEmit`: clean (`Version
+             # 5.9.3` confirmed).
+             #
+             # No `v1/**`/`v2/**` edit: `git status --porcelain -- v1 v2`
+             # empty before committing. No Arabic codepoint introduced:
+             # checked directly against the diff with a Unicode-range sweep
+             # (Arabic block, Arabic Supplement, Arabic Presentation Forms
+             # A/B — zero matches) in addition to `npm run gates`' own grep,
+             # which passed — every new line addresses an ayah/rung/fail-count
+             # by number or closed-set value, never corpus text.
+             #
+             # NOT addressed, named so a future run doesn't re-discover it as
+             # new: `activity.ts#lastActiveDayMs()`'s inline re-derivation
+             # (named by v3-D107, still untouched — out of this step's scope);
+             # `floorQueue`'s cross-surah forgetting-risk read (named by
+             # v3-D108, unchanged); Door 3 (open practice)/
+             # `coldSuccessAdoption`/`diminishingReturns`/the SSR override
+             # gap/`isQuestionDisabled()` all remain exactly as open as
+             # v3-D106/D107/D108 left them — this run's scope was the
+             # rescaffold rung alone.
              # NOTE (v3-D108): `packages/engine/src/floor.ts#floorQueue`/
              # `floorMinutes` (FR9, "the 2-minute floor session" — a due cold
              # gate, else the riskiest due review, else a guaranteed-win
