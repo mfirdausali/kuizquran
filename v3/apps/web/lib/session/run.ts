@@ -81,6 +81,14 @@ import { gateForgiveness } from "@engine/gate.ts";
 // unasserted by any test until v3-D83 added both. Every rung below is a call,
 // never a literal.
 import { gradeClassToWire } from "@engine/gradeClass.ts";
+// v2-BUG-2 / v3-D113 — the ms of the learner's last active day, derived from the
+// append-only log (invariant #2). `activity.ts`'s own header states the intent:
+// deriving it there is so "the session caller has no excuse to hardcode it
+// again." `assembleFor` hardcoded it anyway (an inline `reduce(..., 0)`), so
+// this had ZERO production callers — the "re-derive instead of import" shape
+// v3-D107/D108 named. The one derivation now lives in one place; the inline
+// copy's `0` floor (vs the engine's `-Infinity`) is gone with it.
+import { lastActiveDayMs } from "@engine/activity.ts";
 
 import {
   append,
@@ -294,9 +302,7 @@ export async function assembleFor(
     wordCounts.set(w.ayah, (wordCounts.get(w.ayah) ?? 0) + 1);
   }
 
-  const lastActiveDay = prior.length > 0
-    ? prior.reduce((max, e) => (e.ts > max ? e.ts : max), 0)
-    : null;
+  const lastActiveDay = lastActiveDayMs(prior);
 
   const queue = assembleQueue({
     surah,

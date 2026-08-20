@@ -6334,3 +6334,90 @@ framing). The placement onboarding (`placement.ts`, FR10), the SSR override gap
 (`lib/corpus/load.ts`, v3-D96/D110), `activity.ts#lastActiveDayMs()`'s inline
 re-derivation (v3-D107), and `floorQueue`'s cross-surah forgetting-risk read
 (v3-D108) all remain exactly as open as their own entries left them.
+
+### v3-D113 — `assembleFor` re-derived `lastActiveDay` inline; the engine's `lastActiveDayMs()` had zero production callers
+
+**The finding.** `packages/engine/src/activity.ts#lastActiveDayMs(events)` is
+the v2-BUG-2 fix: it derives the learner's most-recent-active-day ms straight
+from the append-only event log (invariant #2), so `assembleQueue`'s make-up
+merge (FR3 step 1 — the "never dropped" guarantee) fires against a real value
+rather than v1's hardcoded `lastActiveDay: null`. Its own header states the
+intent in as many words: it derives the value there "so the session caller has
+no excuse to hardcode it again."
+
+The session caller hardcoded it anyway. `lib/session/run.ts#assembleFor` — the
+ONE queue-assembly seam that every start path funnels through (`startSession`,
+`startFloorSession`, `startWeakSpotDrill`, `startExtraLearn`,
+`startDrillSession`) and that `/home`'s due-count route reads via the same
+function (its own header: "there is ONE assembly, and both callers take it") —
+computed `lastActiveDay` with an inline
+`prior.reduce((max, e) => (e.ts > max ? e.ts : max), 0)`. So `lastActiveDayMs`
+had **zero production callers** (`grep -rln lastActiveDayMs apps/web` returned
+only this run's new test). This is the "re-derive instead of import" shape
+v3-D107 and v3-D108 both named and twice deferred as trivial — the same shape
+as v3-D83's `gradeClassToWire` finding, where the fix's whole point ("nowhere
+else for that decision to live") did not hold until the caller actually routed
+through the one function.
+
+A second, smaller thing rode along: the inline `reduce(..., 0)` **floors at 0**
+where the engine floors at `-Infinity`. For any log whose events carry positive
+epoch-ms timestamps (i.e. every real log) the two agree exactly, so this is
+unreachable in production — but it is precisely the latent divergence a single
+source of truth exists to foreclose, and it is gone with the inline copy.
+
+**Not a live behavioural bug.** For every realistic input the inline reduce and
+`lastActiveDayMs` return the identical value, so no learner was mis-scheduled.
+The defect is the missing single-source-of-truth the engine module was written
+to guarantee — the same class v3-D83 closed for the grading rung.
+
+**Fixed.** `assembleFor` now calls `lastActiveDayMs(prior)`; the inline reduce
+and its `0` floor are deleted. One line, one import, one place.
+
+**Verified — RED first, mirroring the gradeClassToWire wiring proof (v3-D83).**
+New `lib/session/assemble-lastactive.test.ts` mocks `@engine/scheduler.ts` to
+capture the `lastActiveDay` that `assembleQueue` actually receives, and puts a
+spy seam over `@engine/activity.ts#lastActiveDayMs` (non-null → overrides the
+real one, exactly as `gradeClassToWireSpy` does). A fixed non-empty `prior`
+(one `session_start` at T0) makes the inline reduce return a concrete max-ts
+(T0) distinct from the spy's sentinel (T0 − 1 day):
+
+- Against the **unmodified** `run.ts` the captured value was T0, not the
+  sentinel — observed RED (`expected 1786438800000 to be 1786352400000`), the
+  inline derivation blind to the engine function. After wiring the call it is
+  the sentinel — GREEN.
+- A companion (`lastActiveDayMsSpy = null`, the real derivation) asserts the
+  captured value is the true max-ts (T0), so the wiring did not merely satisfy
+  the spy — it carries the real value through too.
+
+`TZ=UTC make test` (all seven suites, fresh `make setup` from a clean
+checkout): **2058 passing** (was 2056, **+2** — exactly this run's two new
+tests; no other suite moved — 255 v2 vitest + 47 v2/api + 272 v3/api + 111
+corpus-compiler + 417 engine + 61 fold-runner + **895** apps/web, +2 incomplete
+PAY-1 by design). `check-test-floor.mjs`: OK, 2058 >= floor 1899 (+159 margin,
+`TEST-FLOOR` left unmoved). `TZ=UTC make build`: exit 0, **20 routes**
+(unchanged — no route added or removed). `npm run gates`: locked-css OK, fonts
+degraded-but-non-blocking (pre-existing), boundaries OK (203 files — one new
+test file), corpus-morphology OK, corpus-glyphs OK. `npx tsc --noEmit`: clean.
+No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff from
+running the suite was reverted before committing, same discipline as every
+prior entry). No Arabic codepoint introduced: both changed files swept directly
+over the Arabic, Supplement, Extended-A and both Presentation Forms blocks plus
+`\u06xx`/`fromCharCode` (zero matches), and `npm run gates`' own Arabic grep
+passed — every added line addresses a ts/day by number or is prose.
+
+**Explicitly not addressed, named so a future run doesn't re-discover it as
+new.** With `lastActiveDayMs` now wired, the previously-catalogued "built,
+tested, zero-caller mechanism with an EXISTING home" seam is essentially
+exhausted. What remains is genuinely gated, not one-night wiring: FR6 Door 3
+(`freeplay.ts#openPracticePick`) and `coldSuccessAdoption` need a new any-ayah
+free-practice surface that would drill UN-encoded ayat — deliberately outside
+`/drill`'s encoded-only guard (v3-D112), so not a natural extension of it; the
+SSR override gap (`lib/corpus/load.ts` reads the frozen corpus from disk with no
+network, so applying overrides server-side needs a Next→Laravel HTTP pattern the
+codebase deliberately lacks — v3-D96/D110); the placement binary-search
+onboarding (`placement.ts`, FR10) cannot run for the served surahs, whose
+`sceneBeats` are empty (112/103) or whose surah is chosen only AFTER the
+placement screen — a structural precondition, not a wiring gap; and
+`sessionSummary.ts#greetingForHour` computes a `greeting` bucket no surface
+renders (a copy/design call, not a defect). `floorQueue`'s cross-surah
+forgetting-risk read (v3-D108) stays moot at single-surah launch scope.

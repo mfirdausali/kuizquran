@@ -53,9 +53,43 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2056 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2058 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 893 apps/web. (v3-D112, 2026-08-20)
+             # + 417 engine + 61 fold-runner + 895 apps/web. (v3-D113, 2026-08-20)
+             # NOTE (v3-D113): `packages/engine/src/activity.ts#lastActiveDayMs`
+             # (the v2-BUG-2 fix — derives the learner's last-active day from the
+             # append-only log so the make-up merge fires; its own header: derived
+             # there "so the session caller has no excuse to hardcode it again")
+             # had ZERO production callers. `lib/session/run.ts#assembleFor` — the
+             # ONE queue-assembly seam every start path AND the /home due-count
+             # route funnel through — hardcoded it anyway, an inline
+             # `prior.reduce((max,e)=>(e.ts>max?e.ts:max),0)`. The "re-derive
+             # instead of import" shape v3-D107/D108 twice named and deferred, and
+             # the same shape as v3-D83's gradeClassToWire finding. Not a live
+             # bug (the two agree for every positive-ts log) but the inline copy
+             # also floored at 0 vs the engine's -Infinity — the exact latent
+             # divergence one source of truth forecloses. Fixed: `assembleFor`
+             # now calls `lastActiveDayMs(prior)`; one line, one import, one place.
+             # RED-first mirrors the gradeClassToWire wiring proof (v3-D83): new
+             # `lib/session/assemble-lastactive.test.ts` mocks `@engine/scheduler`
+             # to capture the `lastActiveDay` assembleQueue receives + spies
+             # `@engine/activity`; against unmodified run.ts the captured value was
+             # the inline max-ts (T0), not the spy's sentinel — RED
+             # (`expected 1786438800000 to be 1786352400000`); wired → GREEN, and
+             # a companion proves the real un-overridden derivation still carries
+             # the true max-ts through. `TZ=UTC make test`: 2058 passing (was
+             # 2056, +2 — exactly this run's two new tests; no other suite moved).
+             # `check-test-floor.mjs`: OK, 2058 >= floor 1899 (+159 margin,
+             # TEST-FLOOR unmoved). `TZ=UTC make build`: exit 0, 20 routes
+             # (unchanged). `npm run gates`: all green (fonts degraded-but-non-
+             # blocking, pre-existing; boundaries 203 files). `npx tsc --noEmit`
+             # clean. No v1/v2 edit (stray v2/tsconfig.tsbuildinfo reverted). No
+             # Arabic codepoint (both files swept over every Arabic block +
+             # \u06xx/fromCharCode, zero matches). With this the "built, tested,
+             # zero-caller mechanism with an existing home" seam is exhausted;
+             # what remains (FR6 Door 3/coldSuccessAdoption, the SSR override gap,
+             # placement/FR10, the unrendered greeting) is design/architecture/
+             # human-gated, not one-night wiring. See DECISIONS.md v3-D113.
              # NOTE (v3-D112): build-plan step 20 (`/drill`, continuous drill)
              # dead-ended — `components/drill/DrillPicker.tsx` rendered a live
              # preview of what a chosen range/page would drill but had NO Start
