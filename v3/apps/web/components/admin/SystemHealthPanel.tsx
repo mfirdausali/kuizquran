@@ -15,13 +15,16 @@
 // WHAT THIS PANEL DELIBERATELY DOES NOT DO. `SystemHealthController::METRICS`
 // registers `atom_cache_coverage`, `events_ingested_24h` and
 // `dead_letter_depth` as CLOSED-SET members (kept apart from the forbidden
-// engagement-bait metrics, WIREFRAME §16) but `index()` only ever computes
-// `fold_determinism_check` and `selection_determinism_check` — the other
-// three have no backend implementation to read yet (there is, for instance,
-// no dead-letter mechanism anywhere in this codebase for `dead_letter_depth`
-// to report on). This panel renders exactly the two checks the API actually
-// answers; inventing placeholder rows for the other three would be the same
-// "manufactures confidence" mistake `ExplainTrace`'s own header warns against.
+// engagement-bait metrics, WIREFRAME §16). `dead_letter_depth` now has a real
+// producer — edge case #130's quarantine count from
+// `DeterminismCheckCommand::sampleFromDatabase()`/`record()` — so `index()`
+// computes all three of `fold_determinism_check`, `selection_determinism_check`
+// and `dead_letter_depth`; this panel needs no change to show the third row,
+// since the table below already renders `report.checks` generically. Only
+// `atom_cache_coverage` and `events_ingested_24h` still have no backend
+// implementation to read. Inventing placeholder rows for THOSE two would be
+// the same "manufactures confidence" mistake `ExplainTrace`'s own header
+// warns against.
 //
 // EGRESS: through `lib/admin/health.ts`, which itself goes through
 // `apiFetch` only (check-boundaries.mjs clause 6).

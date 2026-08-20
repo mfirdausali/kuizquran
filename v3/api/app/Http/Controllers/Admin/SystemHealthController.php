@@ -56,6 +56,7 @@ class SystemHealthController extends Controller
             'checks' => [
                 $this->reading('fold_determinism_check', fn () => $this->foldDeterminism()),
                 $this->reading('selection_determinism_check', fn () => $this->selectionDeterminism()),
+                $this->reading('dead_letter_depth', fn () => $this->deadLetterDepth()),
             ],
             'rebuildRunning' => Cache::lock(self::REBUILD_LOCK, 0)->get() === false,
         ]);
@@ -112,6 +113,22 @@ class SystemHealthController extends Controller
         $recorded = Cache::get('health:selection_determinism_check');
         if ($recorded === null) {
             throw new \RuntimeException('no selection_determinism_check result recorded');
+        }
+
+        return (int) $recorded;
+    }
+
+    /**
+     * Edge case #130 (BUILD-PLAN.md:346) — the fold check's own dead-letter
+     * quarantine count, written by `DeterminismCheckCommand::record()`. Same
+     * #167 discipline as the two checks above: no recorded run means
+     * `unknown`, never a fabricated 0.
+     */
+    private function deadLetterDepth(): int
+    {
+        $recorded = Cache::get('health:dead_letter_depth');
+        if ($recorded === null) {
+            throw new \RuntimeException('no dead_letter_depth result recorded — the fold-runner has not reported');
         }
 
         return (int) $recorded;

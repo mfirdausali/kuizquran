@@ -3,9 +3,13 @@
 namespace Tests\Feature\Nightly;
 
 use App\Console\Commands\DeterminismCheckCommand;
+use App\Models\Event;
 use App\Models\NightlyCheckRun;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
@@ -138,6 +142,86 @@ class DeterminismCheckCommandTest extends TestCase
     {
         $this->artisan('determinism:check', ['check' => 'nonsense'])->assertExitCode(1);
         $this->assertSame(0, NightlyCheckRun::query()->count());
+    }
+
+    /**
+     * Edge case #130 (BUILD-PLAN.md:346) — "Malformed/unparseable snapshot:
+     * poison event wedges fold" → "dead-letter quarantine; fold skips +
+     * alerts; log intact."
+     *
+     * `sampleFromDatabase()` batches every sampled learner into ONE envelope
+     * and `json_encode()`s it whole before handing it to the fold-runner.
+     * That call fails ATOMICALLY on the first invalid-UTF8 byte anywhere in
+     * the payload (PHP's own `json_encode` contract) — so one learner's
+     * corrupted `device_id` (a real reachable shape: a buggy client, a bad
+     * migration, or direct DB surgery; nothing here goes through Eloquent's
+     * casts) silently blanks the WHOLE stdin envelope. Without a fix, the
+     * fold-runner then reports "no input on stdin" as an ERROR night — for
+     * every OTHER, perfectly clean, learner sampled alongside the poisoned
+     * one, night after night, until a human happens to notice and hand-fixes
+     * the row.
+     *
+     * MUTATION: skip the per-learner `json_encode` guard in
+     * `sampleFromDatabase()` and merge every sample into the envelope
+     * unconditionally — this test goes back to asserting `error`/`no input`.
+     */
+    public function test_a_single_poisoned_learner_never_wedges_the_whole_nightly_run(): void
+    {
+        $clean = User::factory()->create();
+        Event::create([
+            'user_id' => $clean->id, 'uuid' => (string) Str::uuid(),
+            'type' => 'rung_complete', 'ts' => 1_000, 'surah' => 112, 'ayah' => 1,
+            'rung' => 'S2', 'correct' => true, 'received_at' => 1_000,
+        ]);
+
+        $poisoned = User::factory()->create();
+        Event::create([
+            'user_id' => $poisoned->id, 'uuid' => (string) Str::uuid(),
+            'type' => 'rung_complete', 'ts' => 1_000, 'surah' => 112, 'ayah' => 1,
+            'rung' => 'S2', 'correct' => true, 'received_at' => 1_000,
+        ]);
+
+        // Seed BOTH learners' atom_cache from their still-clean events, via
+        // the real fold-runner (the same mechanism SystemHealthTest's own
+        // rebuild proof uses) — so the CLEAN learner's cache genuinely
+        // matches a fresh fold and contributes zero findings of its own.
+        // Without this, an empty cache reads as its own real divergence
+        // (foldCheck.ts: "a key present in the fresh fold but ABSENT from
+        // the cache... is a genuine divergence"), which would confound a
+        // dead-letter-only night with an ordinary P1 for a different reason.
+        app(\App\Support\AtomCacheRebuilder::class)->rebuild();
+
+        // NOW corrupt the poisoned learner's stored row — after their cache
+        // was already (correctly) computed from the clean version, so this
+        // reproduces a row whose corruption exists specifically at
+        // determinism-check time. A raw update bypasses Eloquent's casts
+        // entirely, the same route a corrupted row can reach this table
+        // through in production. `device_id` is forwarded verbatim by
+        // EventWireCodec.
+        DB::table('events')->where('user_id', $poisoned->id)
+            ->update(['device_id' => "\xB1\x31"]); // invalid UTF-8 — json_encode() fails on this byte alone
+
+        $this->artisan('determinism:check', ['check' => 'fold'])->assertExitCode(0);
+
+        $run = NightlyCheckRun::query()->where('check', 'fold_determinism_check')->firstOrFail();
+
+        $this->assertSame(
+            'warn',
+            $run->severity,
+            'a dead-lettered learner is never silently green, but the poisoned row alone must not page a P1 either',
+        );
+        $this->assertGreaterThan(
+            0,
+            $run->report['atomsCompared'],
+            'the clean learner was actually compared — the poisoned one did not swallow the whole run',
+        );
+        $this->assertCount(1, $run->report['deadLetters'], 'exactly the poisoned learner is quarantined, not the clean one');
+        $this->assertSame($poisoned->id, $run->report['deadLetters'][0]['userId']);
+
+        $this->assertNotNull(
+            Event::where('user_id', $poisoned->id)->first(),
+            '"log intact" — the poisoned event is quarantined from tonight\'s comparison, never deleted or edited',
+        );
     }
 
     public function test_the_exit_code_map_matches_the_runners_severity_module(): void

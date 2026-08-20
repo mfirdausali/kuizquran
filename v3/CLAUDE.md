@@ -53,9 +53,71 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2058 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 895 apps/web. (v3-D113, 2026-08-20)
+make test    # 2059 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 273 v3/api + 111 corpus-compiler
+             # + 417 engine + 61 fold-runner + 895 apps/web. (v3-D114, 2026-08-20)
+             # NOTE (v3-D114): DEFECTS.md/edge case #130 — `sampleFromDatabase()`
+             # batched every sampled learner into ONE envelope and `json_encode()`d
+             # it whole; that call fails ATOMICALLY on the first invalid-UTF8 byte
+             # (or NaN/Infinity float — Postgres can store either in `strength`)
+             # anywhere in it, so ONE learner's corrupted `device_id` silently
+             # blanked the stdin payload and reported "no input on stdin" as an
+             # ERROR night for every OTHER, perfectly clean, learner sampled
+             # alongside them — indefinitely, with no hint which learner or field
+             # was actually broken. `rebuild()`/`applyEvent()` are fully total (no
+             # malformed-but-typed event makes them throw, verified by reading
+             # every branch), so this — not an engine exception — is the real
+             # "poison event wedges fold" shape in this codebase. Fixed:
+             # `sampleFromDatabase()` now `json_encode()`-tests each learner's own
+             # slice in isolation before merging it into the shared envelope; a
+             # learner that fails is dead-lettered (`{userId, error}`) and excluded
+             # — "log intact," the row is never touched, only skipped for tonight's
+             # run. `runFold()` merges PHP-side dead letters into the report and
+             # upgrades an otherwise-green exit to WARN (report.severity kept in
+             # step with the exit code that decides it) — never silently green over
+             # a quarantined learner, never a P1 from a dead letter alone.
+             # `record()` now writes `health:dead_letter_depth`, giving
+             # `SystemHealthController::METRICS`'s long-registered-but-unimplemented
+             # `dead_letter_depth` (in `METRICS` since M8, zero producer until now)
+             # a real backend; `index()` returns it as a third check, and
+             # `SystemHealthPanel.tsx`'s stale header comment ("no dead-letter
+             # mechanism anywhere in this codebase") is corrected — the render
+             # table is already generic over `checks.length`, so no frontend code
+             # change was needed. RED confirmed directly: `git stash` of the two
+             # source files (test kept) reran the new test against the unmodified
+             # command — `Expected status code 0 but received 1`, the wedge
+             # reproduced live; `git stash pop` restored the fix byte-identically.
+             # The test needed one iteration to be trustworthy: an early draft gave
+             # the "clean" learner no matching `atom_cache` row, which
+             # `foldCheck.ts`'s own contract correctly reads as a genuine P1
+             # divergence — a different bug that would have made the RED proof
+             # ambiguous. Fixed by seeding both learners' caches via the real
+             # `AtomCacheRebuilder` from their still-clean events, THEN corrupting
+             # the poisoned learner's row afterward. `TZ=UTC make test`: 2059
+             # passing (was 2058, +1 — exactly this run's one new PHPUnit test; no
+             # other suite moved). `check-test-floor.mjs`: OK, 2059 >= floor 1899
+             # (+160 margin, TEST-FLOOR unmoved). `TZ=UTC make build`: exit 0, 20
+             # routes (unchanged). `npm run gates`: all green (fonts
+             # degraded-but-non-blocking, pre-existing; boundaries 204 files).
+             # `npx tsc --noEmit` clean. No v1/v2 edit (a stray
+             # v2/tsconfig.tsbuildinfo build-cache diff was reverted before
+             # committing). No Arabic codepoint (full diff swept over every Arabic
+             # block + presentation forms + \u06xx/fromCharCode, zero matches).
+             # NOT addressed, named so a future run doesn't re-discover it as new:
+             # `App\Support\AtomCacheRebuilder` shares the EXACT same json_encode
+             # wedge (it also batches every learner into one envelope) — but unlike
+             # the nightly check, it DELETEs a rebuilt user's whole atom_cache row
+             # set before reinserting only what the runner returns, so excluding a
+             # poisoned learner from its batch while still deleting their existing
+             # rows would silently WIPE their cache with nothing to replace it, a
+             # strictly worse outcome than today's whole-rebuild failure. Fixing it
+             # needs the delete and the dead-letter set reconciled together — a
+             # real, separate, small task, not a copy of tonight's fix. Per-user
+             # Postgres advisory locks (v3-D32, deferred as untestable against
+             # sqlite-only) and late-arrival refold remain open too — this sandbox
+             # now has a real Postgres 16 server installed, so that premise no
+             # longer holds, but building and proving it is separate, larger scope.
+             # See DECISIONS.md v3-D114.
              # NOTE (v3-D113): `packages/engine/src/activity.ts#lastActiveDayMs`
              # (the v2-BUG-2 fix — derives the learner's last-active day from the
              # append-only log so the make-up merge fires; its own header: derived

@@ -6421,3 +6421,106 @@ placement screen — a structural precondition, not a wiring gap; and
 `sessionSummary.ts#greetingForHour` computes a `greeting` bucket no surface
 renders (a copy/design call, not a defect). `floorQueue`'s cross-surah
 forgetting-risk read (v3-D108) stays moot at single-surah launch scope.
+
+### v3-D114 — DEFECTS.md/edge case #130: one learner's malformed row could wedge the WHOLE nightly determinism check for every learner sampled alongside them
+
+**Confirmed the seam is exhausted, as v3-D113 concluded, and picked up
+build-plan step 14/30's own still-open item instead**: HANDOVER.md's stale
+(2026-08-11/12) "WHAT IS LEFT" table E6 named "fold-runner DB adapter…
+advisory locks, dead-letter quarantine, late-arrival refold" as blocked on live
+infra. Re-checked: the DB adapter (`DeterminismCheckCommand::sampleFromDatabase()`)
+was already built and tested — that row was stale. Dead-letter quarantine (edge
+case #130, `BUILD-PLAN.md:346`: "Malformed/unparseable snapshot: poison event
+wedges fold" → "dead-letter quarantine; fold skips + alerts; log intact") was
+genuinely greenfield and needed no live host to build or prove.
+
+**The bug, found by tracing rather than assumed.** `rebuild()`/`applyEvent()`
+(`packages/engine/src/rebuild.ts`) are fully total — no malformed-but-typed
+`DrillEvent` makes them throw, by deliberate design (grep confirms: `RUNG_KIND[e.rung]`
+on garbage just yields `undefined`, never a throw). So the real "poison event"
+in THIS codebase is not an engine exception; it is `json_encode()`, which fails
+ATOMICALLY across an entire payload on the first invalid-UTF8 byte (or non-finite
+float — `strength`/`stability`/`difficulty` are plain doubles, and Postgres can
+store NaN/Infinity in one) anywhere inside it. `sampleFromDatabase()` batched
+every sampled learner into ONE envelope and encoded it once; `runFold()` then
+passed the (possibly `false`, silently bool→string-coerced to `""` — this file
+has no `declare(strict_types=1)`, verified with a throwaway `php -r` repro) result
+as stdin. The fold-runner's `fromStdin()` sees empty input and throws "no input
+on stdin", and `main()`'s catch turns that into `exit 5 (error)` for the ENTIRE
+run. **One corrupted `device_id` on ONE learner silently zeroed out every other,
+perfectly clean, learner's nightly comparison — indefinitely, night after night,
+with an error message ("no input on stdin") that gives no hint which learner or
+which field is actually broken.**
+
+**Fixed.** `sampleFromDatabase()` now `json_encode()`-tests each learner's own
+slice in isolation, BEFORE it is merged into the shared envelope; a learner that
+fails is pushed to a new `deadLetters` list (`{userId, error}`) and excluded from
+`samples` — "log intact," the row itself is never touched, only skipped for
+tonight's run. `runFold()` merges any PHP-side dead letters into the final
+report and, if the runner otherwise came back green, upgrades the exit code
+(and the report's own `severity` field, kept in step with it — `record()`'s own
+docblock is explicit that a report/exit-code mismatch is the exact bug class
+this taxonomy exists to make impossible to miss) to WARN: a dead-lettered
+learner is never silently green, but is not by itself proof of a genuine cache
+divergence, so it never pages a P1 alone. If EVERY sampled learner is
+dead-lettered, the existing "no learners" error path fires with a message that
+now distinguishes the two causes. `record()` also now writes
+`health:dead_letter_depth`, giving `SystemHealthController::METRICS`'s
+long-registered-but-never-implemented `dead_letter_depth` metric (present in
+`METRICS` since M8, zero producer until now) a real backend, via the same
+36h-TTL cache convention every other check here already uses; `index()` now
+returns it as a third check, and `SystemHealthPanel.tsx`'s own header comment —
+which explicitly claimed "no dead-letter mechanism anywhere in this codebase"
+— is corrected (the render table is already generic over `checks.length`, so
+no frontend code change was needed, only the stale claim).
+
+**RED confirmed directly, not asserted.** `git stash` of the two source files
+only (`DeterminismCheckCommand.php`, `SystemHealthController.php`; the new test
+kept) and reran the new test against the unmodified command: `Expected status
+code 0 but received 1` — the exact wedge, reproduced live, not hypothesized.
+`git stash pop` restored the fix byte-identically. The test itself needed one
+iteration to be trustworthy: an early draft gave the "clean" learner an event
+with no matching `atom_cache` row, which `foldCheck.ts`'s own contract correctly
+reads as a genuine divergence (P1) — a different bug than the one under test,
+and it would have made the RED proof ambiguous. Fixed by seeding both learners'
+caches via the real `AtomCacheRebuilder` (the same mechanism `SystemHealthTest`'s
+own rebuild proof uses) from their still-clean events, THEN corrupting the
+poisoned learner's stored row afterward — reproducing a row whose corruption
+exists specifically at determinism-check time, with the clean learner's
+comparison genuinely clean rather than accidentally noisy.
+
+**`TZ=UTC make test`** (all seven suites, from a `make setup` run this same
+session): **2059 passing** (was 2058, **+1** — exactly this run's one new
+PHPUnit test; no other suite moved — 255 v2 vitest + 47 v2/api + **273** v3/api
++ 111 corpus-compiler + 417 engine + 61 fold-runner + 895 apps/web, +2
+incomplete PAY-1 by design). `check-test-floor.mjs`: OK, 2059 >= floor 1899
+(+160 margin, `TEST-FLOOR` left unmoved). `TZ=UTC make build`: exit 0, 20 routes
+(unchanged — no route added or removed). `npm run gates`: locked-css OK, fonts
+degraded-but-non-blocking (pre-existing), boundaries OK (204 files),
+corpus-morphology OK, corpus-glyphs OK. `npx tsc --noEmit`: clean (`Version
+5.9.3`). No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache
+diff was reverted before committing, same discipline as every prior entry). No
+Arabic codepoint introduced: the full diff swept with a Unicode-range regex over
+the Arabic, Supplement, and both Presentation Forms blocks plus a `fromCharCode`/
+`\u06xx`-`\uFExx` grep — zero matches, and every new line addresses a userId,
+byte-error string, or closed-set severity value, never corpus text.
+
+**Explicitly NOT addressed, named so a future run doesn't re-discover it as
+new.** `App\Support\AtomCacheRebuilder` (the admin "rebuild atom cache" action)
+shares the EXACT same root cause — it also batches every learner into one
+`json_encode()`'d envelope before calling the fold-runner — so one poisoned
+learner among many would make an admin's rebuild click fail for ALL learners,
+not just the corrupted one. It was deliberately NOT fixed this run: unlike the
+nightly check (which simply excludes a dead-lettered learner from comparison),
+`AtomCacheRebuilder::rebuild()` DELETES a rebuilt user's entire `atom_cache` row
+set before reinserting only what the runner returns — excluding a poisoned
+learner from the batch sent to the runner while still including them in the
+`DELETE ... WHERE user_id IN (...)` would silently WIPE their cache with nothing
+to replace it, a strictly worse outcome than today's "the whole rebuild fails."
+Fixing this safely needs the delete and the dead-letter set to be reconciled
+together, which is a real, separate, small design task, not a copy-paste of
+tonight's fix. Per-user Postgres advisory locks (v3-D32) and late-arrival refold
+remain deferred too — this sandbox does have a real Postgres 16 server
+installed (unlike when v3-D32 was written against sqlite-only), so the
+"untestable" premise no longer holds, but building and proving that is a
+separate, larger task from tonight's scope.

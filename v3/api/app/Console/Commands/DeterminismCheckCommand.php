@@ -145,18 +145,23 @@ class DeterminismCheckCommand extends Command
         }
 
         $envelope = $this->sampleFromDatabase((int) $this->option('sample'));
+        $deadLetters = $envelope['deadLetters'];
+        $samples = $envelope['samples'];
 
         // v3-D50's lesson, at the sampling layer: an empty sample is an
         // ERROR night, not a green one. The runner enforces this too; doing
         // it here as well means a broken sampler is reported by whichever
         // layer notices first, never swallowed by both.
-        if ($envelope['samples'] === []) {
+        if ($samples === []) {
             $report = [
                 'check' => 'fold_determinism_check',
                 'severity' => 'error',
-                'error' => 'sampler returned no learners — nothing to compare, refusing to report green',
+                'error' => $deadLetters === []
+                    ? 'sampler returned no learners — nothing to compare, refusing to report green'
+                    : 'every sampled learner was dead-lettered (unencodable event/atom data) — nothing to compare, refusing to report green',
                 'usersChecked' => 0,
                 'atomsCompared' => 0,
+                'deadLetters' => $deadLetters,
             ];
 
             return $this->record('fold_determinism_check', 5, $report);
@@ -164,8 +169,26 @@ class DeterminismCheckCommand extends Command
 
         [$exit, $report] = $this->invokeRunner(
             ['bin/fold-determinism-check.ts'],
-            json_encode($envelope, JSON_UNESCAPED_SLASHES),
+            json_encode(['engineVersion' => $envelope['engineVersion'], 'samples' => $samples], JSON_UNESCAPED_SLASHES),
         );
+
+        // Edge case #130 (BUILD-PLAN.md:346) — "poison event wedges fold" →
+        // "dead-letter quarantine; fold skips + alerts". A learner PHP had
+        // to quarantine BEFORE the envelope was ever built is invisible to
+        // the runner — it never saw them — so its own exit code cannot
+        // reflect this. Merge PHP's dead letters in and, if the runner
+        // otherwise came back green, upgrade to WARN: a quarantined learner
+        // is never silently green, but is not by itself proof of a genuine
+        // cache divergence either, so it never pages a P1 on its own.
+        $report['deadLetters'] = array_merge($deadLetters, $report['deadLetters'] ?? []);
+        if ($report['deadLetters'] !== [] && $exit === 0) {
+            $exit = 3;
+            // Keep the stored report's OWN severity field in step with the
+            // exit code that now decides it — `record()`'s docblock is
+            // explicit that a report/exit-code mismatch is exactly the bug
+            // class this taxonomy exists to make impossible to miss.
+            $report['severity'] = 'warn';
+        }
 
         return $this->record('fold_determinism_check', $exit, $report);
     }
@@ -186,7 +209,19 @@ class DeterminismCheckCommand extends Command
      * a mostly-idle user base spends its budget re-verifying atoms that have
      * not changed in months.
      *
-     * @return array{engineVersion:string,samples:list<array<string,mixed>>}
+     * DEAD-LETTER QUARANTINE (edge case #130). `json_encode()` fails
+     * ATOMICALLY across a whole payload on the first invalid-UTF8 byte or
+     * non-finite float (NaN/Infinity — both storable in a real `strength`
+     * column) anywhere in it. Batching every learner into one envelope
+     * before encoding means ONE poisoned learner would otherwise blank the
+     * entire stdin payload and every OTHER, perfectly clean, learner sampled
+     * alongside them reports as an unexplained ERROR night. Each learner's
+     * own slice is therefore encode-tested here, in isolation, before it is
+     * ever merged into the shared envelope — a learner that fails is
+     * quarantined into `deadLetters` and excluded from `samples`. "Log
+     * intact": the row itself is never touched, only skipped for this run.
+     *
+     * @return array{engineVersion:string,samples:list<array<string,mixed>>,deadLetters:list<array{userId:mixed,error:string}>}
      */
     private function sampleFromDatabase(int $limit): array
     {
@@ -202,6 +237,7 @@ class DeterminismCheckCommand extends Command
             ->all();
 
         $samples = [];
+        $deadLetters = [];
         foreach ($userIds as $userId) {
             $events = Event::query()
                 ->where('user_id', $userId)
@@ -241,17 +277,28 @@ class DeterminismCheckCommand extends Command
                 continue;
             }
 
-            $samples[] = [
+            $entry = [
                 'userId' => $userId,
                 'events' => $events,
                 'liveCache' => (object) $liveCache,
                 'cachedEngineVersion' => (object) $versions,
             ];
+
+            if (json_encode($entry, JSON_UNESCAPED_SLASHES) === false) {
+                $deadLetters[] = [
+                    'userId' => $userId,
+                    'error' => 'unencodable event/atom data — '.json_last_error_msg(),
+                ];
+                continue;
+            }
+
+            $samples[] = $entry;
         }
 
         return [
             'engineVersion' => (string) config('nightly.engine_version', 'v3-engine-0.1.0'),
             'samples' => $samples,
+            'deadLetters' => $deadLetters,
         ];
     }
 
@@ -364,6 +411,14 @@ class DeterminismCheckCommand extends Command
         if ($severity !== 'error') {
             $divergences = (int) ($report['divergentCount'] ?? count($report['divergences'] ?? []));
             Cache::put("health:{$check}", $divergences, now()->addHours(36));
+
+            // Edge case #130's other half: `SystemHealthController::METRICS`
+            // has registered `dead_letter_depth` since M8 with no producer —
+            // this is the fold check's own quarantine count, the same
+            // 36h-TTL health-cache convention as every other check here.
+            if ($check === 'fold_determinism_check') {
+                Cache::put('health:dead_letter_depth', count($report['deadLetters'] ?? []), now()->addHours(36));
+            }
         }
 
         return $severity;
