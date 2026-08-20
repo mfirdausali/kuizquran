@@ -43,6 +43,7 @@ import {
   clearReveal,
   currentItem,
   demoteOfferFor,
+  diminishingReturnsNudge,
   extraLearnOfferFor,
   sessionSummaryOf,
   startExtraLearn,
@@ -94,6 +95,11 @@ export function SessionIsland({ surah, mode = "full" }: SessionIslandProps) {
   // rep. Same lifecycle as `extraOffer`: computed only once the summary is
   // reached, null before that and reset the moment the learner acts on it.
   const [weakSpotOffer, setWeakSpotOffer] = useState<WeakSpot | null>(null);
+  // FR6 diminishing-returns nudge (v3-D111) — the engine's honest line for a
+  // weak spot already massed a lot today. Computed alongside `weakSpotOffer`
+  // (the engine decides the threshold and the words; this component renders the
+  // string it is handed, or nothing). Null when below the threshold or no offer.
+  const [weakSpotNudge, setWeakSpotNudge] = useState<string | null>(null);
   // v3-D107 — the gate forgiveness ladder's demote offer (v2-D08): once the
   // CURRENT queue item is a due cold gate the engine has decided has failed
   // DEMOTE_OFFER_AFTER_FAILS times running, this replaces the quiz card with
@@ -320,12 +326,27 @@ export function SessionIsland({ surah, mode = "full" }: SessionIslandProps) {
   useEffect(() => {
     if (phase.kind !== "summary" || !run) return;
     let alive = true;
-    void weakSpotOfferFor(run, Date.now())
-      .then((offer) => {
-        if (alive) setWeakSpotOffer(offer);
+    const now = Date.now();
+    void weakSpotOfferFor(run, now)
+      .then(async (offer) => {
+        if (!alive) return;
+        setWeakSpotOffer(offer);
+        // FR6 diminishing-returns nudge (v3-D111): only ever computed for the
+        // atom actually offered, and only once — the engine decides whether
+        // this spot has been massed enough today to warrant the honest line.
+        // A nudge fetch failure must never block the offer (or the summary):
+        // the button stands with no nudge, same never-blocks discipline as the
+        // offer itself.
+        const nudge = offer
+          ? await diminishingReturnsNudge(run, offer.ref, now).catch(() => null)
+          : null;
+        if (alive) setWeakSpotNudge(nudge);
       })
       .catch(() => {
-        if (alive) setWeakSpotOffer(null);
+        if (alive) {
+          setWeakSpotOffer(null);
+          setWeakSpotNudge(null);
+        }
       });
     return () => {
       alive = false;
@@ -336,6 +357,7 @@ export function SessionIsland({ surah, mode = "full" }: SessionIslandProps) {
     if (!run || !corpus || !weakSpotOffer) return;
     const ayah = weakSpotOffer.ref;
     setWeakSpotOffer(null);
+    setWeakSpotNudge(null);
     void startWeakSpotDrill(run, corpus, ayah).then((extended) => {
       setRun(extended);
       setPhase({ kind: "drilling" });
@@ -452,6 +474,16 @@ export function SessionIsland({ surah, mode = "full" }: SessionIslandProps) {
           <button type="button" className="btn" onClick={onPracticeWeakSpot}>
             Practice your weakest spot (ayah {weakSpotOffer.ref})
           </button>
+        ) : null}
+        {/* FR6 diminishing-returns nudge (v3-D111): the engine's honest line
+            when this spot has already been massed a lot today — shown BENEATH
+            the button, never instead of it. The learner keeps the choice; the
+            cost is stated before the tap. The string is the engine's; this
+            component never composes it. */}
+        {weakSpotOffer && weakSpotNudge ? (
+          <p className="caption" role="status" data-testid="diminishing-returns-nudge">
+            {weakSpotNudge}
+          </p>
         ) : null}
       </div>
     );

@@ -55,7 +55,21 @@ import { floorQueue } from "@engine/floor.ts";
 // FR6 Door 1 ("extra Learn", v3-D98) — see `extraLearnOfferFor`/`startExtraLearn`
 // below for why the summary screen, not the assembled queue, is where this lives.
 // FR6 Door 2 ("weak-spot gym", v3-D106) — see `weakSpotOfferFor`/`startWeakSpotDrill`.
-import { extraLearnGrant, weakSpots, type ExtraLearnGrant, type WeakSpot } from "@engine/freeplay.ts";
+// FR6 diminishing-returns nudge (v3-D111) — see `diminishingReturnsNudge` below
+// for why this honesty line had zero production callers until it got the one
+// surface where a learner can mass the same atom: the Door 2 weak-spot offer.
+import {
+  extraLearnGrant,
+  weakSpots,
+  diminishingReturns,
+  type ExtraLearnGrant,
+  type WeakSpot,
+} from "@engine/freeplay.ts";
+// Same-learning-day scoping for the diminishing-returns rep count — the SAME
+// notion `update()` uses to damp massed same-day successes ×0.35 (invariant #4),
+// which is exactly the cost the nudge is honest about. DEFAULT_DAY_CONFIG,
+// matching the config the offer functions' own `rebuild(prior)` folds under.
+import { isSameLearningDay } from "@engine/daybound.ts";
 // v3-D107 — gate forgiveness ladder (v2-D08): see `demoteOfferFor`/
 // `acceptGateDemote` below for why `gateForgiveness`/`demoteToLearn` were
 // UNREACHABLE (not merely unwired) until this run's slip-tracking fix.
@@ -902,6 +916,52 @@ export async function startWeakSpotDrill(run: SessionRun, c: Corpus, ayah: numbe
     // A "review" item is never a gate — the rescaffold ladder does not apply.
     rescaffolding: false,
   };
+}
+
+/**
+ * FR6 — the diminishing-returns nudge (`packages/engine/src/freeplay.ts
+ * #diminishingReturns`).
+ *
+ * `diminishingReturns` was real and unit-tested (`freeplay.test.ts`) since
+ * freeplay landed, but had ZERO production callers — v3-D106's own header named
+ * it out of scope alongside Door 3 and the adoption offer: "each need[s] a real
+ * UI surface of their own." Its surface is the one existing place a learner can
+ * mass the SAME atom in a sitting: FR6 Door 2 (`weakSpotOfferFor`, above), which
+ * re-offers whichever encoded atom is riskiest, so a learner who keeps tapping
+ * "Practice your weakest spot" drills the same ayah over and over.
+ *
+ * Past `diminishingReturns`'s own threshold, invariant #4's ×0.35 massed-success
+ * damping means another same-day rep is worth about a third of a spaced one —
+ * this is the honest line that says so. It never HIDES the Door 2 button (the
+ * learner keeps the choice); it states the cost before the tap, the same
+ * discipline every other offer here follows.
+ *
+ * The rep count is the fold's own same-learning-day structured `ayah_produced`
+ * completions of `ayah` — the reconstruct passes the ×0.35 damping actually
+ * penalizes. Free-play (`structured:false`) echoes are excluded: `rebuild.ts`
+ * drops them from lifecycle (invariant #5), so counting them would nudge on
+ * evidence the massing penalty never touched. Same-day is scoped with
+ * `DEFAULT_DAY_CONFIG` (UTC), matching the config `weakSpotOfferFor`'s own
+ * `rebuild(prior)` folds under — never the machine's ambient zone.
+ *
+ * Returns the engine's own string, or null below the threshold — the component
+ * renders whatever it is handed and decides neither the count, the threshold nor
+ * the words (invariant #6).
+ */
+export async function diminishingReturnsNudge(
+  run: SessionRun,
+  ayah: number,
+  now: number,
+): Promise<string | null> {
+  const prior = await getEventsForSurah(run.surah);
+  const sameDayReps = prior.filter(
+    (e) =>
+      e.type === "ayah_produced" &&
+      e.ayah === ayah &&
+      e.structured !== false &&
+      isSameLearningDay(e.ts, now),
+  ).length;
+  return diminishingReturns(sameDayReps);
 }
 
 /**

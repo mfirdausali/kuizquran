@@ -559,6 +559,67 @@ describe("v3-D106 — Door 2 CTA on the real summary screen, actually wired", ()
   });
 });
 
+// v3-D111 — FR6's diminishing-returns nudge (`packages/engine/src/freeplay.ts
+// #diminishingReturns`), the honest line for a learner who keeps massing the
+// SAME weak spot in one day: past ~4 same-day reps, invariant #4's ×0.35
+// damping means another rep is worth about a third of a spaced one, and the app
+// says so rather than letting them grind. `lib/session/run.ts` gained
+// `diminishingReturnsNudge` (proven at the run.ts level in
+// `lib/session/run.test.ts`); this block proves the COMPONENT renders the
+// engine's own string beneath the Door 2 offer, and only once the threshold is
+// crossed — the component decides neither the threshold nor the words.
+describe("v3-D111 — the diminishing-returns nudge beneath the Door 2 offer", () => {
+  async function seedReps(ayah: number, count: number, at: number): Promise<void> {
+    for (let i = 0; i < count; i++) {
+      await append(
+        { type: "ayah_produced", ts: at + i, tz: "UTC", surah: SURAH, ayah, rung: "S3", structured: true } as DrillEvent,
+        { now: at + i, tz: "UTC" },
+      );
+    }
+  }
+
+  it("renders the honest nudge once the offered weak spot has been massed enough today", async () => {
+    installFetch();
+    const now = Date.now();
+    // Three prior same-day reps of 112:1; the trivial run below completes a
+    // fourth, crossing the engine's threshold. Ayah 1 is the ONLY encoded atom,
+    // so `weakSpots` ranks it first and Door 2 offers exactly it.
+    await seedReps(1, 3, now);
+    startSessionOverride = () => Promise.resolve({ ok: true, run: trivialOneItemRun(corpus, now) });
+
+    render(<SessionIsland surah={SURAH} />);
+    await waitFor(() => expect(screen.getByTestId("session-drill")).toBeTruthy());
+    await completeSession();
+    await waitFor(() => expect(screen.getByTestId("session-summary")).toBeTruthy());
+
+    // The offer appears (precondition), and the nudge appears beneath it. The
+    // string is the engine's — the assertion is on its content, not a literal
+    // the component owns.
+    await screen.findByRole("button", { name: /practice your weakest spot/i });
+    const nudge = await screen.findByTestId("diminishing-returns-nudge");
+    expect(nudge.textContent).toMatch(/spacing/i);
+  });
+
+  it("does not render the nudge below the threshold — a couple of reps is not 'a lot'", async () => {
+    installFetch();
+    const now = Date.now();
+    // One prior rep + the trivial run's completion = 2 same-day reps of 112:1,
+    // below the engine's floor. The Door 2 offer must still appear (ayah 1 is
+    // encoded), proving the nudge's absence is the threshold, not a missing offer.
+    await seedReps(1, 1, now);
+    startSessionOverride = () => Promise.resolve({ ok: true, run: trivialOneItemRun(corpus, now) });
+
+    render(<SessionIsland surah={SURAH} />);
+    await waitFor(() => expect(screen.getByTestId("session-drill")).toBeTruthy());
+    await completeSession();
+    await waitFor(() => expect(screen.getByTestId("session-summary")).toBeTruthy());
+
+    await screen.findByRole("button", { name: /practice your weakest spot/i });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByTestId("diminishing-returns-nudge")).toBeNull();
+  });
+});
+
 // v3-D107 — the gate forgiveness ladder's demote offer (v2-D08), the learner
 // surface for `lib/session/run.ts#demoteOfferFor`/`acceptGateDemote`. Proven
 // at the `run.ts` level (a real fold, no DOM) in `lib/session/run.test.ts`;

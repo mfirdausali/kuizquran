@@ -93,6 +93,7 @@ import {
   startExtraLearn,
   weakSpotOfferFor,
   startWeakSpotDrill,
+  diminishingReturnsNudge,
   demoteOfferFor,
   acceptGateDemote,
   SessionCommitFailure,
@@ -909,6 +910,90 @@ describe("v3-D106 — Door 2, 'weak-spot gym' after the assembled queue is done"
       expect(e.structured).toBe(true);
       expect(["S2", "S3"]).toContain(e.rung);
     }
+  });
+});
+
+// FR6's diminishing-returns nudge (`packages/engine/src/freeplay.ts#diminishingReturns`)
+// was real and unit-tested (`freeplay.test.ts`) since freeplay landed but had
+// ZERO production callers — v3-D106's own header named it out of scope: "the
+// adoption offer and the diminishing-returns nudge are deliberately NOT done —
+// each needs its own UI surface." Its surface is the ONE existing place a
+// learner can mass the SAME atom in a sitting: FR6 Door 2 (the weak-spot gym),
+// which re-offers whichever encoded atom is riskiest, so a learner who keeps
+// tapping "Practice your weakest spot" drills the same ayah again and again.
+// After enough same-day reps invariant #4's ×0.35 massed-success damping means
+// another rep is worth ~a third of a spaced one — `diminishingReturns` is the
+// honest line that says so. `diminishingReturnsNudge` counts the fold's own
+// same-learning-day structured `ayah_produced` reps of an ayah (the reconstruct
+// completions the damping actually penalizes) and hands the engine's own string
+// (or null) to the component — React never decides the threshold or the words.
+describe("v3-D111 — FR6 diminishing-returns nudge on the Door 2 weak-spot offer", () => {
+  // One structured Carry-band completion of `ayah` at `ts` — the same seed the
+  // Door 2 block above uses to make an ayah a weak-spot candidate, i.e. exactly
+  // one massed rep of the atom the nudge counts.
+  async function seedRep(ayah: number, ts: number): Promise<void> {
+    await append(
+      { type: "ayah_produced", ts, tz: TZ, surah: SURAH_12, ayah, rung: "S3", structured: true } as DrillEvent,
+      { now: ts, tz: TZ },
+    );
+  }
+
+  const doneRun: SessionRun = {
+    surah: SURAH_12,
+    queue: [],
+    cursor: 0,
+    machine: {} as SessionRun["machine"],
+    startedAt: T0,
+    slips: 0,
+    lastTap: null,
+    done: true,
+    gateSlipped: false,
+    rescaffolding: false,
+  };
+
+  it("returns null below the threshold — three same-day reps is not yet 'a lot'", async () => {
+    const ayah = 4;
+    for (let i = 0; i < 3; i++) await seedRep(ayah, T0 + i * 1000);
+    const nudge = await diminishingReturnsNudge(doneRun, ayah, T0 + 10_000);
+    expect(nudge).toBeNull();
+  });
+
+  it("returns the honest nudge once the same atom has been massed 4× the same learning day", async () => {
+    const ayah = 4;
+    for (let i = 0; i < 4; i++) await seedRep(ayah, T0 + i * 1000);
+    const nudge = await diminishingReturnsNudge(doneRun, ayah, T0 + 10_000);
+    expect(nudge).toMatch(/spacing/);
+  });
+
+  it("counts only the CURRENT learning day — yesterday's reps never accumulate into today's", async () => {
+    const ayah = 4;
+    const yesterday = T0 - 86_400_000;
+    // Four reps yesterday, one today: today's count is 1, well below the floor.
+    for (let i = 0; i < 4; i++) await seedRep(ayah, yesterday + i * 1000);
+    await seedRep(ayah, T0);
+    const nudge = await diminishingReturnsNudge(doneRun, ayah, T0 + 10_000);
+    expect(nudge).toBeNull();
+  });
+
+  it("scopes to the offered ayah — massing a DIFFERENT ayah does not trip the nudge", async () => {
+    const offered = 4;
+    const other = 5;
+    for (let i = 0; i < 4; i++) await seedRep(other, T0 + i * 1000);
+    await seedRep(offered, T0 + 5000);
+    const nudge = await diminishingReturnsNudge(doneRun, offered, T0 + 10_000);
+    expect(nudge).toBeNull();
+  });
+
+  it("counts structured reps only — a free-play (structured:false) echo is evidence, not a graded rep the damping penalizes", async () => {
+    const ayah = 4;
+    for (let i = 0; i < 4; i++) {
+      await append(
+        { type: "ayah_produced", ts: T0 + i * 1000, tz: TZ, surah: SURAH_12, ayah, rung: "S3", structured: false } as DrillEvent,
+        { now: T0 + i * 1000, tz: TZ },
+      );
+    }
+    const nudge = await diminishingReturnsNudge(doneRun, ayah, T0 + 10_000);
+    expect(nudge).toBeNull();
   });
 });
 

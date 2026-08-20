@@ -53,9 +53,50 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2030 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2037 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 867 apps/web. (v3-D110, 2026-08-19)
+             # + 417 engine + 61 fold-runner + 874 apps/web. (v3-D111, 2026-08-20)
+             # NOTE (v3-D111): FR6's diminishing-returns nudge
+             # (`packages/engine/src/freeplay.ts#diminishingReturns`) — an
+             # honest line for a learner who keeps massing the SAME atom in one
+             # day — was real and unit-tested since freeplay landed but had ZERO
+             # production callers. v3-D106's own header named it out of scope
+             # alongside Door 3 and the cold-success-adoption offer ("each needs
+             # its own UI surface"). Of the three FR6 remainders it is the only
+             # one with an EXISTING home: FR6 Door 2, the weak-spot gym
+             # (`weakSpotOfferFor`, wired v3-D106), which re-offers whichever
+             # encoded atom is riskiest — so a learner tapping "Practice your
+             # weakest spot" repeatedly drills the same ayah, and past the
+             # threshold invariant #4's ×0.35 massed-same-day damping makes the
+             # next rep worth ~a third of a spaced one. `lib/session/run.ts`
+             # gained `diminishingReturnsNudge(run, ayah, now)` (counts the
+             # fold's own same-learning-day structured `ayah_produced`
+             # completions of the ayah — the reps the damping penalizes;
+             # `structured:false` free-play echoes excluded, invariant #5;
+             # same-day scoped under DEFAULT_DAY_CONFIG, matching
+             # `weakSpotOfferFor`'s own `rebuild(prior)`), and
+             # `SessionIsland.tsx` renders the engine's string as a
+             # `role="status"` caption BENEATH the Door 2 button — never instead
+             # of it; the learner keeps the choice, the component decides neither
+             # count, threshold nor words (invariant #6, check-boundaries clause
+             # 5 still green at 200 files: the engine call lives in `lib/`).
+             # RED confirmed by `git stash` of the two source files only (tests
+             # kept): all 5 new `run.test.ts` cases failed on exactly
+             # `diminishingReturnsNudge is not a function`, and the positive
+             # component case failed on the missing `diminishing-returns-nudge`
+             # testid; `git stash pop` restored both byte-identically, 60/60
+             # green across the two files. `TZ=UTC make test`: 2037 passing (was
+             # 2030, +7 — exactly this run's new tests: 5 + 2; no other suite
+             # moved). `check-test-floor.mjs`: OK, 2037 >= floor 1899 (+138
+             # margin, TEST-FLOOR unmoved). `TZ=UTC make build`: exit 0, 20
+             # routes (unchanged). `npm run gates`: all green (fonts
+             # degraded-but-non-blocking, pre-existing). `npx tsc --noEmit`
+             # clean. No v1/v2 edit, no Arabic codepoint (every added line
+             # addresses an ayah/rep-count by number). Door 3 (open practice)
+             # and `coldSuccessAdoption` remain unwired (each needs the any-ayah
+             # picker route that does not exist); the placement binary-search
+             # onboarding (FR10, `placement.ts`) remains a deliberate design
+             # choice, not a wiring gap. See DECISIONS.md v3-D111.
              # NOTE (v3-D110): DEFECTS.md#B13 — the `disable` override field
              # reached NO learner, for two reasons that hid each other.
              # `applyOverrides()` returns `{corpus, disabled, groups}` but

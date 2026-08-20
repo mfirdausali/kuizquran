@@ -6115,3 +6115,98 @@ read (v3-D108); Door 3 (open practice)/`coldSuccessAdoption`/
 `diminishingReturns` (v3-D106). With this entry, **every field of the
 override layer now reaches a learner**, which closes the last item on
 v3-D95/D104/D105's own repeatedly-carried "still unwired" list.
+
+---
+
+### v3-D111 — FR6's diminishing-returns nudge: `diminishingReturns()` had zero production callers; its surface is the one place a learner can mass the same atom — the Door 2 weak-spot offer
+
+**The finding.** `packages/engine/src/freeplay.ts#diminishingReturns` (FR6 — "after
+N massed reps of the same atom the same day, practice yields little → an honest
+nudge line") was real and unit-tested (`freeplay.test.ts:85-86`) since freeplay
+landed, but had **zero production callers** anywhere in this app. v3-D106's own
+header named it out of scope alongside Door 3 and the cold-success-adoption
+offer: "Doors 2/3, the adoption offer and the diminishing-returns nudge are
+deliberately NOT done — each needs its own UI surface." Doors 1 (v3-D98) and 2
+(v3-D106) were wired in the runs since; the nudge and Door 3/adoption remained.
+
+**Why this one, and why now.** Of the three FR6 remainders, the nudge is the
+only one with an *existing* home. Door 3 (open practice) needs a whole new
+any-ayah picker route; `coldSuccessAdoption` needs an untaught-ayah cold drill,
+which only Door 3 can reach — so both are genuinely new-surface work, not a
+wiring fix. The nudge, by contrast, belongs exactly where a learner can already
+mass the SAME atom in one sitting: **FR6 Door 2, the weak-spot gym**
+(`weakSpotOfferFor`), which re-offers whichever encoded atom is riskiest — so a
+learner who keeps tapping "Practice your weakest spot" drills the same ayah over
+and over. Past `diminishingReturns`'s own threshold, invariant #4's ×0.35
+massed-same-day-success damping means the next rep is worth about a third of a
+spaced one. The nudge is the honest line that says so, on the exact surface where
+the massing happens — grounded in the engine's own damping model, not invented.
+
+**Wired.**
+- `lib/session/run.ts` gained `diminishingReturnsNudge(run, ayah, now)`: it
+  re-derives the fold (`getEventsForSurah`, the same source every other offer
+  function here reads), counts the **same-learning-day structured `ayah_produced`
+  completions** of `ayah` — the reconstruct passes the ×0.35 damping actually
+  penalizes — and hands the count to the engine's `diminishingReturns`, returning
+  its string or null. Free-play (`structured:false`) echoes are excluded:
+  `rebuild.ts` drops them from lifecycle (invariant #5), so counting them would
+  nudge on evidence the massing penalty never touched. Same-day is scoped with
+  `isSameLearningDay` under `DEFAULT_DAY_CONFIG` (UTC) — the SAME config
+  `weakSpotOfferFor`'s own `rebuild(prior)` folds under, never the machine's
+  ambient zone (Absolute A's spirit).
+- `components/session/SessionIsland.tsx` computes the nudge alongside the Door 2
+  offer (one fetch, only for the atom actually offered), and renders the engine's
+  string as a `role="status"` caption **beneath** the button — never instead of
+  it. The learner keeps the choice; the cost is stated before the tap, the same
+  discipline every other offer here follows. The component decides neither the
+  count, the threshold nor the words (invariant #6 / check-boundaries clause 5,
+  which still passes at 200 files because the engine calls live in `lib/`, not
+  the component).
+
+**Verified.**
+- **RED confirmed by `git stash` of the two source files only (every new test
+  kept on disk).** `lib/session/run.test.ts`: all 5 new cases failed on exactly
+  `diminishingReturnsNudge is not a function`. `test/session-island.test.tsx`:
+  the positive "renders the honest nudge" case failed on the missing
+  `diminishing-returns-nudge` testid (its below-threshold sibling passes
+  vacuously without the wiring — the positive case is the load-bearing one).
+  `git stash pop` restored both byte-identically; 60/60 green across the two
+  files.
+- The 5 run.test.ts cases prove the *scoping*, not just the threshold: null at 3
+  same-day reps, the nudge at 4; yesterday's 4 reps never accumulate into today
+  (same-learning-day only); massing a DIFFERENT ayah does not trip the offered
+  one; and 4 `structured:false` echoes count for nothing. The component test
+  massing 112:1 to the threshold asserts the offer appears AND the nudge appears
+  beneath it; the sibling asserts the offer appears but the nudge does not below
+  the threshold — so the nudge's absence is the threshold, never a missing offer.
+- `TZ=UTC make test` (full monorepo, all seven suites, from a completed
+  `make setup`): **2037 passing** (was 2030, **+7** — exactly this run's new
+  tests: 5 in `run.test.ts`, 2 in `session-island.test.tsx`; no other suite's
+  count moved — 255 v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler +
+  417 engine + 61 fold-runner + **874** apps/web). `check-test-floor.mjs`: OK,
+  2037 >= floor 1899 (+138 margin, `TEST-FLOOR` left unmoved, same discipline as
+  every prior entry). `TZ=UTC make build`: exit 0, **20 routes** (unchanged — no
+  route added or removed). `npm run gates`: locked-css OK, fonts
+  degraded-but-non-blocking (pre-existing, unrelated), boundaries OK (200 files),
+  corpus-morphology OK, corpus-glyphs OK (4 launch surahs). `npx tsc --noEmit`:
+  clean.
+- No `v1/**`/`v2/**` edit (`git status --porcelain -- v1 v2` empty). No Arabic
+  codepoint introduced: swept every added line directly with a Unicode-range
+  scan over the Arabic, Supplement, Extended-A and both Presentation Forms blocks
+  — zero matches — plus `\u06xx`-escape and `fromCharCode` greps, plus
+  `npm run gates`' own Arabic grep, which passed. Every new line addresses an
+  ayah/rep-count by number, never corpus text.
+
+**Explicitly not addressed, named so a future run doesn't re-discover it as
+new:** Door 3 (open practice / `openPracticePick`) and `coldSuccessAdoption`
+remain unwired — each needs the any-ayah picker route that does not exist, out of
+this run's scope (v3-D106's own framing, unchanged). The placement binary-search
+onboarding (`placement.ts#initPlacement`/`nextProbe`/`answerProbe`/
+`placementResult`, FR10) is also still unwired: `OnboardingFlow.tsx` screen 4
+deliberately asks the single "have you memorised before?" prior instead, and that
+is a documented design choice entangled with the screen order (placement precedes
+surah choice) and the fact that only surah 12 carries scene beats — a real
+product decision, not a wiring fix. The SSR override gap (`lib/corpus/load.ts`,
+v3-D96/D110), `activity.ts#lastActiveDayMs()`'s inline re-derivation (v3-D107),
+and `floorQueue`'s cross-surah forgetting-risk read (v3-D108) all remain exactly
+as open as their own entries left them.
