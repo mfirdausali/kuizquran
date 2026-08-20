@@ -374,6 +374,7 @@ function trivialOneItemRun(c: Corpus, now: number): SessionRun {
     done: false,
     gateSlipped: false,
     rescaffolding: false,
+    structured: true,
   };
 }
 
@@ -438,6 +439,7 @@ describe("v3-D98 — Door 1 CTA on the real summary screen, actually wired", () 
       done: false,
       gateSlipped: false,
       rescaffolding: false,
+      structured: true,
     };
     // Play this seeding run to completion OFF-SCREEN, via the real (unmocked)
     // functions — mirrors run.test.ts's own playThrough, driven by the
@@ -539,6 +541,7 @@ describe("v3-D106 — Door 2 CTA on the real summary screen, actually wired", ()
           done: false,
           gateSlipped: false,
           rescaffolding: false,
+          structured: true,
         },
       });
 
@@ -667,6 +670,7 @@ function gateRunFor(c: Corpus, now: number): SessionRun {
     done: false,
     gateSlipped: false,
     rescaffolding: false,
+    structured: true,
   };
 }
 
@@ -765,5 +769,81 @@ describe("v3-D108 — SessionIsland mode='floor' drills FR9's floor session, not
 
     render(<SessionIsland surah={SURAH} mode="floor" />);
     await waitFor(() => expect(screen.getByTestId("session-drill")).toBeTruthy());
+  });
+});
+
+// Step 20 — the `drill` prop starts a continuous drill over a learner-chosen
+// stretch, honouring the graded/victory-lap choice. `/drill`'s picker links
+// here; `SessionPage` parses the URL into the `DrillSpec` this prop carries.
+// The component still decides nothing — `startDrillSession` resolves readiness
+// off the fold and threads the mode's `structured` flag onto every event.
+describe("step 20 — a continuous drill started from /drill", () => {
+  async function seedEncoded(ayah: number): Promise<void> {
+    const seedT0 = Date.now() - 3 * 24 * 60 * 60 * 1000;
+    await append(
+      { type: "ayah_produced", ts: seedT0, tz: "UTC", surah: SURAH, ayah, rung: "S3", structured: true } as DrillEvent,
+      { now: seedT0, tz: "UTC" },
+    );
+  }
+
+  it("drills the chosen range and, on a VICTORY LAP, writes only structured:false events", async () => {
+    installFetch();
+    await seedEncoded(1);
+    const seededIds = new Set((await getAllEvents()).map((e) => e.id));
+
+    render(
+      <SessionIsland
+        surah={SURAH}
+        drill={{ selection: { kind: "range", from: 1, to: 1 }, mode: "victory-lap" }}
+      />,
+    );
+    await waitFor(() => expect(screen.getByTestId("session-drill")).toBeTruthy());
+    await completeSession();
+    await waitFor(() => expect(screen.getByTestId("session-summary")).toBeTruthy());
+
+    const fresh = (await getAllEvents()).filter((e) => !seededIds.has(e.id));
+    const produced = fresh.filter((e) => e.type === "ayah_produced");
+    const taps = fresh.filter((e) => e.type === "reconstruct_tap");
+    expect(produced.length).toBeGreaterThan(0);
+    expect(taps.length).toBeGreaterThan(0);
+    // The victory lap's promise: nothing this run wrote is graded.
+    expect(produced.every((e) => e.structured === false)).toBe(true);
+    expect(taps.every((e) => e.structured === false)).toBe(true);
+  });
+
+  it("a GRADED drill writes structured events, exactly like an ordinary review", async () => {
+    installFetch();
+    await seedEncoded(1);
+    const seededIds = new Set((await getAllEvents()).map((e) => e.id));
+
+    render(
+      <SessionIsland
+        surah={SURAH}
+        drill={{ selection: { kind: "range", from: 1, to: 1 }, mode: "graded" }}
+      />,
+    );
+    await waitFor(() => expect(screen.getByTestId("session-drill")).toBeTruthy());
+    await completeSession();
+    await waitFor(() => expect(screen.getByTestId("session-summary")).toBeTruthy());
+
+    const fresh = (await getAllEvents()).filter((e) => !seededIds.has(e.id));
+    const produced = fresh.filter((e) => e.type === "ayah_produced");
+    expect(produced.length).toBeGreaterThan(0);
+    expect(produced.every((e) => e.structured !== false)).toBe(true);
+  });
+
+  it("declines with 'none-ready' when the picked range has nothing learned yet", async () => {
+    installFetch();
+    // No seed: nothing is encoded, so a range drill has nothing ready.
+    render(
+      <SessionIsland
+        surah={SURAH}
+        drill={{ selection: { kind: "range", from: 1, to: 4 }, mode: "graded" }}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByText(/none of the ayat you picked have been learned yet/i)).toBeTruthy(),
+    );
+    expect(screen.queryByTestId("session-drill")).toBeNull();
   });
 });

@@ -56,6 +56,7 @@
 // drill ENDS ON THE SEAM INTO THE NEXT PAGE. That is not an off-by-one leaking
 // into the UI — it is the thing turning the page trains.
 
+import type { Corpus } from "@engine/types.ts";
 import { expand, type Site } from "@engine/site.ts";
 
 /** A contiguous mushaf page's ayah span within ONE surah. Cross-surah pages
@@ -110,6 +111,42 @@ export function sitesForPage(
     sites.push({ kind: "seam", surah, ayah: span.lastAyah });
   }
   return sites;
+}
+
+/** What a learner picked to drill: a RANGE of ayat, or a mushaf PAGE. The
+ *  single shape carried from the picker's state, through the `/session` URL
+ *  (`lib/drill/handoff.ts`), to the session loop's `startDrillSession`. */
+export type DrillSelection =
+  | { kind: "range"; from: number; to: number }
+  | { kind: "page"; page: number };
+
+/**
+ * The AYAT a selection resolves to — the `kind: "ayah"` sites only. Seams are
+ * dropped here on purpose: a connection atom has no reconstruct surface in v3
+ * (see this module's header and DEFECTS.md#E-08), so a page's terminal seam is
+ * previewed but is not a drillable step. `startDrillSession` further narrows
+ * these to the ENCODED ones (its readiness decision, off the fold).
+ *
+ * Returns an EMPTY list — never throws — on an out-of-range request or a page
+ * this surah has no geometry for: this runs off a URL a learner could hand-edit
+ * (edge case #78), so a bad selection is an empty drill, not a crashed render.
+ */
+export function ayatForSelection(corpus: Corpus, sel: DrillSelection): number[] {
+  const surah = corpus.meta.surah;
+  const ayahCount = corpus.meta.ayahCount;
+  let sites: Site[];
+  if (sel.kind === "range") {
+    const lo = Math.min(sel.from, sel.to);
+    const hi = Math.max(sel.from, sel.to);
+    if (!Number.isInteger(lo) || !Number.isInteger(hi) || lo < 1 || hi > ayahCount) return [];
+    sites = sitesForRange(surah, lo, hi, ayahCount);
+  } else {
+    const spans = pagesForSurah(corpus.verses.map((v) => ({ ayah: v.ayah, page: v.page })));
+    const span = spans.find((p) => p.page === sel.page);
+    if (!span) return [];
+    sites = sitesForPage(surah, span, ayahCount);
+  }
+  return sites.filter((s) => s.kind === "ayah").map((s) => s.ayah);
 }
 
 /** A verse's geometry as the corpus reports it. `page: null` means this build

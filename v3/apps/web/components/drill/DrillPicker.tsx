@@ -30,6 +30,7 @@
 // discovered afterwards in a strength drop.
 
 import { useCallback, useMemo, useState } from "react";
+import Link from "next/link";
 import type { Corpus } from "@engine/types.ts";
 import { rebuild } from "@engine/rebuild.ts";
 import { getEventsForSurah, useLogState } from "@/lib/idb";
@@ -46,6 +47,7 @@ import {
   sitesForRange,
   type PageSpan,
 } from "@/lib/drill/sites";
+import { drillHref } from "@/lib/drill/handoff";
 
 interface DrillPickerProps {
   corpus: Corpus;
@@ -254,6 +256,28 @@ export function DrillPicker({ corpus, now }: DrillPickerProps) {
       ) : (
         <DrillSummary preview={preview} />
       )}
+
+      {/* THE START — step 20's missing seam. This route "selects WHAT to
+          drill; it does not drill" (this file's header), so Start is a LINK
+          into `/session`'s drill mode, carrying the selection and the
+          graded/victory-lap choice in the URL (`lib/drill/handoff.ts`). It
+          appears only when the preview found at least one READY ayah:
+          `ayahCount`, not `stepCount`, because a page's boundary SEAM is
+          previewed (it is the page turn a hafiz trains) but has no reconstruct
+          surface in v3 to drill (DEFECTS.md#E-08) — offering Start with only a
+          seam ready would dead-end on `none-ready`. The picker decides nothing
+          about grading: `run.ts#startDrillSession` re-derives readiness off the
+          fold and honours the mode. */}
+      {preview && preview.ayahCount > 0 ? (
+        <Link
+          className="btn"
+          href={drillHref(selection, mode)}
+          data-testid="drill-start"
+        >
+          Start{mode === "victory-lap" ? " victory lap" : ""} — {preview.ayahCount}{" "}
+          {preview.ayahCount === 1 ? "ayah" : "ayat"}
+        </Link>
+      ) : null}
     </div>
   );
 }

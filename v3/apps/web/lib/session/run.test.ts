@@ -96,6 +96,7 @@ import {
   diminishingReturnsNudge,
   demoteOfferFor,
   acceptGateDemote,
+  startDrillSession,
   SessionCommitFailure,
   type SessionRun,
 } from "./run";
@@ -717,7 +718,7 @@ describe("v3-D98 — Door 1, 'extra Learn' after the assembled queue is done", (
   it("offers nothing before the mastery gate window opens the FIRST candidate is un-encoded — a virgin log grants the first mushaf-order ayah", async () => {
     const c = corpus();
     const offer = await extraLearnOfferFor(
-      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true, gateSlipped: false, rescaffolding: false },
+      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true, gateSlipped: false, rescaffolding: false, structured: true },
       c,
       T0,
     );
@@ -815,7 +816,7 @@ describe("v3-D98 — Door 1, 'extra Learn' after the assembled queue is done", (
 describe("v3-D106 — Door 2, 'weak-spot gym' after the assembled queue is done", () => {
   it("offers nothing before any atom is encoded — a virgin log has no weak spot to rank", async () => {
     const offer = await weakSpotOfferFor(
-      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true, gateSlipped: false, rescaffolding: false },
+      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true, gateSlipped: false, rescaffolding: false, structured: true },
       T0,
     );
     expect(offer).toBeNull();
@@ -849,6 +850,7 @@ describe("v3-D106 — Door 2, 'weak-spot gym' after the assembled queue is done"
       done: true,
       gateSlipped: false,
       rescaffolding: false,
+      structured: true,
     };
     const offer = await weakSpotOfferFor(doneRun, T0 + 10_000);
     expect(offer).not.toBeNull();
@@ -875,6 +877,7 @@ describe("v3-D106 — Door 2, 'weak-spot gym' after the assembled queue is done"
       done: true,
       gateSlipped: false,
       rescaffolding: false,
+      structured: true,
     };
     const offer = await weakSpotOfferFor(doneRun, T0 + 10_000);
     expect(offer).not.toBeNull();
@@ -949,6 +952,7 @@ describe("v3-D111 — FR6 diminishing-returns nudge on the Door 2 weak-spot offe
     done: true,
     gateSlipped: false,
     rescaffolding: false,
+    structured: true,
   };
 
   it("returns null below the threshold — three same-day reps is not yet 'a lot'", async () => {
@@ -1674,5 +1678,152 @@ describe("v3-D109 — gate forgiveness ladder: the rescaffold rung (v2-D08)", ()
     if (!started.ok) return;
     expect(started.run.queue[0]?.kind).toBe("gate");
     expect(started.run.rescaffolding).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// STEP 20 — the continuous drill can actually START, and honours its mode.
+// ---------------------------------------------------------------------------
+// `/drill`'s picker (`components/drill/DrillPicker.tsx`) rendered a live
+// preview — what would be drilled, how long, and what a slip costs — but had
+// NO Start button and no handoff into the session loop, so build-plan step 20
+// dead-ended one tap short of drilling anything. Worse, the picker's own
+// "Victory lap — nothing can be damaged" radio was a claim with nothing behind
+// it: every emit site in this module hardcoded `structured: true`, so the
+// `structured:false` free-play path the victory lap needs (invariant #5 /
+// `update.ts:71`'s structured guard) had zero production reach. These tests
+// pin both halves: a drill can start over a chosen set of ayat, and a
+// victory-lap drill damages nothing because its taps AND its `ayah_produced`
+// carry `structured:false` and the fold leaves the atom untouched.
+describe("step 20 — startDrillSession over a chosen range, graded vs victory-lap", () => {
+  // Seed a drillable (ENCODED) ayah by appending its whole-ayah S3
+  // `ayah_produced` — the SAME public `append()` a real Carry-band completion
+  // uses, never a fabricated internal atom shape. `update.ts:118` sets
+  // `encoded` on an s3/gate outcome, which is exactly what makes an ayah
+  // reachable by the drill (a not-yet-encoded ayah is a guess, not a
+  // retrieval — `lib/drill/preview.ts`'s own gap guard).
+  async function seedEncoded(surah: number, ayah: number, ts: number) {
+    await append(
+      { type: "ayah_produced", ts, tz: TZ, surah, ayah, rung: "S3", structured: true } as DrillEvent,
+      { now: ts, tz: TZ },
+    );
+  }
+
+  it("drills only the ENCODED ayat in the selection, in ascending order", async () => {
+    const c = corpus();
+    // Encode 3 then 1 (out of order); leave 2 and 4 un-encoded.
+    await seedEncoded(SURAH, 3, T0);
+    await seedEncoded(SURAH, 1, T0 + 1000);
+
+    // Pass the selection DESCENDING to prove the queue is sorted, not merely
+    // echoed, and that the un-encoded 2/4 are dropped rather than drilled
+    // (drilling an un-encoded ayah would grade a guess).
+    const started = await startDrillSession(
+      { surah: SURAH, now: T0 + 2000, tz: TZ, ayat: [4, 3, 2, 1], structured: true },
+      c,
+    );
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    expect(started.run.queue.map((q) => q.ayah)).toEqual([1, 3]);
+    expect(started.run.queue.every((q) => q.kind === "review")).toBe(true);
+    expect(started.run.structured).toBe(true);
+  });
+
+  it("returns 'none-ready' when nothing in the selection has been encoded", async () => {
+    const c = corpus();
+    // A fresh log: no ayah is encoded, so there is nothing to drill. This is
+    // NOT "no corpus" and NOT "nothing due" — a learner picked a real range,
+    // but none of it is ready. Its own reason so the view can say so.
+    const started = await startDrillSession(
+      { surah: SURAH, now: T0, tz: TZ, ayat: [1, 2, 3, 4], structured: true },
+      c,
+    );
+    expect(started.ok).toBe(false);
+    if (started.ok) return;
+    expect(started.unavailable).toBe("none-ready");
+  });
+
+  it("a GRADED drill logs fold-graded (structured) events", async () => {
+    const c = corpus();
+    await seedEncoded(SURAH, 1, T0);
+    const before = await getAllEvents();
+    const beforeIds = new Set(before.map((e) => e.id));
+
+    const started = await startDrillSession(
+      { surah: SURAH, now: T0 + 1000, tz: TZ, ayat: [1], structured: true },
+      c,
+    );
+    if (!started.ok) throw new Error("a graded drill of an encoded ayah must start");
+    await playThrough(started.run, c);
+
+    const after = await getAllEvents();
+    const fresh = after.filter((e) => !beforeIds.has(e.id));
+    const produced = fresh.filter((e) => e.type === "ayah_produced");
+    const taps = fresh.filter((e) => e.type === "reconstruct_tap");
+    expect(produced.length).toBeGreaterThan(0);
+    expect(taps.length).toBeGreaterThan(0);
+    // Graded ⇒ structured is never false (absent counts as structured).
+    expect(produced.every((e) => e.structured !== false)).toBe(true);
+    expect(taps.every((e) => e.structured !== false)).toBe(true);
+  });
+
+  it("a VICTORY-LAP drill damages NOTHING: taps and ayah_produced are structured:false and the fold leaves strength unchanged", async () => {
+    const c = corpus();
+    await seedEncoded(SURAH, 1, T0);
+    const seeded = await getAllEvents();
+    const seededIds = new Set(seeded.map((e) => e.id));
+    const strengthBefore = rebuild(seeded).get(atomKey(SURAH, "ayah", 1))?.strength;
+    expect(typeof strengthBefore).toBe("number");
+
+    const started = await startDrillSession(
+      { surah: SURAH, now: T0 + 1000, tz: TZ, ayat: [1], structured: false },
+      c,
+    );
+    if (!started.ok) throw new Error("a victory-lap drill of an encoded ayah must start");
+    expect(started.run.structured).toBe(false);
+    await playThrough(started.run, c);
+
+    const after = await getAllEvents();
+    const fresh = after.filter((e) => !seededIds.has(e.id));
+    const produced = fresh.filter((e) => e.type === "ayah_produced");
+    const taps = fresh.filter((e) => e.type === "reconstruct_tap");
+    expect(produced.length).toBeGreaterThan(0);
+    expect(taps.length).toBeGreaterThan(0);
+    // The load-bearing half: every drill event this run wrote is free-play.
+    expect(produced.every((e) => e.structured === false)).toBe(true);
+    expect(taps.every((e) => e.structured === false)).toBe(true);
+    // …and because the fold's structured guard (`update.ts:71`) drops them,
+    // the atom's strength is byte-identical to before the victory lap — the
+    // "nothing can be damaged" promise the picker's radio makes.
+    const strengthAfter = rebuild(after).get(atomKey(SURAH, "ayah", 1))?.strength;
+    expect(strengthAfter).toBe(strengthBefore);
+  });
+
+  it("a WRONG tap during a victory lap still damages nothing (errors carry full weight ONLY when structured)", async () => {
+    const c = corpus();
+    await seedEncoded(SURAH, 1, T0);
+    const strengthBefore = rebuild(await getAllEvents()).get(atomKey(SURAH, "ayah", 1))?.strength;
+
+    const started = await startDrillSession(
+      { surah: SURAH, now: T0 + 1000, tz: TZ, ayat: [1], structured: false },
+      c,
+    );
+    if (!started.ok) throw new Error("victory-lap drill must start");
+
+    // One deliberate wrong tap, then finish correctly. A wrong tap does not
+    // advance (the learner retries), so the run still completes.
+    const correct = correctIndexFor(started.run, c);
+    const wrong = correct === 0 ? 1 : 0;
+    const afterWrong = await answerCurrent(started.run, c, wrong, { now: T0 + 1500, tz: TZ });
+    await playThrough(afterWrong, c);
+
+    const after = await getAllEvents();
+    const wrongTaps = after.filter(
+      (e) => e.type === "reconstruct_tap" && e.correct === false && e.ts >= T0 + 1000,
+    );
+    expect(wrongTaps.length).toBeGreaterThan(0);
+    expect(wrongTaps.every((e) => e.structured === false)).toBe(true);
+    const strengthAfter = rebuild(after).get(atomKey(SURAH, "ayah", 1))?.strength;
+    expect(strengthAfter).toBe(strengthBefore);
   });
 });

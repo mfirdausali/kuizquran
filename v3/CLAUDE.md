@@ -53,9 +53,66 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2037 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2056 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 874 apps/web. (v3-D111, 2026-08-20)
+             # + 417 engine + 61 fold-runner + 893 apps/web. (v3-D112, 2026-08-20)
+             # NOTE (v3-D112): build-plan step 20 (`/drill`, continuous drill)
+             # dead-ended — `components/drill/DrillPicker.tsx` rendered a live
+             # preview of what a chosen range/page would drill but had NO Start
+             # button and no handoff into the session loop, so the whole
+             # continuous-drill surface was a step marked DONE on a component no
+             # route could run. Coupled second half: the picker's own "Victory
+             # lap — nothing can be damaged" radio had nothing behind it, because
+             # every emit site in `lib/session/run.ts` hardcoded
+             # `structured: true`, so the `structured:false` free-play path the
+             # victory lap needs (invariant #5 / `update.ts:71`'s structured
+             # guard) had zero production reach — shipping Start without the flag
+             # would have made that radio a dark pattern. Fixed both, end to end:
+             # `run.ts` gained `startDrillSession` (folds the log, filters the
+             # chosen ayat to the ENCODED ones off the fold — a not-yet-learned
+             # ayah is a guess, `lib/drill/preview.ts`'s BUG-3 gap guard — orders
+             # them ascending, runs them as ordinary `review` items through the
+             # EXACT same answerCurrent/answerAfterTap/settleAnswer path, no
+             # second grading rule so B2's "gradeClassToWire is the ONE function"
+             # holds); `SessionRun` gained a `structured` field the shared
+             # `startFromQueue` carries onto the `reconstruct_tap` and
+             # `ayah_produced` emits (`run.structured`, not a literal); a new
+             # `none-ready` unavailable reason. `startExtraLearn`/
+             # `startWeakSpotDrill` now set `structured:true` EXPLICITLY (a
+             # victory-lap drill reaches the summary too, and its false must not
+             # leak into a granted Learn or the full-weight weak-spot gym).
+             # `lib/drill/sites.ts` gained `ayatForSelection` (range/page → ayah
+             # numbers; seams dropped, E-08 — no reconstruct surface in v3);
+             # `lib/drill/handoff.ts` (new) is the `/drill`→`/session` URL
+             # contract both directions (`victory` the only opt-in to the lap; a
+             # mistyped grade stays graded; a hand-edited out-of-range URL
+             # degrades to `none-ready`, never a 500, #78). `DrillPicker` gained
+             # a Start LINK shown only when a READY ayah exists (`ayahCount`, not
+             # `stepCount` — a page whose only ready step is a seam never offers
+             # a drill that would dead-end); `SessionPage`→`SessionGate`→
+             # `SessionIsland` thread the parsed `DrillSpec`, the drill runs
+             # within the ENROLLED surah. RED confirmed by `git stash` of `run.ts`
+             # only (5 new `run.test.ts` cases kept): all failed on exactly
+             # `startDrillSession is not a function`; pop → 5/5 green. The
+             # load-bearing case runs a victory-lap drill to completion and
+             # asserts every fresh `ayah_produced` AND `reconstruct_tap` is
+             # `structured:false` and the atom's strength is byte-identical to
+             # before — "nothing can be damaged" against the real fold; a
+             # companion proves a WRONG tap in a victory lap still damages
+             # nothing. `TZ=UTC make test`: 2056 passing (was 2037, +19 — exactly
+             # this run's new tests: 5 run.test.ts + 3 session-island + 3
+             # drill-picker + 8 drill-handoff; no other suite moved).
+             # `check-test-floor.mjs`: OK, 2056 >= floor 1899 (+157 margin,
+             # TEST-FLOOR unmoved). `TZ=UTC make build`: exit 0, 20 routes
+             # (unchanged — `/drill` and `/session` both already existed).
+             # `npm run gates`: all green (fonts degraded-but-non-blocking,
+             # pre-existing; boundaries 202 files). `npx tsc --noEmit` clean. No
+             # v1/v2 edit, no Arabic codepoint (every added line addresses an
+             # ayah/range/page by number or a mode by closed-set value). SEAM
+             # drilling remains out of reach (E-08, same as floor/weak-spot);
+             # Door 3 (`openPracticePick`)/`coldSuccessAdoption` remain unwired
+             # (need the any-ayah picker route that does not exist). See
+             # DECISIONS.md v3-D112.
              # NOTE (v3-D111): FR6's diminishing-returns nudge
              # (`packages/engine/src/freeplay.ts#diminishingReturns`) — an
              # honest line for a learner who keeps massing the SAME atom in one

@@ -6210,3 +6210,127 @@ product decision, not a wiring fix. The SSR override gap (`lib/corpus/load.ts`,
 v3-D96/D110), `activity.ts#lastActiveDayMs()`'s inline re-derivation (v3-D107),
 and `floorQueue`'s cross-surah forgetting-risk read (v3-D108) all remain exactly
 as open as their own entries left them.
+
+---
+
+### v3-D112 — `/drill` (step 20) dead-ended: the picker previewed a drill but could not START one, and the victory-lap mode had nothing behind it
+
+**The finding.** `components/drill/DrillPicker.tsx` rendered a live, honest
+preview — what a chosen range or page would drill, how long it would take, and
+what a slip costs — but had **no Start button and no handoff** into the session
+loop. `/drill`'s own route header even said so ("This route selects WHAT to
+drill. It does not drill... the drilling loop... live in `/session`"), yet
+nothing linked the two. So build-plan **step 20** (continuous drill: range +
+mushaf page) was marked DONE on a component no route could actually run — the
+exact "a step DONE on a component no route reaches" failure HANDOVER.md names as
+the thing the build's gates exist to prevent. A learner could configure a drill
+and read "You'll see exactly what it covers before you start" — and there was no
+start.
+
+**The coupled second half.** The picker's own "How it counts" fieldset offers
+two radios: **Graded review** ("Slips will lower your strength") and **Victory
+lap** ("Nothing can be damaged"). The victory lap needs the free-play path
+(invariant #5 / `update.ts:71`'s structured guard): events written
+`structured:false` fold as evidence only, so no slip can cost strength. But
+`lib/session/run.ts` **hardcoded `structured: true` at every emit site** — the
+only graded path in the product had no structured-false reach at all. Had a
+Start button shipped without threading the flag, the victory-lap radio would
+have been a dark pattern: a claim ("nothing can be damaged") the code would then
+violate. So the two halves are one step — the Start handoff is worthless, or
+worse, without the mode being honoured.
+
+**Fixed, end to end.**
+- `lib/session/run.ts` gained `startDrillSession(input, c)`: it folds the log,
+  filters the chosen ayat to the **ENCODED** ones (reconstructing an ayah never
+  produced whole is a guess, not a retrieval — `lib/drill/preview.ts`'s own
+  BUG-3 gap guard, the single source of truth for "ready", decided here off the
+  fold and never in the component), orders them ascending, and runs them as
+  ordinary `review` items through the **exact same** `answerCurrent`/
+  `answerAfterTap`/`settleAnswer` path every other queue item uses — no second
+  grading rule, so DEFECTS.md#B2's "gradeClassToWire is the ONE function"
+  guarantee holds. `SessionRun` gained a `structured` field; the shared
+  `startFromQueue` carries it; the `reconstruct_tap` and the ordinary
+  `ayah_produced` emits now stamp `run.structured` instead of a literal `true`.
+  A new `none-ready` unavailable reason (distinct from `nothing-due` and
+  `no-corpus`) reports a real selection with nothing learned yet.
+- `startExtraLearn`/`startWeakSpotDrill` now set `structured: true`
+  **explicitly** rather than inheriting it — a victory-lap drill reaches the
+  summary too, and its `structured:false` must not leak into a granted Learn
+  (which has to encode) or the full-weight weak-spot gym (FR6).
+- `lib/drill/sites.ts` gained `DrillSelection` + `ayatForSelection(corpus, sel)`
+  (the range/page → ayah-numbers resolution, seams dropped: E-08 leaves them no
+  reconstruct surface in v3, so a page's terminal seam is previewed but not
+  drilled — the same ayah-only rule floor/weak-spot drills already follow).
+- `lib/drill/handoff.ts` (new) is the `/drill`→`/session` URL contract, both
+  directions: `drillHref(selection, mode)` and `parseDrillParams(params)`, with
+  `victory` as the only opt-in to the victory lap (a mistyped grade stays
+  graded, the safe side) and a hand-edited out-of-range URL degrading to an
+  empty drill (`ayatForSelection` → `none-ready`), never a 500 (#78).
+- `DrillPicker.tsx` gained a Start **link** into `/session`'s drill query,
+  shown only when the preview found at least one READY ayah (`ayahCount`, not
+  `stepCount`, so a page whose only ready step is a seam does not offer a drill
+  that would dead-end on `none-ready`). `SessionPage` parses the drill query
+  into a `DrillSpec` (taking precedence over `?mode=`) and threads it through
+  `SessionGate` → `SessionIsland`, which resolves ayat + `structuredFor(mode)`
+  and calls `startDrillSession`. The surah stays the ENROLLED one
+  (`SessionGate`'s authority) — a drill runs within the surah the learner is
+  actually enrolled in; multi-surah drill-of-another-surah is the same
+  multi-surah gap named everywhere else, out of scope.
+
+**Verified.**
+- **RED confirmed** by `git stash` of `lib/session/run.ts` only (the 5 new
+  `run.test.ts` step-20 cases kept): all 5 failed on exactly
+  `startDrillSession is not a function`; `git stash pop` restored the impl,
+  5/5 green. The victory-lap case is the load-bearing one: it seeds an encoded
+  atom, runs a victory-lap drill to completion, and asserts every fresh
+  `ayah_produced` AND every `reconstruct_tap` carries `structured:false` and the
+  atom's strength is byte-identical to before — the "nothing can be damaged"
+  promise proven against the real fold, not asserted in the abstract. A
+  companion case makes one deliberate WRONG tap during a victory lap and proves
+  strength still unchanged (errors carry full weight ONLY when structured). The
+  graded sibling proves the ordinary path is unmoved (`structured !== false`).
+  Two more pin the encoded-filter (a descending selection with un-encoded ayat
+  yields an ascending queue of only the encoded ones) and `none-ready`.
+- Component level: `test/session-island.test.tsx` drives a real drill via the
+  `drill` prop through the actual DOM (trial-and-error per blank, no Arabic
+  literal) and asserts the same structured-per-mode split plus the `none-ready`
+  message; `test/drill-picker.test.tsx` pins the Start link's presence, its
+  href (graded and victory-lap), and its ABSENCE when nothing is ready;
+  `test/drill-handoff.test.ts` round-trips the URL contract and its validation.
+- `TZ=UTC make test`: **2056 passing** (was 2037, **+19** — exactly this run's
+  new tests: 5 in `run.test.ts`, 3 in `session-island.test.tsx`, 3 in
+  `drill-picker.test.tsx`, 8 in `drill-handoff.test.ts`; no other suite's count
+  moved — 255 v2 vitest + 47 v2/api + 272 v3/api + 111 corpus-compiler + 417
+  engine + 61 fold-runner + **893** apps/web). `check-test-floor.mjs`: OK, 2056
+  >= floor 1899 (+157 margin, `TEST-FLOOR` left unmoved). `TZ=UTC make build`:
+  exit 0, **20 routes** (unchanged — `/drill` and `/session` both already
+  existed). `npm run gates`: locked-css OK, fonts degraded-but-non-blocking
+  (pre-existing), boundaries OK (202 files), corpus-morphology OK, corpus-glyphs
+  OK. `npx tsc --noEmit`: clean.
+- No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff was
+  reverted before committing, same discipline as every prior entry). No Arabic
+  codepoint introduced: swept every added line directly over the Arabic,
+  Supplement, Extended-A and both Presentation Forms blocks (zero matches), plus
+  `\u06xx`-escape/`fromCharCode` greps, plus `npm run gates`' own Arabic grep,
+  which passed. Every new line addresses an ayah/range/page by number or a mode
+  by closed-set value, never corpus text.
+
+**A test-fixture consequence, named.** `SessionRun` gaining a required
+`structured` field broke the hand-built run literals in `session-island.test.tsx`
+and `run.test.ts` (they omitted it, so an emit read `structured: undefined`),
+exactly as the `gateSlipped`/`rescaffolding` additions did before. Fixed by
+adding `structured: true` to each fixture — production never hits this, since
+every real run comes from `startFromQueue`/`startExtraLearn`/`startWeakSpotDrill`,
+all of which set it.
+
+**Explicitly not addressed, named so a future run doesn't re-discover it as
+new:** SEAM drilling remains out of reach — a page's boundary seam (the page
+turn a hafiz trains) is previewed but has no reconstruct surface in v3
+(`bridge.ts` atticked, DEFECTS.md#E-08); this is the same limitation floor and
+weak-spot drills live with, not a regression this run introduced. Door 3 (open
+practice / `openPracticePick`) and `coldSuccessAdoption` remain unwired — each
+still needs the any-ayah picker route that does not exist (v3-D106/D111's own
+framing). The placement onboarding (`placement.ts`, FR10), the SSR override gap
+(`lib/corpus/load.ts`, v3-D96/D110), `activity.ts#lastActiveDayMs()`'s inline
+re-derivation (v3-D107), and `floorQueue`'s cross-surah forgetting-risk read
+(v3-D108) all remain exactly as open as their own entries left them.

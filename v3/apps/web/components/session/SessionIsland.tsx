@@ -46,6 +46,7 @@ import {
   diminishingReturnsNudge,
   extraLearnOfferFor,
   sessionSummaryOf,
+  startDrillSession,
   startExtraLearn,
   startFloorSession,
   startSession,
@@ -56,6 +57,9 @@ import {
   type SessionRun,
   type SessionUnavailable,
 } from "@/lib/session/run";
+import { structuredFor } from "@/lib/drill/preview";
+import { ayatForSelection } from "@/lib/drill/sites";
+import type { DrillSpec } from "@/lib/drill/handoff";
 import type { SessionSummary } from "@engine/sessionSummary.ts";
 import type { ExtraLearnGrant, WeakSpot } from "@engine/freeplay.ts";
 
@@ -67,6 +71,12 @@ export interface SessionIslandProps {
    *  the 2-minute floor session. Decided by the route (`?mode=`), never by
    *  this component. */
   mode?: SessionMode;
+  /** Step 20 — a continuous drill request from `/drill` (a chosen range or
+   *  page + graded/victory-lap), or null for an ordinary session. When present
+   *  it takes precedence over `mode`. The ayat and the structured flag are
+   *  resolved in lib/ (`ayatForSelection`, `structuredFor`) and handed to
+   *  `startDrillSession` — this component still decides nothing. */
+  drill?: DrillSpec | null;
 }
 
 type Phase =
@@ -80,7 +90,7 @@ type Phase =
   | { kind: "drilling" }
   | { kind: "summary"; summary: SessionSummary };
 
-export function SessionIsland({ surah, mode = "full" }: SessionIslandProps) {
+export function SessionIsland({ surah, mode = "full", drill = null }: SessionIslandProps) {
   const [corpus, setCorpus] = useState<Corpus | null>(null);
   const [run, setRun] = useState<SessionRun | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
@@ -109,6 +119,15 @@ export function SessionIsland({ surah, mode = "full" }: SessionIslandProps) {
   // (`dismissedDemoteAyah`), so declining does not re-ask on every render.
   const [demoteOffer, setDemoteOffer] = useState<{ ayah: number } | null>(null);
   const [dismissedDemoteAyah, setDismissedDemoteAyah] = useState<number | null>(null);
+
+  // A stable identity for the drill request, so the start effect keys on the
+  // VALUE, not the object reference (a parent re-render hands down a
+  // fresh-but-equal `drill` object). Empty string when this is not a drill.
+  const drillKey = drill
+    ? drill.selection.kind === "range"
+      ? `range:${drill.selection.from}:${drill.selection.to}:${drill.mode}`
+      : `page:${drill.selection.page}:${drill.mode}`
+    : "";
 
   // Load the corpus, then start (or RESUME) the session. Resume is not a
   // separate path: the queue is derived from the fold of the event log, so a
@@ -141,11 +160,27 @@ export function SessionIsland({ surah, mode = "full" }: SessionIslandProps) {
           return;
         }
         setCorpus(c);
-        const start = mode === "floor" ? startFloorSession : startSession;
-        const started = await start(
-          { surah, now: Date.now(), tz: currentTz() },
-          c,
-        );
+        // Step 20 — a drill request runs a learner-chosen stretch, not the
+        // daily assembly. The ayat and the graded/victory-lap flag are resolved
+        // in lib/ (`ayatForSelection` off the corpus geometry, `structuredFor`
+        // off the mode) and handed to `startDrillSession`, which decides
+        // READINESS off the fold. `mode` (full/floor) applies only when there
+        // is no drill.
+        const started = drill
+          ? await startDrillSession(
+              {
+                surah,
+                now: Date.now(),
+                tz: currentTz(),
+                ayat: ayatForSelection(c, drill.selection),
+                structured: structuredFor(drill.mode),
+              },
+              c,
+            )
+          : await (mode === "floor" ? startFloorSession : startSession)(
+              { surah, now: Date.now(), tz: currentTz() },
+              c,
+            );
         if (!alive) return;
         if (!started.ok) {
           setPhase({ kind: "unavailable", reason: started.unavailable });
@@ -206,7 +241,12 @@ export function SessionIsland({ surah, mode = "full" }: SessionIslandProps) {
       alive = false;
       unsubscribe?.();
     };
-  }, [surah, mode]);
+    // `drillKey` (a stable string) rather than the `drill` object itself, so a
+    // parent re-render that hands down a fresh-but-equal object does not restart
+    // the session — the same "depend on the value, not the reference" care the
+    // rest of this file takes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [surah, mode, drillKey]);
 
   const cur = useMemo(() => {
     if (!run || !corpus) return null;
@@ -441,13 +481,17 @@ export function SessionIsland({ surah, mode = "full" }: SessionIslandProps) {
       mode === "floor"
         ? "There's nothing to check in on yet — learn your first ayah in a full session, then come back here."
         : "Nothing is due right now. Come back later today.";
-    return (
-      <p className="caption">
-        {phase.reason === "nothing-due"
+    // Step 20: a drill selection with nothing the learner has learned yet. NOT
+    // a failure and NOT "nothing due" — they picked a real stretch, but none of
+    // it is ready. Reconstructing an ayah never produced whole would be a
+    // guess, so the drill honestly declines rather than grading one.
+    const message =
+      phase.reason === "none-ready"
+        ? "None of the ayat you picked have been learned yet, so there's nothing to drill here. Learn them first — in a full session — and they'll be ready."
+        : phase.reason === "nothing-due"
           ? nothingDueMessage
-          : "This surah is not available on this device yet."}
-      </p>
-    );
+          : "This surah is not available on this device yet.";
+    return <p className="caption">{message}</p>;
   }
 
   if (phase.kind === "summary") {

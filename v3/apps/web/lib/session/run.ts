@@ -100,7 +100,12 @@ import { assemblePass } from "@/lib/onboarding/pass";
  *  "the corpus failed to load", and those need different responses. */
 export type SessionUnavailable =
   | "no-corpus"
-  | "nothing-due";
+  | "nothing-due"
+  // A continuous drill (`startDrillSession`) whose chosen range/page contains
+  // nothing the learner has ENCODED yet — distinct from "nothing-due" (a
+  // finished daily queue) and "no-corpus" (a load failure): the learner picked
+  // a real stretch, but none of it is ready to drill.
+  | "none-ready";
 
 export interface StartInput {
   surah: number;
@@ -165,6 +170,19 @@ export interface SessionRun {
    * non-gate item, or a gate at any other rung of the ladder.
    */
   readonly rescaffolding: boolean;
+  /**
+   * Step 20 — whether the events this session writes are STRUCTURED (graded)
+   * or free-play. `true` for the ordinary daily assembly, the floor session,
+   * and every offer-extended run (invariant #5's structured session moves
+   * lifecycle). `false` only for a "victory lap" continuous drill
+   * (`startDrillSession` with `structured: false`): its taps AND its
+   * `ayah_produced` carry `structured:false`, so the fold's guard
+   * (`update.ts:71`) leaves every drilled atom untouched — "nothing can be
+   * damaged", the promise `lib/drill/preview.ts` states to the learner as a
+   * consequence rather than as a boolean. Gates are never a victory lap, so
+   * `gate_result` stays graded regardless (a drill never queues a gate item).
+   */
+  readonly structured: boolean;
 }
 
 export type StartResult =
@@ -365,6 +383,86 @@ export async function startFloorSession(input: StartInput, c: Corpus): Promise<S
   return startFromQueue(surah, now, tz, queue, atomsMap, prior, c);
 }
 
+/** What `startDrillSession` needs beyond an ordinary start: the chosen ayat and
+ *  whether this is graded or a victory lap. */
+export interface DrillStartInput extends StartInput {
+  /**
+   * The ayat the learner's `/drill` selection resolves to (a range, or a
+   * mushaf page's ayah sites) — in ANY order. This function filters them to
+   * the ENCODED ones and orders them ascending, so the caller may pass the raw
+   * selection without pre-filtering. SEAMS are deliberately not accepted: a
+   * connection atom (n→n+1) has no reconstruct surface in v3 (`bridge.ts`
+   * atticked, DEFECTS.md#E-08), the same reason the floor and weak-spot drills
+   * are ayah-only — a page's terminal seam is previewed on `/drill` but is not
+   * a drillable step here.
+   */
+  readonly ayat: readonly number[];
+  /**
+   * false = "victory lap": every event this session writes carries
+   * `structured:false`, so the fold's guard (`update.ts:71`) leaves lifecycle
+   * untouched — nothing can be damaged. true = an ordinary graded review. The
+   * picker presents this to the learner as a CONSEQUENCE, never as a boolean
+   * (`lib/drill/preview.ts`), and `structuredFor(mode)` is the single place the
+   * mode→boolean mapping is made.
+   */
+  readonly structured: boolean;
+}
+
+/**
+ * Step 20 — START a continuous drill over a chosen range or page.
+ *
+ * `/drill`'s picker (`components/drill/DrillPicker.tsx`) previewed what a drill
+ * would cover but had no Start button and no handoff into the loop, so the
+ * whole continuous-drill surface dead-ended one tap short of drilling anything
+ * — a step marked DONE on a component no route could actually run, the exact
+ * failure the build's own gates exist to prevent. This is that handoff.
+ *
+ * WHY IT DOES NOT REUSE `assembleQueue`: the daily assembly decides what is DUE
+ * today; a drill is the learner overriding that to run a specific stretch,
+ * ready-or-not-due. So the queue here is exactly the READY ayat of the
+ * selection, in reading order — no scheduler, no due-date filter.
+ *
+ * "Ready" = ENCODED. Reconstructing an ayah never produced whole is a guess,
+ * not a retrieval; grading it would damage an atom that never had a chance
+ * (`lib/drill/preview.ts`'s BUG-3 gap guard). That decision is made HERE, off
+ * the fold — never in the picker component, which only PREVIEWS readiness
+ * (check-boundaries clause 5: the component decides nothing).
+ *
+ * Every item is an ordinary `review`, graded through the exact same
+ * `answerCurrent`/`answerAfterTap`/`settleAnswer` path every other queue item
+ * uses — there is no second grading rule, so DEFECTS.md#B2's "gradeClassToWire
+ * is the ONE function" guarantee holds. The only thing the drill mode changes
+ * is the `structured` flag threaded onto those events (graded vs victory lap),
+ * which the shared `startFromQueue` carries onto the run.
+ */
+export async function startDrillSession(input: DrillStartInput, c: Corpus): Promise<StartResult> {
+  const { surah, now, tz, ayat, structured } = input;
+
+  if (!Array.isArray(c.words) || c.words.length === 0) {
+    return { ok: false, unavailable: "no-corpus" };
+  }
+
+  const prior = await getEventsForSurah(surah);
+  const atomsMap = rebuild(prior);
+
+  const ready = [...new Set(ayat)]
+    .filter((ayah) => atomsMap.get(atomKey(surah, "ayah", ayah))?.encoded === true)
+    .sort((a, b) => a - b);
+
+  if (ready.length === 0) {
+    return { ok: false, unavailable: "none-ready" };
+  }
+
+  const queue: QueueItem[] = ready.map((ayah) => ({
+    kind: "review",
+    atomKey: atomKey(surah, "ayah", ayah),
+    ayah,
+    estMin: 0,
+  }));
+
+  return startFromQueue(surah, now, tz, queue, atomsMap, prior, c, structured);
+}
+
 /**
  * Shared by `startSession` and `startFloorSession`: given an already-built
  * queue and the fold it came from, decide RESUME-vs-NEW (never re-emitting
@@ -381,6 +479,9 @@ async function startFromQueue(
   atomsMap: ReturnType<typeof rebuild>,
   prior: Awaited<ReturnType<typeof getEventsForSurah>>,
   c: Corpus,
+  // Step 20 — false for a "victory lap" continuous drill; true (the default)
+  // for every other entry point (the daily assembly, the floor session).
+  structured = true,
 ): Promise<StartResult> {
   if (queue.length === 0) {
     return { ok: false, unavailable: "nothing-due" };
@@ -422,6 +523,7 @@ async function startFromQueue(
       done: false,
       gateSlipped: false,
       rescaffolding,
+      structured,
     },
   };
 }
@@ -575,7 +677,11 @@ export async function answerCurrent(
     position: cur.position,
     choice,
     correct: adv.correct,
-    structured: true,
+    // Step 20: `run.structured` is false ONLY for a victory-lap drill, so a
+    // slip during a victory lap is recorded as evidence but the fold's guard
+    // (`update.ts:71`) never lets it cost strength. `true` (== graded) for
+    // every ordinary session, so nothing about the normal grading path moves.
+    structured: run.structured,
   } as DrillEvent;
 
   // ---- COMMIT ---------------------------------------------------------------
@@ -661,7 +767,10 @@ async function answerAfterTap(
           // decided which via `full` — this only resolves that GradeClass to its
           // wire Rung via gradeClassToWire(), never a re-derived ternary (B2).
           rung: gradeClassToWire(adv.full ? "s3_full" : "s2_partial"),
-          structured: true,
+          // Step 20: false ONLY for a victory-lap drill, so the completed pass
+          // is evidence the fold records but never grades (nothing damaged).
+          // `true` for every ordinary review — the graded path is unchanged.
+          structured: run.structured,
         } as DrillEvent);
 
     return commitThenContinue(ayahEvent, ctx, null, () =>
@@ -843,6 +952,10 @@ export function startExtraLearn(run: SessionRun, c: Corpus, ayah: number): Sessi
     gateSlipped: false,
     // A "learn" item is never a gate — the rescaffold ladder does not apply.
     rescaffolding: false,
+    // Extra Learn is always GRADED, never inherited: if the completed run was a
+    // victory-lap drill (`structured:false`), that mode must not leak into a
+    // fresh Learn the engine granted — a newly learned ayah has to encode.
+    structured: true,
   };
 }
 
@@ -915,6 +1028,10 @@ export async function startWeakSpotDrill(run: SessionRun, c: Corpus, ayah: numbe
     gateSlipped: false,
     // A "review" item is never a gate — the rescaffold ladder does not apply.
     rescaffolding: false,
+    // The weak-spot gym is FULL-WEIGHT evidence (FR6), always graded — never
+    // inherited from a victory-lap drill's `structured:false`, which would
+    // silently make the weakest-atom rehearsal count for nothing.
+    structured: true,
   };
 }
 

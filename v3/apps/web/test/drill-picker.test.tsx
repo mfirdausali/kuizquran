@@ -10,8 +10,9 @@
 // states deliberately, including `pending` and `broken`.
 
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
-import type { Corpus } from "@engine/types.ts";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { createElement } from "react";
+import type { Corpus, DrillEvent } from "@engine/types.ts";
 import { YUSUF_GEOMETRY } from "./fixtures/geometry";
 
 type LogState =
@@ -27,7 +28,23 @@ vi.mock("@/lib/idb", () => ({
   getEventsForSurah: () => Promise.resolve([]),
 }));
 
+// next/link needs a mounted App Router to render; none exists in jsdom. Stub it
+// to a plain anchor so the Start LINK's href is assertable (the same reason
+// test-island.test.tsx stubs next/navigation).
+vi.mock("next/link", () => ({
+  default: ({ href, children, ...rest }: { href: string; children: unknown }) =>
+    createElement("a", { href, ...rest }, children as never),
+}));
+
 const { DrillPicker } = await import("@/components/drill/DrillPicker");
+
+/** A single whole-ayah S3 completion for `ayah` — folds to an ENCODED atom, so
+ *  the preview marks that ayah drillable and the Start link appears. Surah 12
+ *  matches `corpusWith`'s meta, so the atom key lines up with the picker's own
+ *  `sitesForRange(12, …)`. No Arabic: the event carries coordinates only. */
+function encoded(ayah: number): DrillEvent {
+  return { type: "ayah_produced", ts: 1, surah: 12, ayah, rung: "S3", structured: true } as DrillEvent;
+}
 
 /** A corpus carrying only what the picker reads. No Arabic is written here;
  *  the picker renders no verse text, so none is needed. */
@@ -139,5 +156,38 @@ describe("log states", () => {
     logState = { status: "empty" };
     render(<DrillPicker corpus={WITH_GEOMETRY} now={0} />);
     expect(screen.getByText(/Nothing here has been learned yet/i)).toBeDefined();
+  });
+});
+
+// Step 20's missing seam: the picker previewed a drill but never offered to
+// START one. These pin the Start LINK — that it appears only when a ready ayah
+// exists, that it carries the selection and the chosen mode into `/session`'s
+// drill query, and that it is absent when nothing in the selection is ready
+// (so the learner is never sent to a drill that would immediately dead-end on
+// `none-ready`).
+describe("the Start link hands the selection to /session", () => {
+  it("offers Start with the default range and graded mode once an ayah is ready", () => {
+    // Encode ayah 1 (inside the default 1..6 range); leave 2..6 un-encoded.
+    logState = { status: "ready", data: [encoded(1)] };
+    render(<DrillPicker corpus={WITH_GEOMETRY} now={0} />);
+    const start = screen.getByTestId("drill-start");
+    expect(start.getAttribute("href")).toBe("/session?drill=range&from=1&to=6&grade=graded");
+  });
+
+  it("carries the victory-lap choice into the href when that mode is selected", () => {
+    logState = { status: "ready", data: [encoded(1)] };
+    render(<DrillPicker corpus={WITH_GEOMETRY} now={0} />);
+    fireEvent.click(screen.getByRole("radio", { name: /victory lap/i }));
+    expect(screen.getByTestId("drill-start").getAttribute("href")).toBe(
+      "/session?drill=range&from=1&to=6&grade=victory",
+    );
+  });
+
+  it("shows NO Start link when nothing in the selection has been learned", () => {
+    // A ready but empty log: the range is real, but no ayah is encoded, so
+    // Start must not appear — offering it would dead-end on `none-ready`.
+    logState = { status: "ready", data: [] };
+    render(<DrillPicker corpus={WITH_GEOMETRY} now={0} />);
+    expect(screen.queryByTestId("drill-start")).toBeNull();
   });
 });

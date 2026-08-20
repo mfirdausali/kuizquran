@@ -29,6 +29,7 @@
 
 import { SessionGate } from "@/components/session/SessionGate";
 import type { SessionMode } from "@/lib/session/run";
+import { parseDrillParams, type DrillSpec } from "@/lib/drill/handoff";
 
 // v3-D108 — FR9's 2-minute floor session gets its own MODE on this SAME
 // route, `?mode=floor`, rather than a second `/session` page: the quiz loop,
@@ -43,24 +44,57 @@ function parseMode(raw: string | undefined): SessionMode {
   return raw === "floor" ? "floor" : "full";
 }
 
+// The header copy for the session, chosen by what it is. A drill says what it
+// covers and whether it can be damaged; a floor session and the ordinary daily
+// session keep their own words. `parseDrillParams` decides drill-vs-not.
+function heading(mode: SessionMode, drill: DrillSpec | null): { title: string; caption: string } {
+  if (drill) {
+    const victory = drill.mode === "victory-lap";
+    return {
+      title: victory ? "Victory lap" : "Drill",
+      caption: victory
+        ? "Run the stretch you chose. Nothing can be damaged — this is a victory lap."
+        : "Run the stretch you chose, graded as an ordinary review.",
+    };
+  }
+  if (mode === "floor") {
+    return {
+      title: "Quick check-in",
+      caption: "The smallest useful session — one or two items, about two minutes.",
+    };
+  }
+  return {
+    title: "Session",
+    caption: "Today's mix — gates, reviews, and one new ayah if yesterday's passed.",
+  };
+}
+
 export default async function SessionPage({
   searchParams,
 }: {
-  searchParams: Promise<{ mode?: string }>;
+  searchParams: Promise<{
+    mode?: string;
+    drill?: string;
+    from?: string;
+    to?: string;
+    page?: string;
+    grade?: string;
+  }>;
 }) {
-  const { mode: rawMode } = await searchParams;
-  const mode = parseMode(rawMode);
+  const sp = await searchParams;
+  const mode = parseMode(sp.mode);
+  // A drill request (`?drill=range|page`) takes precedence over `mode`: it is a
+  // different, learner-chosen queue entirely (`startDrillSession`), not a
+  // variant of the daily assembly. `null` when this is an ordinary session.
+  const drill = parseDrillParams(sp);
+  const { title, caption } = heading(mode, drill);
 
   return (
     <div className="screen">
       <div className="stack">
         <header className="page-head">
-          <h1>{mode === "floor" ? "Quick check-in" : "Session"}</h1>
-          <p className="caption">
-            {mode === "floor"
-              ? "The smallest useful session — one or two items, about two minutes."
-              : "Today's mix — gates, reviews, and one new ayah if yesterday's passed."}
-          </p>
+          <h1>{title}</h1>
+          <p className="caption">{caption}</p>
         </header>
 
         <section className="card" aria-labelledby="drill-h">
@@ -69,7 +103,7 @@ export default async function SessionPage({
               THE DRILL
             </h2>
           </div>
-          <SessionGate mode={mode} />
+          <SessionGate mode={mode} drill={drill} />
         </section>
       </div>
     </div>

@@ -19,6 +19,7 @@ import { readChoices } from "@/lib/onboarding/choices";
 import { SessionIsland } from "@/components/session/SessionIsland";
 import { ONBOARDING_HREF } from "@/lib/onboarding/surahs";
 import type { SessionMode } from "@/lib/session/run";
+import type { DrillSpec } from "@/lib/drill/handoff";
 
 type State =
   | { kind: "loading" }
@@ -30,9 +31,14 @@ export interface SessionGateProps {
    *  session. Read from `/session`'s own `?mode=` and passed straight down;
    *  this component decides nothing about it. */
   mode?: SessionMode;
+  /** Step 20 — a continuous drill request from `/drill` (`?drill=range|page`),
+   *  or null for an ordinary session. Passed straight down; the surah is still
+   *  the enrolled one this gate reads, so a drill runs within the surah the
+   *  learner is actually enrolled in. */
+  drill?: DrillSpec | null;
 }
 
-export function SessionGate({ mode = "full" }: SessionGateProps) {
+export function SessionGate({ mode = "full", drill = null }: SessionGateProps) {
   const [state, setState] = useState<State>({ kind: "loading" });
 
   useEffect(() => {
@@ -68,5 +74,5 @@ export function SessionGate({ mode = "full" }: SessionGateProps) {
     );
   }
 
-  return <SessionIsland surah={state.surah} mode={mode} />;
+  return <SessionIsland surah={state.surah} mode={mode} drill={drill} />;
 }
