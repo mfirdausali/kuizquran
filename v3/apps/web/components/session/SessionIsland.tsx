@@ -60,8 +60,20 @@ import {
 import { structuredFor } from "@/lib/drill/preview";
 import { ayatForSelection } from "@/lib/drill/sites";
 import type { DrillSpec } from "@/lib/drill/handoff";
-import type { SessionSummary } from "@engine/sessionSummary.ts";
+import { formatDuration, type Greeting, type SessionSummary } from "@engine/sessionSummary.ts";
 import type { ExtraLearnGrant, WeakSpot } from "@engine/freeplay.ts";
+
+// `summarizeSession`'s own header names this as one of the four facts "the
+// completion screen shows" — the ENGINE decides which of the four buckets an
+// hour falls into (`greetingForHour`); this component only supplies the
+// words for a bucket it is handed, the same division StageBadge draws
+// between a decided `stage` and its own component-local `DOT_CLASS` map.
+const GREETING_TEXT: Record<Greeting, string> = {
+  morning: "Good morning.",
+  afternoon: "Good afternoon.",
+  evening: "Good evening.",
+  night: "Good night.",
+};
 
 export interface SessionIslandProps {
   /** Which surah this session drills. Chosen at onboarding, passed in as data —
@@ -498,12 +510,16 @@ export function SessionIsland({ surah, mode = "full", drill = null }: SessionIsl
     const { summary } = phase;
     return (
       <div className="stack" data-testid="session-summary">
+        <p className="caption" data-testid="session-greeting">
+          {GREETING_TEXT[summary.greeting]}
+        </p>
         <h2 style={{ margin: 0, fontSize: 16 }}>Session complete</h2>
         <p className="caption">
           {summary.ayatCompleted} ayat · {summary.taps} taps
           {summary.recall !== null
             ? ` · ${Math.round(summary.recall * 100)}% recall`
             : ""}
+          {` · ${formatDuration(summary.durationMs)}`}
         </p>
         {/* FR6 Door 1: only ever shown once the engine itself grants it — this
             component never decides whether one more ayah fits the gate. */}

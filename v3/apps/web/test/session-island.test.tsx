@@ -847,3 +847,53 @@ describe("step 20 — a continuous drill started from /drill", () => {
     expect(screen.queryByTestId("session-drill")).toBeNull();
   });
 });
+
+// `packages/engine/src/sessionSummary.ts`'s own header: "the facts the
+// completion screen shows: duration, recall (accuracy), ayat completed, and
+// a time-of-day greeting." `summarizeSession` computes all four — but the
+// summary screen only ever printed `ayatCompleted`/`taps`/`recall`.
+// `summary.greeting` and `summary.durationMs` (plus the engine's own
+// `formatDuration`) reached the component's `SessionSummary` prop and were
+// then silently dropped, same shape as every other "computed, never
+// rendered" finding in DECISIONS.md (v3-D97's streak, v3-D111's nudge).
+describe("session summary — greeting and duration, computed by the engine but never shown until now", () => {
+  it("shows a time-of-day greeting for the real session-start hour, and the real elapsed duration", async () => {
+    installFetch();
+    // A fixed 09:00 UTC clock (DEFAULT_DAY_CONFIG's tz is UTC) → "morning"
+    // per `greetingForHour`. The mock advances by 1s on every read so the
+    // recorded event timestamps are genuinely increasing — the rendered
+    // duration must be provably real, never a frozen "0:00".
+    let clockMs = Date.UTC(2026, 0, 15, 9, 0, 0);
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => (clockMs += 1000));
+    const startedAt = clockMs;
+    startSessionOverride = () => Promise.resolve({ ok: true, run: trivialOneItemRun(corpus, startedAt) });
+
+    render(<SessionIsland surah={SURAH} />);
+    await waitFor(() => expect(screen.getByTestId("session-drill")).toBeTruthy());
+    await completeSession();
+    await waitFor(() => expect(screen.getByTestId("session-summary")).toBeTruthy());
+
+    expect(screen.getByTestId("session-greeting").textContent).toMatch(/good morning/i);
+    const stats = screen.getByTestId("session-summary").textContent ?? "";
+    expect(stats).toMatch(/\d+:\d{2}/);
+
+    nowSpy.mockRestore();
+  });
+
+  it("shows a different greeting outside the morning window — the bucket is the engine's, not a component guess", async () => {
+    installFetch();
+    let clockMs = Date.UTC(2026, 0, 15, 22, 0, 0); // 22:00 UTC → "night"
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => (clockMs += 1000));
+    const startedAt = clockMs;
+    startSessionOverride = () => Promise.resolve({ ok: true, run: trivialOneItemRun(corpus, startedAt) });
+
+    render(<SessionIsland surah={SURAH} />);
+    await waitFor(() => expect(screen.getByTestId("session-drill")).toBeTruthy());
+    await completeSession();
+    await waitFor(() => expect(screen.getByTestId("session-summary")).toBeTruthy());
+
+    expect(screen.getByTestId("session-greeting").textContent).toMatch(/good night/i);
+
+    nowSpy.mockRestore();
+  });
+});
