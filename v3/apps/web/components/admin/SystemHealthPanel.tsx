@@ -154,7 +154,8 @@ export function SystemHealthPanel() {
         {outcome ? (
           <p className="caption" role="status">
             {outcome.ok
-              ? `Rebuild complete — ${outcome.usersProcessed ?? 0} learner(s), ${outcome.atomsWritten ?? 0} atom(s) written.`
+              ? `Rebuild complete — ${outcome.usersProcessed ?? 0} learner(s), ${outcome.atomsWritten ?? 0} atom(s) written.` +
+                (outcome.deadLetterCount ? ` ${outcome.deadLetterCount} learner(s) skipped (unencodable data) — their existing cache is untouched.` : "")
               : outcome.message}
           </p>
         ) : null}

@@ -39,17 +39,30 @@ use Illuminate\Support\Facades\DB;
  * FoldRunnerProcess — the same invocation path DeterminismCheckCommand
  * uses), and writes back exactly what it returns.
  *
- * ── REPLACE, NEVER MERGE ──
+ * ── REPLACE, NEVER MERGE — BUT ONLY THE USERS ACTUALLY SENT ──
  * A rebuilt user's ENTIRE atom_cache row set is deleted and reinserted from
- * the fresh fold, inside one transaction per user. WIREFRAME §16: "staff may
- * never edit graded state" — a rebuild re-derives the whole truth from the
- * log, so a stale row for an atom the fresh fold no longer produces (e.g. a
+ * the fresh fold, inside one transaction. WIREFRAME §16: "staff may never
+ * edit graded state" — a rebuild re-derives the whole truth from the log, so
+ * a stale row for an atom the fresh fold no longer produces (e.g. a
  * PDPA-purged ayah reference, or a corrected engine bug) must not survive
  * the rebuild it was supposed to be fixed by.
+ *
+ * ── DEAD-LETTER QUARANTINE (edge case #130, the half v3-D114 left open) ──
+ * `json_encode()` fails ATOMICALLY across a whole payload on the first
+ * invalid-UTF8 byte or non-finite float anywhere in it — the same root cause
+ * `DeterminismCheckCommand::sampleFromDatabase()` was fixed for. Here it is
+ * sharper: because this class REPLACES, a fix that merely excluded a
+ * poisoned user from the runner's input while still deleting their existing
+ * rows would WIPE their cache with nothing to reinsert — strictly worse than
+ * today's whole-rebuild failure. So each user's own entry is encode-tested
+ * BEFORE it is added to the batch, and the eventual `DELETE` is scoped to
+ * exactly the user IDs that were actually sent (and so will actually get a
+ * fresh row back) — never to every candidate ID. A dead-lettered user's row
+ * set is left byte-identical, "log intact," same as the nightly check.
  */
 class AtomCacheRebuilder
 {
-    /** @return array{usersProcessed:int, atomsWritten:int} */
+    /** @return array{usersProcessed:int, atomsWritten:int, deadLetters:list<array{userId:mixed,error:string}>} */
     public function rebuild(): array
     {
         $userIds = Event::query()->select('user_id')->distinct()->pluck('user_id')
@@ -61,14 +74,36 @@ class AtomCacheRebuilder
             // Genuinely nothing to rebuild — not an error (edge case #167's
             // "the failure path returns null, not zero" is about UNKNOWN vs
             // zero; an empty log truthfully re-derives to zero atoms).
-            return ['usersProcessed' => 0, 'atomsWritten' => 0];
+            return ['usersProcessed' => 0, 'atomsWritten' => 0, 'deadLetters' => []];
         }
 
-        $users = $userIds->map(fn ($userId) => [
-            'userId' => $userId,
-            'events' => Event::query()->where('user_id', $userId)->orderBy('id')->get()
-                ->map(fn (Event $e) => EventWireCodec::toWire($e))->all(),
-        ])->all();
+        $users = [];
+        $deadLetters = [];
+        foreach ($userIds as $userId) {
+            $entry = [
+                'userId' => $userId,
+                'events' => Event::query()->where('user_id', $userId)->orderBy('id')->get()
+                    ->map(fn (Event $e) => EventWireCodec::toWire($e))->all(),
+            ];
+
+            if (json_encode($entry, JSON_UNESCAPED_SLASHES) === false) {
+                $deadLetters[] = [
+                    'userId' => $userId,
+                    'error' => 'unencodable event data — '.json_last_error_msg(),
+                ];
+
+                continue;
+            }
+
+            $users[] = $entry;
+        }
+
+        if ($users === []) {
+            // Every candidate was dead-lettered — nothing to send the
+            // runner, and (§16) nothing may be deleted either: a rebuild
+            // that rebuilds nobody must wipe nobody.
+            return ['usersProcessed' => 0, 'atomsWritten' => 0, 'deadLetters' => $deadLetters];
+        }
 
         [$exit, $report] = FoldRunnerProcess::run(
             ['bin/rebuild-atom-cache.ts'],
@@ -87,9 +122,13 @@ class AtomCacheRebuilder
         /** @var list<array<string,mixed>> $rows */
         $rows = $report['rows'] ?? [];
         $now = (int) round(microtime(true) * 1000);
+        $sentUserIds = array_map(fn (array $u) => $u['userId'], $users);
 
-        DB::transaction(function () use ($userIds, $rows, $now) {
-            DB::table('atom_cache')->whereIn('user_id', $userIds)->delete();
+        DB::transaction(function () use ($sentUserIds, $rows, $now) {
+            // Scoped to exactly the users sent to the runner — a
+            // dead-lettered user's ID is not in this list, so their existing
+            // rows are never touched by this DELETE.
+            DB::table('atom_cache')->whereIn('user_id', $sentUserIds)->delete();
             foreach (array_chunk($rows, 500) as $chunk) {
                 DB::table('atom_cache')->insert(array_map(fn (array $r) => [
                     'user_id' => $r['userId'],
@@ -112,6 +151,6 @@ class AtomCacheRebuilder
             }
         });
 
-        return ['usersProcessed' => count($users), 'atomsWritten' => count($rows)];
+        return ['usersProcessed' => count($users), 'atomsWritten' => count($rows), 'deadLetters' => $deadLetters];
     }
 }

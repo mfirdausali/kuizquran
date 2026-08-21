@@ -194,6 +194,7 @@ class SystemHealthController extends Controller
             'queued' => false,
             'usersProcessed' => $result['usersProcessed'],
             'atomsWritten' => $result['atomsWritten'],
+            'deadLetters' => $result['deadLetters'],
         ]);
     }
 }

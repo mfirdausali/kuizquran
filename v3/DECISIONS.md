@@ -6524,3 +6524,118 @@ remain deferred too — this sandbox does have a real Postgres 16 server
 installed (unlike when v3-D32 was written against sqlite-only), so the
 "untestable" premise no longer holds, but building and proving that is a
 separate, larger task from tonight's scope.
+
+### v3-D115 — edge case #130's other half: `AtomCacheRebuilder` shares the nightly check's exact json_encode wedge, but REPLACE semantics make the naive fix actively dangerous
+
+**Picked up exactly the deferral v3-D114 named.** `AtomCacheRebuilder::rebuild()`
+batched every candidate user (every user with events OR an existing
+`atom_cache` row) into one `json_encode()`'d envelope before calling the
+fold-runner, the identical root cause as `DeterminismCheckCommand
+::sampleFromDatabase()` before v3-D114 — one learner's unencodable event data
+(invalid-UTF8 `deviceId`, or a non-finite `strength`/`stability`/`difficulty`
+float, both storable in a real Postgres column) failed the WHOLE `json_encode`
+call, so the admin's "rebuild atom cache" button failed for every learner in
+the batch, not just the corrupted one.
+
+**Why this is sharper than the nightly check, not just a copy of it.** The
+nightly check only ever COMPARES; excluding a dead-lettered learner from the
+comparison is side-effect-free. This rebuilder REPLACES — WIREFRAME §16, "a
+rebuilt user's ENTIRE atom_cache row set is deleted and reinserted from the
+fresh fold." v3-D114 named the trap precisely: a fix that dead-lettered the
+poisoned learner's ENCODING but still deleted their existing rows before
+excluding them from re-insert would silently WIPE their cache with nothing to
+replace it — strictly worse than today's whole-rebuild failure. The dead-letter
+set and the `DELETE ... WHERE user_id IN (...)` scope had to be reconciled
+together, or the fix would trade one bug for a worse one.
+
+**Fixed.** Each candidate user's `{userId, events}` entry is now
+`json_encode()`-tested in isolation BEFORE being added to the batch sent to
+the fold-runner — mirroring `sampleFromDatabase()`'s per-user encode-test
+exactly. A user that fails is pushed to a `deadLetters` list
+(`{userId, error}`) and excluded from the batch. Critically, the subsequent
+`DELETE` is now scoped to `$sentUserIds` — the user IDs actually present in
+the batch handed to the runner (equivalently, the IDs the runner's returned
+rows can possibly belong to) — **never** to the original candidate list. A
+dead-lettered user's ID never enters `$sentUserIds`, so their existing rows
+are never touched by the `DELETE`, "log intact" in the same sense v3-D114 used
+it. If every candidate is dead-lettered, the method returns early with
+`atomsWritten: 0` and no `DELETE` at all — a rebuild that rebuilds nobody must
+wipe nobody.
+
+`SystemHealthController::rebuildAtomCache()` now forwards `deadLetters` in its
+JSON response alongside `usersProcessed`/`atomsWritten` — an admin who clicks
+"rebuild" while one learner's data is corrupted needs to see that a learner
+was skipped, not read a bare "rebuild complete" that hides it. `lib/admin
+/health.ts#rebuildAtomCache` decodes it as a `deadLetterCount` (a count, not
+the raw list — the admin console has no per-user drill-down surface today, so
+exposing more than a count would be unused surface area); `SystemHealthPanel
+.tsx` appends "`N learner(s) skipped (unencodable data) — their existing
+cache is untouched.`" to the existing rebuild-complete caption only when the
+count is nonzero, the same "only show it when it's true" discipline
+`report.rebuildRunning` already uses on this same panel.
+
+**RED confirmed three times, one per layer, each by reverting only the
+source and re-running with the new tests kept:**
+- Backend: `git stash` of `AtomCacheRebuilder.php` + `SystemHealthController
+  .php` alone. The new `SystemHealthTest` case failed with `Expected response
+  status code [200] but received 500` — the exact wedge, reproduced live: a
+  clean learner's rebuild genuinely failed because a different learner's
+  `device_id` held an invalid-UTF-8 byte. `git stash pop` restored the fix
+  byte-identically; 9/9 `SystemHealthTest` cases green (was 8).
+- Frontend decode: `git stash` of `lib/admin/health.ts` alone. Both new
+  `health.test.ts` cases failed on exactly `expected undefined to be 1` /
+  `to be +0` — the two other 12 cases in the file were unaffected. Reverted;
+  14/14 green (was 12).
+- Frontend render: `git stash` of `SystemHealthPanel.tsx` alone. The new
+  "names the skipped learner count" case failed on a `waitFor` timeout
+  (the caption never appeared); the sibling "no dead letters → no mention of
+  skipped" case and the other 7 pre-existing cases were unaffected. Reverted;
+  9/9 green (was 7).
+
+The load-bearing backend assertion does not stop at "the response is 200": it
+asserts (1) `usersProcessed === 1` — only the clean learner was actually
+rebuilt, not both; (2) `deadLetters` names exactly the poisoned learner's ID;
+(3) the clean learner's fresh row exists; and (4) the poisoned learner's
+PRE-EXISTING row (seeded by a genuine prior `rebuild()` call, before
+corruption, through the real fold-runner — not a hand-inserted fixture) is
+`assertEquals`-identical, byte for byte, to what it was before the corrupted
+rebuild ran. Assertion (4) is what actually proves "never wiped" rather than
+merely "still present" — a bug that deleted-then-silently-failed-to-reinsert
+would still leave a row absent, which a weaker `assertNotNull` alone would not
+catch, but a row present-and-mutated would pass `assertNotNull` while still
+being wrong; only the `assertEquals` against the true prior value closes both
+gaps at once.
+
+**`TZ=UTC make test`** (all seven suites, from a clean `make setup` this
+session — this sandbox had no dependencies installed at all before this run,
+including a `v3/api` composer install that first hit the sandbox's outbound
+git-mirror timeout and needed one retry with a longer process timeout, purely
+an environment artifact, not a code change): **2064 passing** (was 2059,
+**+5** — exactly this run's new tests: 1 in `SystemHealthTest.php`, 2 in
+`health.test.ts`, 2 in `system-health-panel.test.tsx`; no other suite moved —
+255 v2 vitest + 47 v2/api + **274** v3/api + 111 corpus-compiler + 417 engine
++ 61 fold-runner + **899** apps/web, +2 incomplete PAY-1 by design).
+`check-test-floor.mjs`: OK, 2064 >= floor 1899 (+165 margin, `TEST-FLOOR` left
+unmoved). `TZ=UTC make build`: exit 0, 20 routes (unchanged — no route added
+or removed). `npm run gates`: locked-css OK, fonts degraded-but-non-blocking
+(pre-existing), boundaries OK (204 files), corpus-morphology OK,
+corpus-glyphs OK. `npx tsc --noEmit`: clean. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff was reverted before committing,
+same discipline as every prior entry — verified with `git status --porcelain
+-- v1 v2` empty immediately before commit). No Arabic codepoint introduced:
+the full diff was swept with a Python Unicode-range check over the Arabic,
+Arabic Supplement, Arabic Extended-A, and both Presentation Forms blocks, plus
+a `fromCharCode`/`\u06xx`/`\ufbxx`/`\ufexx` grep — zero matches on both; every
+new line addresses a userId, an error string, or an integer count, never
+corpus text.
+
+**Explicitly NOT addressed, named so a future run doesn't re-discover it as
+new.** Per-user Postgres advisory locks (v3-D32) and late-arrival refold
+remain deferred — unchanged by this run, and still the same "this sandbox now
+has a real Postgres 16 server, so 'untestable' no longer holds, but building
+and proving it is separate, larger scope" status v3-D114 left them in. With
+both `DeterminismCheckCommand` and `AtomCacheRebuilder` now dead-letter-safe,
+every known `json_encode`-batching call site in this codebase that hands
+learner data to the fold-runner over stdin has been checked and fixed — a
+`grep -rn "FoldRunnerProcess::run"` over `v3/api/app` confirms these are the
+only two callers.

@@ -162,6 +162,44 @@ describe("rebuildAtomCache — the #168 mutex outcomes, distinguishable", () => 
     expect(outcome.atomsWritten).toBe(9);
   });
 
+  /**
+   * Edge case #130's other half (v3-D114 left this open;
+   * AtomCacheRebuilder's own fix closes it): a dead-lettered learner's
+   * existing atom_cache rows are left untouched, never wiped — the client
+   * must surface that a rebuild completed WITH a quarantine, not silently
+   * drop it.
+   */
+  it("a completed rebuild with dead letters reports the count, still ok", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          started: true,
+          queued: false,
+          usersProcessed: 4,
+          atomsWritten: 9,
+          deadLetters: [{ userId: 7, error: "unencodable event data" }],
+        }),
+        { status: 200 },
+      ),
+    ) as unknown as typeof fetch;
+
+    const outcome = await rebuildAtomCache();
+    expect(outcome.ok).toBe(true);
+    expect(outcome.deadLetterCount).toBe(1);
+  });
+
+  it("a completed rebuild with an empty dead-letter list reports a genuine zero", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({ started: true, queued: false, usersProcessed: 4, atomsWritten: 9, deadLetters: [] }),
+        { status: 200 },
+      ),
+    ) as unknown as typeof fetch;
+
+    const outcome = await rebuildAtomCache();
+    expect(outcome.deadLetterCount).toBe(0);
+  });
+
   /** #168: a 202 while another rebuild holds the lock — QUEUED, never a failure. */
   it("a 202 while the mutex is held reports queued, not ok, not a bare failure", async () => {
     globalThis.fetch = vi.fn(async () =>

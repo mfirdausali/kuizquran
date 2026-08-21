@@ -112,6 +112,10 @@ export interface RebuildOutcome {
   message: string;
   usersProcessed?: number;
   atomsWritten?: number;
+  /** Edge case #130's other half: a learner whose event data could not be
+   *  encoded for the fold-runner. Their EXISTING atom_cache rows are left
+   *  untouched, never wiped — see AtomCacheRebuilder's own header. */
+  deadLetterCount?: number;
 }
 
 /**
@@ -164,5 +168,6 @@ export async function rebuildAtomCache(): Promise<RebuildOutcome> {
     message: "rebuild complete",
     usersProcessed: typeof b.usersProcessed === "number" ? b.usersProcessed : undefined,
     atomsWritten: typeof b.atomsWritten === "number" ? b.atomsWritten : undefined,
+    deadLetterCount: Array.isArray(b.deadLetters) ? b.deadLetters.length : undefined,
   };
 }

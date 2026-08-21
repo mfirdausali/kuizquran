@@ -53,9 +53,52 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2059 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 273 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 895 apps/web. (v3-D114, 2026-08-20)
+make test    # 2064 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 274 v3/api + 111 corpus-compiler
+             # + 417 engine + 61 fold-runner + 899 apps/web. (v3-D115, 2026-08-21)
+             # NOTE (v3-D115): edge case #130's OTHER half — `AtomCacheRebuilder`
+             # (the admin "rebuild atom cache" action) shares the EXACT same
+             # json_encode batching wedge v3-D114 fixed for the nightly check, but
+             # is sharper: because this rebuilder REPLACES (delete-then-reinsert,
+             # WIREFRAME §16), a naive fix that dead-lettered a poisoned learner's
+             # ENCODING but still deleted their existing atom_cache rows before
+             # excluding them from re-insert would silently WIPE their cache with
+             # nothing to replace it — strictly worse than today's whole-rebuild
+             # failure, exactly the trap v3-D114 named and deferred. Fixed by
+             # reconciling both halves together: each candidate user's entry is
+             # now json_encode()-tested in isolation before joining the batch; a
+             # user that fails is dead-lettered and excluded, and the subsequent
+             # `DELETE ... WHERE user_id IN (...)` is scoped to exactly the user
+             # IDs actually sent to the runner — never the original candidate
+             # list — so a dead-lettered learner's existing row is never touched.
+             # `SystemHealthController`/`lib/admin/health.ts`/`SystemHealthPanel.tsx`
+             # thread the dead-letter count through so an admin who clicks
+             # "rebuild" is told a learner was skipped, never a bare "complete."
+             # RED confirmed three times, one per layer (`git stash` of the
+             # backend pair, then `health.ts` alone, then `SystemHealthPanel.tsx`
+             # alone, tests kept each time): the backend case reproduced the
+             # exact live wedge (`Expected... 200 but received 500`); both
+             # frontend cases failed on exactly the new assertions, siblings
+             # unaffected; each reverted byte-identically and re-ran green. The
+             # load-bearing backend assertion `assertEquals`s the poisoned
+             # learner's PRE-rebuild row (seeded via a real prior `rebuild()`
+             # call through the actual fold-runner, then corrupted afterward)
+             # against its POST-rebuild row, byte for byte — proving "never
+             # wiped," not merely "still present." `TZ=UTC make test`: 2064
+             # passing (was 2059, +5 — exactly this run's new tests: 1 PHPUnit +
+             # 2 + 2 vitest; no other suite moved). `check-test-floor.mjs`: OK,
+             # 2064 >= floor 1899 (+165 margin, TEST-FLOOR unmoved). `TZ=UTC make
+             # build`: exit 0, 20 routes (unchanged). `npm run gates`: all green
+             # (fonts degraded-but-non-blocking, pre-existing; boundaries 204
+             # files). `npx tsc --noEmit` clean. No v1/v2 edit (stray
+             # v2/tsconfig.tsbuildinfo build-cache diff reverted before
+             # committing). No Arabic codepoint (full diff swept over every
+             # Arabic block + presentation forms + \u06xx/fromCharCode, zero
+             # matches). With this, both known fold-runner stdin callers
+             # (`grep -rn "FoldRunnerProcess::run" app/` — exactly two) are
+             # dead-letter-safe. Per-user Postgres advisory locks (v3-D32) and
+             # late-arrival refold remain open, unchanged by this run. See
+             # DECISIONS.md v3-D115.
              # NOTE (v3-D114): DEFECTS.md/edge case #130 — `sampleFromDatabase()`
              # batched every sampled learner into ONE envelope and `json_encode()`d
              # it whole; that call fails ATOMICALLY on the first invalid-UTF8 byte

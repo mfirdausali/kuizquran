@@ -6,6 +6,7 @@ use App\Http\Controllers\Admin\SystemHealthController;
 use App\Models\AdminAudit;
 use App\Models\Event;
 use App\Models\User;
+use App\Support\AtomCacheRebuilder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -186,6 +187,78 @@ class SystemHealthTest extends TestCase
 
         // Lock released — a rebuild that finished must not leave the mutex held.
         $this->assertTrue(Cache::lock(SystemHealthController::REBUILD_LOCK)->get(), 'lock must be released after a completed rebuild');
+        Cache::lock(SystemHealthController::REBUILD_LOCK)->forceRelease();
+    }
+
+    /**
+     * DEFECTS.md / edge case #130's OTHER half, deliberately left open by
+     * v3-D114: `AtomCacheRebuilder` shares the nightly check's exact root
+     * cause — it also batches every candidate user into ONE
+     * `json_encode()`'d envelope before calling the fold-runner, so one
+     * learner's unencodable event data (invalid-UTF8 `device_id`) previously
+     * failed the WHOLE rebuild for every learner in the batch. Because this
+     * rebuilder REPLACES (delete-then-reinsert, WIREFRAME §16), a naive fix
+     * that dead-lettered the poisoned learner but still deleted their
+     * EXISTING atom_cache rows before excluding them from re-insert would
+     * silently WIPE their cache with nothing to replace it — strictly worse
+     * than today's whole-rebuild failure. This proves both halves at once:
+     * (1) the clean learner's rebuild is not wedged by the poisoned one, and
+     * (2) the poisoned learner's pre-existing row is left byte-identical —
+     * never deleted, never rewritten, only skipped.
+     *
+     * MUTATION: revert to encoding the whole `$users` batch in one
+     * `json_encode()` call. This test goes back to `started: false` for the
+     * WHOLE request (the clean learner's row is never written either).
+     */
+    public function test_a_poisoned_learner_is_dead_lettered_and_their_existing_cache_is_never_wiped(): void
+    {
+        Cache::lock(SystemHealthController::REBUILD_LOCK)->forceRelease();
+
+        $clean = User::factory()->create();
+        Event::create([
+            'user_id' => $clean->id, 'uuid' => (string) Str::uuid(),
+            'type' => 'rung_complete', 'ts' => 1_000, 'surah' => 112, 'ayah' => 1,
+            'rung' => 'S2', 'correct' => true, 'received_at' => 1_000,
+        ]);
+
+        $poisoned = User::factory()->create();
+        Event::create([
+            'user_id' => $poisoned->id, 'uuid' => (string) Str::uuid(),
+            'type' => 'rung_complete', 'ts' => 1_000, 'surah' => 112, 'ayah' => 1,
+            'rung' => 'S2', 'correct' => true, 'received_at' => 1_000,
+        ]);
+
+        // A real, prior rebuild gives the poisoned learner a genuine cache
+        // row FIRST — this is what proves "untouched" rather than merely
+        // "present" below.
+        app(AtomCacheRebuilder::class)->rebuild();
+        $priorRow = DB::table('atom_cache')->where('user_id', $poisoned->id)->where('surah', 112)->first();
+        $this->assertNotNull($priorRow, 'setup: the poisoned learner needs a real prior row to prove untouched');
+
+        // NOW corrupt the poisoned learner's stored event — after their
+        // cache was already correctly computed from the clean version.
+        DB::table('events')->where('user_id', $poisoned->id)
+            ->update(['device_id' => "\xB1\x31"]); // invalid UTF-8 — json_encode() fails on this byte alone
+
+        $response = $this->postJson('/api/admin/health/rebuild-atom-cache');
+
+        $response->assertOk();
+        $this->assertTrue($response->json('started'));
+        $this->assertSame(1, $response->json('usersProcessed'), 'only the clean learner is actually rebuilt');
+        $this->assertCount(1, $response->json('deadLetters'), 'exactly the poisoned learner is quarantined');
+        $this->assertSame($poisoned->id, $response->json('deadLetters.0.userId'));
+
+        $cleanRow = DB::table('atom_cache')->where('user_id', $clean->id)->where('surah', 112)->first();
+        $this->assertNotNull($cleanRow, 'the clean learner was rebuilt despite the poisoned learner sharing the batch');
+
+        $afterRow = DB::table('atom_cache')->where('user_id', $poisoned->id)->where('surah', 112)->first();
+        $this->assertNotNull($afterRow, 'the poisoned learner\'s existing row must survive — never deleted with nothing to replace it');
+        $this->assertEquals(
+            (array) $priorRow,
+            (array) $afterRow,
+            'byte-identical: the poisoned learner\'s cache is untouched, not merely non-empty',
+        );
+
         Cache::lock(SystemHealthController::REBUILD_LOCK)->forceRelease();
     }
 

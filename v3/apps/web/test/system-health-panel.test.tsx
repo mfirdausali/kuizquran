@@ -162,6 +162,49 @@ describe("SystemHealthPanel — the rebuild button, edge case #168", () => {
     expect(screen.getByText(/12/)).toBeTruthy();
   });
 
+  /**
+   * Edge case #130's other half: a dead-lettered learner's existing
+   * atom_cache rows are left untouched by AtomCacheRebuilder, but an admin
+   * who clicked "rebuild" must still be told a learner was skipped — a bare
+   * "rebuild complete" would silently hide a real quarantine.
+   */
+  it("a completed rebuild with dead letters names the skipped learner count", async () => {
+    stubHealthThenRebuild(
+      new Response(
+        JSON.stringify({
+          started: true,
+          queued: false,
+          usersProcessed: 5,
+          atomsWritten: 12,
+          deadLetters: [{ userId: 7, error: "unencodable event data" }],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    render(<SystemHealthPanel />);
+    const button = await screen.findByRole("button", { name: /rebuild/i });
+    fireEvent.click(button);
+
+    await waitFor(() => expect(screen.getByText(/1 learner\(s\) skipped/i)).toBeTruthy());
+  });
+
+  it("a completed rebuild with no dead letters never mentions skipped learners", async () => {
+    stubHealthThenRebuild(
+      new Response(
+        JSON.stringify({ started: true, queued: false, usersProcessed: 5, atomsWritten: 12, deadLetters: [] }),
+        { status: 200 },
+      ),
+    );
+
+    render(<SystemHealthPanel />);
+    const button = await screen.findByRole("button", { name: /rebuild/i });
+    fireEvent.click(button);
+
+    await waitFor(() => expect(screen.getByText(/5/)).toBeTruthy());
+    expect(screen.queryByText(/skipped/i)).toBeNull();
+  });
+
   it("a 202-queued response is reported as queued, never as a silent success", async () => {
     stubHealthThenRebuild(
       new Response(
