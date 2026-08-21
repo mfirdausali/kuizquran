@@ -53,9 +53,73 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2071 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 281 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 899 apps/web. (v3-D116, 2026-08-21)
+make test    # 2085 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 275 v3/api + 111 corpus-compiler
+             # + 417 engine + 61 fold-runner + 919 apps/web. (v3-D117, 2026-08-21)
+             # NOTE (v3-D117): FR6 Door 3 ("open practice") — the last of
+             # freeplay.ts's three doors — had zero production callers, named
+             # out of scope by v3-D98, D106, D111, D112 and D113 alike for the
+             # identical reason: "needs an any-ayah picker route that does not
+             # exist." That route now exists: new `/practice`
+             # (`components/practice/PracticePicker.tsx` +
+             # `app/(app)/practice/page.tsx`), a new `lib/practice/handoff.ts`
+             # URL contract mirroring `lib/drill/handoff.ts`'s own shape, and
+             # `lib/session/run.ts#startOpenPractice` — always free-play
+             # (`structured:false`, unconditionally; freeplay.ts's own header:
+             # "weak-spot gym is the exception" and Door 3 gets none), so an
+             # untaught ayah practiced here can never accidentally encode and a
+             # strong one can never be damaged, true by construction via
+             # `update.ts:71`'s guard rather than by caller discipline. Unlike
+             # every other entry point in `run.ts`, Door 3 forces the LEARNER'S
+             # chosen difficulty (S2 partial / S3 full — narrowed from
+             # `openPracticePick`'s own `Drill` type, which also admits "S1"
+             # and "chain": S1/pretest is a first-ENCOUNTER property, not a
+             # repeatable exercise, and "chain" needs `bridge.ts`, atticked at
+             # the engine port, DEFECTS.md#E-08) rather than the atom's real
+             # strength — a new `startFromQueue` `initialMachine` override,
+             # used only by Door 3. `SessionIsland`'s summary screen gains an
+             # unconditional "Practice any ayah freely" link (never an
+             # engine-computed grant like Doors 1/2 — a learner can always
+             # freely practice, so nothing gates it behind a fetch).
+             #
+             # Mutation-verified: `git stash` of every changed/new SOURCE file
+             # (tests kept) failed exactly the 9 new Door-3 test cases across
+             # four files, 70 other cases in those same files unaffected;
+             # restored byte-identically, 88/88 green again. The load-bearing
+             # "S2 forces PARTIAL blanking" test seeds a genuinely CARRY-band
+             # atom by spacing real S3 completions across different learning
+             # days until the fold itself reports strength >=80 — confirming
+             # its own precondition rather than assuming a rep count reaches
+             # it (a single S3 append only reaches ~26 strength from a fresh
+             # atom, comfortably inside "learn" band, not "carry").
+             #
+             # `TZ=UTC make test`: 2085 passing (was 2071, +14 net across all
+             # suites — 18 new apps/web tests across four files, no other
+             # suite moved). `check-test-floor.mjs`: OK, 2085 >= floor 1899
+             # (+186 margin, `TEST-FLOOR` left unmoved). `TZ=UTC make build`:
+             # exit 0, 21 routes (was 20 — `/practice` is new). `npm run
+             # gates`: locked-css OK, fonts degraded-but-non-blocking
+             # (pre-existing), boundaries OK (208 files, up from 203 — five
+             # new files, no violation), corpus-morphology and corpus-glyphs
+             # OK. No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff reverted before committing). No Arabic
+             # codepoint introduced: every changed/new file swept individually
+             # over the Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms blocks — zero matches; every new line
+             # addresses an ayah number, a strength value, or a closed-set
+             # difficulty ("S2"/"S3"), never corpus text.
+             #
+             # NOT addressed, named so a future run doesn't re-discover it as
+             # new: `coldSuccessAdoption` remains unwired — Door 3 now gives it
+             # a real surface to attach to (an untaught ayah's hard-drill pass)
+             # but the offer itself is a genuine separate, tap-gated write path
+             # and deserves its own night. The SSR override gap
+             # (`lib/corpus/load.ts`, v3-D96/D110) and late-arrival refold
+             # (v3-D32/D116) are unchanged. With this, FR6's "three doors
+             # after session complete" is fully wired — only the adoption
+             # offer and surfacing the diminishing-returns nudge beyond Door 2
+             # remain as intentionally scoped-out refinements, not gaps. See
+             # DECISIONS.md v3-D117.
              # NOTE (v3-D116): v3-D32/v3-D70's deferred per-user Postgres advisory
              # lock, closed. Both `AtomCacheRebuilder::rebuild()` (writes
              # `atom_cache`, admin-triggered) and `DeterminismCheckCommand`'s

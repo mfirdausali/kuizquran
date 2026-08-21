@@ -848,6 +848,54 @@ describe("step 20 — a continuous drill started from /drill", () => {
   });
 });
 
+// v3-D117 — FR6 Door 3, "open practice". The `practice` prop starts a
+// single-ayah free-play session at a learner-chosen difficulty via
+// `startOpenPractice` — `/practice`'s picker links here; `SessionPage` parses
+// the URL into the `PracticeSpec` this prop carries. Unlike the drill prop,
+// open practice has no readiness precondition (an untaught ayah is exactly
+// what it is for) and is always free-play — there is no graded choice.
+describe("v3-D117 — open practice started from /practice", () => {
+  it("drills an UNTAUGHT ayah — the whole point of open practice — and writes only structured:false events", async () => {
+    installFetch();
+    render(<SessionIsland surah={SURAH} practice={{ ayah: 1, drill: "S3" }} />);
+    await waitFor(() => expect(screen.getByTestId("session-drill")).toBeTruthy());
+    await completeSession();
+    await waitFor(() => expect(screen.getByTestId("session-summary")).toBeTruthy());
+
+    const events = await getAllEvents();
+    const produced = events.filter((e) => e.type === "ayah_produced");
+    const taps = events.filter((e) => e.type === "reconstruct_tap");
+    expect(produced.length).toBeGreaterThan(0);
+    expect(taps.length).toBeGreaterThan(0);
+    expect(produced.every((e) => e.structured === false)).toBe(true);
+    expect(taps.every((e) => e.structured === false)).toBe(true);
+  });
+
+  it("declines with an honest message for an ayah that does not exist in the corpus", async () => {
+    installFetch();
+    render(<SessionIsland surah={SURAH} practice={{ ayah: 9999, drill: "S2" }} />);
+    await waitFor(() =>
+      expect(screen.getByText(/that ayah doesn't exist in this corpus/i)).toBeTruthy(),
+    );
+    expect(screen.queryByTestId("session-drill")).toBeNull();
+  });
+});
+
+// FR6 Door 3's entry point: an unconditional navigation link on the summary
+// screen (never an engine-computed offer like Doors 1/2 — a learner can
+// always freely practice, regardless of what today's fold says).
+describe("v3-D117 — the 'practice any ayah freely' link on the summary screen", () => {
+  it("appears on an ordinary session's summary screen and points at /practice", async () => {
+    installFetch();
+    render(<SessionIsland surah={SURAH} />);
+    await waitFor(() => expect(screen.getByTestId("session-drill")).toBeTruthy());
+    await completeSession();
+    await waitFor(() => expect(screen.getByTestId("session-summary")).toBeTruthy());
+    const link = screen.getByText(/practice any ayah freely/i);
+    expect(link.getAttribute("href")).toBe("/practice");
+  });
+});
+
 // `packages/engine/src/sessionSummary.ts`'s own header: "the facts the
 // completion screen shows: duration, recall (accuracy), ayat completed, and
 // a time-of-day greeting." `summarizeSession` computes all four — but the

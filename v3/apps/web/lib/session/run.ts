@@ -58,9 +58,13 @@ import { floorQueue } from "@engine/floor.ts";
 // FR6 diminishing-returns nudge (v3-D111) — see `diminishingReturnsNudge` below
 // for why this honesty line had zero production callers until it got the one
 // surface where a learner can mass the same atom: the Door 2 weak-spot offer.
+// FR6 Door 3 ("open practice", v3-D117) — see `startOpenPractice` below for
+// why `openPracticePick` had zero production callers until now: it needed an
+// any-ayah picker route, named out of scope by both v3-D98 and v3-D106.
 import {
   extraLearnGrant,
   weakSpots,
+  openPracticePick,
   diminishingReturns,
   type ExtraLearnGrant,
   type WeakSpot,
@@ -113,7 +117,13 @@ export type SessionUnavailable =
   // nothing the learner has ENCODED yet — distinct from "nothing-due" (a
   // finished daily queue) and "no-corpus" (a load failure): the learner picked
   // a real stretch, but none of it is ready to drill.
-  | "none-ready";
+  | "none-ready"
+  // FR6 Door 3 (`startOpenPractice`) — the requested ayah does not exist in
+  // this corpus (a hand-edited `/session?practice=...` URL, edge case #78's
+  // own discipline). Distinct from "none-ready": open practice has NO
+  // readiness precondition at all — an untaught ayah is exactly what it is
+  // for — this is purely "that coordinate is not in the corpus."
+  | "invalid-ayah";
 
 export interface StartInput {
   surah: number;
@@ -470,12 +480,113 @@ export async function startDrillSession(input: DrillStartInput, c: Corpus): Prom
 }
 
 /**
- * Shared by `startSession` and `startFloorSession`: given an already-built
- * queue and the fold it came from, decide RESUME-vs-NEW (never re-emitting
- * `session_start` for a session already open today) and build the initial
- * `SessionRun`. Extracted so the two entry points cannot drift on the
- * session_start/resume rule — the property `startSession`'s own header
- * documents as load-bearing for `sessionSummaryOf`'s duration origin.
+ * FR6 Door 3 — "open practice" (`packages/engine/src/freeplay.ts
+ * #openPracticePick`).
+ *
+ * `openPracticePick` validates a chosen (ayah, drill) pair against the corpus
+ * and has been real and unit-tested since `freeplay.ts` landed alongside
+ * Doors 1/2 (v3-D98, v3-D106), but had ZERO production callers — both of
+ * those entries' own headers named Door 3 out of scope, needing "an any-ayah
+ * picker" that did not exist. This is that entry point.
+ *
+ * Door 3 differs from every other entry point in this file in the one way
+ * that makes it "open" practice: the learner chooses BOTH the ayah — taught
+ * or not; an untaught ayah is exactly what `coldSuccessAdoption` exists for,
+ * though wiring the adoption offer itself remains out of scope here, named so
+ * a future run does not re-discover it as new — AND the drill's difficulty,
+ * independent of the atom's real progress. So this never filters by
+ * `encoded` the way `startDrillSession` does (BUG-3's gap guard is about
+ * GRADING a guess; free play grades nothing) and never sizes the
+ * reconstruction off the atom's real strength the way every other entry
+ * point here does — it uses a fixed, representative strength for the CHOSEN
+ * difficulty instead (`machineForOpenPractice`).
+ *
+ * `openPracticePick`'s own `Drill` type also admits "S1" and "chain" — but
+ * neither has a free-standing reconstruct surface in v3: S1/pretest is a
+ * property of a first encounter (`gradeClass.ts`), not a repeatable exercise,
+ * and "chain" needs `bridge.ts`, atticked at the engine port (DEFECTS.md#E-08
+ * — "nothing left to construct a seam from"). So `OpenPracticeDrill` is
+ * narrowed to the two rungs `reconstruct.ts` can actually build — the same
+ * "filter to what's actually drillable" discipline `startFloorSession` and
+ * `startWeakSpotDrill` already apply to a "connection" atom.
+ *
+ * ALWAYS free-play (`structured: false`, unconditionally — Door 3 has no
+ * graded option, unlike `startDrillSession`'s victory-lap CHOICE): FR6's own
+ * header on `freeplay.ts` states "free-play writes evidence only... weak-spot
+ * gym is the exception" and Door 3 gets no exception. Practicing an untaught
+ * ayah here can never accidentally encode it, and re-drilling a strong one
+ * can never damage it — "nothing here can be damaged" is true by
+ * construction, not by caller discipline.
+ */
+export type OpenPracticeDrill = "S2" | "S3";
+
+/** A representative strength for the CHOSEN difficulty — never the atom's
+ *  real one. `bandOf` (`packages/engine/src/atom.ts`): <40 learn, 40–80
+ *  reinforce, ≥80 carry. 50 sits in "reinforce" (about half the ayah
+ *  blanked, `blankCountFor`'s S2 shape); "S3" additionally forces
+ *  `full: true`, so its own strength value only affects `pickOptions`'
+ *  distractor difficulty, kept at the top of "carry" to match a genuinely
+ *  hard drill. */
+const OPEN_PRACTICE_STRENGTH: Record<OpenPracticeDrill, number> = { S2: 50, S3: 100 };
+
+function machineForOpenPractice(
+  c: Corpus,
+  surah: number,
+  ayah: number,
+  drill: OpenPracticeDrill,
+): ReconstructState {
+  return initReconstruct(c, surah, ayah, OPEN_PRACTICE_STRENGTH[drill], {
+    full: drill === "S3",
+  });
+}
+
+/** What `startOpenPractice` needs beyond an ordinary start: the chosen ayah
+ *  and the chosen difficulty. */
+export interface OpenPracticeStartInput extends StartInput {
+  readonly ayah: number;
+  readonly drill: OpenPracticeDrill;
+}
+
+export async function startOpenPractice(
+  input: OpenPracticeStartInput,
+  c: Corpus,
+): Promise<StartResult> {
+  const { surah, now, tz, ayah, drill } = input;
+
+  if (!Array.isArray(c.words) || c.words.length === 0) {
+    return { ok: false, unavailable: "no-corpus" };
+  }
+  if (!openPracticePick(c, ayah, drill).valid) {
+    return { ok: false, unavailable: "invalid-ayah" };
+  }
+
+  const prior = await getEventsForSurah(surah);
+  const atomsMap = rebuild(prior);
+  const queue: QueueItem[] = [
+    { kind: "review", atomKey: atomKey(surah, "ayah", ayah), ayah, estMin: 0 },
+  ];
+
+  return startFromQueue(
+    surah,
+    now,
+    tz,
+    queue,
+    atomsMap,
+    prior,
+    c,
+    false,
+    machineForOpenPractice(c, surah, ayah, drill),
+  );
+}
+
+/**
+ * Shared by `startSession`, `startFloorSession`, `startDrillSession` and
+ * `startOpenPractice`: given an already-built queue and the fold it came
+ * from, decide RESUME-vs-NEW (never re-emitting `session_start` for a
+ * session already open today) and build the initial `SessionRun`. Extracted
+ * so the entry points cannot drift on the session_start/resume rule — the
+ * property `startSession`'s own header documents as load-bearing for
+ * `sessionSummaryOf`'s duration origin.
  */
 async function startFromQueue(
   surah: number,
@@ -488,6 +599,13 @@ async function startFromQueue(
   // Step 20 — false for a "victory lap" continuous drill; true (the default)
   // for every other entry point (the daily assembly, the floor session).
   structured = true,
+  // FR6 Door 3 — when set, OVERRIDES `machineForItem`'s own strength-derived
+  // sizing for the first (and only) item. Open practice forces a specific,
+  // learner-chosen difficulty rather than deriving one from the atom's real
+  // strength, which is what every other caller of this function wants
+  // instead. Never passed by `startSession`/`startFloorSession`/
+  // `startDrillSession` — their sizing must always follow real progress.
+  initialMachine?: ReconstructState,
 ): Promise<StartResult> {
   if (queue.length === 0) {
     return { ok: false, unavailable: "nothing-due" };
@@ -514,7 +632,9 @@ async function startFromQueue(
 
   const first = queue[0];
   if (!first) return { ok: false, unavailable: "nothing-due" };
-  const { machine, rescaffolding } = machineForItem(c, surah, first, atomsMap);
+  const { machine, rescaffolding } = initialMachine
+    ? { machine: initialMachine, rescaffolding: false }
+    : machineForItem(c, surah, first, atomsMap);
 
   return {
     ok: true,

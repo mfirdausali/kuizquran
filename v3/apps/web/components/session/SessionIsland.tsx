@@ -29,6 +29,7 @@
 // `buildFace` from a corpus coordinate.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import type { Corpus } from "@engine/types.ts";
 
 import { QuizCard } from "@/components/quiz/QuizCard";
@@ -49,6 +50,7 @@ import {
   startDrillSession,
   startExtraLearn,
   startFloorSession,
+  startOpenPractice,
   startSession,
   startWeakSpotDrill,
   weakSpotOfferFor,
@@ -60,6 +62,7 @@ import {
 import { structuredFor } from "@/lib/drill/preview";
 import { ayatForSelection } from "@/lib/drill/sites";
 import type { DrillSpec } from "@/lib/drill/handoff";
+import type { PracticeSpec } from "@/lib/practice/handoff";
 import { formatDuration, type Greeting, type SessionSummary } from "@engine/sessionSummary.ts";
 import type { ExtraLearnGrant, WeakSpot } from "@engine/freeplay.ts";
 
@@ -89,6 +92,13 @@ export interface SessionIslandProps {
    *  resolved in lib/ (`ayatForSelection`, `structuredFor`) and handed to
    *  `startDrillSession` — this component still decides nothing. */
   drill?: DrillSpec | null;
+  /** FR6 Door 3 — an open-practice request from `/practice` (a chosen ayah +
+   *  difficulty), or null for an ordinary session. Takes precedence over
+   *  `mode` but yields to `drill` if somehow both are present (a hand-edited
+   *  URL cannot request two different kinds of session at once — `drill`
+   *  keeps the existing, longer-standing precedence). Handed straight to
+   *  `startOpenPractice` — this component decides nothing about it either. */
+  practice?: PracticeSpec | null;
 }
 
 type Phase =
@@ -102,7 +112,12 @@ type Phase =
   | { kind: "drilling" }
   | { kind: "summary"; summary: SessionSummary };
 
-export function SessionIsland({ surah, mode = "full", drill = null }: SessionIslandProps) {
+export function SessionIsland({
+  surah,
+  mode = "full",
+  drill = null,
+  practice = null,
+}: SessionIslandProps) {
   const [corpus, setCorpus] = useState<Corpus | null>(null);
   const [run, setRun] = useState<SessionRun | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
@@ -141,6 +156,9 @@ export function SessionIsland({ surah, mode = "full", drill = null }: SessionIsl
       : `page:${drill.selection.page}:${drill.mode}`
     : "";
 
+  // Same "key on the VALUE, not the object reference" care as `drillKey`.
+  const practiceKey = practice ? `${practice.ayah}:${practice.drill}` : "";
+
   // Load the corpus, then start (or RESUME) the session. Resume is not a
   // separate path: the queue is derived from the fold of the event log, so a
   // reload re-derives whatever is still due (edge case #93).
@@ -176,8 +194,11 @@ export function SessionIsland({ surah, mode = "full", drill = null }: SessionIsl
         // daily assembly. The ayat and the graded/victory-lap flag are resolved
         // in lib/ (`ayatForSelection` off the corpus geometry, `structuredFor`
         // off the mode) and handed to `startDrillSession`, which decides
-        // READINESS off the fold. `mode` (full/floor) applies only when there
-        // is no drill.
+        // READINESS off the fold. FR6 Door 3 — an open-practice request runs a
+        // single learner-chosen ayah at a learner-chosen difficulty, always
+        // free-play; handed to `startOpenPractice`, which decides VALIDITY off
+        // the corpus (never readiness — open practice has none). `mode`
+        // (full/floor) applies only when there is neither.
         const started = drill
           ? await startDrillSession(
               {
@@ -189,10 +210,15 @@ export function SessionIsland({ surah, mode = "full", drill = null }: SessionIsl
               },
               c,
             )
-          : await (mode === "floor" ? startFloorSession : startSession)(
-              { surah, now: Date.now(), tz: currentTz() },
-              c,
-            );
+          : practice
+            ? await startOpenPractice(
+                { surah, now: Date.now(), tz: currentTz(), ayah: practice.ayah, drill: practice.drill },
+                c,
+              )
+            : await (mode === "floor" ? startFloorSession : startSession)(
+                { surah, now: Date.now(), tz: currentTz() },
+                c,
+              );
         if (!alive) return;
         if (!started.ok) {
           setPhase({ kind: "unavailable", reason: started.unavailable });
@@ -253,12 +279,12 @@ export function SessionIsland({ surah, mode = "full", drill = null }: SessionIsl
       alive = false;
       unsubscribe?.();
     };
-    // `drillKey` (a stable string) rather than the `drill` object itself, so a
-    // parent re-render that hands down a fresh-but-equal object does not restart
-    // the session — the same "depend on the value, not the reference" care the
-    // rest of this file takes.
+    // `drillKey`/`practiceKey` (stable strings) rather than the `drill`/
+    // `practice` objects themselves, so a parent re-render that hands down a
+    // fresh-but-equal object does not restart the session — the same "depend
+    // on the value, not the reference" care the rest of this file takes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [surah, mode, drillKey]);
+  }, [surah, mode, drillKey, practiceKey]);
 
   const cur = useMemo(() => {
     if (!run || !corpus) return null;
@@ -497,12 +523,18 @@ export function SessionIsland({ surah, mode = "full", drill = null }: SessionIsl
     // a failure and NOT "nothing due" — they picked a real stretch, but none of
     // it is ready. Reconstructing an ayah never produced whole would be a
     // guess, so the drill honestly declines rather than grading one.
+    // FR6 Door 3: a hand-edited `/practice` handoff naming an ayah that does
+    // not exist in this corpus. Distinct from "none-ready" — open practice
+    // has no readiness precondition to fail; this is purely "not a real
+    // coordinate," edge case #78's own discipline.
     const message =
       phase.reason === "none-ready"
         ? "None of the ayat you picked have been learned yet, so there's nothing to drill here. Learn them first — in a full session — and they'll be ready."
-        : phase.reason === "nothing-due"
-          ? nothingDueMessage
-          : "This surah is not available on this device yet.";
+        : phase.reason === "invalid-ayah"
+          ? "That ayah doesn't exist in this corpus."
+          : phase.reason === "nothing-due"
+            ? nothingDueMessage
+            : "This surah is not available on this device yet.";
     return <p className="caption">{message}</p>;
   }
 
@@ -545,6 +577,15 @@ export function SessionIsland({ surah, mode = "full", drill = null }: SessionIsl
             {weakSpotNudge}
           </p>
         ) : null}
+        {/* FR6 Door 3: unlike Doors 1/2, open practice is not an engine-
+            computed grant — a learner can always freely practice any ayah, so
+            this is an unconditional navigation choice, never gated behind a
+            fetch. `/practice` is where the ayah + difficulty are actually
+            chosen; this component still decides nothing about what happens
+            there. */}
+        <Link className="btn btn--ghost" href="/practice">
+          Practice any ayah freely
+        </Link>
       </div>
     );
   }

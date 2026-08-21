@@ -6825,3 +6825,153 @@ new:**
   whole-cache action — but worth reconsidering (e.g. locking per-user inside
   the write loop instead of once up front) if rebuild ever becomes routine or
   partial/incremental.
+
+### v3-D117 — FR6 Door 3 ("open practice"): `packages/engine/src/freeplay.ts#openPracticePick` gets the any-ayah picker v3-D98/D106/D111/D112/D113 named out of scope five nights running
+
+**Re-derived state per NIGHTLY.md, not trusted from any stale line.** `git
+fetch origin main` found the previous session's local checkout of `main` was
+18 commits stale (a stale `origin/main` tracking ref, not real divergence —
+GitHub's `main` was already at `HEAD`, `a1b43d0`); fast-forwarded the local
+branch. Re-derived the 32-step build order from `BUILD-PLAN.md` + `git log` +
+`HANDOVER.md`: steps 1–26 and 29 DONE, 27/28 human-content-gated (unchanged,
+still waiting on Firdaus's review of `docs/AL-MULK-SCENE-BEATS.md`), step 30's
+engineering exhausted with only infra/calendar items left (a staging host, a
+live Postgres/SMTP account, PAY-1's Stripe fixtures). Per that same
+established practice, swept for the next "mechanism built and unit-tested,
+zero production callers" instance.
+
+**Finding:** `packages/engine/src/freeplay.ts`'s Door 3 (`openPracticePick`)
+and `coldSuccessAdoption` — the last two of FR6's five exported functions —
+were still exactly where v3-D98 first found them: real, unit-tested
+(`freeplay.test.ts`), zero callers anywhere in `apps/web`. Every one of D98,
+D106, D111, D112 and D113 named Door 3 out of scope for the identical reason:
+"needs an any-ayah picker route that does not exist."
+
+**Scope, decided before writing code, matching the "one door per night"
+discipline every prior FR6 entry set:** Door 3 only, and — within Door 3 —
+the picker plus the free-play drill itself; `coldSuccessAdoption` (the
+tap-gated "adopt this untaught ayah into Carrying" offer that would follow a
+hard cold pass) is a genuine, separate write path and stays unwired, named
+here so a future run does not re-discover it as new.
+
+Two design questions had no ratified default anywhere and needed one before
+any code: (1) `openPracticePick`'s own `Drill` type admits "S1" and "chain"
+alongside "S2"/"S3" — but S1/pretest is a property of a first ENCOUNTER
+(`gradeClass.ts`), not a repeatable exercise a learner can request on demand,
+and "chain" needs `bridge.ts`, atticked at the engine port (DEFECTS.md#E-08 —
+"nothing left to construct a seam from"). Resolved by narrowing the picker
+(and `startOpenPractice`'s own parameter type) to "S2"/"S3" only — the two
+rungs `reconstruct.ts` can actually build — the identical "filter to what's
+drillable" discipline `startFloorSession`/`startWeakSpotDrill` already apply
+to a "connection" atom. (2) A learner-chosen difficulty has to override the
+atom's REAL strength (an untaught ayah is exactly the point; a strong one
+must still offer "partial"), but every other entry point in this file derives
+`initReconstruct`'s strength from the real fold. Resolved with a fixed,
+representative strength per difficulty (`OPEN_PRACTICE_STRENGTH`: S2→50,
+S3→100 — `bandOf`'s own "reinforce"/"carry" bands) rather than an engine
+change: `initReconstruct` already takes strength as a plain argument, so
+choosing which one to pass is a caller decision, not new engine surface.
+
+**Built:**
+- `lib/session/run.ts` gains `OpenPracticeDrill`, `startOpenPractice` and a
+  new `invalid-ayah` `SessionUnavailable` reason (a hand-edited ayah outside
+  the corpus — distinct from "none-ready", since open practice has no
+  readiness precondition to fail in the first place). `startFromQueue` gains
+  an optional `initialMachine` override, used ONLY by Door 3, so its sizing
+  can bypass `machineForItem`'s real-strength derivation without touching any
+  other caller.
+- ALWAYS free-play (`structured: false`, unconditionally — freeplay.ts's own
+  header: "weak-spot gym is the exception" and Door 3 gets none): the queue
+  item is an ordinary `"review"` kind, so it commits through the exact same
+  `answerCurrent`/`answerAfterTap`/`settleAnswer` path every other item uses
+  (DEFECTS.md#B2's "gradeClassToWire is the ONE function" guarantee holds by
+  construction), and `update.ts:71`'s structured guard means an untaught ayah
+  drilled here can never accidentally encode, and a strong one can never be
+  damaged — true by construction, not by caller discipline.
+- New `lib/practice/handoff.ts` (its own small `/practice` → `/session` URL
+  contract — `?practice=1&ayah=&drill=` — kept separate from
+  `lib/drill/handoff.ts` because a drill selection is a multi-ayah
+  range/page with a graded/victory-lap CHOICE, while open practice is always
+  exactly one ayah, always free-play, choosing a DIFFICULTY instead; sharing
+  one contract for two shapes this different was the wrong economy).
+- New `/practice` route (`components/practice/PracticePicker.tsx` +
+  `app/(app)/practice/page.tsx`), mirroring `/drill/page.tsx`'s server/client
+  split — except it reads no log at all: open practice has no readiness
+  precondition, so there is nothing log-derived to get wrong between SSR and
+  hydration here.
+- `SessionGate`/`SessionIsland` thread a new `practice` prop exactly like
+  `drill` (a `practiceKey` stable identity, dispatch precedence: `drill` >
+  `practice` > `mode`); `/session` parses `?practice=1&ayah=&drill=` into a
+  `PracticeSpec` alongside its existing drill parsing. The summary screen
+  gains an unconditional "Practice any ayah freely" link to `/practice` —
+  unlike Doors 1/2 this is never an engine-computed grant (a learner can
+  always freely practice), so it needs no fetch to gate it.
+
+**Verified:**
+- `lib/session/run.test.ts` (6 new tests): starts on an untaught ayah (no
+  atom row exists at all — the headline capability `startDrillSession`
+  structurally forbids via its own `encoded` filter); "S3" forces whole-ayah
+  blanking on a fresh, never-seen atom (an ordinary review of the same atom
+  would blank only 1 word, band "learn" — full blanking here is the override,
+  not a coincidence of a fresh atom); "S2" blanks only PART of the ayah even
+  against a genuinely CARRY-band atom, seeded by spacing real S3 completions
+  across different learning days until the fold itself reports strength ≥80
+  (confirms its own precondition rather than assuming a rep count reaches it
+  — a single S3 append, contrary to a stale comment on an earlier entry,
+  only reaches ~26 strength from a fresh atom, comfortably inside "learn");
+  an out-of-corpus ayah returns `invalid-ayah`, never `none-ready`; completing
+  a pass on an untaught ayah writes `structured:false` throughout and leaves
+  the atom un-encoded; completing a pass on an already-encoded ayah leaves
+  its strength byte-identical.
+- `test/practice-handoff.test.ts` (5 new tests): the href↔parse round-trip
+  through an ACTUAL URL (mirroring `drill-handoff.test.ts`'s own method), and
+  a hand-edited/absent/mistyped query degrading to `null` rather than a
+  guess.
+- `test/practice-picker.test.tsx` (4 new tests): both difficulties state
+  their consequence in plain words, never jargon; the Start href carries the
+  chosen ayah + difficulty; an out-of-range typed ayah clamps to the corpus's
+  own count rather than producing a request `openPracticePick` would reject.
+- `test/session-island.test.tsx` (3 new tests): drills a genuinely untaught
+  ayah end to end and confirms every landed event is `structured:false`;
+  declines an out-of-corpus ayah with the honest new message; the "Practice
+  any ayah freely" link renders on an ordinary session's summary screen and
+  points at `/practice`.
+- Mutation-verified by `git stash` of every SOURCE file changed for this
+  entry (six edited files stashed, the three new `practice/` source files
+  moved aside), keeping every test file: exactly the 9 new test cases failed
+  (`lib/session/run.test.ts`'s 6 Door-3 cases plus 3 in
+  `test/session-island.test.tsx`; `practice-handoff.test.ts`/
+  `practice-picker.test.tsx` failed to collect at all, their module gone),
+  all 70 other cases in those four files unaffected; restored byte-
+  identically, 88/88 green again in the same four files.
+- `TZ=UTC make test`: **2085 passing** (was 2071 per the last recorded
+  figure at HEAD, +18 from six changed/new apps/web test files — no other
+  suite moved a single test either direction): 255 v2 vitest + 47 v2/api +
+  275 v3/api + 111 corpus-compiler + 417 engine + 61 fold-runner + 919
+  apps/web. `check-test-floor.mjs`: OK, 2085 >= floor 1899 (+186 margin,
+  `TEST-FLOOR` left unmoved). `TZ=UTC make build`: exit 0, 21 routes (was
+  20 — `/practice` is new). `npm run gates`: locked-css OK, fonts degraded-
+  but-non-blocking (pre-existing, unrelated), boundaries OK (208 files, up
+  from 203 — five new files, no violation), corpus-morphology and
+  corpus-glyphs OK.
+
+No `v1/**`/`v2/**` edit (`git status --porcelain -- v1 v2` empty at commit
+time; a stray `v2/tsconfig.tsbuildinfo` build-cache diff produced by running
+the suite was reverted before staging, the same housekeeping every prior
+entry records). No Arabic codepoint introduced: every changed and new file
+swept individually over the Arabic, Arabic Supplement, Arabic Extended-A, and
+both Presentation Forms blocks — zero matches; every new line addresses an
+ayah number, a strength value, or a closed-set difficulty ("S2"/"S3"), never
+corpus text.
+
+**Explicitly NOT done, named so a future run does not re-discover it as
+new:** `coldSuccessAdoption` remains unwired — Door 3 now has a real surface
+for it to attach to (an untaught ayah's hard-drill pass, right here), but the
+offer itself is a genuine separate write path (a tap-gated "adopt into
+Carrying" action distinct from ordinary free-play evidence) and deserves its
+own night. The SSR override gap (`lib/corpus/load.ts`, v3-D96/D110) and
+late-arrival refold (v3-D32/D116) are unchanged by this run. With Door 3
+built, FR6's own "three doors after session complete" is now fully wired —
+only the adoption offer and the diminishing-returns nudge's OTHER possible
+surfaces (it is wired onto Door 2 only, per v3-D111) remain as intentionally
+scoped-out refinements, not gaps.

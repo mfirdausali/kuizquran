@@ -97,6 +97,7 @@ import {
   demoteOfferFor,
   acceptGateDemote,
   startDrillSession,
+  startOpenPractice,
   SessionCommitFailure,
   type SessionRun,
 } from "./run";
@@ -1824,6 +1825,157 @@ describe("step 20 — startDrillSession over a chosen range, graded vs victory-l
     expect(wrongTaps.length).toBeGreaterThan(0);
     expect(wrongTaps.every((e) => e.structured === false)).toBe(true);
     const strengthAfter = rebuild(after).get(atomKey(SURAH, "ayah", 1))?.strength;
+    expect(strengthAfter).toBe(strengthBefore);
+  });
+});
+
+describe("v3-D117 — FR6 Door 3, 'open practice' (any ayah × chosen difficulty)", () => {
+  // A single S3 completion only reaches ~26 strength from a fresh atom
+  // (update.ts: GAIN.s3=30 × diffFactor≈0.88, initial difficulty 0.3) — well
+  // inside "learn" band (<40), NOT "carry" (>=80). `encoded` flips true on
+  // the FIRST S3 success regardless of strength (update.ts:118), which is all
+  // step 20's own `seedEncoded` needed — but the "S2 still blanks only part"
+  // test below needs a genuinely CARRY-band atom to prove anything: a
+  // strength-0 atom's ordinary "learn" band ALSO blanks only part (1 word),
+  // which would pass whether or not the override actually happened. This
+  // seeds real, well-spaced (never same-learning-day, so never damped ×0.35)
+  // S3 completions until the real fold reports carry band, confirming its
+  // own precondition rather than assuming a rep count reaches it.
+  async function seedEncoded(surah: number, ayah: number, ts: number) {
+    await append(
+      { type: "ayah_produced", ts, tz: TZ, surah, ayah, rung: "S3", structured: true } as DrillEvent,
+      { now: ts, tz: TZ },
+    );
+  }
+
+  async function seedCarryBand(
+    surah: number,
+    ayah: number,
+    startTs: number,
+  ): Promise<{ strength: number; lastTs: number }> {
+    let ts = startTs;
+    for (let i = 0; i < 20; i++) {
+      await seedEncoded(surah, ayah, ts);
+      const strength =
+        rebuild(await getAllEvents()).get(atomKey(surah, "ayah", ayah))?.strength ?? 0;
+      if (strength >= 80) return { strength, lastTs: ts };
+      ts += 2 * 24 * 60 * 60 * 1000; // 2 days apart — never the same learning day
+    }
+    throw new Error("test precondition broken: could not reach carry band in 20 reps");
+  }
+
+  it("starts on an UNTAUGHT ayah (no atom exists yet) — this is the whole point of open practice", async () => {
+    const c = corpus();
+    const started = await startOpenPractice(
+      { surah: SURAH, now: T0, tz: TZ, ayah: 2, drill: "S2" },
+      c,
+    );
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    expect(started.run.queue).toEqual([
+      { kind: "review", atomKey: atomKey(SURAH, "ayah", 2), ayah: 2, estMin: 0 },
+    ]);
+    // Free play, unconditionally — Door 3 has no graded option.
+    expect(started.run.structured).toBe(false);
+  });
+
+  it("'S3' forces WHOLE-ayah blanking, regardless of the atom's real (unseen) strength", async () => {
+    const c = corpus();
+    const started = await startOpenPractice(
+      { surah: SURAH, now: T0, tz: TZ, ayah: 1, drill: "S3" },
+      c,
+    );
+    if (!started.ok) throw new Error("open practice on an untaught ayah must start");
+    // An ORDINARY review of a never-seen atom (band "learn") would blank only
+    // 1 word — `reconstruct.ts#blankCountFor`. Full blanking here proves the
+    // chosen difficulty overrode the real (absent) strength, not merely that
+    // a fresh atom happens to look full.
+    expect(started.run.machine.blankPositions.length).toBe(started.run.machine.words.length);
+  });
+
+  it("'S2' blanks only PART of the ayah, even when the atom is already CARRY-band strong", async () => {
+    const c = corpus12();
+    const ayah = 1;
+    const { strength: strengthBefore, lastTs } = await seedCarryBand(SURAH_12, ayah, T0);
+    expect(strengthBefore).toBeGreaterThanOrEqual(80); // carry band, confirmed for real
+
+    const started = await startOpenPractice(
+      { surah: SURAH_12, now: lastTs + 1000, tz: TZ, ayah, drill: "S2" },
+      c,
+    );
+    if (!started.ok) throw new Error("open practice on an encoded ayah must start");
+    const { blankPositions, words } = started.run.machine;
+    // An ORDINARY review of this SAME atom (band "carry") would blank the
+    // WHOLE ayah — `blankCountFor`'s own carry branch returns `total`. A
+    // strictly partial count here proves "S2" overrode the real strength
+    // rather than reading it.
+    expect(words.length).toBeGreaterThan(2); // a vacuous "half of 1 or 2" would prove nothing
+    expect(blankPositions.length).toBeGreaterThan(0);
+    expect(blankPositions.length).toBeLessThan(words.length);
+  });
+
+  it("rejects an ayah that does not exist in the corpus, honestly — never 'none-ready'", async () => {
+    const c = corpus();
+    const started = await startOpenPractice(
+      { surah: SURAH, now: T0, tz: TZ, ayah: 9999, drill: "S3" },
+      c,
+    );
+    expect(started.ok).toBe(false);
+    if (started.ok) return;
+    expect(started.unavailable).toBe("invalid-ayah");
+  });
+
+  it("completing a pass on an UNTAUGHT ayah damages nothing: structured:false and the atom stays un-encoded", async () => {
+    const c = corpus();
+    const ayah = 3;
+    const before = await getAllEvents();
+    const beforeIds = new Set(before.map((e) => e.id));
+
+    const started = await startOpenPractice(
+      { surah: SURAH, now: T0, tz: TZ, ayah, drill: "S3" },
+      c,
+    );
+    if (!started.ok) throw new Error("open practice on an untaught ayah must start");
+    await playThrough(started.run, c);
+
+    const after = await getAllEvents();
+    const fresh = after.filter((e) => !beforeIds.has(e.id));
+    const produced = fresh.filter((e) => e.type === "ayah_produced");
+    const taps = fresh.filter((e) => e.type === "reconstruct_tap");
+    expect(produced.length).toBeGreaterThan(0);
+    expect(taps.length).toBeGreaterThan(0);
+    expect(produced.every((e) => e.structured === false)).toBe(true);
+    expect(taps.every((e) => e.structured === false)).toBe(true);
+    // The fold's structured guard (`update.ts:71`) drops every free-play
+    // outcome, so an ayah practiced but never actually taught stays
+    // un-encoded — a Door 3 pass, however "hard" and however cleanly
+    // completed, cannot silently teach it. (That is exactly what
+    // `coldSuccessAdoption` exists to offer as a deliberate, separate,
+    // tap-gated step — still unwired, out of this run's scope.)
+    const atom = rebuild(after).get(atomKey(SURAH, "ayah", ayah));
+    expect(atom?.encoded ?? false).toBe(false);
+  });
+
+  it("completing a pass on an already-encoded ayah leaves its strength byte-identical", async () => {
+    const c = corpus12();
+    const ayah = 2;
+    await seedEncoded(SURAH_12, ayah, T0);
+    const seeded = await getAllEvents();
+    const seededIds = new Set(seeded.map((e) => e.id));
+    const strengthBefore = rebuild(seeded).get(atomKey(SURAH_12, "ayah", ayah))?.strength;
+    expect(typeof strengthBefore).toBe("number");
+
+    const started = await startOpenPractice(
+      { surah: SURAH_12, now: T0 + 1000, tz: TZ, ayah, drill: "S3" },
+      c,
+    );
+    if (!started.ok) throw new Error("open practice on an encoded ayah must start");
+    await playThrough(started.run, c);
+
+    const after = await getAllEvents();
+    const fresh = after.filter((e) => !seededIds.has(e.id));
+    expect(fresh.some((e) => e.type === "ayah_produced")).toBe(true);
+    const strengthAfter = rebuild(after).get(atomKey(SURAH_12, "ayah", ayah))?.strength;
     expect(strengthAfter).toBe(strengthBefore);
   });
 });

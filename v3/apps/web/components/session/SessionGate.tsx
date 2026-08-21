@@ -20,6 +20,7 @@ import { SessionIsland } from "@/components/session/SessionIsland";
 import { ONBOARDING_HREF } from "@/lib/onboarding/surahs";
 import type { SessionMode } from "@/lib/session/run";
 import type { DrillSpec } from "@/lib/drill/handoff";
+import type { PracticeSpec } from "@/lib/practice/handoff";
 
 type State =
   | { kind: "loading" }
@@ -36,9 +37,14 @@ export interface SessionGateProps {
    *  the enrolled one this gate reads, so a drill runs within the surah the
    *  learner is actually enrolled in. */
   drill?: DrillSpec | null;
+  /** FR6 Door 3 — an open-practice request from `/practice`
+   *  (`?practice=1&ayah=&drill=`), or null for an ordinary session. Passed
+   *  straight down for the same reason `drill` is: the surah stays the
+   *  enrolled one this gate reads. */
+  practice?: PracticeSpec | null;
 }
 
-export function SessionGate({ mode = "full", drill = null }: SessionGateProps) {
+export function SessionGate({ mode = "full", drill = null, practice = null }: SessionGateProps) {
   const [state, setState] = useState<State>({ kind: "loading" });
 
   useEffect(() => {
@@ -74,5 +80,5 @@ export function SessionGate({ mode = "full", drill = null }: SessionGateProps) {
     );
   }
 
-  return <SessionIsland surah={state.surah} mode={mode} drill={drill} />;
+  return <SessionIsland surah={state.surah} mode={mode} drill={drill} practice={practice} />;
 }
