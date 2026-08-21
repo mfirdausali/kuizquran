@@ -3,6 +3,7 @@
 namespace App\Support;
 
 use App\Models\Event;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -59,6 +60,14 @@ use Illuminate\Support\Facades\DB;
  * exactly the user IDs that were actually sent (and so will actually get a
  * fresh row back) — never to every candidate ID. A dead-lettered user's row
  * set is left byte-identical, "log intact," same as the nightly check.
+ *
+ * ── PER-USER ADVISORY LOCK (v3-D32/v3-D70, closed) ──
+ * Every candidate user is locked via `PerUserFoldLock` for the full span of
+ * this method — event read, the fold-runner call, and the delete+insert —
+ * so a nightly `DeterminismCheckCommand` run can never read one of these
+ * learners' `atom_cache` rows mid-rebuild. See that class's header for why
+ * the lock is session-level (spans the external process call) rather than
+ * transaction-scoped, and for the no-op-on-sqlite behavior in dev/test.
  */
 class AtomCacheRebuilder
 {
@@ -77,6 +86,15 @@ class AtomCacheRebuilder
             return ['usersProcessed' => 0, 'atomsWritten' => 0, 'deadLetters' => []];
         }
 
+        return PerUserFoldLock::withLocks($userIds->all(), fn () => $this->rebuildLocked($userIds));
+    }
+
+    /**
+     * @param  Collection<int,mixed>  $userIds
+     * @return array{usersProcessed:int, atomsWritten:int, deadLetters:list<array{userId:mixed,error:string}>}
+     */
+    private function rebuildLocked($userIds): array
+    {
         $users = [];
         $deadLetters = [];
         foreach ($userIds as $userId) {

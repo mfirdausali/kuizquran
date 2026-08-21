@@ -7,6 +7,7 @@ use App\Models\Event;
 use App\Models\NightlyCheckRun;
 use App\Support\EventWireCodec;
 use App\Support\FoldRunnerProcess;
+use App\Support\PerUserFoldLock;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -35,27 +36,26 @@ use Throwable;
  *   4. appends an immutable ledger row, and
  *   5. writes the health cache key the dashboard has been waiting for.
  *
- * ── SINGLE-FLIGHT, HONESTLY ──
- * v3-D32 deferred per-user Postgres advisory locks, and this repo's dev DB
- * is sqlite, which has no `pg_advisory_lock` to test against. Rather than
- * write an untestable Postgres-only path and claim it works, this command
- * single-flights at the RUN level with Laravel's own atomic cache lock
- * (`Cache::lock`) — the same mechanism `SystemHealthController::REBUILD_LOCK`
- * already uses for the atom-cache rebuild, and for the same reason: two
- * concurrent runs comparing the same cache while a rebuild interleaves can
- * produce a divergence neither run would see alone, which then reads as a
- * P1 that never happened.
+ * ── SINGLE-FLIGHT, TWO GRAINS ──
+ * This command single-flights at the RUN level with Laravel's own atomic
+ * cache lock (`Cache::lock`) — the same mechanism
+ * `SystemHealthController::REBUILD_LOCK` already uses for the atom-cache
+ * rebuild, and for the same reason: two concurrent NIGHTLIES comparing the
+ * same cache would produce a divergence neither run would see alone, which
+ * then reads as a P1 that never happened.
  *
- * What that buys and what it does not: a run-level lock prevents two
- * NIGHTLIES overlapping. It does NOT prevent a nightly from reading a
- * learner's cache midway through a concurrent per-user refold — that is what
- * the deferred per-user advisory lock is for, and it remains deferred. This
- * command therefore SNAPSHOTS each learner's event log by ingest-sequence
- * ceiling (`id <= :cursor`) so at least the log side of the comparison is a
- * consistent read; the cache side can still be mid-write, which is why a
- * live P1 must be re-run before it is called "confirmed". `--confirm-reruns`
- * exists for exactly that, and the ledger's own reset semantics use the word
- * BUILD-PLAN uses: *confirmed* P1.
+ * What a run-level lock does NOT buy: it says nothing about a nightly
+ * reading a learner's cache mid-rebuild via the completely separate
+ * `AtomCacheRebuilder`/`REBUILD_LOCK` path. v3-D32 deferred a per-user fix
+ * for this ("sqlite, this repo's dev DB, has no `pg_advisory_lock` to test
+ * against") — closed in v3-D116 now that this build's deployment target
+ * (Forge + managed Postgres) has a real Postgres to prove it against.
+ * `sampleFromDatabase()`'s own per-user loop now holds a `PerUserFoldLock`
+ * for exactly the learner it is reading, for exactly as long as it is
+ * reading them, so a same-learner rebuild cannot interleave. This command
+ * also SNAPSHOTS each learner's event log by ingest-sequence ceiling
+ * (`id <= :cursor`), so the log side of the comparison stays a consistent
+ * read regardless of new events arriving mid-run.
  */
 class DeterminismCheckCommand extends Command
 {
@@ -221,6 +221,14 @@ class DeterminismCheckCommand extends Command
      * quarantined into `deadLetters` and excluded from `samples`. "Log
      * intact": the row itself is never touched, only skipped for this run.
      *
+     * PER-USER ADVISORY LOCK (v3-D32/v3-D70, closed in v3-D116). Each
+     * learner's events-and-cache read runs inside a `PerUserFoldLock` for
+     * exactly that learner, so a concurrent `AtomCacheRebuilder::rebuild()`
+     * for the same learner cannot delete-and-reinsert their `atom_cache`
+     * rows between this read and the fold-runner comparing them. Different
+     * learners are never serialized against each other — only the same
+     * learner's read and a same-learner rebuild ever contend.
+     *
      * @return array{engineVersion:string,samples:list<array<string,mixed>>,deadLetters:list<array{userId:mixed,error:string}>}
      */
     private function sampleFromDatabase(int $limit): array
@@ -239,60 +247,23 @@ class DeterminismCheckCommand extends Command
         $samples = [];
         $deadLetters = [];
         foreach ($userIds as $userId) {
-            $events = Event::query()
-                ->where('user_id', $userId)
-                ->where('id', '<=', $cursor)
-                ->orderBy('id')
-                ->get()
-                ->map(fn (Event $e) => $this->toWireEvent($e))
-                ->all();
+            $result = PerUserFoldLock::withLocks(
+                [(int) $userId],
+                fn () => $this->sampleOneUserLocked($userId, $cursor),
+            );
 
-            $liveCache = [];
-            $versions = [];
-            $rows = DB::table('atom_cache')->where('user_id', $userId)->get();
-            foreach ($rows as $row) {
-                $key = "{$row->surah}:{$row->kind}:{$row->ref}";
-                $liveCache[$key] = [
-                    'surah' => (int) $row->surah,
-                    'kind' => (string) $row->kind,
-                    'ref' => (int) $row->ref,
-                    'strength' => (float) $row->strength,
-                    'stability' => (float) $row->stability,
-                    'difficulty' => (float) $row->difficulty,
-                    'lastRetrieval' => $row->last_retrieval === null ? null : (int) $row->last_retrieval,
-                    'reps' => (int) $row->reps,
-                    'lapses' => (int) $row->lapses,
-                    'encoded' => (bool) $row->encoded,
-                    'gateDueAt' => $row->gate_due_at === null ? null : (int) $row->gate_due_at,
-                    'gatePassed' => (bool) $row->gate_passed,
-                    'gateFails' => (int) $row->gate_fails,
-                ];
-                $versions[$key] = (string) $row->engine_version;
-            }
-
-            // A learner with neither events nor cached atoms contributes
-            // nothing to compare — including them would inflate
-            // `usersChecked` while comparing zero atoms.
-            if ($events === [] && $liveCache === []) {
+            if ($result === null) {
+                // A learner with neither events nor cached atoms contributes
+                // nothing to compare — including them would inflate
+                // `usersChecked` while comparing zero atoms.
                 continue;
             }
 
-            $entry = [
-                'userId' => $userId,
-                'events' => $events,
-                'liveCache' => (object) $liveCache,
-                'cachedEngineVersion' => (object) $versions,
-            ];
-
-            if (json_encode($entry, JSON_UNESCAPED_SLASHES) === false) {
-                $deadLetters[] = [
-                    'userId' => $userId,
-                    'error' => 'unencodable event/atom data — '.json_last_error_msg(),
-                ];
-                continue;
+            if ($result['deadLetter'] !== null) {
+                $deadLetters[] = $result['deadLetter'];
+            } else {
+                $samples[] = $result['sample'];
             }
-
-            $samples[] = $entry;
         }
 
         return [
@@ -300,6 +271,71 @@ class DeterminismCheckCommand extends Command
             'samples' => $samples,
             'deadLetters' => $deadLetters,
         ];
+    }
+
+    /**
+     * The single-learner critical section `sampleFromDatabase()` runs under
+     * a `PerUserFoldLock` for `$userId` — extracted so the lock's closure has
+     * one clear boundary rather than a loop body full of `continue`s.
+     *
+     * @return array{sample:?array<string,mixed>,deadLetter:?array{userId:mixed,error:string}}|null
+     *                                                                                              null when this learner has nothing to compare at all.
+     */
+    private function sampleOneUserLocked(mixed $userId, int $cursor): ?array
+    {
+        $events = Event::query()
+            ->where('user_id', $userId)
+            ->where('id', '<=', $cursor)
+            ->orderBy('id')
+            ->get()
+            ->map(fn (Event $e) => $this->toWireEvent($e))
+            ->all();
+
+        $liveCache = [];
+        $versions = [];
+        $rows = DB::table('atom_cache')->where('user_id', $userId)->get();
+        foreach ($rows as $row) {
+            $key = "{$row->surah}:{$row->kind}:{$row->ref}";
+            $liveCache[$key] = [
+                'surah' => (int) $row->surah,
+                'kind' => (string) $row->kind,
+                'ref' => (int) $row->ref,
+                'strength' => (float) $row->strength,
+                'stability' => (float) $row->stability,
+                'difficulty' => (float) $row->difficulty,
+                'lastRetrieval' => $row->last_retrieval === null ? null : (int) $row->last_retrieval,
+                'reps' => (int) $row->reps,
+                'lapses' => (int) $row->lapses,
+                'encoded' => (bool) $row->encoded,
+                'gateDueAt' => $row->gate_due_at === null ? null : (int) $row->gate_due_at,
+                'gatePassed' => (bool) $row->gate_passed,
+                'gateFails' => (int) $row->gate_fails,
+            ];
+            $versions[$key] = (string) $row->engine_version;
+        }
+
+        if ($events === [] && $liveCache === []) {
+            return null;
+        }
+
+        $entry = [
+            'userId' => $userId,
+            'events' => $events,
+            'liveCache' => (object) $liveCache,
+            'cachedEngineVersion' => (object) $versions,
+        ];
+
+        if (json_encode($entry, JSON_UNESCAPED_SLASHES) === false) {
+            return [
+                'sample' => null,
+                'deadLetter' => [
+                    'userId' => $userId,
+                    'error' => 'unencodable event/atom data — '.json_last_error_msg(),
+                ],
+            ];
+        }
+
+        return ['sample' => $entry, 'deadLetter' => null];
     }
 
     /**

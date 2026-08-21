@@ -534,9 +534,16 @@ Two named, still-open sub-gaps inside this gate:
   email, not phone". `DeterminismCheckCommand` logs at error level and records
   the P1 permanently in the ledger, but **no mail dispatch exists** — there is
   no operational mailer configured. A P1 at 3am currently pages nobody.
-- **Per-user advisory locks remain deferred** (v3-D32, restated in v3-D70).
-  Single-flight is a run-level `Cache::lock`; sqlite has no `pg_advisory_lock`
-  to test a per-user path against.
+- ~~**Per-user advisory locks remain deferred**~~ **CLOSED (v3-D116,
+  2026-08-21).** `App\Support\PerUserFoldLock` wraps both
+  `AtomCacheRebuilder::rebuild()` and `DeterminismCheckCommand`'s DB-sampling
+  path in a real Postgres session-level `pg_advisory_lock` per learner,
+  proven against a genuine Postgres connection (not sqlite standing in for
+  one) including a `pcntl_fork`'d cross-process mutual-exclusion proof. See
+  DECISIONS.md v3-D116. **Late-arrival refold** (v3-D32's other deferred
+  half) remains open — this build has no automatic refold-on-ingest
+  pipeline at all yet, so "late-arrival" has no normal-arrival mechanism to
+  extend.
 
 BUILD-PLAN Q12 is still open: self-managed VPS vs Forge + managed Postgres, and
 **who carries the 3am pager** when `fold_determinism` pages a P1.

@@ -6639,3 +6639,189 @@ every known `json_encode`-batching call site in this codebase that hands
 learner data to the fold-runner over stdin has been checked and fixed — a
 `grep -rn "FoldRunnerProcess::run"` over `v3/api/app` confirms these are the
 only two callers.
+
+---
+
+## Ratified 2026-08-21 (later) — build-plan step 14 completion
+
+### v3-D116 — v3-D32/v3-D70's deferred per-user Postgres advisory lock, closed: proven against a real Postgres server, not sqlite standing in for one
+
+**Picked up exactly the deferral v3-D115's own closing note named** — "this
+sandbox now has a real Postgres 16 server... but building and proving it is
+separate, larger scope."
+
+**The race, restated precisely.** `DeterminismCheckCommand`'s own header
+already named the gap: its `Cache::lock(self::LOCK)` single-flights at the
+RUN level (two nightlies cannot overlap), but that lock and
+`SystemHealthController::REBUILD_LOCK` (guarding `AtomCacheRebuilder::rebuild()`)
+are two entirely unrelated keys on two entirely separate trigger paths — a
+cron-fired nightly and an admin's button click — that both touch the same
+`atom_cache` rows. Nothing stopped a nightly from reading a learner's events
+at one moment and their `atom_cache` row at another, with a concurrent
+rebuild deleting-and-reinserting that learner's rows in between: a "confirmed
+P1" that is really just this race, never a genuine fold divergence. v3-D32
+named the fix (per-user Postgres advisory locks) and deferred it with a
+specific, falsifiable reason: "sqlite, this repo's dev DB, has no
+`pg_advisory_lock` to test against." v3-D70 re-confirmed the same deferral
+five days later. That reason no longer holds — this sandbox has Postgres 16
+installed (found stopped; started via `service postgresql start`), and this
+build's actual deployment target (DECISIONS.md's own hosting note: "Forge +
+managed Postgres") runs Postgres in production regardless of what any given
+sandbox happens to have.
+
+**Built.** `App\Support\PerUserFoldLock::withLocks(array $userIds, Closure
+$fn)` — session-level `pg_advisory_lock`/`pg_advisory_unlock` pairs (not
+`pg_advisory_xact_lock`: the critical sections span an external Node
+subprocess call via `FoldRunnerProcess::run`, and holding a database
+transaction open for the wall-clock duration of a subprocess is its own
+operational hazard on a small deployment), acquired in a fixed sorted order
+across every id in one call (the standard fix for lock-ordering deadlocks
+between two callers wanting overlapping id sets), always released in a
+`finally` so a thrown callback can never leak a held lock — a leaked lock
+would wedge every future rebuild/nightly check for that learner forever,
+strictly worse than the race it replaces. No-ops on any non-Postgres
+connection: sqlite (this repo's dev/test default) has no equivalent
+primitive, and is single-process in this codebase's own usage, so there is no
+second process for a real lock to exclude in the first place — stated in the
+class's own header, not hidden behind a silent success.
+
+Wired into both known callers (confirmed exhaustive by v3-D115's own
+`grep -rn "FoldRunnerProcess::run"`, still exactly two):
+- `AtomCacheRebuilder::rebuild()` locks every candidate user id for the FULL
+  span of the (renamed) `rebuildLocked()` — event read, the fold-runner call,
+  and the delete+insert — so a nightly cannot read any of those learners'
+  rows mid-rebuild.
+- `DeterminismCheckCommand::sampleFromDatabase()`'s per-user loop body was
+  extracted into `sampleOneUserLocked()` and wrapped in
+  `PerUserFoldLock::withLocks([$userId], ...)` per iteration — locking
+  exactly the one learner being read, for exactly as long as the read takes,
+  never the whole sampled batch.
+
+**Verified against a REAL Postgres server, deliberately — a mock would
+reproduce v3-D32's own objection to testing this at all.** A fake lock, an
+in-memory stand-in, or an assertion that only checks the SQL string this
+class would send proves nothing about whether Postgres actually serializes
+two callers on it — the exact vacuous-verification shape this build has
+shipped nine times over (HANDOVER.md's own count, now effectively ten if this
+had been faked). Every load-bearing assertion in both new test files opens a
+genuine second Postgres connection or a genuinely separate OS process:
+
+- `tests/Unit/Support/PerUserFoldLockTest.php` (5 tests): `isSupported()`
+  reflects the real driver; the sqlite no-op path is proven to never issue a
+  Postgres-only statement (which would throw under sqlite if the guard were
+  ever removed); a lock is proven released after a successful run AND after
+  the callback throws, in both cases via a SEPARATE raw PDO session's
+  non-blocking `pg_try_advisory_lock` (a leaked lock reads as `false`
+  immediately, no timing needed); and — the load-bearing case —
+  `pcntl_fork()`s a genuinely separate OS process that holds the advisory
+  lock on user id 601 for 450ms while the parent proves a DIFFERENT id (602)
+  returns in under 200ms (proving per-user granularity, not a global
+  serialization wearing a per-user name) and the SAME id (601) takes over
+  250ms (proving genuine blocking, not a coincidental pass). The child
+  hard-exits via `posix_kill(posix_getpid(), SIGKILL)` so it never runs
+  PHPUnit/Laravel shutdown handlers, which would otherwise double-report into
+  the parent's test result.
+- `tests/Feature/Nightly/PerUserFoldLockWiringTest.php` (2 tests) proves the
+  two real CALLERS route through the lock, against a second throwaway,
+  migrated Postgres database (`imanapp_lock_test` — this test never migrates
+  it itself, matching `PerUserFoldLockTest`'s read-only footprint). **The
+  first draft of this file was itself a near-miss vacuous verification,
+  caught before committing**: both `rebuild()` and the determinism check
+  shell out to Node even with zero lock contention, measured on this machine
+  at ~390-410ms of pure subprocess-startup overhead — a fixed
+  `assertGreaterThan(250, $elapsedMs)` threshold, the first thing written,
+  PASSED on the deliberately-unwired tree too, on that overhead alone, before
+  any fork was ever involved. Rewritten to measure each test's OWN
+  freshly-measured unlocked baseline first, then require the locked run
+  (behind a 1800ms fork-held lock) to exceed that baseline by a 1200ms
+  margin — a threshold tied to the fork's actual hold time, not an assumed
+  absolute number that could coincide with ordinary subprocess latency on a
+  slower or faster machine.
+
+**RED confirmed at both layers, each by reverting only the source (tests
+kept), then restored byte-identically:**
+- The mutation stub (`isSupported()` hardcoded to `false`,
+  `withLocks()` reduced to a bare `return $fn();`) failed exactly
+  `PerUserFoldLockTest`'s two load-bearing assertions —
+  `assertTrue(PerUserFoldLock::isSupported())` and the same-id timing floor
+  (`0.0019ms` measured, `assertGreaterThan(250, ...)` failed cleanly) — the
+  other 3 of 5 cases (release-after-success, release-after-throw, the
+  no-op-on-sqlite case) were correctly unaffected, since they exercise
+  behavior the stub still satisfies vacuously.
+- Reverting ONLY the two call sites (`AtomCacheRebuilder::rebuild()` calling
+  `rebuildLocked()` directly; `sampleFromDatabase()`'s loop calling
+  `sampleOneUserLocked()` directly — both skipping
+  `PerUserFoldLock::withLocks()` entirely, the primitive itself untouched)
+  failed exactly `PerUserFoldLockWiringTest`'s two margin assertions, with
+  the actual measured numbers surfaced in the failure message: `"rebuild()
+  must wait for the other session's advisory lock on this exact user, not
+  race past it (baseline 379ms, locked run 366ms, expected at least
+  1579ms)"` and the equivalent for the determinism check (baseline 373ms,
+  locked run 363ms) — proving the unwired tree races straight past the other
+  session's held lock rather than merely "running a bit slower."
+
+**Also added:** a `postgres:16` service container to
+`.github/workflows/ci.yml`'s `php` job (declared for both matrix legs — GitHub
+Actions services run per-job, not per-matrix-value — but only the `v3/api` leg
+touches it) plus a step that creates and migrates a throwaway
+`imanapp_lock_test` database before `php artisan test` runs. Without this, both
+new test files' honest "skip cleanly, never a false green, when Postgres is
+unreachable" behavior would make CI's copy of this suite a **permanent,
+silent skip** — proving nothing in the one place a regression would actually
+be caught, the same shape of gap `E9`/v3-D78 closed for the Playwright suite
+and CI's own `php` job fixed for `v3/api` in the first place. The
+`PGSQL_LOCK_TEST_*` env var defaults in both test files match the official
+`postgres` Docker image's own defaults exactly, so the CI service and the
+tests agree without either file needing to know about the other.
+
+**`TZ=UTC make test`** (all seven suites, from a fully completed `make setup`
+— this sandbox had no dependencies installed at session start, same as
+v3-D115's own note; `v2/api`'s composer install alone took ~10 minutes against
+this sandbox's outbound git-mirror fallback, an environment artifact, not a
+code change): **2071 passing** (was 2064, **+7** — exactly this run's new
+tests: 5 in `PerUserFoldLockTest`, 2 in `PerUserFoldLockWiringTest`; no other
+suite moved — 255 v2 vitest + 47 v2/api + **281** v3/api + 111
+corpus-compiler + 417 engine + 61 fold-runner + 899 apps/web, +2 incomplete
+PAY-1 by design). `check-test-floor.mjs`: OK, 2071 >= floor 1899 (+172
+margin, `TEST-FLOOR` left unmoved). `TZ=UTC make build`: exit 0, 20 routes
+(unchanged — no route added or removed). `npm run gates` (run as part of
+`next build`'s `prebuild` script): locked-css OK, fonts
+degraded-but-non-blocking (pre-existing, unrelated — Amiri present, 4 UI
+fonts missing), boundaries OK (203 files), corpus-morphology OK,
+corpus-glyphs OK. `npx tsc --noEmit`: clean, `Version 5.9.3` confirmed (not a
+TeX banner). No `v1/**`/`v2/**` edit: a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff produced by running the suite was reverted before
+committing, same discipline as every prior entry — `git status --porcelain --
+v1 v2` empty immediately before commit. No Arabic codepoint introduced: every
+changed and new file was swept with a Unicode-range check over the Arabic,
+Arabic Supplement, Arabic Extended-A, and both Presentation Forms blocks —
+zero matches; every new line addresses a user id, a millisecond duration, or
+a config key, never corpus text.
+
+**Explicitly NOT addressed, named so a future run doesn't re-discover it as
+new:**
+- **Late-arrival refold** — v3-D32's OTHER deferred half — remains open, and
+  is a materially different, larger piece of work than this lock was: this
+  build has **no automatic refold-on-ingest at all** today.
+  `EventsController::store()` only ever inserts rows; `atom_cache` is
+  populated exclusively by the admin's manual `AtomCacheRebuilder::rebuild()`
+  click. "Late-arrival refold" presupposes a normal-arrival refold pipeline
+  already exists and asks how a late event should retrigger it — that
+  pipeline does not exist yet, so building "late-arrival" handling first
+  would mean designing the wrong half of a feature that has no other half.
+  Deciding whether/how atom_cache should be kept live (per-event fold on
+  ingest? a queued job? a scheduled batch?) is a real, separate product/
+  architecture question, not a lock-shaped fix — named here so it is picked
+  up deliberately, not rediscovered as if it were a small remainder of this
+  entry.
+- **`AtomCacheRebuilder::rebuild()` now holds ALL candidate users' locks for
+  the entire rebuild span** (event read, subprocess call, and write —
+  potentially every user in the whole system, since candidates are "every
+  user with events OR an existing atom_cache row"), not one user at a time.
+  This is the correct, simplest fix for the race it closes, but it does mean
+  a full-database rebuild will make every OTHER user's concurrent nightly
+  read wait for the ENTIRE rebuild to finish, not just for its own turn.
+  Acceptable today because a rebuild is a rare, deliberate, admin-triggered,
+  whole-cache action — but worth reconsidering (e.g. locking per-user inside
+  the write loop instead of once up front) if rebuild ever becomes routine or
+  partial/incremental.

@@ -104,6 +104,28 @@ jobs:
       fail-fast: false
       matrix:
         dir: [v2/api, v3/api]
+    # v3-D116: PerUserFoldLockTest/PerUserFoldLockWiringTest are the load-bearing
+    # proof that v3-D32/v3-D70's deferred per-user Postgres advisory lock genuinely
+    # serializes two sessions — a mock here would be exactly the vacuous-verification
+    # shape this build has already shipped nine times (HANDOVER.md). Both tests skip
+    # cleanly (never a false green) when no Postgres is reachable, so this service
+    # is what keeps that skip from being CI's silent, permanent default. Declared for
+    # both matrix legs (services run per-job, not per-matrix-value in Actions) but
+    # v2/api never touches it.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -120,6 +142,18 @@ jobs:
         if: steps.has.outputs.yes == 'true'
         with:
           php-version: "8.3"
+          extensions: pdo_pgsql, pgsql
+
+      - name: Create the throwaway Postgres database for the per-user advisory-lock tests
+        # PerUserFoldLockWiringTest reads real events/atom_cache rows through a
+        # migrated schema (unlike PerUserFoldLockTest, which only ever calls
+        # pg_advisory_lock/unlock — no tables needed there). Migrated here, once,
+        # out of band, matching the test's own "never runs migrations itself" note.
+        if: steps.has.outputs.yes == 'true' && matrix.dir == 'v3/api'
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -U postgres -d postgres -c "CREATE DATABASE imanapp_lock_test;"
 
       - uses: actions/setup-node@v4
         if: steps.has.outputs.yes == 'true' && matrix.dir == 'v3/api'
@@ -150,6 +184,16 @@ jobs:
           # reads config — provide .env + a key FIRST, and skip auto-scripts on install
           # so a missing app key can't fail the autoload step.
           APP_KEY: base64:2fl+Ktt0V1Sj9K0m7hHkK2n8xY3qZp1Rw6cV0aB9eD4=
+          # v3-D116: matches PerUserFoldLockTest's/PerUserFoldLockWiringTest's own
+          # defaults exactly (the official postgres image's own defaults), so this
+          # is set unconditionally rather than only for the v3/api leg — it is a
+          # no-op for v2/api, which never reads these vars.
+          PGSQL_LOCK_TEST_HOST: 127.0.0.1
+          PGSQL_LOCK_TEST_PORT: 5432
+          PGSQL_LOCK_TEST_DATABASE: postgres
+          PGSQL_LOCK_TEST_WIRING_DATABASE: imanapp_lock_test
+          PGSQL_LOCK_TEST_USERNAME: postgres
+          PGSQL_LOCK_TEST_PASSWORD: postgres
         run: |
           # Laravel's bootstrap/cache + storage are gitignored (generated dirs), so a
           # fresh CI checkout lacks them → package:discover fails ("must be present and
@@ -161,6 +205,14 @@ jobs:
           php artisan key:generate --force || true
           composer run-script post-autoload-dump --no-interaction || true
           php artisan config:clear || true
+          # PerUserFoldLockWiringTest's own schema, migrated once against the
+          # throwaway Postgres database created above — the test never migrates
+          # itself (see its header).
+          if [ "${{ matrix.dir }}" = "v3/api" ]; then
+            DB_CONNECTION=pgsql DB_HOST=127.0.0.1 DB_PORT=5432 \
+              DB_DATABASE=imanapp_lock_test DB_USERNAME=postgres DB_PASSWORD=postgres \
+              php artisan migrate --force
+          fi
           php artisan test
 
   # ---- Playwright e2e (v3/apps/web): the M5 exit-criterion suite — full-Yusuf
