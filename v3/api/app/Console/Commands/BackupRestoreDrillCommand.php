@@ -2,8 +2,10 @@
 
 namespace App\Console\Commands;
 
+use App\Models\AccountDeletionRequest;
 use App\Models\AdminAudit;
 use App\Models\Event;
+use App\Models\PurgeLedgerEntry;
 use App\Models\User;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -53,16 +55,31 @@ use Illuminate\Support\Facades\Schema;
  *    notices. The drill therefore records a purge, restores a backup taken
  *    BEFORE it, and asserts the purged subject did NOT come back.
  *
- *    ── AN HONEST LIMITATION, STATED IN CODE RATHER THAN OMITTED ──
- *    The PDPA delete/purge endpoint is M7 scope and IS NOT BUILT YET (there is
- *    no purge path anywhere in `app/`; DECISIONS.md v3-D16 notes the only purge
- *    path in the whole system is learner-initiated PDPA delete). So this drill
- *    cannot exercise the real purge. What it does instead is exercise the
- *    RECONCILIATION MECHANISM the real purge will need — a purge ledger that
- *    survives the restore and is re-applied to the restored data — and it
- *    reports the gap explicitly in its output rather than printing a green
- *    checkmark that would be a lie. When the PDPA endpoint lands, it writes to
- *    this same ledger and this drill covers it unchanged.
+ *    ── CORRECTED 2026-08-22 (v3-D123) — THIS USED TO BE FABRICATED ──
+ *    This docblock previously claimed "the PDPA delete/purge endpoint is M7
+ *    scope and IS NOT BUILT YET" and that the drill only exercised a stand-in
+ *    reconciliation mechanism. That was true when this file was first written
+ *    (`75ac0bb`) but became false a few hours later the SAME DAY, when
+ *    `93ce02a` shipped the real endpoint (`PurgeDueAccountsCommand`,
+ *    `AccountDeletionRequest`, `PurgeLedgerEntry`) — and this file was never
+ *    revisited. In between, the purge step below directly called
+ *    `$doomed->delete()` and hand-wrote a JSON file shaped like a ledger row
+ *    but sharing no code, no column names (`purged_at` vs the real
+ *    `purged_at_ms`) and no transaction with the actual purge path — so this
+ *    property was PASSING GREEN while proving nothing about whether a real
+ *    PDPA purge survives a restore. `PurgeLedgerEntry`'s own docblock and
+ *    `AccountDeletionTest`'s own docblock both asserted this drill "already
+ *    reconciles against" / "already exercises" the real thing — also false,
+ *    for the same reason. Fixed: the purge below is a real
+ *    `AccountDeletionRequest` (due immediately) consumed by a real
+ *    `$this->call(PurgeDueAccountsCommand::class)` — the exact command that
+ *    runs nightly in production. The JSON ledger file this drill still writes
+ *    is not fabricated data; it is a CAPTURE of the real `PurgeLedgerEntry`
+ *    row `pdpa:purge-due` just wrote, taken because the ledger row itself is
+ *    created AFTER the backup dump below and would otherwise be lost in the
+ *    wipe — an operator restoring a stale backup needs the current ledger
+ *    from somewhere outside that stale backup too, which is exactly what this
+ *    file stands in for.
  *
  * ═══════════════════════════════════════════════════════════════════════════════
  * WHAT THIS DRILL DOES NOT PROVE
@@ -213,20 +230,40 @@ class BackupRestoreDrillCommand extends Command
         }
 
         // ─────────────────────────────────────────────────────────────────────
-        // 2. RECORD A PURGE, AFTER the backup was taken.
-        //    This is the ordering that makes the property non-trivial: the
-        //    backup on disk still CONTAINS the doomed subject.
+        // 2. RECORD A REAL PDPA PURGE, AFTER the backup was taken, through the
+        //    ACTUAL production code path — not a hand-rolled delete. This is
+        //    the ordering that makes the property non-trivial: the backup on
+        //    disk still CONTAINS the doomed subject (see v3-D123: this used to
+        //    delete $doomed directly and fabricate a ledger file, exercising
+        //    nothing about the real purge).
         // ─────────────────────────────────────────────────────────────────────
+        $nowMs = (int) round(microtime(true) * 1000);
+        AccountDeletionRequest::create([
+            'user_id' => $doomed->id,
+            'token_hash' => hash('sha256', bin2hex(random_bytes(16))),
+            'requested_at_ms' => $nowMs,
+            'purge_at_ms' => $nowMs, // already due
+        ]);
+        $this->call(PurgeDueAccountsCommand::class);
+
+        if (User::whereKey($doomed->id)->exists()) {
+            $failures[] = 'PURGE: pdpa:purge-due did not remove the doomed subject — the real purge path never ran';
+        }
+
+        // Capture the REAL `purge_ledger` row `pdpa:purge-due` just wrote.
+        // This is NOT fabricated: the row is created by the same
+        // `PurgeLedgerEntry::create()` call and the same transaction
+        // production runs nightly. It has to be captured to a file because
+        // it exists only AFTER the backup dump above and would otherwise be
+        // lost in the wipe below — the same reason a real operator restoring
+        // a stale backup needs the ledger from somewhere outside that backup.
         $purgeLedger = $dir.'/purge-ledger.json';
-        file_put_contents($purgeLedger, json_encode([
-            [
-                'user_id' => $doomed->id,
-                'purged_at' => (int) round(microtime(true) * 1000),
-                'reason' => 'pdpa_delete',
-            ],
-        ], JSON_PRETTY_PRINT));
-        $doomed->delete();
-        $this->line('purge: recorded a PDPA delete for a subject the backup still contains');
+        $realLedgerRows = PurgeLedgerEntry::where('user_id', $doomed->id)->get()->toArray();
+        if ($realLedgerRows === []) {
+            $failures[] = 'PURGE: pdpa:purge-due did not write a purge_ledger row for the doomed subject';
+        }
+        file_put_contents($purgeLedger, json_encode($realLedgerRows, JSON_PRETTY_PRINT));
+        $this->line('purge: recorded a REAL PDPA purge via pdpa:purge-due for a subject the backup still contains');
 
         // ─────────────────────────────────────────────────────────────────────
         // 3. WIPE. The destructive half — without it the "restore" proves
@@ -306,8 +343,8 @@ class BackupRestoreDrillCommand extends Command
         }
 
         // ─────────────────────────────────────────────────────────────────────
-        // 5. PURGE-AWARENESS: re-apply the ledger, then prove the forgotten
-        //    subject did not come back.
+        // 5. PURGE-AWARENESS: re-apply the REAL captured `purge_ledger` row,
+        //    then prove the forgotten subject did not come back.
         // ─────────────────────────────────────────────────────────────────────
         $resurrected = User::whereKey($doomed->id)->exists();
         if (! $resurrected) {
@@ -362,9 +399,9 @@ class BackupRestoreDrillCommand extends Command
         $this->warn('SCOPE — what this run does and does not cover:');
         $this->line("  • ran against driver `{$driver}`. A green SQLite drill does NOT prove a");
         $this->line('    Postgres restore. The staging-Postgres run is a separate checklist line.');
-        $this->line('  • the PDPA delete endpoint is M7 scope and IS NOT BUILT. This drill exercises');
-        $this->line('    the purge-LEDGER reconciliation the real endpoint will write to, not the');
-        $this->line('    endpoint itself. When it lands, this drill covers it unchanged.');
+        $this->line('  • the purge step above runs the REAL `pdpa:purge-due` command against a real');
+        $this->line('    `AccountDeletionRequest`, and reconciles against a captured REAL');
+        $this->line('    `purge_ledger` row — not a fabricated one (v3-D123).');
         $this->line('  • no off-site copy, retention window, or key-rotation policy is exercised here.');
         $this->line('');
 

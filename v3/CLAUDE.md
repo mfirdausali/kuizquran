@@ -53,9 +53,62 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2094 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 275 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 928 apps/web. (v3-D118, 2026-08-22)
+make test    # 2097 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 278 v3/api + 111 corpus-compiler
+             # + 417 engine + 61 fold-runner + 928 apps/web. (v3-D123, 2026-08-22)
+             # NOTE (v3-D123): `backup:restore-drill`'s PURGE-AWARE property
+             # (build-plan step 30/M10) was fabricated — it called
+             # `$doomed->delete()` directly and hand-wrote a JSON file shaped
+             # like a ledger row, sharing no code with the REAL PDPA purge
+             # path (`PurgeDueAccountsCommand`/`AccountDeletionRequest`/
+             # `PurgeLedgerEntry`, build-plan step 23) that shipped hours
+             # after this drill was first written and was never wired in.
+             # Two OTHER files' docblocks (`PurgeLedgerEntry`,
+             # `AccountDeletionTest`) both separately claimed this drill
+             # already reconciled against/exercised the real thing — also
+             # false, same "docblock says X, reality is Y" shape as v3-D90/
+             # D110. Fixed: the purge step now creates a real
+             # `AccountDeletionRequest` and calls
+             # `$this->call(PurgeDueAccountsCommand::class)` — the exact
+             # command that runs nightly — and the JSON file the drill writes
+             # is now a CAPTURE of the real `PurgeLedgerEntry` row that
+             # command wrote, not an authored fabrication. `find tests
+             # -iname "*Backup*"` returned nothing before this run — the
+             # command had zero test coverage in either direction; new
+             # `tests/Feature/Backup/BackupRestoreDrillTest.php` (3 tests).
+             # RED confirmed directly: `git stash` of the source file alone
+             # (tests kept) reran against the original fabrication — 2 of 3
+             # new tests failed, exactly on `assertArrayHasKey('id', ...)`
+             # (a fabricated ledger has no Eloquent primary key) and on the
+             # literal string `pdpa:purge-due — purged 1, skipped 0` never
+             # appearing in the drill's own console output (the real command
+             # was never called). Reverted byte-identically; 3/3 green again.
+             # This was found by a fresh sweep for this build's recurring
+             # "built + tested, zero real caller" bug class after the ENGINE
+             # layer (`packages/engine/src`, every exported function) came
+             # back genuinely clean — a real negative finding, same shape as
+             # v3-D95's own empty sweep, recorded so a future run does not
+             # re-walk that file list; `placement.ts`/FR10 remains the one
+             # deliberately-unwired exception (v3-D111).
+             # `TZ=UTC make test`: 2097 passing (was 2094, +3 — exactly this
+             # run's new tests; no other suite moved). `check-test-floor.mjs`:
+             # OK, 2097 >= floor 1899 (+198 margin, TEST-FLOOR unmoved).
+             # `TZ=UTC make build`: exit 0, 21 routes (unchanged — no new
+             # route). `npm run gates`: locked-css OK, fonts degraded-but-
+             # non-blocking (pre-existing), boundaries OK (208 files,
+             # unchanged), corpus-morphology and corpus-glyphs OK. No
+             # `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff reverted before committing). No Arabic
+             # codepoint introduced: every changed/new file swept
+             # individually over the Arabic, Arabic Supplement, Arabic
+             # Extended-A and both Presentation Forms blocks — zero matches
+             # in the diff (three pre-existing matches elsewhere in
+             # DECISIONS.md, from earlier entries, are untouched by this
+             # change). NOT addressed, named so a future run doesn't
+             # re-discover it as new: the drill still runs SQLite-only in
+             # this sandbox — the staging-Postgres restore run remains a
+             # separate, still-open LAUNCH-CHECKLIST line, unchanged by this
+             # fix. See DECISIONS.md v3-D123.
              # NOTE (v3-D119..D122, same night as D118): the REAL GitHub
              # Actions CI had been `failure` on every commit for at least nine
              # commits running (back through dfa2f76/D115) — nothing before

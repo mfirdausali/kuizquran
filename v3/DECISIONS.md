@@ -7469,3 +7469,113 @@ four commits (`git status --porcelain -- v1 v2` clean before each), and
 none of the four changed a single test's expectations or weakened any
 gate — every fix made an existing, already-written assertion reachable
 for the first time, never altered what it asserted.
+
+### v3-D123 — `backup:restore-drill`'s own PURGE-AWARE property (build-plan step 30 / M10) was fabricated, and had zero test coverage of its own in either direction until this run
+
+**Found by a fresh sweep for this build's recurring bug class** ("mechanism
+built and unit-tested, zero real caller" — v3-D82 through D118) after the
+engine layer (`packages/engine/src`) came back genuinely clean this run: every
+exported function is reachable from a real caller, either in `apps/web` or in
+`worker/fold-runner`'s own nightly checks, with the sole exception of
+`placement.ts` (FR10), already named a deliberate, non-live product decision
+in v3-D111. That is a real negative finding, consistent with v3-D95's own
+"eight-night sweep came back empty" precedent — recorded here rather than
+silently discarded, so a future run does not re-walk the same file list.
+
+The next layer, `v3/api/app/Support` + `app/Console/Commands`, turned up a
+different shape of the same underlying failure mode: not an unreachable
+mechanism, but a **test double standing in for a real mechanism that now
+exists**, still believed by three separate docblocks to be the honest
+limitation it was when first written.
+
+`BackupRestoreDrillCommand` (`75ac0bb`, 2026-08-12T06:26+09:00 —
+committed alongside unrelated content, hence its odd commit message) proves
+the launch checklist's "backup restore drill: GREEN" line by actually
+performing dump → encrypt → wipe → decrypt → restore against the configured
+database, then diffing the result. Its third property, PURGE-AWARE, is meant
+to prove a PDPA delete survives a restore of a backup taken before it. At the
+time this file was written, that was honestly impossible to test for real:
+its own docblock says so — "the PDPA delete/purge endpoint is M7 scope and IS
+NOT BUILT YET (there is no purge path anywhere in `app/`)" — so the drill
+recorded a "purge" by calling `$doomed->delete()` directly and hand-writing a
+JSON file shaped like a ledger row (`{user_id, purged_at, reason}`), then
+reconciled against that file after the restore.
+
+**That claim went stale the same day, a few hours later.** `93ce02a`
+(2026-08-12T16:08 UTC) shipped the real PDPA purge path — build-plan step 23:
+`AccountDeletionRequest` (a pending deletion), `PurgeDueAccountsCommand`
+(`pdpa:purge-due`, the nightly hard-delete, transactional, writes an
+append-only `PurgeLedgerEntry` row FIRST inside the same transaction as the
+user delete), and `PurgeLedgerEntry` itself (append-only, `updating`/
+`deleting` both throw). `BackupRestoreDrillCommand.php` was never touched
+again (`git log --oneline -- app/Console/Commands/BackupRestoreDrillCommand.php`
+shows exactly one commit, `75ac0bb`, an ancestor of `93ce02a`) — so its
+"purge" step kept fabricating a deletion and a ledger file sharing no code, no
+transaction, and not even the same column name (`purged_at` vs. the real
+schema's `purged_at_ms`) with the mechanism that shipped hours later.
+
+**Two other files independently asserted this drill already covered the real
+thing — both false, for the identical reason:**
+- `PurgeLedgerEntry`'s own docblock: "This is the row `BackupRestoreDrillCommand`
+  already reconciles against."
+- `AccountDeletionTest`'s own docblock: "Mirrors `BackupRestoreDrillCommand`'s
+  own fixture shape... since that command already exercises the reconciliation
+  half of this feature."
+
+Neither author was wrong to believe it — the shapes (a keeper who survives, a
+doomed subject who does not) really do mirror each other, and a docblock is
+not code a test checks. But the actual mechanism these three files describe
+as shared was never shared: `grep -rn "PurgeLedgerEntry\|PurgeDueAccountsCommand\|AccountDeletionRequest" app/Console/Commands/BackupRestoreDrillCommand.php`
+returned nothing before this fix. This is the same "docblock claims X, reality
+is Y" shape as v3-D90's and v3-D110's own findings, spread across three files
+instead of one.
+
+**Why nothing caught it:** `find tests -iname "*Backup*"` returned nothing —
+this command had zero test coverage in either direction before this run, so
+there was no RED to have already failed on. Being a "wipe the whole configured
+database" command, it is the kind of thing a human runs by hand and reads the
+console output of, which is presumably how it was believed to work at all.
+
+**Fixed:** the purge step now creates a real `AccountDeletionRequest` (due
+immediately) for the doomed subject and calls
+`$this->call(PurgeDueAccountsCommand::class)` — the exact command
+`routes/console.php` schedules nightly. The JSON file the drill still writes
+is no longer authored by this command; it is a **capture** of the real
+`PurgeLedgerEntry` row `pdpa:purge-due` just wrote
+(`PurgeLedgerEntry::where('user_id', $doomed->id)->get()->toArray()`), taken
+because that row is created AFTER the backup dump above and would otherwise
+be lost in the wipe — mirroring the genuine real-world need for an operator
+restoring a stale backup to reconcile against a purge ledger from somewhere
+outside that stale backup. All three stale docblocks (this command's own,
+plus the two above) are corrected in place rather than deleted, per this
+build's own "correct forward, name what changed" convention.
+
+**Verified — RED confirmed directly, not asserted:** `git stash` of
+`BackupRestoreDrillCommand.php` alone (the new test file kept) and reran the
+new suite against the original, fabricated source: 2 of 3 new tests failed,
+exactly on the assertions this fix targets —
+`test_the_captured_ledger_carries_the_real_model_shape_not_a_fabrication`
+failed on `assertArrayHasKey('id', ...)` (a fabricated ledger entry has no
+Eloquent primary key), and
+`test_the_drill_actually_invokes_the_real_purge_command` failed because the
+literal string `pdpa:purge-due — purged 1, skipped 0` never appeared in the
+drill's console output (the real command was never called at all). The third
+test (`...passes_end_to_end_against_sqlite`) passed even against the
+fabrication, confirming the drill's OTHER two properties (restore integrity,
+encryption) were never in question — only the purge-aware claim was hollow.
+`git stash pop` restored the fix byte-identically; all 3 tests green again,
+9 assertions.
+
+`TZ=UTC php artisan test` (v3/api, corpus compiled first): **278 passed** (was
+275, +3 — exactly this run's new tests), 2 incomplete (PAY-1, unchanged), 6
+skipped (the Postgres-only `PerUserFoldLock*` tests, unchanged — no local
+Postgres reachable in this sandbox run). No other suite's count moved by this
+change; the new test file's `RefreshDatabase` trait means the drill's own
+dump/wipe/restore of the WHOLE configured database happen inside this test's
+transaction and roll back with it, never touching any other test's rows.
+
+**Scope, deliberate:** this fix closes the ONE property that was fabricated.
+It does not add Postgres coverage for the drill (still SQLite-only in this
+sandbox, same open line LAUNCH-CHECKLIST.md already carries for the
+staging-Postgres restore), and it does not change anything about the
+restore-integrity or encryption properties, which were already real.
