@@ -53,9 +53,67 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2110 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2130 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 278 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 941 apps/web. (v3-D124, 2026-08-22)
+             # + 417 engine + 61 fold-runner + 961 apps/web. (v3-D125, 2026-08-22)
+             # NOTE (v3-D125): `Admin\FlagController` (build-plan step 26/M8,
+             # the flag plane) had zero frontend callers — BUILD-PLAN's own M8
+             # line names "nav homes for flags/reports/templates/audit viewer"
+             # as a deliverable never built, and `grep -rln "admin/flags"
+             # apps/web` (excluding this run's new files) returned nothing.
+             # Same "built + tested, zero production caller" shape as
+             # v3-D100/D124, found by continuing v3-D124's own named next
+             # step: the sweep of `v3/api/app/Http/Controllers`. Fixed: new
+             # `lib/admin/flags.ts` (mirrors `lib/admin/health.ts`'s
+             # three-state discipline) + `components/admin/FlagsPanel.tsx` +
+             # a new standalone `/settings/flags` route (mirrors
+             # `/settings/health`'s and `/settings/content-freeze`'s shape).
+             # Kill stays one click (no ceremony); enable renders the full
+             # ceremony form but validates none of it client-side beyond
+             # making the form usable — every rule (>=20-char reason, verbatim
+             # typed name, both ethics booleans, the version-conflict check)
+             # is asserted only by the server and its response rendered
+             # verbatim, per BUILD-PLAN's own "SERVER-ENFORCED" requirement.
+             # Also resolved, not just noted: v3-D124's own "worth a future
+             # run's attention" 401-vs-403 finding turned out to be NOT a bug.
+             # `SystemHealthTest::setUp()` authenticates every test in the
+             # class (incl. `test_health_requires_admin`, which merely empties
+             # the admin allowlist) — so that test hits `EnsureIsAdmin`'s
+             # allowlist check and correctly gets 403; `ContentFreezeTest
+             # ::test_the_freeze_report_requires_admin` never authenticates at
+             # all, so `auth:sanctum` itself correctly returns 401 before
+             # `EnsureIsAdmin` runs. No middleware inconsistency exists; the
+             # two tests exercise different scenarios and both status codes
+             # are textbook-correct for their own case. No code changed for
+             # this finding — recorded so it is not re-opened as live. RED
+             # confirmed directly: both new test files were run against the
+             # tree before either source file existed and failed on
+             # module-resolution errors; implemented after, 20/20 green.
+             # `TZ=UTC make test`: 2130 passing (was 2110, +20 — exactly this
+             # run's new tests). `check-test-floor.mjs`: OK, 2130 >= floor
+             # 1899 (+231 margin). `TZ=UTC make build`: exit 0, 23 routes (was
+             # 22 — `/settings/flags` is new). `npm run gates`: all green
+             # (fonts degraded-but-non-blocking, pre-existing; boundaries 218
+             # files, up from 214, four new files). No `v1/**`/`v2/**` edit
+             # (stray `v2/tsconfig.tsbuildinfo` reverted before committing).
+             # No Arabic codepoint (full diff swept over every Arabic block +
+             # both Presentation Forms blocks, zero matches). NOT addressed:
+             # the flag plane's "reports/templates/audit viewer" nav homes
+             # (FlagRampAudit rows have no viewer anywhere); the admin
+             # client-side auth gate (pre-existing, named gap). Sweep of
+             # `v3/api/app/Http/Controllers` is now fully READ (not fully
+             # wired) — three more zero-caller surfaces found and
+             # deliberately left, each for a stated reason, not a quick fix:
+             # `AdminRevealController`/`AdminUsersController` (§16
+             # privacy-reveal tooling, deserves its own careful UI pass),
+             # `GlossDraftsController` (gated on Firdaus's ratification, none
+             # recorded), and — most consequential — `OverridesController
+             # ::store` (`POST /api/overrides`, the ADMIN WRITE path,
+             # distinct from the public GET path `lib/overrides/fetch.ts`
+             # already calls): there is still no UI anywhere for an admin/
+             # qari to actually write a gloss/distractor override; workbench
+             # signs verifications only. `v3/worker/fold-runner/src` remains
+             # entirely unswept. See DECISIONS.md v3-D125.
              # NOTE (v3-D124): `Admin\ContentFreezeController` (build-plan step
              # 28/M9's freeze gate) had zero frontend callers — its own
              # docblock claimed "the workbench shows them together", false

@@ -7688,3 +7688,110 @@ this recurring bug class is `v3/api/app/Http/Controllers` beyond
 `ContentFreezeController` (not exhaustively re-checked this run — this was
 the first hit found and fixed, not a proof the rest of the directory is
 clean) and `v3/worker/fold-runner/src` (not yet swept at all).
+
+### v3-D125 — `Admin\FlagController` had zero frontend callers; the flag plane had no nav home (build-plan step 26/M8), and v3-D124's 401-vs-403 note was a red herring
+
+**Continuing the named sweep.** v3-D124 named `v3/api/app/Http/Controllers`
+beyond `ContentFreezeController` as the next unswept layer. This run swept it
+and found `Admin\FlagController` (`GET /api/admin/flags`, plus
+`kill`/`enable`/`ack` — build-plan step 26/M8's flag plane) fully built and
+tested (`tests/Feature/Flags/FlagPlaneTest.php`, 13 tests covering #126's
+kill-always-wins race, #127's cache bust, #159's ack-never-re-enables, and the
+M10 security-review versionless-ramp fix) with **zero frontend callers** —
+`grep -rln "admin/flags" apps/web` (excluding the new files this run adds)
+returned nothing, and BUILD-PLAN's own M8 line names "nav homes for
+flags/reports/templates/audit viewer" as a deliverable never built. Same shape
+as v3-D100 (`SystemHealthController`) and v3-D124 (`ContentFreezeController`).
+
+**Fixed:** new `lib/admin/flags.ts` (`loadFlags`/`killFlag`/`enableFlag`/
+`acknowledgeFlag`, mirroring `lib/admin/health.ts`'s three-state discipline
+and egress-through-`apiFetch`-only convention) + `components/admin/FlagsPanel.tsx`
++ a new standalone `/settings/flags` route (mirrors `/settings/health`'s and
+`/settings/content-freeze`'s shape — staff tooling, no learner chrome). Kill
+stays one click, matching the ceremony's own asymmetry (`FlagController::kill`'s
+own docblock: "friction on the safety path is how a harmful feature stays live
+for an extra ten minutes"). Enable renders the full ceremony (reason textarea,
+typed-name confirmation, two named checkboxes) but validates NONE of it beyond
+what makes the form usable (Confirm disabled until every field is non-empty) —
+the actual rules (>=20 chars, verbatim name, both booleans, the version
+conflict) are asserted only by the server and its response is rendered
+verbatim, never re-derived client-side, per BUILD-PLAN's own "SERVER-ENFORCED"
+requirement for this exact ceremony.
+
+**v3-D124's 401-vs-403 note, resolved as NOT a bug.** That entry flagged
+`ContentFreezeTest.php` asserting 401 on an unauthenticated request to
+`/admin/content-freeze` while `SystemHealthTest.php` asserted 403 on an
+"equivalent" unauthenticated request to `/admin/health`, both routes sharing
+the identical `auth:sanctum` + `admin` middleware stack, and left it as "worth
+a future run's attention." Read both test bodies directly (not just their
+names): `SystemHealthTest::setUp()` calls `Sanctum::actingAs(User::factory()
+->create(['email' => 'ops@example.com', ...]))` **unconditionally for every
+test in the class**, including `test_health_requires_admin` — that test sets
+`admin.emails` to an EMPTY array but the request DOES carry a valid,
+verified-email Sanctum token; `EnsureIsAdmin` reaches its allowlist check and
+returns 403. `ContentFreezeTest::test_the_freeze_report_requires_admin` never
+authenticates at all — `auth:sanctum` itself rejects the request with 401
+before `EnsureIsAdmin` ever runs. Confirmed by running both tests
+individually (`php artisan test --filter=test_health_requires_admin` and
+`--filter=test_the_freeze_report_requires_admin`) and reading their `setUp()`
+methods side by side — no middleware or route-group difference exists; the
+two tests exercise two genuinely different scenarios (authenticated-but-
+forbidden vs. never-authenticated) and 403-vs-401 is the textbook-correct
+response for each. No code or test changed for this — it is a finding that
+there was nothing to fix, recorded so a future run doesn't re-open it as a
+live inconsistency.
+
+**Verified:** RED confirmed directly, not asserted — both new test files
+(`lib/admin/flags.test.ts`, `test/flags-panel.test.tsx`) were run against the
+tree BEFORE either source file existed and failed on module-resolution errors
+(`Does the file exist?`); implemented after, all 20 new tests green on the
+first pass.
+
+`TZ=UTC make test`: **2130 passing** (was 2110, +20 — exactly this run's new
+tests: 13 in `flags.test.ts`, 7 in `flags-panel.test.tsx`; no other suite's
+count moved — `v3/api` PHPUnit stayed at 278, no backend file touched).
+`check-test-floor.mjs`: OK, 2130 >= floor 1899 (+231 margin, `TEST-FLOOR` left
+unmoved). `TZ=UTC make build`: exit 0, **23 routes** (was 22 — `/settings/flags`
+is new). `npm run gates`: locked-css OK, fonts degraded-but-non-blocking
+(pre-existing, unrelated), boundaries OK (218 files, up from 214 — four new
+files, no violation), corpus-morphology and corpus-glyphs OK.
+
+No `v1/**`/`v2/**` edit: `git status --porcelain -- v1 v2` empty immediately
+before committing (a stray `v2/tsconfig.tsbuildinfo` build-cache diff from
+running the suite was reverted first, same discipline as every prior entry).
+No Arabic codepoint introduced: every new/changed file was swept
+programmatically for the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks — zero matches; every new line addresses a
+flag key, a description string already present in `FlagRegistry::FLAGS`
+(English prose, not corpus text), a version number, or a boolean.
+
+**Not addressed, named so a future run doesn't re-discover it as new:** the
+admin client-side auth gate remains unbuilt across every admin screen
+(pre-existing, named gap since v3-D100/D124 — this panel inherits the same
+scope limit); the flag plane's "reports/templates/audit viewer" nav homes
+BUILD-PLAN's M8 line also names are still unbuilt (`FlagRampAudit` rows have
+no viewer anywhere in `apps/web` — a real, separate, smaller follow-on); the
+72h auto-waive (v3-D91) still has no UI signal distinguishing an operator ack
+from an auto-waive on this panel beyond the small "(auto-waived after 72h)"
+caption this run added, which is read-only and not a filter/sort.
+
+**`v3/api/app/Http/Controllers` is now fully READ, not fully wired** — this
+run's sweep of the directory is complete, but three more zero-caller surfaces
+were found and deliberately left, each for a reason named here so a future
+run doesn't either re-discover them as new or wire them up as a same-shape
+quick fix (they are not): `AdminRevealController` and `AdminUsersController`
+(`/admin/users/{id}/reveal`, `/admin/reveal/{token}`, `/admin/users/export.csv`)
+have no frontend caller at all — this is §16 privacy-reveal tooling with a
+server-TTL security model that deserves its own careful UI pass, not a quick
+wire-up in the style of a status panel; `GlossDraftsController` has no
+frontend caller either, but is explicitly gated on Firdaus's ratification
+(BUILD-PLAN: "agents may draft into a flagged non-shipping table only if
+Firdaus ratifies that"), and none is recorded; and `OverridesController::store`
+(`POST /api/overrides`, the admin WRITE path — distinct from the public `GET
+/api/overrides` read path `lib/overrides/fetch.ts` already calls) also has no
+frontend caller — `grep -rn "apiFetch(\"/api/overrides\"" apps/web` finds only
+the GET call — meaning there is still no UI anywhere for an admin/qari to
+actually correct a gloss or distractor through the write path B1/B3's own
+closures depend on; workbench signs verifications only, never writes an
+override. `v3/worker/fold-runner/src` remains entirely unswept for this bug
+class.
