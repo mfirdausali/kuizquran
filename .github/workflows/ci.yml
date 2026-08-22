@@ -141,7 +141,7 @@ jobs:
       - uses: shivammathur/setup-php@v2
         if: steps.has.outputs.yes == 'true'
         with:
-          php-version: "8.3"
+          php-version: "8.4"
           extensions: pdo_pgsql, pgsql
 
       - name: Create the throwaway Postgres database for the per-user advisory-lock tests

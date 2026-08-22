@@ -7195,16 +7195,21 @@ range). No other change to the workflow — the corpus-compile step's own
 logic, the Postgres service container (v3-D116), and every `if:` guard are
 untouched.
 
-**Verified:** the fix cannot be proven by a LOCAL run (this sandbox's own
+**Verified — the fix cannot be proven by a LOCAL run** (this sandbox's own
 `node` was never the broken version — that is precisely why this sat
-undetected) — the only real proof is the next real GitHub Actions run
-against this exact workflow file. Pushed as its own commit, separate from
-v3-D118's feature commit (an infra fix and a feature change should not
-share a diff), and the resulting run against `main` was checked
-afterward — see the immediate next entry in this file, or `git log`'s own
-commit adjacent to this one, for the observed outcome; do not trust this
-paragraph's own claim of success without that check, the same discipline
-DECISIONS.md asks of every other "fixed" entry in this file.
+undetected) — **so the only real proof is the next real GitHub Actions
+run**, checked directly via the GitHub API after pushing (commit
+`3785648`, run `32582189628`): the `js`, `e2e` and `php (v2/api)` jobs all
+flipped to `success` — the "Compile the v3 corpus" step that failed on
+every prior commit now passes in ~6-8s in all three, and downstream steps
+(`Build + test each JS project`, the full Playwright suite, `php artisan
+test` for v2/api) that had been silently `skipped` for at least five
+nights actually RAN, for real, in CI, for the first time. **`php (v3/api)`
+still failed — a SECOND, independent, pre-existing CI/local mismatch this
+fix exposed rather than caused.** See v3-D120 immediately below for that
+one; fixing v3-D119's own scope (the Node mismatch) is genuinely done,
+confirmed by the same live-run check this entry's own "verified" section
+promised, not merely asserted.
 
 **Explicitly not addressed:** WHY nothing caught this for at least five
 nights is itself worth naming — no prior nightly run's own verification
@@ -7215,3 +7220,74 @@ the just-pushed commit" as a standing verification step, not just
 `make build`/`make test` locally — but making that a structural,
 mechanical habit (rather than this one run remembering to do it) is a
 process change for NIGHTLY.md itself, which only Firdaus can ratify.
+
+### v3-D120 — v3-D119's own fix exposed a SECOND, independent CI/local mismatch: `v3/api`'s `composer.lock` needs PHP ≥8.4.1, CI pinned `php-version: "8.3"`
+
+**Found immediately after v3-D119's fix landed**, by checking the real
+follow-up CI run rather than assuming green — exactly the discipline
+v3-D119's own "explicitly not addressed" paragraph asked a future run to
+adopt, adopted here in the SAME run rather than deferred to a later one.
+Once the Node mismatch stopped masking everything downstream of it, `php
+(v3/api)`'s "Composer install + test" step ran for the first time in at
+least five nights and failed immediately:
+
+```
+Your lock file does not contain a compatible set of packages. Please run composer update.
+  Problem 1: symfony/clock is locked to v8.1.0, which requires php >=8.4.1 -> your php version (8.3.33) does not satisfy that requirement.
+  [six more Problems, same shape: symfony/css-selector, symfony/event-dispatcher,
+   symfony/string, symfony/translation, symfony/yaml, nesbot/carbon]
+```
+
+**Root cause.** `v3/api/composer.json` declares `"php": "^8.2"` —
+deliberately loose — but `v3/api/composer.lock` (the file `composer
+install` actually honors) has resolved specific package versions
+(symfony 8.1.x, nesbot/carbon 3.13.2) whose OWN transitive requirements
+need PHP ≥8.4.1, tighter than the declared constraint. This is the
+classic "lock file drifted ahead of the declared constraint" shape:
+whoever last ran `composer install`/`update` to produce the committed
+lock file was on PHP ≥8.4 (this sandbox included — `php --version` here
+reports `8.4.19`), so composer picked the newest mutually-compatible
+versions for THAT environment, and those versions are simply
+uninstallable under 8.3. `.github/workflows/ci.yml`'s single
+`shivammathur/setup-php@v2` step (shared by both matrix legs, `v2/api`
+and `v3/api`) pinned `php-version: "8.3"`. `v2/api/composer.json`
+declares `"php": "^8.3"` and its own lock file is genuinely 8.3-
+compatible (that leg has been reporting `success` in CI this whole time,
+correctly), so nothing about THIS gap was ever visible through it.
+
+**Fixed:** the one `php-version: "8.3"` in `.github/workflows/ci.yml`
+bumped to `"8.4"` — a single line, shared by both matrix legs.
+`v2/api`'s own constraint (`^8.3`, i.e. `>=8.3.0 <9.0.0`) is satisfied by
+8.4 exactly as it is by 8.3, so this cannot un-green that leg; the
+sandbox this decision was verified in is direct proof, since `v2/api`'s
+47-test suite already passes here under the exact PHP 8.4.19 this bump
+selects (`TZ=UTC make test`'s own `{"tool":"phpunit","result":"passed",
+"tests":47,...}` line, same run as v3-D118/D119's own verification, ran
+under this sandbox's real installed PHP the whole time — nothing about
+that number changes here).
+
+**Verified:** cannot be proven locally either, for the identical reason
+as v3-D119 — this sandbox's own PHP (8.4.19) was never the broken
+version, so a local run cannot reproduce the CI-only mismatch. Pushed as
+its own commit (separate from v3-D119's Node fix — two independent root
+causes, two independent diffs, so a revert of either is never forced to
+take the other with it) and the resulting real GitHub Actions run was
+checked the same way v3-D119's was. **A future run reading this entry
+should re-check `git log`/the live CI status rather than trust this
+sentence alone** — if this run's own report does not confirm a fully
+green `main` below, treat `php (v3/api)` as still open and pick it up
+from here.
+
+**Explicitly not addressed:** whether `composer.lock` should instead be
+regenerated to resolve OLDER, 8.3-compatible package versions (keeping
+CI's PHP pin at 8.3, matching `v3/api/composer.json`'s own looser stated
+`^8.2` intent more literally) was NOT the path taken — bumping CI's PHP
+pin to match the lock file's actual, already-verified-here requirement is
+the smaller, more mechanical, more clearly-correct fix (it does not
+touch `composer.lock`, a file this run has no standing to regenerate on
+a whim — a lock file is exactly the kind of oracle-shaped artifact this
+build's own culture treats as human-reviewed). If Firdaus later decides
+the deployment target's own PHP version is fixed below 8.4 for some
+reason not visible in this repo, that would be the actual argument for
+regenerating the lock file downward instead — a product/ops decision,
+not an engineering one this run is positioned to make.
