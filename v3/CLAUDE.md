@@ -53,9 +53,86 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2085 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2094 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 275 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 919 apps/web. (v3-D117, 2026-08-21)
+             # + 417 engine + 61 fold-runner + 928 apps/web. (v3-D118, 2026-08-22)
+             # NOTE (v3-D118): `packages/engine/src/freeplay.ts#coldSuccessAdoption`
+             # — the LAST of FR6's five exported functions to reach a learner —
+             # had zero production callers, exactly the gap v3-D117's own header
+             # named: "the offer itself is a genuine separate write path...
+             # deserves its own night." A learner who free-drilled an untaught
+             # ayah cold and hard through Door 3 had no way to actually adopt it
+             # into their memorization — the pass is deliberately free-play
+             # (`structured:false`), so nothing about it ever touches the atom,
+             # by construction. WIREFRAME.md's own event table already settles
+             # that `adoption` itself is evidence-only ("Logged, no strength
+             # signal") — `rebuild.ts` correctly has no fold branch for it, the
+             # same structural absence `session_start`/`rung_start` already use.
+             # So the real encode is an ordinary structured `ayah_produced`
+             # (`rung: gradeClassToWire("s3_full")`, never a literal); `adoption`
+             # rides alongside it purely as the audit trail, the same division
+             # `gate_demote`'s own `sentToReviews` field draws.
+             #
+             # `lib/session/run.ts` gains `SessionRun.openPracticeDrill` (the
+             # learner's CHOSEN Door 3 difficulty, stored verbatim — `run.machine`
+             # carries no `full` field once a pass completes, so this is the one
+             # place the choice survives to session-end), `adoptionOfferFor(run)`
+             # (re-derives the fold, calls `coldSuccessAdoption(atoms, ayah,
+             # run.openPracticeDrill, run.slips === 0)` — a Door 3 queue is always
+             # exactly one item, so `run.slips` at completion is scoped to
+             # precisely that pass, the "cold" signal), and `acceptAdoption(run,
+             # ctx)` (re-verifies the offer before committing anything, commits
+             # the encode then the audit event as two chained retry-safe
+             # commits). No "accepted" flag anywhere: `adoptionOfferFor` is
+             # SELF-CLOSING — once the atom is genuinely encoded,
+             # `coldSuccessAdoption`'s own `untaught` check reads false on the
+             # next call. `SessionIsland.tsx` gains the matching offer effect +
+             # "Adopt ayah N" button, mirroring Doors 1/2 exactly.
+             #
+             # Mutation-verified: `git stash` of the two SOURCE files alone
+             # (`run.ts`, `SessionIsland.tsx`; every test kept) failed exactly
+             # the 8 new test cases (7 in `run.test.ts`, 1 in
+             # `session-island.test.tsx`), 80 other cases in those two files
+             # unaffected; restored byte-identically, 88/88 green again. The
+             # component-level "offers the CTA" test deliberately does NOT use
+             # `completeSession()`'s trial-and-error tile clicking — a coin-flip
+             # wrong tap before the right one would be a genuine slip, silently
+             # falsifying the "cold pass" the offer requires. Instead it
+             # precomputes, PURELY (`advanceReconstruct` is a pure engine
+             # function — no DB write, so it never double-commits against the
+             # on-screen run), the exact correct DISPLAY index at each blank,
+             # then clicks exactly those tiles.
+             #
+             # `TZ=UTC make test`: 2094 passing (was 2085, +9 — exactly this
+             # run's new tests: 7 in `run.test.ts` + 2 in
+             # `session-island.test.tsx`; no other suite moved).
+             # `check-test-floor.mjs`: OK, 2094 >= floor 1899 (+195 margin,
+             # `TEST-FLOOR` left unmoved). `TZ=UTC make build`: exit 0, 21 routes
+             # (unchanged — no new route). `npm run gates`: locked-css OK, fonts
+             # degraded-but-non-blocking (pre-existing), boundaries OK (208
+             # files, unchanged — no new file), corpus-morphology and
+             # corpus-glyphs OK. `npx tsc --noEmit`: clean, `Version 5.9.3`
+             # confirmed. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted before
+             # committing). No Arabic codepoint introduced: every changed file
+             # swept individually over the Arabic, Arabic Supplement, Arabic
+             # Extended-A and both Presentation Forms blocks, plus a
+             # `\u06xx`/`\u08xx`-escape and `fromCharCode` sweep — zero matches;
+             # every new line addresses an ayah number, a strength value, a
+             # slip count, or a closed-set difficulty ("S2"/"S3"), never corpus
+             # text.
+             #
+             # NOT addressed, named so a future run doesn't re-discover it as
+             # new: the diminishing-returns nudge stays wired onto Door 2 only
+             # (v3-D111) — Door 3 has no equivalent, though the case for one is
+             # weaker (open practice never damages a strong atom regardless of
+             # rep count). The SSR override gap (`lib/corpus/load.ts`,
+             # v3-D96/D110) and late-arrival refold (v3-D32/D116) are
+             # unchanged. With this, all five of `freeplay.ts`'s FR6 exports
+             # have a real production caller — the "built and tested, zero
+             # callers" sweep that produced v3-D82 through D117 has exhausted
+             # this file; a future run should look elsewhere for the next
+             # instance. See DECISIONS.md v3-D118.
              # NOTE (v3-D117): FR6 Door 3 ("open practice") — the last of
              # freeplay.ts's three doors — had zero production callers, named
              # out of scope by v3-D98, D106, D111, D112 and D113 alike for the

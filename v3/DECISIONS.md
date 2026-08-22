@@ -6975,3 +6975,172 @@ built, FR6's own "three doors after session complete" is now fully wired —
 only the adoption offer and the diminishing-returns nudge's OTHER possible
 surfaces (it is wired onto Door 2 only, per v3-D111) remain as intentionally
 scoped-out refinements, not gaps.
+
+### v3-D118 — cold-success adoption (`freeplay.ts#coldSuccessAdoption`): the last of FR6's five exported functions gets its write path, closing v3-D117's own named deferral
+
+**Re-derived state per NIGHTLY.md, not trusted from any stale line.** `git
+fetch origin main` found the local checkout already matched
+`origin/main` (`c82fc95`, v3-D117) — no reconciliation needed this time.
+Re-walked `BUILD-PLAN.md`'s 32-step order against `git log` and
+`HANDOVER.md`: steps 1–26 and 29 DONE, 27/28 human-content-gated
+(unchanged — surah 67's scene beats still await Firdaus), step 30's
+engineering exhausted (only infra/calendar items remain: a staging host, a
+live Postgres/SMTP account, PAY-1's Stripe fixtures — none of them
+agent-doable). Picked up exactly where v3-D117's own header left off: "the
+offer itself is a genuine separate write path... deserves its own night."
+
+**Finding.** `packages/engine/src/freeplay.ts#coldSuccessAdoption` was real
+and unit-tested (`freeplay.test.ts`'s "cold-success adoption" block, 2
+assertions) since `freeplay.ts` landed alongside Doors 1/2 (v3-D98), but had
+ZERO production callers — `grep -rln coldSuccessAdoption apps/web` returned
+nothing before this run. It is the last of FR6's five exported functions
+(`extraLearnGrant`, `weakSpots`, `openPracticePick`, `coldSuccessAdoption`,
+`diminishingReturns`) to reach a learner. A learner who free-drilled an
+untaught ayah cold and hard through Door 3 (open practice, v3-D117) had no
+way to actually adopt it into their memorization — the pass is deliberately
+free-play (`structured:false`, invariant #5), so nothing about it ever
+touches the atom, by construction. The "adopt" offer is what turns that
+free-play evidence into a real, deliberate, tap-gated commitment.
+
+**A subtlety WIREFRAME.md's own event table already settled, not
+re-litigated here:** `adoption` is listed among the EVIDENCE-ONLY event
+types ("Logged, no strength signal") — `rebuild.ts` correctly has no fold
+branch for it, the same structural-absence pattern `session_start`/
+`rung_start`/`ayah_complete` already use, not a gap to fix. So `adoption`
+alone cannot be what encodes the atom. The actual encode has to be an
+ordinary structured `ayah_produced` (`rung: "S3"`) — exactly what a real
+graded hard pass would commit — and `adoption` rides alongside it purely as
+the audit trail recording that THIS particular encode came from the
+tap-gated adopt action rather than an ordinary Learn/gate pass, the same
+division `gate_demote`'s own `sentToReviews` field draws for "tap-gated,
+never automatic."
+
+**Built.** `lib/session/run.ts` gains:
+- `SessionRun.openPracticeDrill: OpenPracticeDrill | null` — the learner's
+  CHOSEN Door 3 difficulty, stored verbatim on the run rather than
+  re-derived from the completed pass's blank layout (`ReconstructState`,
+  `run.machine`'s own type, carries no `full` field once a pass is done —
+  only the transient `ReconstructAdvance.full` does, inside `settleAnswer`,
+  never surviving to session-end). `startFromQueue` (shared by all four
+  entry points) gains a matching optional parameter, defaulted to `null`
+  for every caller but `startOpenPractice`, which threads its own `drill`
+  argument through.
+- `adoptionOfferFor(run)` — re-derives the fold (never `run`'s in-memory
+  queue, the same discipline `extraLearnOfferFor`/`weakSpotOfferFor`/
+  `demoteOfferFor` already follow) and calls `coldSuccessAdoption(atoms,
+  ayah, run.openPracticeDrill, run.slips === 0)`. `run.slips === 0` is
+  Door 3's own "cold pass" signal — a Door 3 queue is always exactly one
+  item, so `run.slips` at completion is scoped to precisely that one
+  ayah's pass, never a multi-item total. No `now` parameter (unlike
+  `weakSpotOfferFor`): `coldSuccessAdoption` is time-independent, the same
+  shape `demoteOfferFor` already has for the identical reason.
+- `acceptAdoption(run, ctx)` — re-verifies the offer itself before
+  committing anything (never trusts a stale caller, mirroring
+  `acceptGateDemote`'s own "acts on exactly what it was shown" discipline),
+  then commits the structured `ayah_produced` (`rung:
+  gradeClassToWire("s3_full")`, never a literal — B2/v3-D26's rule) and the
+  `adoption` audit event as two chained `commitThenContinue` calls (edge
+  case #74's retry discipline applies to each independently). Returns `run`
+  unchanged (no queue mutation) — **no extra "accepted" flag is needed
+  anywhere**, because `adoptionOfferFor` is SELF-CLOSING: the moment the
+  atom is genuinely encoded, `coldSuccessAdoption`'s own `untaught` check
+  reads `false` on the next call and the offer silently disappears. This
+  is the same "ask the engine again, never remember an answer locally"
+  shape every prior FR6 offer in this file already uses.
+
+`SessionIsland.tsx` gains an `adoptionOffer` state + effect (fires on
+`phase.kind === "summary"`, mirroring Doors 1/2's own effects exactly) and
+an "Adopt ayah N" button, rendered only when `adoptionOffer?.offer` — the
+component never checks `run.slips` or `run.openPracticeDrill` itself
+(check-boundaries.mjs clause 5's boundary holds).
+
+**Verified.**
+- `packages/engine/test/freeplay.test.ts`'s existing "cold-success
+  adoption" block (2 assertions, unmodified) still proves the pure engine
+  function in isolation; this run adds no engine-level test — only wiring.
+- `lib/session/run.test.ts` (7 new tests): offers nothing before the run
+  is done; offers nothing for an "S2" (easy) drill — `coldSuccessAdoption`
+  requires "hard"; offers `{offer:true, ayah}` after a genuinely cold
+  (`run.slips === 0`), hard ("S3") pass of a still-untaught ayah, with the
+  atom confirmed STILL un-encoded at that point (`rebuild()` read
+  directly, never assumed); offers NOTHING if the pass slipped anywhere —
+  proven by deliberately tapping one wrong tile mid-pass, then recovering,
+  the same technique v3-D107's own cold-gate slip test uses; `acceptAdoption`
+  commits exactly one STRUCTURED `ayah_produced` (`rung:"S3"`) plus exactly
+  one `adoption` event and the atom becomes `encoded:true` with
+  `strength > 0`, and the offer is confirmed gone on the very next call (the
+  self-closing property, proven directly rather than assumed); a no-op on
+  an "S2" run (no event appended, `result === run` by reference); a no-op
+  on a SECOND `acceptAdoption` call after the first already landed — no
+  double-encode, distinguishing the one free-play `ayah_produced` Door 3's
+  own pass already wrote (`structured:false`) from the one STRUCTURED
+  encode adoption adds, so the count assertion cannot pass on a
+  miscounted vacuous total.
+- `test/session-island.test.tsx` (2 new tests): the CTA appears and
+  clicking it lands both events, encodes the atom, and the CTA itself
+  disappears — driven WITHOUT `completeSession()`'s trial-and-error
+  `driveOneBlank` (which tries DOM tiles in positional order and could
+  commit a genuine wrong tap before finding the right one, silently
+  falsifying the "cold pass" this offer requires). Instead the test
+  precomputes, PURELY (`advanceReconstruct` is a pure engine function,
+  Absolute A — no DB write, so this never double-commits against the
+  on-screen run), the exact sequence of correct DISPLAY indices the bank
+  will need, then clicks exactly those tiles. A companion test confirms
+  the CTA never appears for an "S2" open-practice run (safe to drive via
+  the ordinary `completeSession()` here, since `coldSuccessAdoption`
+  rejects "S2" regardless of slips — nothing about THIS assertion depends
+  on a cold pass).
+- Mutation-verified directly: `git stash` of the two SOURCE files alone
+  (`run.ts`, `SessionIsland.tsx`; every test file kept) and reran both
+  suites — exactly the 8 new tests failed (7 in `run.test.ts`, 1 in
+  `session-island.test.tsx`; the negative "S2 offers nothing" component
+  test passed vacuously either way, correctly, since neither the wired nor
+  unwired tree can offer adoption on an easy drill), all 80 other cases in
+  those two files unaffected; `git stash pop` restored both source files
+  byte-identically, reran — 88/88 green again in both files.
+- `TZ=UTC make test` (full monorepo, all seven suites, from a completed
+  `make setup` — this sandbox had no dependencies installed at session
+  start, same as several prior entries; `v2/api`'s composer install alone
+  needed source clones against this sandbox's outbound proxy, an
+  environment artifact, not a code change): **2094 passing** (was 2085,
+  **+9** — exactly this run's new tests: 7 in `run.test.ts` + 2 in
+  `session-island.test.tsx`; no other suite moved) — 255 v2 vitest + 47
+  v2/api + 275 v3/api (2 incomplete PAY-1 by design, 6 skipped — the
+  Postgres-only `PerUserFoldLockTest`/`PerUserFoldLockWiringTest` suites
+  from v3-D116 skipping cleanly against this sandbox's Postgres state,
+  their own documented "skip cleanly, never a false green" behavior, not a
+  regression) + 111 corpus-compiler + 417 engine + 61 fold-runner + 928
+  apps/web. `check-test-floor.mjs`: OK, 2094 >= floor 1899 (+195 margin,
+  `TEST-FLOOR` left unmoved). `TZ=UTC make build`: exit 0, 21 routes
+  (unchanged — no new route; `/practice` already existed from v3-D117).
+  `npm run gates` (run as part of `next build`'s `prebuild` script):
+  locked-css OK, fonts degraded-but-non-blocking (pre-existing, unrelated —
+  Amiri present, 4 UI fonts missing), boundaries OK (208 files — this run
+  added no new file), corpus-morphology and corpus-glyphs OK. `npx tsc
+  --noEmit`: clean, `Version 5.9.3` confirmed (not a TeX banner).
+
+No `v1/**`/`v2/**` edit: `git status --porcelain -- v1 v2` empty
+immediately before committing — a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff produced by running the suite was reverted first, the
+same housekeeping every prior entry records. No Arabic codepoint
+introduced: every changed file (`run.ts`, `run.test.ts`,
+`SessionIsland.tsx`, `session-island.test.tsx`) swept individually over
+the Arabic, Arabic Supplement, Arabic Extended-A and both Presentation
+Forms Unicode blocks, plus a `\u06xx`/`\u08xx`-escape and
+`fromCharCode` sweep — zero matches on every check; every new line
+addresses an ayah number, a strength value, a slip count, or a closed-set
+difficulty ("S2"/"S3"), never corpus text.
+
+**Explicitly NOT addressed, named so a future run doesn't re-discover it
+as new:** the diminishing-returns nudge remains wired onto Door 2 only
+(v3-D111) — Door 3 has no equivalent nudge, though the case for one is
+weaker (open practice never damages a strong atom regardless of rep
+count, invariant #5). The SSR override gap (`lib/corpus/load.ts`,
+v3-D96/D110) and late-arrival refold (v3-D32/D116) are unchanged. With
+this entry, all five of `freeplay.ts`'s exported FR6 functions
+(`extraLearnGrant`, `weakSpots`, `openPracticePick`, `coldSuccessAdoption`,
+`diminishingReturns`) have a real, tested production caller — the
+"mechanism built and unit-tested, zero production callers" sweep that
+produced v3-D82 through v3-D117 has now exhausted this file specifically;
+a future run's sweep should look elsewhere in the engine for the next
+instance of the same shape.

@@ -39,7 +39,9 @@ import { currentTz } from "@/lib/idb/append";
 import { writeLock } from "@/lib/idb/writeLock";
 import { refreshEntitlementSnapshot } from "@/lib/entitlement/sync";
 import {
+  acceptAdoption,
   acceptGateDemote,
+  adoptionOfferFor,
   answerCurrent,
   clearReveal,
   currentItem,
@@ -64,7 +66,7 @@ import { ayatForSelection } from "@/lib/drill/sites";
 import type { DrillSpec } from "@/lib/drill/handoff";
 import type { PracticeSpec } from "@/lib/practice/handoff";
 import { formatDuration, type Greeting, type SessionSummary } from "@engine/sessionSummary.ts";
-import type { ExtraLearnGrant, WeakSpot } from "@engine/freeplay.ts";
+import type { AdoptionOffer, ExtraLearnGrant, WeakSpot } from "@engine/freeplay.ts";
 
 // `summarizeSession`'s own header names this as one of the four facts "the
 // completion screen shows" — the ENGINE decides which of the four buckets an
@@ -146,6 +148,13 @@ export function SessionIsland({
   // (`dismissedDemoteAyah`), so declining does not re-ask on every render.
   const [demoteOffer, setDemoteOffer] = useState<{ ayah: number } | null>(null);
   const [dismissedDemoteAyah, setDismissedDemoteAyah] = useState<number | null>(null);
+  // Cold-success adoption (v3-D117's own deferral) — the one-tap offer to
+  // adopt an untaught ayah into Carrying after a cold, hard ("S3") Door 3
+  // pass. Only ever non-null on a Door 3 summary screen; `adoptionOfferFor`
+  // itself already gates on `run.openPracticeDrill`, so no local mode check
+  // is needed here — the same "ask the engine, render what it says" shape
+  // every other offer on this screen follows.
+  const [adoptionOffer, setAdoptionOffer] = useState<AdoptionOffer | null>(null);
 
   // A stable identity for the drill request, so the start effect keys on the
   // VALUE, not the object reference (a parent re-render hands down a
@@ -442,6 +451,38 @@ export function SessionIsland({
     });
   }, [run, corpus, weakSpotOffer]);
 
+  // Cold-success adoption (v3-D117's own deferral) — once the assembled
+  // (Door 3) run is genuinely done, ask the engine (via `adoptionOfferFor`,
+  // which re-derives the fold — never this component checking `run.slips`
+  // or `run.openPracticeDrill` itself) whether a cold, hard pass of an
+  // untaught ayah is on offer to adopt into Carrying. Re-fires whenever
+  // `run` changes — including right after `onAcceptAdoption` below commits —
+  // so the offer disappears on its own once accepted (`adoptionOfferFor`'s
+  // own header: "self-closing, no extra flag needed"), the same never-blocks
+  // discipline as Doors 1/2's effects above.
+  useEffect(() => {
+    if (phase.kind !== "summary" || !run) {
+      setAdoptionOffer(null);
+      return;
+    }
+    let alive = true;
+    void adoptionOfferFor(run)
+      .then((offer) => {
+        if (alive) setAdoptionOffer(offer);
+      })
+      .catch(() => {
+        if (alive) setAdoptionOffer(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [phase, run]);
+
+  const onAcceptAdoption = useCallback(() => {
+    if (!run || !adoptionOffer) return;
+    commit(() => acceptAdoption(run, { now: Date.now(), tz: currentTz() }));
+  }, [run, adoptionOffer, commit]);
+
   // v3-D107 — ask the engine (via `demoteOfferFor`, which re-derives the
   // fold — never this component reading `gateFails` itself, which clause 5
   // would refuse to let it do) whether the CURRENT queue item is a due gate
@@ -576,6 +617,20 @@ export function SessionIsland({
           <p className="caption" role="status" data-testid="diminishing-returns-nudge">
             {weakSpotNudge}
           </p>
+        ) : null}
+        {/* Cold-success adoption: only ever shown once the engine itself
+            confirms a cold, hard pass of a still-untaught ayah — this
+            component never checks slips or the chosen difficulty itself. */}
+        {adoptionOffer?.offer ? (
+          <div className="stack" data-testid="adoption-offer">
+            <p className="caption">
+              You produced ayah {adoptionOffer.ayah} correctly, cold. Adopt it
+              into your memorization?
+            </p>
+            <button type="button" className="btn" onClick={onAcceptAdoption}>
+              Adopt ayah {adoptionOffer.ayah}
+            </button>
+          </div>
         ) : null}
         {/* FR6 Door 3: unlike Doors 1/2, open practice is not an engine-
             computed grant — a learner can always freely practice any ayah, so

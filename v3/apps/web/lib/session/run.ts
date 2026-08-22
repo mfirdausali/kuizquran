@@ -61,13 +61,19 @@ import { floorQueue } from "@engine/floor.ts";
 // FR6 Door 3 ("open practice", v3-D117) — see `startOpenPractice` below for
 // why `openPracticePick` had zero production callers until now: it needed an
 // any-ayah picker route, named out of scope by both v3-D98 and v3-D106.
+// Cold-success adoption (v3-D117's own deferral, wired here): `openPracticePick`
+// gets its picker route below; `coldSuccessAdoption` is the LAST of FR6's five
+// exported functions still lacking a production caller. See `adoptionOfferFor`/
+// `acceptAdoption` near the bottom of this file for the full write-up.
 import {
   extraLearnGrant,
   weakSpots,
   openPracticePick,
+  coldSuccessAdoption,
   diminishingReturns,
   type ExtraLearnGrant,
   type WeakSpot,
+  type AdoptionOffer,
 } from "@engine/freeplay.ts";
 // Same-learning-day scoping for the diminishing-returns rep count — the SAME
 // notion `update()` uses to damp massed same-day successes ×0.35 (invariant #4),
@@ -201,6 +207,17 @@ export interface SessionRun {
    * `gate_result` stays graded regardless (a drill never queues a gate item).
    */
   readonly structured: boolean;
+  /**
+   * FR6 Door 3 — the CHOSEN open-practice difficulty (`startOpenPractice`'s
+   * own `drill` argument), or `null` for every other entry point in this
+   * file. Stored verbatim rather than re-derived from the completed pass's
+   * blank layout: `ReconstructState` (`run.machine`'s type) carries no
+   * `full` field once a pass is done — only `ReconstructAdvance.full` does,
+   * transiently, inside `settleAnswer` — so this is the one place the
+   * learner's actual choice survives to session-end. `adoptionOfferFor`/
+   * `acceptAdoption` (below) are its only readers.
+   */
+  readonly openPracticeDrill: OpenPracticeDrill | null;
 }
 
 export type StartResult =
@@ -576,6 +593,7 @@ export async function startOpenPractice(
     c,
     false,
     machineForOpenPractice(c, surah, ayah, drill),
+    drill,
   );
 }
 
@@ -606,6 +624,10 @@ async function startFromQueue(
   // instead. Never passed by `startSession`/`startFloorSession`/
   // `startDrillSession` — their sizing must always follow real progress.
   initialMachine?: ReconstructState,
+  // FR6 Door 3 — the learner's chosen difficulty, stored verbatim on the
+  // resulting run (see `SessionRun.openPracticeDrill`'s own header for why).
+  // Never passed by any caller but `startOpenPractice`.
+  openPracticeDrill: OpenPracticeDrill | null = null,
 ): Promise<StartResult> {
   if (queue.length === 0) {
     return { ok: false, unavailable: "nothing-due" };
@@ -650,6 +672,7 @@ async function startFromQueue(
       gateSlipped: false,
       rescaffolding,
       structured,
+      openPracticeDrill,
     },
   };
 }
@@ -1300,6 +1323,108 @@ async function advancePastCurrent(run: SessionRun, c: Corpus): Promise<SessionRu
     lastTap: null,
     gateSlipped: false,
   };
+}
+
+/**
+ * FR6 — cold-success adoption (`packages/engine/src/freeplay.ts
+ * #coldSuccessAdoption`).
+ *
+ * `coldSuccessAdoption` was real and unit-tested (`freeplay.test.ts`) since
+ * `freeplay.ts` landed alongside Doors 1/2 (v3-D98), but had ZERO production
+ * callers — v3-D117's own header, having just built Door 3 (open practice),
+ * named this exact gap: "Door 3 now has a real surface for it to attach to
+ * ... but the offer itself is a genuine separate write path ... deserves its
+ * own night." This is that night.
+ *
+ * A cold pass (no slip anywhere in the pass — `run.slips`, which for a Door-3
+ * run is scoped to exactly this one ayah's queue item, never a multi-item
+ * total) of a HARD open-practice drill ("S3" — Door 3 never offers "chain",
+ * see `OpenPracticeDrill`'s own header) on an ayah that is still UNTAUGHT
+ * offers a one-tap "adopt it into Carrying". `run.openPracticeDrill` is read
+ * verbatim rather than re-derived from the completed pass (`SessionRun`'s own
+ * header explains why `ReconstructState` cannot answer this after the fact).
+ *
+ * Re-derives the fold AFTER this session's own free-play commits have
+ * landed — the same discipline `extraLearnOfferFor`/`weakSpotOfferFor`/
+ * `demoteOfferFor` all follow — never from `run`'s in-memory queue. This is
+ * also what makes the offer SELF-CLOSING with no extra "accepted" flag
+ * needed on `SessionRun`: once `acceptAdoption` (below) actually encodes the
+ * atom, `coldSuccessAdoption`'s own `untaught` check reads `false` on the
+ * next call, and this returns `null`.
+ *
+ * Takes no `now` — unlike `weakSpotOfferFor`/`extraLearnOfferFor`,
+ * `coldSuccessAdoption` is time-independent (a cold pass either just
+ * happened or it did not; nothing here decays with the clock), the same
+ * shape `demoteOfferFor` above already has for the identical reason.
+ */
+export async function adoptionOfferFor(run: SessionRun): Promise<AdoptionOffer | null> {
+  if (!run.done || run.openPracticeDrill !== "S3") return null;
+  const q = run.queue[0];
+  if (!q) return null;
+  const prior = await getEventsForSurah(run.surah);
+  const atoms = [...rebuild(prior).values()];
+  const result = coldSuccessAdoption(atoms, q.ayah, run.openPracticeDrill, run.slips === 0);
+  return result.offer ? result : null;
+}
+
+/**
+ * Accept an adoption offer: commit the SAME graded event an ordinary
+ * structured hard pass would (`ayah_produced`, `rung: "S3"`,
+ * `structured:true`) — this is what actually moves the atom (`update.ts`'s
+ * `outcome.kind === "s3" ... encoded = true`, and `rebuild.ts`'s structured-S3
+ * branch schedules the day-1 cold gate exactly as any other first encode
+ * does) — then a dedicated `adoption` wire event (WIREFRAME.md's own table:
+ * "Evidence only ... Logged, no strength signal") recording that THIS encode
+ * came from the tap-gated adopt action rather than an ordinary Learn/gate
+ * pass. `rebuild.ts` deliberately has no fold branch for `adoption` (same
+ * "evidence only" shape as `session_start`/`rung_start`/`ayah_complete`) — it
+ * is the encode event above that does the real work; this is the audit
+ * trail, the same division `gate_demote`'s own `sentToReviews` field draws
+ * for "tap-gated, never automatic."
+ *
+ * Re-verifies the offer against the fold itself (never trusting a stale
+ * caller) before committing anything — the same "acts on exactly what it was
+ * shown" discipline `acceptGateDemote`'s own header documents. A no-op
+ * (returns `run` unchanged, appends nothing) if the offer no longer holds —
+ * e.g. a second tap after the first already landed, or the drill was never
+ * "S3" to begin with.
+ */
+export async function acceptAdoption(
+  run: SessionRun,
+  ctx: AppendContext,
+): Promise<SessionRun> {
+  if (!run.done || run.openPracticeDrill !== "S3") return run;
+  const q = run.queue[0];
+  if (!q) return run;
+
+  const prior = await getEventsForSurah(run.surah);
+  const atoms = [...rebuild(prior).values()];
+  if (!coldSuccessAdoption(atoms, q.ayah, run.openPracticeDrill, run.slips === 0).offer) {
+    return run;
+  }
+
+  const encodeEvent = {
+    type: "ayah_produced",
+    ts: ctx.now,
+    tz: ctx.tz,
+    surah: run.surah,
+    ayah: q.ayah,
+    rung: gradeClassToWire("s3_full"),
+    correct: true,
+    structured: true,
+  } as DrillEvent;
+
+  return commitThenContinue(encodeEvent, ctx, null, () => {
+    const adoptionEvent = {
+      type: "adoption",
+      ts: ctx.now,
+      tz: ctx.tz,
+      surah: run.surah,
+      ayah: q.ayah,
+      rung: gradeClassToWire("s3_full"),
+    } as DrillEvent;
+    return commitThenContinue(adoptionEvent, ctx, null, () => Promise.resolve(run));
+  });
 }
 
 // --- small helpers ----------------------------------------------------------

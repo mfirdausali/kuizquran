@@ -37,7 +37,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { Corpus, DrillEvent } from "@engine/types.ts";
-import { initReconstruct } from "@engine/reconstruct.ts";
+import { advanceReconstruct, initReconstruct } from "@engine/reconstruct.ts";
 import { DEMOTE_OFFER_AFTER_FAILS } from "@engine/gate.ts";
 
 import { DB_NAME, openDb, resetDbForTests, writeLock, getAllEvents, append, RetryableAppendError } from "@/lib/idb";
@@ -374,6 +374,7 @@ function trivialOneItemRun(c: Corpus, now: number): SessionRun {
     done: false,
     gateSlipped: false,
     rescaffolding: false,
+    openPracticeDrill: null,
     structured: true,
   };
 }
@@ -439,6 +440,7 @@ describe("v3-D98 — Door 1 CTA on the real summary screen, actually wired", () 
       done: false,
       gateSlipped: false,
       rescaffolding: false,
+      openPracticeDrill: null,
       structured: true,
     };
     // Play this seeding run to completion OFF-SCREEN, via the real (unmocked)
@@ -541,6 +543,7 @@ describe("v3-D106 — Door 2 CTA on the real summary screen, actually wired", ()
           done: false,
           gateSlipped: false,
           rescaffolding: false,
+          openPracticeDrill: null,
           structured: true,
         },
       });
@@ -670,6 +673,7 @@ function gateRunFor(c: Corpus, now: number): SessionRun {
     done: false,
     gateSlipped: false,
     rescaffolding: false,
+    openPracticeDrill: null,
     structured: true,
   };
 }
@@ -893,6 +897,97 @@ describe("v3-D117 — the 'practice any ayah freely' link on the summary screen"
     await waitFor(() => expect(screen.getByTestId("session-summary")).toBeTruthy());
     const link = screen.getByText(/practice any ayah freely/i);
     expect(link.getAttribute("href")).toBe("/practice");
+  });
+});
+
+// Cold-success adoption (v3-D117's own deferral) — `run.test.ts` already
+// proves `adoptionOfferFor`/`acceptAdoption`'s WIRING at the engine-caller
+// level, including the exact cold-vs-slipped distinction, on a real 4-ayah
+// surah. This proves the COMPONENT actually surfaces it, mirroring the
+// Door 1/Door 2 CTA blocks above — but it cannot use `completeSession()`'s
+// trial-and-error `driveOneBlank` for the drive itself: a coin-flip wrong
+// tap before the right one would be a genuine slip, which would silently
+// falsify the very "cold pass" this offer requires. Instead it precomputes
+// the exact correct DISPLAY index at each blank PURELY (`advanceReconstruct`
+// is a pure engine function, Absolute A — no DB write), then clicks exactly
+// that tile every time.
+describe("cold-success adoption — the offer appears on Door 3's summary screen and clicking it commits", () => {
+  it("offers 'Adopt ayah N' after a cold hard pass, and clicking it lands both events, encodes the atom, and removes itself", async () => {
+    installFetch();
+    const ayah = 1;
+    // Mirrors `startOpenPractice`'s own `machineForOpenPractice`: "S3" forces
+    // `full:true` at a fixed, representative strength (100) — never the
+    // atom's real (absent) one. See `lib/session/run.ts`'s own
+    // `OPEN_PRACTICE_STRENGTH`.
+    const initialMachine = initReconstruct(corpus, SURAH, ayah, 100, { full: true });
+
+    const { assemblePass } = await import("@/lib/onboarding/pass");
+    const indices: number[] = [];
+    let sim = initialMachine;
+    for (let guard = 0; guard < 50; guard++) {
+      const assembled = assemblePass(sim, corpus);
+      if (!assembled) break;
+      indices.push(assembled.item.correctIndex);
+      const choice = assembled.item.options[assembled.item.correctIndex]!.text;
+      const adv = advanceReconstruct(sim, corpus, choice);
+      sim = adv.state;
+      if (adv.ayahProduced) break;
+    }
+    expect(indices.length).toBeGreaterThan(0);
+
+    render(<SessionIsland surah={SURAH} practice={{ ayah, drill: "S3" }} />);
+    await waitFor(() => expect(screen.getByTestId("session-drill")).toBeTruthy());
+
+    for (let i = 0; i < indices.length; i++) {
+      const bank = document.querySelector(".bank");
+      if (!bank) throw new Error("no bank to drive");
+      const tiles = within(bank as HTMLElement).getAllByRole("button");
+      const tile = tiles[indices[i]!];
+      if (!tile) throw new Error("computed correct tile index out of range");
+      fireEvent.click(tile);
+      const isLast = i === indices.length - 1;
+      if (isLast) {
+        await waitFor(() => expect(screen.getByTestId("session-summary")).toBeTruthy());
+      } else {
+        await waitFor(() => expect(screen.getByRole("status")).toBeTruthy());
+        expect(screen.getByRole("status").textContent).toMatch(/correct/i);
+        fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+      }
+    }
+
+    const cta = await screen.findByRole("button", { name: new RegExp(`adopt ayah ${ayah}`, "i") });
+    fireEvent.click(cta);
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: new RegExp(`adopt ayah ${ayah}`, "i") }),
+      ).toBeNull(),
+    );
+
+    const events = await getAllEvents();
+    const { rebuild } = await import("@engine/rebuild.ts");
+    const { atomKey } = await import("@engine/atom.ts");
+    const atom = rebuild(events).get(atomKey(SURAH, "ayah", ayah));
+    expect(atom?.encoded).toBe(true);
+    expect(events.some((e) => e.type === "adoption" && e.ayah === ayah)).toBe(true);
+    const produced = events.filter(
+      (e) => e.type === "ayah_produced" && e.ayah === ayah && e.structured === true,
+    );
+    // Exactly one STRUCTURED production — the accept path's own encode. The
+    // Door-3 pass itself also lands an `ayah_produced`, but `structured:false`
+    // (free play), so it is deliberately excluded from this count.
+    expect(produced.length).toBe(1);
+    expect(produced[0]!.rung).toBe("S3");
+  });
+
+  it("does NOT offer adoption for an 'S2' (easy) open-practice drill", async () => {
+    installFetch();
+    render(<SessionIsland surah={SURAH} practice={{ ayah: 2, drill: "S2" }} />);
+    await waitFor(() => expect(screen.getByTestId("session-drill")).toBeTruthy());
+    await completeSession();
+    await waitFor(() => expect(screen.getByTestId("session-summary")).toBeTruthy());
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByTestId("adoption-offer")).toBeNull();
   });
 });
 

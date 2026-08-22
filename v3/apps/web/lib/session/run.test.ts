@@ -98,6 +98,8 @@ import {
   acceptGateDemote,
   startDrillSession,
   startOpenPractice,
+  adoptionOfferFor,
+  acceptAdoption,
   SessionCommitFailure,
   type SessionRun,
 } from "./run";
@@ -719,7 +721,7 @@ describe("v3-D98 — Door 1, 'extra Learn' after the assembled queue is done", (
   it("offers nothing before the mastery gate window opens the FIRST candidate is un-encoded — a virgin log grants the first mushaf-order ayah", async () => {
     const c = corpus();
     const offer = await extraLearnOfferFor(
-      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true, gateSlipped: false, rescaffolding: false, structured: true },
+      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true, gateSlipped: false, rescaffolding: false, structured: true, openPracticeDrill: null },
       c,
       T0,
     );
@@ -817,7 +819,7 @@ describe("v3-D98 — Door 1, 'extra Learn' after the assembled queue is done", (
 describe("v3-D106 — Door 2, 'weak-spot gym' after the assembled queue is done", () => {
   it("offers nothing before any atom is encoded — a virgin log has no weak spot to rank", async () => {
     const offer = await weakSpotOfferFor(
-      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true, gateSlipped: false, rescaffolding: false, structured: true },
+      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true, gateSlipped: false, rescaffolding: false, structured: true, openPracticeDrill: null },
       T0,
     );
     expect(offer).toBeNull();
@@ -851,6 +853,7 @@ describe("v3-D106 — Door 2, 'weak-spot gym' after the assembled queue is done"
       done: true,
       gateSlipped: false,
       rescaffolding: false,
+      openPracticeDrill: null,
       structured: true,
     };
     const offer = await weakSpotOfferFor(doneRun, T0 + 10_000);
@@ -878,6 +881,7 @@ describe("v3-D106 — Door 2, 'weak-spot gym' after the assembled queue is done"
       done: true,
       gateSlipped: false,
       rescaffolding: false,
+      openPracticeDrill: null,
       structured: true,
     };
     const offer = await weakSpotOfferFor(doneRun, T0 + 10_000);
@@ -953,6 +957,7 @@ describe("v3-D111 — FR6 diminishing-returns nudge on the Door 2 weak-spot offe
     done: true,
     gateSlipped: false,
     rescaffolding: false,
+    openPracticeDrill: null,
     structured: true,
   };
 
@@ -1977,5 +1982,159 @@ describe("v3-D117 — FR6 Door 3, 'open practice' (any ayah × chosen difficulty
     expect(fresh.some((e) => e.type === "ayah_produced")).toBe(true);
     const strengthAfter = rebuild(after).get(atomKey(SURAH_12, "ayah", ayah))?.strength;
     expect(strengthAfter).toBe(strengthBefore);
+  });
+});
+
+// v3-D117's own header, having just built Door 3, named the exact next gap:
+// `coldSuccessAdoption` "has a real surface for it to attach to ... but the
+// offer itself is a genuine separate write path ... deserves its own night."
+// `freeplay.test.ts`'s "cold-success adoption" block already proves the pure
+// engine function; this proves the WIRING — the offer computed off the real
+// fold, and the accept path that actually encodes the atom.
+describe("cold-success adoption — adoptionOfferFor / acceptAdoption (freeplay.ts#coldSuccessAdoption)", () => {
+  it("offers nothing before the run is done", async () => {
+    const c = corpus();
+    const started = await startOpenPractice(
+      { surah: SURAH, now: T0, tz: TZ, ayah: 2, drill: "S3" },
+      c,
+    );
+    if (!started.ok) throw new Error("open practice must start");
+    expect(await adoptionOfferFor(started.run)).toBeNull();
+  });
+
+  it("offers nothing for an 'S2' (easy) open-practice drill — coldSuccessAdoption requires 'hard'", async () => {
+    const c = corpus();
+    const started = await startOpenPractice(
+      { surah: SURAH, now: T0, tz: TZ, ayah: 2, drill: "S2" },
+      c,
+    );
+    if (!started.ok) throw new Error("open practice must start");
+    const { run } = await playThrough(started.run, c);
+    expect(run.done).toBe(true);
+    expect(await adoptionOfferFor(run)).toBeNull();
+  });
+
+  it("offers adoption after a COLD (zero-slip) 'S3' pass of a genuinely UNTAUGHT ayah", async () => {
+    const c = corpus();
+    const ayah = 2;
+    const started = await startOpenPractice(
+      { surah: SURAH, now: T0, tz: TZ, ayah, drill: "S3" },
+      c,
+    );
+    if (!started.ok) throw new Error("open practice must start");
+    const { run } = await playThrough(started.run, c);
+    expect(run.done).toBe(true);
+    expect(run.slips).toBe(0);
+
+    const offer = await adoptionOfferFor(run);
+    expect(offer).not.toBeNull();
+    expect(offer!.offer).toBe(true);
+    expect(offer!.ayah).toBe(ayah);
+
+    // Still untaught — Door 3 is always free-play, so nothing here has
+    // encoded it yet (that is exactly what accepting the offer changes).
+    const atom = rebuild(await getAllEvents()).get(atomKey(SURAH, "ayah", ayah));
+    expect(atom?.encoded ?? false).toBe(false);
+  });
+
+  it("offers NOTHING if the pass slipped anywhere — a cold success must be genuinely cold", async () => {
+    const c = corpus();
+    const ayah = 2;
+    const started = await startOpenPractice(
+      { surah: SURAH, now: T0, tz: TZ, ayah, drill: "S3" },
+      c,
+    );
+    if (!started.ok) throw new Error("open practice must start");
+    let run = started.run;
+    const wrong0 = correctIndexFor(run, c) === 0 ? 1 : 0;
+    run = await answerCurrent(run, c, wrong0, { now: T0 + 100, tz: TZ });
+    expect(run.lastTap?.correct).toBe(false);
+    const rest = await playThrough(run, c);
+    expect(rest.run.done).toBe(true);
+    expect(rest.run.slips).toBeGreaterThan(0);
+
+    expect(await adoptionOfferFor(rest.run)).toBeNull();
+  });
+
+  it("acceptAdoption commits a structured S3 ayah_produced AND an evidence-only adoption event, and the atom becomes encoded", async () => {
+    const c = corpus();
+    const ayah = 2;
+    const started = await startOpenPractice(
+      { surah: SURAH, now: T0, tz: TZ, ayah, drill: "S3" },
+      c,
+    );
+    if (!started.ok) throw new Error("open practice must start");
+    const { run } = await playThrough(started.run, c);
+    const before = await getAllEvents();
+    const beforeIds = new Set(before.map((e) => e.id));
+
+    const offer = await adoptionOfferFor(run);
+    expect(offer?.offer).toBe(true);
+
+    const accepted = await acceptAdoption(run, { now: T0 + 100_000, tz: TZ });
+
+    const after = await getAllEvents();
+    const fresh = after.filter((e) => !beforeIds.has(e.id));
+    const produced = fresh.filter((e) => e.type === "ayah_produced" && e.ayah === ayah);
+    const adoptions = fresh.filter((e) => e.type === "adoption" && e.ayah === ayah);
+    expect(produced.length).toBe(1);
+    expect(produced[0]!.structured).toBe(true);
+    expect(produced[0]!.rung).toBe("S3");
+    expect(adoptions.length).toBe(1);
+
+    const atom = rebuild(after).get(atomKey(SURAH, "ayah", ayah));
+    expect(atom?.encoded).toBe(true);
+    expect(atom?.strength ?? 0).toBeGreaterThan(0);
+
+    // Self-closing: no extra "accepted" flag is needed on SessionRun — the
+    // offer no longer holds once the fold itself says the atom is taught.
+    expect(await adoptionOfferFor(accepted)).toBeNull();
+  });
+
+  it("acceptAdoption is a no-op when there is no valid offer (an 'S2' run)", async () => {
+    const c = corpus();
+    const ayah = 2;
+    const started = await startOpenPractice(
+      { surah: SURAH, now: T0, tz: TZ, ayah, drill: "S2" },
+      c,
+    );
+    if (!started.ok) throw new Error("open practice must start");
+    const { run } = await playThrough(started.run, c);
+    const before = await getAllEvents();
+
+    const result = await acceptAdoption(run, { now: T0 + 100_000, tz: TZ });
+    expect(result).toBe(run);
+    const after = await getAllEvents();
+    expect(after.length).toBe(before.length);
+  });
+
+  it("acceptAdoption is a no-op on a SECOND call after the first already landed — no double-encode", async () => {
+    const c = corpus();
+    const ayah = 2;
+    const started = await startOpenPractice(
+      { surah: SURAH, now: T0, tz: TZ, ayah, drill: "S3" },
+      c,
+    );
+    if (!started.ok) throw new Error("open practice must start");
+    const { run } = await playThrough(started.run, c);
+
+    // `playThrough` above already committed ONE free-play (`structured:false`)
+    // `ayah_produced` for this ayah — that is Door 3 itself, not adoption.
+    // The property under test is that ACCEPTING adds exactly ONE STRUCTURED
+    // one, never a second on a repeat call.
+    const accepted = await acceptAdoption(run, { now: T0 + 100_000, tz: TZ });
+    const afterFirst = await getAllEvents();
+    const structuredAfterFirst = afterFirst.filter(
+      (e) => e.type === "ayah_produced" && e.ayah === ayah && e.structured === true,
+    ).length;
+    expect(structuredAfterFirst).toBe(1);
+
+    await acceptAdoption(accepted, { now: T0 + 200_000, tz: TZ });
+    const afterSecond = await getAllEvents();
+    expect(afterSecond.length).toBe(afterFirst.length);
+    const structuredAfterSecond = afterSecond.filter(
+      (e) => e.type === "ayah_produced" && e.ayah === ayah && e.structured === true,
+    ).length;
+    expect(structuredAfterSecond).toBe(1);
   });
 });
