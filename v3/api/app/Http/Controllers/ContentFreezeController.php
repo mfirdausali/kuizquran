@@ -27,8 +27,19 @@ use Illuminate\Http\Request;
  * files on disk; a single script reading the database would duplicate the
  * frontier predicate that VerificationsController already owns (and B3 was
  * exactly the bug where two places computed "verified" and one was wrong).
- * So each half answers what it can see first-hand, and the workbench shows
- * them together.
+ * So each half answers what it can see first-hand.
+ *
+ * CORRECTED: this docblock previously claimed "the workbench shows them
+ * together" — false from the day it was written, the same "docblock says X,
+ * reality is Y" shape as v3-D90/D110/D123's own findings. `grep -rln
+ * "content-freeze" apps/web` (excluding the unrelated build-script naming
+ * collision in `lib/corpus/load.ts`) returned nothing until this endpoint's
+ * frontend half was built: `apps/web/lib/admin/contentFreeze.ts` +
+ * `components/admin/ContentFreezePanel.tsx`, rendered at
+ * `/settings/content-freeze` — a standalone admin screen, mirroring
+ * `/settings/health`'s own shape, not embedded in the per-surah
+ * `/workbench` route (this endpoint spans every launch surah at once, so it
+ * does not fit a surah-scoped screen).
  *
  * THIS ENDPOINT NEVER FREEZES ANYTHING. Freezing is a human act. A route that
  * flipped a "frozen" bit would be a checklist that ticks itself.

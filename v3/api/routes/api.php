@@ -130,9 +130,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/stripe', [StripeSettingsController::class, 'store']);
         Route::post('/stripe/test', [StripeSettingsController::class, 'test']);
 
-        // Build-plan step 28 (M9): the content-freeze gate, read as JSON by the
-        // workbench so "is this corpus bookable for a qari session" is answered
-        // on the screen where sessions get scheduled, not only in a terminal.
+        // Build-plan step 28 (M9): the content-freeze gate, read as JSON by
+        // /settings/content-freeze so "is this corpus bookable for a qari
+        // session" is answered on a screen, not only in a terminal.
         Route::get('/content-freeze', [ContentFreezeController::class, 'index']);
     });
 });
