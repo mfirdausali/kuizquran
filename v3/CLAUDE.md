@@ -53,9 +53,49 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2097 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2110 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 278 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 928 apps/web. (v3-D123, 2026-08-22)
+             # + 417 engine + 61 fold-runner + 941 apps/web. (v3-D124, 2026-08-22)
+             # NOTE (v3-D124): `Admin\ContentFreezeController` (build-plan step
+             # 28/M9's freeze gate) had zero frontend callers — its own
+             # docblock claimed "the workbench shows them together", false
+             # from the day it was written (`grep -rn` for it across
+             # apps/web/app/(admin)/workbench and components/workbench
+             # returned nothing). Same "docblock says X, reality is Y" shape
+             # as v3-D90/D110/D123. Fixed: new `lib/admin/contentFreeze.ts`
+             # (mirrors `lib/admin/health.ts#loadHealth`'s three-state
+             # discipline) + `components/admin/ContentFreezePanel.tsx`,
+             # rendered at a new standalone `/settings/content-freeze` route
+             # (mirrors `/settings/health`'s shape — this endpoint spans every
+             # launch surah at once, so a per-surah `/workbench` screen is the
+             # wrong shape for it). No freeze/book button, matching the
+             # controller's own "freezing is a human act." Both stale
+             # docblocks (the controller's, and the route comment in
+             # `routes/api.php`) corrected in place. RED confirmed directly:
+             # both new test files were run against the tree before either
+             # source file existed and failed on module-resolution errors;
+             # implemented after, 13/13 green. Also surfaced, not fixed: the
+             # route's own "requires admin" test asserts 401 while
+             # `SystemHealthTest`'s structurally identical test asserts 403 —
+             # an `auth:sanctum`/`EnsureIsAdmin` inconsistency between the two
+             # controllers, worth a future run's attention. `TZ=UTC make
+             # test`: 2110 passing (was 2097, +13 — exactly this run's new
+             # tests). `check-test-floor.mjs`: OK, 2110 >= floor 1899 (+211
+             # margin). `TZ=UTC make build`: exit 0, 22 routes (was 21 —
+             # `/settings/content-freeze` is new). `npm run gates`: all green
+             # (fonts degraded-but-non-blocking, pre-existing; boundaries 214
+             # files, up from 208, five new files). No `v1/**`/`v2/**` edit
+             # (stray `v2/tsconfig.tsbuildinfo` reverted before committing).
+             # No Arabic codepoint (full diff swept over every Arabic block +
+             # both Presentation Forms blocks, zero matches). NOT addressed:
+             # the 401/403 inconsistency above; the admin client-side auth
+             # gate remains unbuilt across every admin screen (pre-existing,
+             # named gap); the freeze gate's build-artifact half
+             # (`scripts/content-freeze.mjs`) still has no UI, run by hand.
+             # Next unswept layer for this bug class:
+             # `v3/api/app/Http/Controllers` beyond this one controller (not
+             # exhaustively checked) and `v3/worker/fold-runner/src` (not
+             # swept at all). See DECISIONS.md v3-D124.
              # NOTE (v3-D123): `backup:restore-drill`'s PURGE-AWARE property
              # (build-plan step 30/M10) was fabricated — it called
              # `$doomed->delete()` directly and hand-wrote a JSON file shaped

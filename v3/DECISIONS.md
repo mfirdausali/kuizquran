@@ -7579,3 +7579,112 @@ It does not add Postgres coverage for the drill (still SQLite-only in this
 sandbox, same open line LAUNCH-CHECKLIST.md already carries for the
 staging-Postgres restore), and it does not change anything about the
 restore-integrity or encryption properties, which were already real.
+
+### v3-D124 — `Admin\ContentFreezeController` had zero frontend callers; its own docblock's claim that "the workbench shows them together" was never true
+
+**The next layer of the same sweep, continued.** With `v3/api/app/Support` +
+`app/Console/Commands` swept clean by v3-D123 (the one real finding there,
+`BackupRestoreDrillCommand`, already fixed), this run swept
+`v3/api/app/Http/Controllers` for the same "docblock claims a caller that does
+not exist" shape and found one: `ContentFreezeController::index` (`GET
+/api/admin/content-freeze`, build-plan step 28/M9's freeze gate) has been live
+and fully tested (`tests/Feature/ContentFreeze/ContentFreezeTest.php`) since
+M9 landed, but its own class docblock stated, as fact, "the workbench shows
+them together" — asserting `/workbench` renders this endpoint's report
+alongside `scripts/content-freeze.mjs`'s build-artifact criteria.
+
+**False from the day it was written.** `grep -rn
+"content-freeze\|bookable\|allMet\|criteria" apps/web/app/\(admin\)/workbench
+apps/web/components/workbench` returned nothing. The only other
+`content-freeze` hits in `apps/web` are five references to the unrelated
+build-time script `scripts/content-freeze.mjs` (a naming collision, not the
+same endpoint) — `lib/corpus/load.ts`'s own comments and
+`test/content-freeze-gate.test.ts`, which tests that script, never this
+controller. The one screen meant to answer "may this corpus be booked for a
+qari session" — the actual go/no-go a human reads before spending calendar
+time on a scholar — existed only as something a human could `curl` by hand.
+Same "docblock says X, reality is Y" shape as v3-D90's and v3-D110's own
+findings, and the third instance of it this build has now found and fixed
+(v3-D90, v3-D110, v3-D123, this one).
+
+**Fixed:** new `apps/web/lib/admin/contentFreeze.ts#loadContentFreeze`
+(mirrors `lib/admin/health.ts#loadHealth`'s three-state discipline exactly —
+failure is a STATE, never an exception, since a screen that cannot tell "0
+criteria met" from "we could not ask" would license booking a scholar against
+a corpus nobody actually checked) + `components/admin/ContentFreezePanel.tsx`
+(presentational, mirrors `SystemHealthPanel`'s load/unavailable/ready shape),
+rendered at a new `/settings/content-freeze` route — mirroring
+`/settings/health`'s own standalone-admin-screen shape, deliberately NOT
+embedded in the per-surah `/workbench` route: this endpoint reports on every
+launch surah at once (`LAUNCH_SURAHS = [12, 103, 112]`), so a screen scoped to
+one surah via a query parameter is the wrong shape for it. The panel has no
+freeze/book button, matching the controller's own stated intent ("THIS
+ENDPOINT NEVER FREEZES ANYTHING. Freezing is a human act") — it only reports,
+and shows the controller's own `note` field naming that the build-artifact
+half of the gate still runs by hand via `scripts/content-freeze.mjs`. Both
+stale docblocks (the controller's own class comment, and the route
+registration comment in `routes/api.php`) are corrected in place rather than
+deleted, per this build's "correct forward, name what changed" convention.
+
+**A genuine, small backend-boundary finding surfaced while writing the
+frontend's tests, not fixed here:** `ContentFreezeTest.php`'s own
+`test_the_freeze_report_requires_admin` (no auth headers at all) asserts a
+**401**, while `SystemHealthTest.php`'s structurally identical
+`test_health_requires_admin` (also no headers) asserts a **403** — the same
+`auth:sanctum` + `EnsureIsAdmin` middleware stack answering an equivalent
+unauthenticated request two different ways across two controllers.
+`EnsureIsAdmin::handle()` itself only ever returns 403 (never 401), so the
+401 on the content-freeze route must originate from `auth:sanctum` itself
+rejecting the request before `EnsureIsAdmin` runs — a middleware-ordering or
+guard-configuration difference between the two routes' groups, not touched by
+this fix. It matters at the frontend boundary because `apiFetch` (the sole
+`/api/*` egress, DEFECTS.md#B8) intercepts exactly status 401 to retry as a
+freshly-minted ANONYMOUS LEARNER identity — the wrong identity for an admin
+screen — so a real unauthenticated visit to `/settings/content-freeze` will
+silently attempt a learner-token retry before finally surfacing as a generic
+"request failed" message, never the specific "this screen requires an admin
+account" wording `loadContentFreeze` gives a plain 403. `loadHealth` already
+lives with this same limitation (its own test suite exercises only 403, for
+the identical reason) — this is not a regression this run introduced, but it
+is worth a future run's attention if the two status codes are ever meant to
+agree.
+
+**Verified:** RED confirmed directly, not asserted — both new test files
+(`lib/admin/contentFreeze.test.ts`, `test/content-freeze-panel.test.tsx`) were
+run against the tree BEFORE either source file existed and failed on
+module-resolution errors (`Does the file exist?`), the literal RED-before-
+green NIGHTLY.md requires; implemented after, all 13 new tests green on the
+first pass following one iteration (the 401-vs-403 discovery above, which
+moved one test from a 401 fixture to a 403 fixture to match what `apiFetch`
+actually lets this module observe).
+
+`TZ=UTC make test`: **2110 passing** (was 2097, +13 — exactly this run's new
+tests: 8 in `contentFreeze.test.ts`, 5 in `content-freeze-panel.test.tsx`; no
+other suite's count moved — `v3/api` PHPUnit stayed at 278 since only comments
+changed there, not behavior). `check-test-floor.mjs`: OK, 2110 >= floor 1899
+(+211 margin, `TEST-FLOOR` left unmoved). `TZ=UTC make build`: exit 0, **22
+routes** (was 21 — `/settings/content-freeze` is new). `npm run gates`:
+locked-css OK, fonts degraded-but-non-blocking (pre-existing, unrelated),
+boundaries OK (214 files, up from 208 — five new files, no violation),
+corpus-morphology and corpus-glyphs OK.
+
+No `v1/**`/`v2/**` edit: `git status --porcelain -- v1 v2` empty immediately
+before committing (a stray `v2/tsconfig.tsbuildinfo` build-cache diff from
+running the suite was reverted first, same discipline as every prior entry).
+No Arabic codepoint introduced: the full diff (both PHP files and all five new
+`apps/web` files) was swept programmatically for the Arabic, Arabic
+Supplement, Arabic Extended-A and both Presentation Forms Unicode blocks —
+zero matches; every new line addresses a surah/ayah count, a criterion name,
+or a boolean/status value, never corpus text.
+
+**Not addressed, named so a future run doesn't re-discover it as new:** the
+401-vs-403 inconsistency between `ContentFreezeTest.php` and
+`SystemHealthTest.php` (above); the admin client-side auth gate remains
+unbuilt across every admin screen (`workbench/page.tsx`'s own long-standing
+named gap — this panel inherits the same scope limit, not a new one); and the
+build-artifact half of the freeze gate (`scripts/content-freeze.mjs`) still
+has no UI at all, run by hand exactly as before. The next unswept layer for
+this recurring bug class is `v3/api/app/Http/Controllers` beyond
+`ContentFreezeController` (not exhaustively re-checked this run — this was
+the first hit found and fixed, not a proof the rest of the directory is
+clean) and `v3/worker/fold-runner/src` (not yet swept at all).
