@@ -44,7 +44,7 @@ jobs:
       - uses: actions/setup-node@v4
         if: steps.detect.outputs.dirs != ''
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install pnpm
         if: steps.detect.outputs.dirs != ''
@@ -158,7 +158,7 @@ jobs:
       - uses: actions/setup-node@v4
         if: steps.has.outputs.yes == 'true' && matrix.dir == 'v3/api'
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Compile the v3 corpus (12, 67, 103, 112)
         # Same gap as the Makefile's test-api3 target (see its comment):
@@ -239,7 +239,7 @@ jobs:
       - uses: actions/setup-node@v4
         if: steps.has.outputs.yes == 'true'
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Compile the v3 corpus (12, 67, 103, 112)
         # Same reason as the `js` job's identical step: apps/web's build

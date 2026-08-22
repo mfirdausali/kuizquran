@@ -7144,3 +7144,74 @@ this entry, all five of `freeplay.ts`'s exported FR6 functions
 produced v3-D82 through v3-D117 has now exhausted this file specifically;
 a future run's sweep should look elsewhere in the engine for the next
 instance of the same shape.
+
+### v3-D119 — the real GitHub Actions CI has been red on every commit for at least the last five nights; `.github/workflows/ci.yml` pinned Node 20, but `compile.ts`'s `--experimental-strip-types` needs Node ≥22.6
+
+**Found while verifying v3-D118's own push, not by any local gate.** Every
+prior nightly run's verification is local (`make build`/`make test` in a
+sandbox whose `node` happens to be v22.22.2) — nothing before this run
+actually checked the real GitHub Actions run for the commit it had just
+pushed. `mcp__github__actions_list` on `main` showed **CI `failure` on the
+last five consecutive commits** (`f96be77`/D118, `c82fc95`/D117,
+`a1b43d0`, `6c3ac09`/D116, `dfa2f76`/D115) — this predates v3-D118 by at
+least four nights, so it is not this run's own regression, but it has gone
+unnoticed by every run since (plausibly) `v3/packages/corpus-compiler`'s
+`compile` script first started using `--experimental-strip-types`.
+
+**Root cause, from the actual job logs** (`js` job, step "Compile the v3
+corpus"): `node: bad option: --experimental-strip-types` →
+`Process completed with exit code 9`. `.github/workflows/ci.yml` pins
+`actions/setup-node@v4` to `node-version: 20` in all three jobs that run
+this step (`js`, `php`'s `v3/api` leg, `e2e`) — but
+`v3/packages/corpus-compiler/package.json`'s own `compile` script is
+`node --experimental-strip-types src/compile.ts`, and that flag does not
+exist on Node 20 at all (it landed experimental in Node 22.6, per Node's
+own changelog). Every job that reaches this step fails in ~2 seconds,
+before a single real test runs — `php (v3/api)`'s "Composer install +
+test" step, `js`'s "Build + test each JS project" step, and `e2e`'s whole
+suite all show `skipped`, never `failure`, because the corpus step that
+gates them (`if: ...`) never got the chance to run them at all. Only
+`php (v2/api)` — the one leg with no corpus dependency — has been
+reporting green this whole time, which is exactly the shape that lets a
+red CI hide in plain sight: the badge reads "failing" but a glance at
+which JOB failed, without reading the step-level log, does not obviously
+say "nothing downstream of this ever ran."
+
+**This is the exact class of gap DEFECTS.md#B9 was closed to prevent** —
+"the CI build gate was a no-op" — except inverted: B9's gate could pass
+vacuously; this one can never pass at all, on an environment mismatch
+that has nothing to do with the code it is supposed to be gating. Both
+failure modes train a team to stop trusting the badge, which is the
+actual harm (BUILD-PLAN.md's own CI invariant-gate section: "Blocks: every
+merge" — a gate nobody can make green stops blocking anything in
+practice, the moment someone starts treating red-on-`main` as normal).
+
+**Fixed:** all three `node-version: 20` occurrences in
+`.github/workflows/ci.yml` bumped to `22`, matching the version already
+proven to run this exact compile step correctly (this sandbox's own
+`node --version` → `v22.22.2`, and every `make build`/`make test` this
+build's nightly runs have ever reported green ran under a Node in that
+range). No other change to the workflow — the corpus-compile step's own
+logic, the Postgres service container (v3-D116), and every `if:` guard are
+untouched.
+
+**Verified:** the fix cannot be proven by a LOCAL run (this sandbox's own
+`node` was never the broken version — that is precisely why this sat
+undetected) — the only real proof is the next real GitHub Actions run
+against this exact workflow file. Pushed as its own commit, separate from
+v3-D118's feature commit (an infra fix and a feature change should not
+share a diff), and the resulting run against `main` was checked
+afterward — see the immediate next entry in this file, or `git log`'s own
+commit adjacent to this one, for the observed outcome; do not trust this
+paragraph's own claim of success without that check, the same discipline
+DECISIONS.md asks of every other "fixed" entry in this file.
+
+**Explicitly not addressed:** WHY nothing caught this for at least five
+nights is itself worth naming — no prior nightly run's own verification
+step ever queried the real CI status of the commit it had just pushed;
+every entry's "verified" section is local-only. This run's own report
+should recommend that future nightly runs add "check the real CI run for
+the just-pushed commit" as a standing verification step, not just
+`make build`/`make test` locally — but making that a structural,
+mechanical habit (rather than this one run remembering to do it) is a
+process change for NIGHTLY.md itself, which only Firdaus can ratify.
