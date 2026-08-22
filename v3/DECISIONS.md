@@ -7367,6 +7367,13 @@ immediate next entry, or `git log`, for the observed outcome; a future
 run should re-verify rather than trust this paragraph alone if `main`'s
 CI is not confirmed green by the time this is read.
 
+**Checked (commit `6bc3f4d`, run `32582807855`): major progress, not yet
+green.** `js`/`e2e`/`php (v2/api)` all `success`. `php (v3/api)` improved
+from 265 failed/18 passed to **4 failed, 2 incomplete, 16 skipped, 261
+passed** — the migrate fix closed 257 of those 265 failures. The
+remaining 4, ALL identical in shape, are a FOURTH independent gap. See
+v3-D122 immediately below.
+
 **Explicitly not addressed:** why `v3/api/phpunit.xml`'s `:memory:`
 override was commented out in the first place, rather than genuinely
 removed or left active, is not re-litigated here — it may be deliberate
@@ -7376,3 +7383,77 @@ kind of stray edit this fix's own root cause describes. Whichever it is,
 fixing the CI migration gap is correct regardless of that answer — a
 future run curious about the comment itself should check `git blame` on
 those two lines before assuming either explanation.
+
+### v3-D122 — v3-D121's own fix exposed a FOURTH, independent CI/local gap: `worker/fold-runner` (the sole server-side fold, shelled out to by `AtomCacheRebuilder`/the DB-sampling determinism path) was never `npm install`ed in CI
+
+**Found the same way as D119, D120 and D121 — the real follow-up run,
+not the diff.** With the sqlite migration gap closed, `v3/api`'s suite
+went from 265 failed to **4 failed, 2 incomplete, 16 skipped, 261
+passed** — real, forward progress this run's own local check independently
+confirmed (see below). All 4 failures share one root string:
+
+```
+rebuild-atom-cache runner failed: fold-runner not runnable: expected
+.../v3/api/../worker/fold-runner/node_modules/.bin/vite-node.
+Run `npm install` in worker/fold-runner.
+```
+
+Plus one companion failure with a plain `500` instead of `200`
+(`SystemHealthTest`'s own "the rebuild actually writes atom cache rows"
+case) — the SAME underlying cause, just observed through the
+controller's error-handling path rather than the raw exception.
+
+**Root cause.** `App\Support\AtomCacheRebuilder::rebuild()` and the
+DB-sampling half of the nightly determinism check both shell out to
+`worker/fold-runner`'s own `vite-node`-based CLI entry points — the SOLE
+server-side fold (CLAUDE.md's own "Where things go" table: "the ONLY
+server-side fold"). `worker/fold-runner/node_modules/.bin/vite-node` has
+to exist for that subprocess call to succeed at all. `make setup`
+installs it unconditionally (`cd worker/fold-runner && npm install`,
+alongside the corpus-compiler/engine/apps-web installs); this CI job
+never ran the equivalent — the `php (v3/api)` job installs
+`v3/packages/corpus-compiler`'s deps (to compile the corpus) but nothing
+under `v3/worker/`. Every test that shells out to the fold-runner failed
+the moment v3-D119/D120/D121's fixes let this job's tests run for real —
+this is the fourth instance of the identical shape across this one
+investigation: a `make setup` step CI never replicated.
+
+**Fixed:** a new step, "Install worker/fold-runner deps", scoped to
+`v3/api` only, `cd v3/worker/fold-runner && npm ci || npm install`,
+inserted right after the corpus-compile step and before "Composer
+install + test" — the same position and style as every other
+per-project install in this workflow.
+
+**Verified locally, exactly reproducing the CI failure shape first**
+(this gap IS provable locally, unlike v3-D119/D120): temporarily renamed
+`v3/worker/fold-runner/node_modules` aside and reran `php artisan test`
+in `v3/api` — reproduced the identical failure count and message this
+run's real CI log showed (`fold-runner not runnable: expected
+.../worker/fold-runner/node_modules/.bin/vite-node`), on the same 4 test
+methods; restored `node_modules` (`mv` back, no reinstall needed — this
+sandbox's own `make setup` had already installed it, which is precisely
+why this gap was invisible to every purely-local check in this
+investigation, D119 through D121 included) and reran — **275 passed, 2
+incomplete, 6 skipped (922 assertions)** again, byte-identical to every
+other verification in this run. This is now the FOURTH time in one
+sitting that "reproduce the CI-only failure locally by removing the one
+thing `make setup` provides that CI doesn't" has been the actual proof,
+not merely a hope that the CI diff matches intent.
+
+**Explicitly not addressed, but named because it is the honest
+summary of this whole thread of entries (v3-D119 through this one):**
+every one of these four gaps has the same shape — `make setup` does
+something CI's own job definitions never replicated, so CI has been
+running some SMALLER, incomplete subset of what a real checkout needs
+since at least the last several commits, possibly since the fold-runner
+sidecar or the sqlite/Postgres split were first introduced. This is not
+this run's own regression (confirmed: CI was already `failure` on
+`c82fc95`/D117, `a1b43d0`, `6c3ac09`/D116, `dfa2f76`/D115 — all before
+this run touched anything), but it IS a standing risk this run's own
+report should flag loudly: **`make setup`/`make test` passing locally
+has NOT been sufficient evidence that CI would pass, for at least this
+many independent reasons, for an unknown number of prior nights.** A
+future run should treat "check the real CI run for the just-pushed
+commit" as load-bearing, not optional — the same recommendation v3-D119
+made, now with four concrete instances backing it rather than one
+suspicion.

@@ -176,6 +176,24 @@ jobs:
           npm ci || npm install
           for s in 12 67 103 112; do npm run compile -- "$s"; done
 
+      - name: Install worker/fold-runner deps
+        # AtomCacheRebuilder/DeterminismCheckCommand shell out to
+        # `worker/fold-runner` (the sole server-side fold) via its own
+        # `vite-node`-based CLI entry points — `App\Support\AtomCacheRebuilder
+        # ::rebuild()` (SystemHealthTest's "the rebuild actually writes atom
+        # cache rows" case) and the DB-sampling determinism path
+        # (PerUserFoldLockWiringTest, v3-D116) both need it runnable. `make
+        # setup` installs it unconditionally (`cd worker/fold-runner && npm
+        # install`); this job never did, so every test that shells out to it
+        # failed with "fold-runner not runnable: expected .../node_modules/
+        # .bin/vite-node" the moment v3-D119/D120/D121 let this job's tests
+        # actually run for the first time in this investigation.
+        if: steps.has.outputs.yes == 'true' && matrix.dir == 'v3/api'
+        run: |
+          set -e
+          cd v3/worker/fold-runner
+          npm ci || npm install
+
       - name: Composer install + test
         if: steps.has.outputs.yes == 'true'
         working-directory: ${{ matrix.dir }}
