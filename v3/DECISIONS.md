@@ -7457,3 +7457,15 @@ future run should treat "check the real CI run for the just-pushed
 commit" as load-bearing, not optional — the same recommendation v3-D119
 made, now with four concrete instances backing it rather than one
 suspicion.
+
+**Checked (commit `c4057bd`, run `32583012839`): GREEN.** All four jobs —
+`js`, `e2e`, `php (v2/api)`, `php (v3/api)` — report `success`. This is
+the first fully green real CI run on `main` in at least nine commits
+(every run checked in this thread of entries, back through `dfa2f76`/
+D115, had been `failure`). v3-D119 through this entry closed the whole
+chain: Node version → PHP version → the missing sqlite migrate → the
+missing fold-runner install. `v1/**`/`v2/**` untouched by any of these
+four commits (`git status --porcelain -- v1 v2` clean before each), and
+none of the four changed a single test's expectations or weakened any
+gate — every fix made an existing, already-written assertion reachable
+for the first time, never altered what it asserted.

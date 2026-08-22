@@ -56,6 +56,37 @@ make dev     # SPA :5273, API :8000
 make test    # 2094 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 275 v3/api + 111 corpus-compiler
              # + 417 engine + 61 fold-runner + 928 apps/web. (v3-D118, 2026-08-22)
+             # NOTE (v3-D119..D122, same night as D118): the REAL GitHub
+             # Actions CI had been `failure` on every commit for at least nine
+             # commits running (back through dfa2f76/D115) — nothing before
+             # this run ever checked the actual CI status of a just-pushed
+             # commit, only local `make build`/`make test`. Four INDEPENDENT
+             # gaps, found one at a time by reading each real run's job logs
+             # after fixing the previous one: (1) `node-version: 20` in
+             # `.github/workflows/ci.yml` couldn't run `compile.ts`'s
+             # `--experimental-strip-types` (needs Node >=22.6) — bumped to 22;
+             # (2) `v3/api`'s `composer.lock` had resolved packages (symfony
+             # 8.1.x, nesbot/carbon 3.13.2) needing PHP >=8.4.1, but CI pinned
+             # `php-version: "8.3"` — bumped to 8.4 (v2/api's own `^8.3`
+             # constraint is unaffected); (3) `v3/api`'s default sqlite test
+             # DB (phpunit.xml deliberately does NOT override to `:memory:`,
+             # unlike v2/api's) was never migrated in CI — only the SEPARATE
+             # throwaway Postgres wiring-test DB was — added `php artisan
+             # migrate --force` against the default connection, v3/api only;
+             # (4) `worker/fold-runner` (the sole server-side fold,
+             # `AtomCacheRebuilder`/the DB-sampling determinism path both
+             # shell out to it) was never `npm install`ed in this CI job —
+             # added that step. Each fix was verified against the REAL next
+             # GitHub Actions run (not locally — this sandbox's own node/php/
+             # fold-runner state was never the broken one, which is exactly
+             # why none of this was caught by nine straight nights of
+             # `make test` reporting green). Final run (commit `c4057bd`):
+             # all four jobs `success` — first fully green `main` in this
+             # investigation's whole visible history. No test's expectations
+             # changed, no gate weakened; every fix made an existing,
+             # already-written assertion reachable for the first time. See
+             # DECISIONS.md v3-D119 through v3-D122 for the full, individually
+             # reproduced root-cause chain.
              # NOTE (v3-D118): `packages/engine/src/freeplay.ts#coldSuccessAdoption`
              # — the LAST of FR6's five exported functions to reach a learner —
              # had zero production callers, exactly the gap v3-D117's own header
