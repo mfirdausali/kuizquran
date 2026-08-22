@@ -7272,11 +7272,16 @@ version, so a local run cannot reproduce the CI-only mismatch. Pushed as
 its own commit (separate from v3-D119's Node fix — two independent root
 causes, two independent diffs, so a revert of either is never forced to
 take the other with it) and the resulting real GitHub Actions run was
-checked the same way v3-D119's was. **A future run reading this entry
-should re-check `git log`/the live CI status rather than trust this
-sentence alone** — if this run's own report does not confirm a fully
-green `main` below, treat `php (v3/api)` as still open and pick it up
-from here.
+checked the same way v3-D119's was (commit `c13b401`, run `32582535966`).
+**Confirmed: the `composer install` failure is gone** — `js`, `e2e` and
+`php (v2/api)` all `success`, and `php (v3/api)`'s Composer step got past
+dependency resolution for the first time and actually reached `php artisan
+test`, which ran for real (265 failed, 18 passed) — a completely different
+failure, a THIRD independent issue, not this entry's own scope. See
+v3-D121 immediately below. **A future run reading this entry should
+re-check `git log`/the live CI status rather than trust this sentence
+alone** — if this run's own report does not confirm a fully green `main`
+below, treat `php (v3/api)` as still open and pick it up from here.
 
 **Explicitly not addressed:** whether `composer.lock` should instead be
 regenerated to resolve OLDER, 8.3-compatible package versions (keeping
@@ -7291,3 +7296,83 @@ the deployment target's own PHP version is fixed below 8.4 for some
 reason not visible in this repo, that would be the actual argument for
 regenerating the lock file downward instead — a product/ops decision,
 not an engineering one this run is positioned to make.
+
+### v3-D121 — v3-D120's own fix exposed a THIRD, independent CI/local gap: `v3/api`'s default sqlite test database was never migrated in CI, only the separate Postgres wiring-test database was
+
+**Found the same way v3-D120 was found — by checking the real follow-up
+CI run rather than trusting the diff.** Once `composer install` stopped
+failing, `php artisan test` for `v3/api` ran for the first time in this
+whole investigation and failed immediately and completely: **265 failed,
+18 passed**, every failure the identical shape —
+
+```
+Database file at path [.../v3/api/database/database.sqlite] does not exist.
+  SQL: select exists (select 1 from sqlite_master where name = 'migrations' and type = 'table')
+```
+
+**Root cause.** `v3/api/phpunit.xml` deliberately does NOT override
+`DB_CONNECTION`/`DB_DATABASE` to sqlite `:memory:` — both lines are
+present but commented out. `v2/api/phpunit.xml` has the identical two
+lines, ACTIVE, which is exactly why `v2/api` never hit this: an
+in-memory sqlite database is created, migrated (via `RefreshDatabase`)
+and torn down entirely INSIDE the PHPUnit process, invisible to anything
+outside it. With v3/api's override commented out, its test run instead
+uses the real `.env`'s `DB_CONNECTION=sqlite` with no `DB_DATABASE`
+override — Laravel's own default, `database/database.sqlite`, a real
+file on disk that has to actually exist and be migrated before any query
+against it can succeed. A local `make setup` provides exactly that: its
+`API_V3` block runs `cd $(API_V3) && php artisan migrate --force`
+unconditionally, against this same default connection, once, and the
+resulting file persists across every later `make test`. CI's "Composer
+install + test" step has no equivalent — its only `php artisan migrate
+--force` call is scoped `DB_CONNECTION=pgsql ... DB_DATABASE=
+imanapp_lock_test`, migrating the SEPARATE throwaway Postgres database
+v3-D116's wiring test needs, never the app's own default connection.
+`php artisan test` therefore always ran against a sqlite file that had
+never been created, let alone migrated — the exact same shape as
+v3-D119/D120, a local convenience (`make setup`'s own migrate call)
+silently doing work CI never replicated.
+
+**Confirmed directly, not assumed:** `rm -f database/database.sqlite &&
+php artisan migrate --force` in this sandbox recreates the file from
+nothing and migrates it in one call — Laravel's sqlite connector creates
+a missing file automatically the moment something tries to use it via
+`migrate`, so no separate `touch` step is needed, matching what `make
+setup`'s own single migrate call has relied on this whole time without
+anyone naming it explicitly until now.
+
+**Fixed:** `.github/workflows/ci.yml`'s "Composer install + test" step
+gains one more `if [ "${{ matrix.dir }}" = "v3/api" ]; then php artisan
+migrate --force; fi`, immediately after the existing Postgres-wiring
+migrate block and immediately before `php artisan test` — using the
+step's own ambient `.env` connection (sqlite, file-based), never
+overriding it, mirroring `make setup`'s exact call. Scoped to `v3/api`
+only: `v2/api`'s test run never reads its own default sqlite connection
+at all (phpunit's `:memory:` override supersedes it for the whole
+process), so migrating v2/api's file-based default would be genuine,
+pointless extra work with no test ever reading the result.
+
+**Verified locally** (this IS provable locally, unlike v3-D119/D120 —
+the gap is a missing STEP, not an environment-version mismatch this
+sandbox happens not to have): reran `rm -f database/database.sqlite &&
+php artisan migrate --force && php artisan test` in `v3/api` directly —
+same **275 passed, 2 incomplete, 6 skipped (922 assertions)** this run's
+own v3-D118 verification already reported, confirming the fresh-migrate
+path produces byte-identical results to the pre-existing persisted file,
+never a different count. **The real CI proof is still the next live run**
+— pushed as its own commit (a third independent root cause, a third
+independent diff, same "revert one without forcing the others"
+reasoning as v3-D120's own header) and checked the same way. See the
+immediate next entry, or `git log`, for the observed outcome; a future
+run should re-verify rather than trust this paragraph alone if `main`'s
+CI is not confirmed green by the time this is read.
+
+**Explicitly not addressed:** why `v3/api/phpunit.xml`'s `:memory:`
+override was commented out in the first place, rather than genuinely
+removed or left active, is not re-litigated here — it may be deliberate
+(some `v3/api` test needs a persistent file across requests within one
+test, or needs to inspect the file after a run) or it may be exactly the
+kind of stray edit this fix's own root cause describes. Whichever it is,
+fixing the CI migration gap is correct regardless of that answer — a
+future run curious about the comment itself should check `git blame` on
+those two lines before assuming either explanation.

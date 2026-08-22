@@ -213,6 +213,27 @@ jobs:
               DB_DATABASE=imanapp_lock_test DB_USERNAME=postgres DB_PASSWORD=postgres \
               php artisan migrate --force
           fi
+          # v3-D120's own follow-up: v3/api's phpunit.xml deliberately does NOT
+          # override DB_CONNECTION/DB_DATABASE to sqlite `:memory:` (unlike
+          # v2/api's, which does — that is why v2/api never needed this step:
+          # an in-memory DB is created fresh, migrated, and torn down entirely
+          # inside the PHPUnit process, invisible to this shell). v3/api's
+          # PHPUnit run therefore uses the real `.env` connection — sqlite,
+          # file-based, DB_DATABASE unset so Laravel defaults to
+          # `database/database.sqlite` — same as a local `make setup`, which
+          # runs `php artisan migrate --force` against that exact default
+          # connection unconditionally. This CI step never mirrored that: it
+          # only ever migrated the SEPARATE Postgres wiring-test database
+          # above, so `php artisan test` here always started against a sqlite
+          # file that had never been created, let alone migrated. `php artisan
+          # migrate --force` both creates the missing file AND migrates it in
+          # one call (confirmed directly: `rm -f database/database.sqlite &&
+          # php artisan migrate --force` recreates it from nothing), so no
+          # separate `touch` step is needed. Scoped to v3/api only — v2/api's
+          # own default sqlite connection is never read by its test run at all.
+          if [ "${{ matrix.dir }}" = "v3/api" ]; then
+            php artisan migrate --force
+          fi
           php artisan test
 
   # ---- Playwright e2e (v3/apps/web): the M5 exit-criterion suite — full-Yusuf
