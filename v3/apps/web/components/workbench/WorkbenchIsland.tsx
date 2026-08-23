@@ -39,6 +39,7 @@ import { loadFrontier, type FrontierLoad } from "@/lib/workbench/verifications.t
 import { FrontierNavigator } from "./FrontierNavigator";
 import { ExplainTrace } from "./ExplainTrace";
 import { QariMode } from "./QariMode";
+import { OverrideEditor } from "./OverrideEditor";
 
 /** The lanes this picker can select. `rc` is absent BY DESIGN — WIREFRAME's
  *  DATA/CODE table keeps reconstruct.ts's state machine as CODE permanently,
@@ -113,6 +114,7 @@ export function WorkbenchIsland({ surah, corpus }: WorkbenchIslandProps) {
       : null;
 
   const ayahCount = corpus.meta.ayahCount;
+  const ayahWords = useMemo(() => corpus.words.filter((w) => w.ayah === ayah), [corpus, ayah]);
   const spec = useMemo(
     () => specFor(lane, surah, ayah, ayahCount),
     [lane, surah, ayah, ayahCount],
@@ -187,6 +189,8 @@ export function WorkbenchIsland({ surah, corpus }: WorkbenchIslandProps) {
         chip={chipForAyah}
         onSigned={() => setFrontierEpoch((n) => n + 1)}
       />
+
+      <OverrideEditor surah={surah} ayah={ayah} words={ayahWords} />
 
       <ExplainTrace explanation={explanation} surah={surah} />
     </div>

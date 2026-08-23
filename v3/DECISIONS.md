@@ -7795,3 +7795,87 @@ actually correct a gloss or distractor through the write path B1/B3's own
 closures depend on; workbench signs verifications only, never writes an
 override. `v3/worker/fold-runner/src` remains entirely unswept for this bug
 class.
+
+### v3-D126 — `OverridesController::store` (the admin override WRITE path) had zero frontend callers, scoped to the two fields that need no typed Arabic
+
+**Continuing the named sweep.** v3-D125's own closing note named this exact
+gap: `POST /api/overrides` (build-plan step 15's admin write path, the write
+DEFECTS.md#B1/#B3's own closures depend on being reachable) has existed,
+admin-gated and fully tested (`OverridesTest.php`: closed 4-member `field`
+set, `editorId` always the authenticated admin, append-only rows) since the
+override layer shipped — but `grep -rn "apiFetch(\"/api/overrides\""
+apps/web` found only the GET call `lib/overrides/fetch.ts` makes for the
+learner corpus loader. An admin or qari at `/workbench` could SEE a wrong
+gloss (`ExplainTrace`) and SIGN an ayah's verification (`QariMode`) but had
+no way to correct the thing they were looking at.
+
+**Scoped to `gloss` and `disable`, deliberately not all four fields.**
+`distractor`'s payload is a full replacement `CorpusDistractor[]` set whose
+`text` field is raw Arabic — a free-text box for that would be exactly the
+shape `WorkbenchIsland`'s own header already refuses for the spec editor's
+answer picker ("cannot type Arabic into any answer field — no such field
+exists... ship the picker with its CorpusRef plumbing intact, not a text
+input now"). `group` (multi-word idiom grouping) is a smaller, rarer surface
+deferred alongside it. Both are real, separate, future work, not silently
+dropped — named here so a future run doesn't either rediscover them as new
+or "quick-fix" a free-text distractor box that would risk a keyboard path to
+Arabic.
+
+**Fixed:** new `lib/overrides/write.ts` (`submitOverride`/`glossOverride`/
+`disableOverride`, mirroring `lib/workbench/sign.ts`'s never-throws
+discipline and `lib/admin/flags.ts`'s outcome-object shape, egress through
+`apiFetch` only) + `components/workbench/OverrideEditor.tsx`, wired into
+`WorkbenchIsland` beside `QariMode`. The panel lists existing overrides for
+the open ayah (reusing `lib/overrides/fetch.ts#fetchOverrides`, the same
+function the learner corpus loader calls — one read path for both
+consumers), a "Correct a gloss" form (word position chosen from a dropdown
+built off the corpus's own `text_uthmani` — never typed — plus a language
+and a free EN/MS text correction), and a "Disable a question" form (whole-
+ayah or one word, a closed-set question-type dropdown mirroring
+`lib/test/build.ts#TestItemKind`, the actual set `isQuestionDisabled` is
+checked against at its one real consumer). A listed active `disable` row
+gets a "Re-enable" button, which posts a NEW row with `disabled: false` —
+never an edit in place, matching `DisablePayload`'s own append-only
+contract.
+
+**Verified:** RED confirmed directly — both new test files
+(`lib/overrides/write.test.ts`, `test/workbench-override-editor.test.tsx`)
+were run against the tree before either source file existed and failed on
+module-resolution errors; implemented after, all 14 new tests green on the
+first pass (one test-only fix along the way: `toBeDisabled` is a jest-dom
+matcher this repo's vitest setup does not register, so the "cannot submit
+incomplete gloss form" case reads `.disabled` off the raw DOM node instead).
+
+`TZ=UTC make test`: **2144 passing** (was 2130, +14 — exactly this run's new
+tests: 8 in `write.test.ts`, 6 in `workbench-override-editor.test.tsx`; no
+other suite's count moved — `v3/api` PHPUnit stayed at 278, no backend file
+touched, since `OverridesController::store` already existed and needed no
+change). `check-test-floor.mjs`: OK, 2144 >= floor 1899 (+245 margin,
+`TEST-FLOOR` left unmoved). `TZ=UTC make build`: exit 0, 23 routes
+(unchanged — no new route, `OverrideEditor` renders inside the existing
+`/workbench` route). `npm run gates`: locked-css OK, fonts
+degraded-but-non-blocking (pre-existing, unrelated), boundaries OK (223
+files, up from 218 — four new files, no violation), corpus-morphology and
+corpus-glyphs OK.
+
+No `v1/**`/`v2/**` edit: `git status --porcelain -- v1 v2` empty immediately
+before committing (a stray `v2/tsconfig.tsbuildinfo` build-cache diff from
+running the suite was reverted first, same discipline as every prior entry).
+No Arabic codepoint introduced: every new/changed file was swept
+programmatically for the Arabic, Arabic Supplement, Arabic Extended-A and
+both Presentation Forms Unicode blocks — zero matches; every new line
+addresses a word position (an integer), a language code (`"en"`/`"ms"`), a
+closed-set question type, a version number, or free EN prose an admin
+types — never corpus text. `words[].text_uthmani` is read back OUT of the
+corpus prop the server component already loaded, the same discipline
+`lib/test/build.ts`'s own header states for its own Arabic reads.
+
+**Not addressed, named so a future run doesn't re-discover it as new:**
+`distractor` and `group` override authoring remain unbuilt, for the reason
+stated above (needs a word-tap CorpusRef picker, the same unbuilt piece the
+spec editor is waiting on); the admin client-side auth gate remains unbuilt
+across every admin screen (pre-existing, named gap since v3-D100). The three
+other zero-caller surfaces v3-D125 named (`AdminRevealController`/
+`AdminUsersController`, `GlossDraftsController`) are unchanged by this run —
+still deliberately left for their own stated reasons. `v3/worker/fold-runner/src`
+remains entirely unswept for this bug class.

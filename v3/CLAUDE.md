@@ -53,9 +53,56 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2130 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2144 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 278 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 961 apps/web. (v3-D125, 2026-08-22)
+             # + 417 engine + 61 fold-runner + 975 apps/web. (v3-D126, 2026-08-23)
+             # NOTE (v3-D126): `OverridesController::store` (`POST
+             # /api/overrides`, the admin WRITE path B1/B3's closures depend
+             # on) had zero frontend callers — v3-D125's own closing note
+             # named this exact gap: "there is still no UI anywhere for an
+             # admin/qari to actually correct a gloss or distractor...
+             # workbench signs verifications only, never writes an
+             # override." Scoped to the two fields that need no typed
+             # Arabic: `gloss` (an EN/MS text correction) and `disable` (a
+             # toggle over an existing word position, chosen from a
+             # dropdown, never typed). `distractor` needs a word-tap
+             # CorpusRef picker — the same reason `WorkbenchIsland`'s own
+             # spec editor leaves its answer picker unbuilt rather than
+             # stubbed with a free-text field, since that field's payload is
+             # raw Arabic — and `group` (multi-word idiom grouping) is
+             # deferred alongside it, both real separate future work. Fixed:
+             # new `lib/overrides/write.ts` (mirrors `lib/workbench/sign.ts`'s
+             # never-throws discipline) + `components/workbench/OverrideEditor.tsx`,
+             # wired into `WorkbenchIsland` beside `QariMode`. Lists existing
+             # overrides for the open ayah (reusing
+             # `lib/overrides/fetch.ts#fetchOverrides`, the same function the
+             # learner corpus loader calls), a gloss-correction form, and a
+             # disable/re-enable form (question-type dropdown mirrors
+             # `lib/test/build.ts#TestItemKind`, the actual set
+             # `isQuestionDisabled` is checked against). Re-enable posts a
+             # NEW row with `disabled: false` — never an edit in place,
+             # matching `DisablePayload`'s own append-only contract. RED
+             # confirmed directly: both new test files were run against the
+             # tree before either source file existed and failed on
+             # module-resolution errors; implemented after, 14/14 green.
+             # `TZ=UTC make test`: 2144 passing (was 2130, +14 — exactly this
+             # run's new tests). `check-test-floor.mjs`: OK, 2144 >= floor
+             # 1899 (+245 margin). `TZ=UTC make build`: exit 0, 23 routes
+             # (unchanged — no new route, renders inside the existing
+             # `/workbench` route). `npm run gates`: all green (fonts
+             # degraded-but-non-blocking, pre-existing; boundaries 223 files,
+             # up from 218, four new files). No `v1/**`/`v2/**` edit (stray
+             # `v2/tsconfig.tsbuildinfo` reverted before committing). No
+             # Arabic codepoint (every new/changed file swept over the
+             # Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms blocks, zero matches). NOT addressed:
+             # `distractor`/`group` override authoring (needs the word-tap
+             # CorpusRef picker); the admin client-side auth gate
+             # (pre-existing, named gap). The other three zero-caller
+             # surfaces v3-D125 named (`AdminRevealController`/
+             # `AdminUsersController`, `GlossDraftsController`) are
+             # unchanged. `v3/worker/fold-runner/src` remains entirely
+             # unswept. See DECISIONS.md v3-D126.
              # NOTE (v3-D125): `Admin\FlagController` (build-plan step 26/M8,
              # the flag plane) had zero frontend callers — BUILD-PLAN's own M8
              # line names "nav homes for flags/reports/templates/audit viewer"
