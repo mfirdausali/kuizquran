@@ -53,9 +53,56 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2165 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2187 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 283 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 991 apps/web. (v3-D127, 2026-08-23)
+             # + 417 engine + 61 fold-runner + 1013 apps/web. (v3-D128, 2026-08-23)
+             # NOTE (v3-D128): `Admin\RevealController` and
+             # `Admin\AdminUsersController::exportCsv` — WIREFRAME §16's
+             # reveal-identity and bulk-CSV-export surfaces, two of the three
+             # zero-caller admin controllers v3-D125 named and twice deferred
+             # ("its own careful UI pass") — had zero frontend callers, the
+             # same "built + tested + zero production callers" shape as
+             # v3-D100/D124/D125/D126/D127. Fixed: new `lib/admin/reveal.ts`
+             # (`revealIdentity`/`checkRevealToken`, mirroring
+             # `lib/admin/flags.ts`'s "the server decides everything"
+             # discipline — reason-code set, >=10-char minimum, the PII-scan-
+             # then-acknowledge flow and the reveal TTL are all server-decided
+             # and rendered verbatim) + `lib/admin/users.ts`
+             # (`downloadUsersCsv`, driving a real authenticated browser
+             # download via an object URL since the endpoint needs a Bearer
+             # token a plain `<a href>` cannot carry) + new
+             # `components/admin/PrivacyPanel.tsx`, wired into a new
+             # standalone `/settings/privacy` route. Deliberately no
+             # "browse all learners" picker — `AdminUsersController` exposes
+             # no JSON listing, only the identity-free CSV, so the reveal
+             # form takes a typed user id the way an operator already has it
+             # (a support ticket), matching v3-D110's own scope discipline
+             # rather than inventing a second backend surface. Edge cases
+             # #148 (an anonymous subject renders a distinct `anonymous`
+             # state, never conflated with `not-found`) and #149 (a
+             # PII-shaped reason renders the server's own `detected[]`/`hint`
+             # and re-submits only on an explicit acknowledgement) are
+             # rendered exactly as the server decided them, never re-derived
+             # client-side. `GlossDraftsController`, the third surface
+             # v3-D125 named, stays untouched — gated on Firdaus's
+             # unrecorded ratification. RED confirmed three times (one per
+             # new file pair): each new source file was moved aside with its
+             # test kept and `vitest run` re-executed — all three failed on
+             # module resolution; restored byte-identically, all green.
+             # `TZ=UTC make test`: 2187 passing (was 2165, +22 — exactly this
+             # run's new tests: 11 + 4 + 7). `check-test-floor.mjs`: OK, 2187
+             # >= floor 1899 (+288 margin). `TZ=UTC make build`: exit 0, 24
+             # routes (was 23 — `/settings/privacy` is new). `npm run gates`:
+             # all green (fonts degraded-but-non-blocking, pre-existing;
+             # boundaries 233 files, up from 230, three new production
+             # files). No `v1/**`/`v2/**` edit. No Arabic codepoint. NOT
+             # addressed: `GlossDraftsController` (the last v3-D125 surface,
+             # still ratification-gated); `distractor`/`group` override
+             # authoring (v3-D126); role-based UI gating within the admin
+             # console (v3-D127) — this panel is reachable by any
+             # allowlisted admin regardless of role. With this, every admin
+             # controller with a real write/read surface has a frontend
+             # caller — see DECISIONS.md v3-D128.
              # NOTE (v3-D127): the admin client-side auth gate — named unbuilt
              # since v3-D92 and repeated through v3-D100/D124/D125/D126, each
              # quoting the same reason: "a redirect with no server

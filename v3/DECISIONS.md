@@ -8071,3 +8071,112 @@ non-qari admin, the client-side half of v3-D92's own finding) is a
 separate, smaller follow-on this run did not scope into — `AdminGate`
 proves ADMIN, not WHICH admin role, and every admin screen still shows the
 same chrome to any allowlisted admin regardless of their `roles` array.
+
+### v3-D128 — `Admin\RevealController` and `Admin\AdminUsersController::exportCsv`, the privacy-sensitive pair v3-D125/D127 both deferred by name, get their missing frontend
+
+**Continuing v3-D127's own "not addressed" list, not the fold-runner sweep
+— that sweep is exhausted (v3-D127).** Two of the three remaining
+zero-caller admin surfaces v3-D125 named are `AdminRevealController`
+(`POST /api/admin/users/{id}/reveal`, `GET /api/admin/reveal/{token}`) and
+`AdminUsersController::exportCsv` (`GET /api/admin/users/export.csv`) —
+WIREFRAME §16's reveal-identity and bulk-CSV-export surfaces. Both have
+been live and fully tested (`tests/Feature/Admin/AdminPrivacyTest.php`,
+19 tests, including the M10 security-review fixes scoping a reveal token
+to its minting admin and auditing the bulk export *before* the stream
+opens) since build-plan step 24, but `grep -rln "admin/users\|admin/reveal"
+apps/web` (excluding this run's new files) returned nothing — the same
+"built + tested + zero production callers" shape as v3-D100/D124/D125/D126,
+deferred twice by name for being "the privacy-sensitive one... deserves
+its own careful UI pass."
+
+The third named surface, `GlossDraftsController`, stays untouched — it is
+gated on Firdaus's ratification to draft into a non-shipping table, and
+none is recorded (BUILD-PLAN's own agent-deployment rule).
+
+**Deliberately no "browse all learners and pick one" list.**
+`AdminUsersController` exposes no JSON listing endpoint, only the
+identity-free bulk CSV — inventing a paginated user-listing route to back
+a picker would be new backend scope, not a wiring fix. The reveal form
+therefore takes a typed user id, the way an operator would already have
+it (from a support ticket, a pseudonym correlated elsewhere): the same
+scope discipline v3-D110 used for `disable` (ship exactly what the
+backend already supports; don't invent a second surface to make the UI
+prettier).
+
+**What is genuinely new, not a re-derivation of server logic:**
+`lib/admin/reveal.ts` (`revealIdentity`/`checkRevealToken`, mirroring
+`lib/admin/flags.ts`'s three-state discipline and its own "the server
+decides everything" rule — the reason-code closed set, the >=10-char
+minimum, the PII-detection-then-acknowledge flow and the reveal TTL are
+all asserted only by `AdminRevealController` and reported back verbatim,
+never re-validated client-side beyond what makes the form usable) +
+`lib/admin/users.ts` (`downloadUsersCsv` — the endpoint requires a Bearer
+token, so a plain `<a href>` cannot authenticate it; the browser download
+is driven manually via an object URL and a detached anchor's `.click()`,
+the standard pattern for an authenticated download) +
+`components/admin/PrivacyPanel.tsx`, wired into a new standalone
+`/settings/privacy` route (mirrors `/settings/flags`'s shape — no shared
+nav; `(admin)` contributes no URL segment).
+
+Two edge cases from WIREFRAME §16 are rendered as the server decided them,
+not re-derived: **#148** (revealing an anonymous account returns a defined
+`anonymous` state, never conflated with `not-found` — the panel renders a
+distinct message for each, off the response's own `identity: null` +
+absence/presence of a 404) and **#149** (a PII-shaped reason text comes
+back as a `pii-warning` state carrying the server's own `detected[]` list
+and `hint`; the panel shows an acknowledgement checkbox and re-submits
+with `acknowledge_pii_warning: true` only on the operator's explicit
+action — it never guesses at what looks like PII itself). The re-check
+button's refusal is rendered as the server's single undifferentiated
+"invalid" — expired, unknown and belongs-to-another-admin are
+deliberately indistinguishable here too, matching `AdminRevealController
+::check`'s own docblock reasoning that distinguishing them would build an
+oracle the backend explicitly refuses to be.
+
+**RED confirmed directly, three times, one per new file pair:** each of
+`lib/admin/reveal.ts`, `lib/admin/users.ts` and
+`components/admin/PrivacyPanel.tsx` was moved aside (its own test file
+kept in place) and `vitest run` re-executed — all three failed on module
+resolution (`Does the file exist?`), not on an assertion inside an
+existing implementation; each file was then restored byte-identically and
+the suite reran green. `lib/admin/users.test.ts` needed a
+`@vitest-environment jsdom` docblock (the default environment is Node,
+which has no `HTMLAnchorElement`) — caught by the same RED-before-green
+run, not assumed correct.
+
+`TZ=UTC npx vitest run` (apps/web only): **1013 passing** (was 991, +22 —
+exactly this run's new tests: 11 in `reveal.test.ts` + 4 in
+`users.test.ts` + 7 in `privacy-panel.test.tsx`; every other file's count
+unmoved). `TZ=UTC make test` (full monorepo, all seven suites):
+**2187 passing** (was 2165, +22, matching exactly). `check-test-floor.mjs`:
+OK, 2187 >= floor 1899 (+288 margin, `TEST-FLOOR` left unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, **24
+routes** (was 23 — `/settings/privacy` is new). `npx tsc --noEmit`: clean.
+`npm run gates`: locked-css OK, fonts degraded-but-non-blocking
+(pre-existing, unrelated — Inter ×3 and Source Serif 4 missing), boundaries
+OK (233 files checked, up from 230 — three new production files, zero
+violations), corpus-morphology and corpus-glyphs OK.
+
+No `v1/**`/`v2/**` edit: `git status --porcelain -- v1 v2` empty
+immediately before committing (a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff from running the suite was reverted first, same
+discipline as every prior entry). No Arabic codepoint introduced: every
+new file swept individually over the Arabic, Arabic Supplement, Arabic
+Extended-A and both Presentation Forms Unicode blocks — zero matches;
+every new line addresses a user id an operator types, a pseudonym or
+identity string the server already computed, a reason code from the
+closed set, or a CSV column name — never corpus text.
+
+**Not addressed, named so a future run doesn't re-discover it as new:**
+`GlossDraftsController` remains the one zero-caller admin surface left
+from v3-D125's original three, still gated on the unrecorded ratification
+named above; `distractor`/`group` override authoring (v3-D126) is
+unchanged; role-based UI gating within the admin console (v3-D127) is
+unchanged — this panel, like every other admin screen, is reachable by
+any allowlisted admin regardless of role. With this, every admin
+controller with a real, non-content-authoring write or read surface has a
+frontend caller — the "built + tested + zero production callers" sweep
+that produced v3-D82 through D127 has exhausted the admin console; a
+future run should look elsewhere (or pick up one of the human-gated or
+infra-gated items LAUNCH-CHECKLIST.md names) for the next instance of
+this bug class.
