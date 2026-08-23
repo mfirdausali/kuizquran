@@ -8180,3 +8180,95 @@ that produced v3-D82 through D127 has exhausted the admin console; a
 future run should look elsewhere (or pick up one of the human-gated or
 infra-gated items LAUNCH-CHECKLIST.md names) for the next instance of
 this bug class.
+
+---
+
+### v3-D129 — `admin_audit` had four writers and zero readers: the audit viewer BUILD-PLAN M8 names ("nav homes for flags/reports/templates/audit viewer") did not exist
+
+**v3-D128's own closing claim — "every admin controller with a real...
+read surface has a frontend caller, the sweep has exhausted the admin
+console" — was true of *controllers* and false of the *model underneath
+four of them*.** `AdminRevealController::reveal`, `AdminUsersController
+::exportCsv`, `SystemHealthController::rebuildAtomCache` and
+`StripeSettingsController::test` (v3-D124/D125/D128) each write an
+append-only `admin_audit` row on every call — but no controller anywhere
+ever read `admin_audit` back. `grep -rln AdminAudit v3/api/app` found five
+files: four writers and the model itself. No fifth, reading, file existed.
+The append-only guarantee `AdminAudit::booted()` enforces (an audit row
+can never be updated or deleted — `AdminPrivacyTest`) was therefore
+unverifiable by any human short of a database console: an operator asking
+"who revealed identity X, and why" had nowhere on the console to ask.
+BUILD-PLAN M8 names this exact gap in its own deliverables line: "nav
+homes for flags/reports/templates/audit viewer." `FlagRampAudit` (v3-D125's
+own "reports/templates/audit viewer" note) shares the identical shape —
+four writer call sites in `FlagService`, zero readers — and stays
+**explicitly unaddressed** by this entry; picking one audit trail and
+doing it well, per NIGHTLY.md's "one step per run," was the scope choice.
+
+**Fixed:** new `Admin\AdminAuditController::index()` (`GET
+/api/admin/audit`, admin-gated, read-only — no POST/PUT/DELETE is
+registered for it at all) + `lib/admin/audit.ts` (`loadAudit`, mirroring
+`lib/admin/flags.ts`'s three-state discipline exactly) +
+`components/admin/AuditLogPanel.tsx`, wired into a new standalone
+`/settings/audit` route (mirrors `/settings/flags`'s shape — no shared
+nav; `(admin)` contributes no URL segment, same as every other admin
+screen).
+
+**The actor is pseudonymized on the way out too.** `subject_pseudonym`
+was already pseudonymized at write time (the learner being looked up);
+`actor_admin_id` is a raw FK to `users` and had never been read back
+anywhere. Returning it verbatim would have made this the *one* screen
+that deanonymizes an admin's own identity to every other admin who can
+load it — the same HMAC `Pseudonymizer` every other admin surface already
+uses is applied to `actor_admin_id` here too, so an admin is exactly as
+pseudonymous to their peers as a learner is to them. A dedicated test
+(`test_the_actor_is_pseudonymized_not_the_raw_admin_id`) asserts the
+returned `actor` field equals `Pseudonymizer::for()`'s own output and is
+never the raw integer id, string-cast or otherwise.
+
+**Deliberately capped, not paginated.** `AdminAuditController::MAX_ENTRIES
+= 200` — a recent-activity review surface, not a full-table browser,
+matching `AdminUsersController`'s own "no browse-all-learners picker"
+scope discipline (v3-D128) rather than building pagination nothing asked
+for yet. A `subject` query param narrows to one pseudonym (e.g. the one an
+operator just revealed), the one filter the reveal/CSV workflow actually
+needs; `meta`/`ip`/`request_id` are read into the model at write time but
+deliberately **not** returned here — minimal exposure on a screen every
+allowlisted admin, not only the acting one, can load.
+
+**RED confirmed at every layer, each reverted byte-identically after:**
+the backend route did not exist before this run — `AdminAuditTest`'s five
+cases (admin-required, newest-first ordering, actor pseudonymization,
+subject filter, no-writes-accepted) all failed on a bare 404/401 against
+the unmodified `routes/api.php`; implemented, 5/5 green. `lib/admin/
+audit.ts` and `components/admin/AuditLogPanel.tsx` were each moved aside
+with their tests kept and `vitest run` re-executed — both failed on module
+resolution (`Failed to load url ./audit`, `Failed to resolve import
+"@/components/admin/AuditLogPanel"`); restored, all green again.
+
+`TZ=UTC make test`: **2204 passing** (was 2187, +17 — exactly this run's
+new tests: 5 PHPUnit + 7 + 5 vitest; no other suite moved).
+`check-test-floor.mjs`: OK, 2204 >= floor 1899 (+305 margin, `TEST-FLOOR`
+left unmoved). `TZ=UTC make build`: exit 0, **25 routes** (was 24 —
+`/settings/audit` is new). `npx tsc --noEmit`: clean. `npm run gates`:
+locked-css OK, fonts degraded-but-non-blocking (pre-existing, unrelated),
+boundaries OK (238 files checked, up from 233 — five new files, zero
+violations), corpus-morphology and corpus-glyphs OK.
+
+No `v1/**`/`v2/**` edit: `git status --porcelain -- v1 v2` empty
+immediately before committing (a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff from running the suite was reverted first, same
+discipline as every prior entry). No Arabic codepoint introduced: every
+new/changed file swept individually over the Arabic, Arabic Supplement,
+Arabic Extended-A and both Presentation Forms Unicode blocks, plus a
+`\u06xx`/`\u08xx`-escape and `fromCharCode` sweep — zero matches; every
+new line addresses a pseudonym the server already computed, a reason code
+from the closed set, an action name, or an epoch-millisecond timestamp —
+never corpus text.
+
+**Not addressed, named so a future run doesn't re-discover it as new:**
+`FlagRampAudit` (named above) has the identical "written, never read"
+shape and its own viewer is still unbuilt; `GlossDraftsController`
+remains gated on the unrecorded ratification; `distractor`/`group`
+override authoring (v3-D126) and role-based UI gating within the admin
+console (v3-D127) are both unchanged.

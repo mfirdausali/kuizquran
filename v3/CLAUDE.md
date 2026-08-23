@@ -53,9 +53,61 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2187 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 283 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 1013 apps/web. (v3-D128, 2026-08-23)
+make test    # 2204 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 288 v3/api + 111 corpus-compiler
+             # + 417 engine + 61 fold-runner + 1025 apps/web. (v3-D129, 2026-08-23)
+             # NOTE (v3-D129): `admin_audit` had four writers
+             # (`AdminRevealController::reveal`, `AdminUsersController
+             # ::exportCsv`, `SystemHealthController::rebuildAtomCache`,
+             # `StripeSettingsController::test`) and zero readers — no
+             # controller anywhere ever read the append-only audit trail
+             # back, so the `AdminAudit::booted()` update/delete guard was
+             # unverifiable by any human short of a database console.
+             # BUILD-PLAN M8 names this exact gap: "nav homes for
+             # flags/reports/templates/audit viewer." v3-D128's own closing
+             # claim ("every admin controller with a real read surface has
+             # a frontend caller, the sweep is exhausted") was true of
+             # *controllers* and false of the *model* four of them wrote
+             # to. Fixed: new `Admin\AdminAuditController::index()` (`GET
+             # /api/admin/audit`, read-only — no write route registered at
+             # all) + `lib/admin/audit.ts` (mirrors `lib/admin/flags.ts`'s
+             # three-state discipline) + `components/admin/AuditLogPanel.tsx`,
+             # wired into a new standalone `/settings/audit` route. The
+             # ACTOR is pseudonymized on the way out too — `actor_admin_id`
+             # is a raw FK that had never been read back anywhere; returning
+             # it verbatim would have made this the one screen that
+             # deanonymizes an admin's own identity to their peers, so the
+             # same `Pseudonymizer` HMAC every other admin surface uses is
+             # applied here too (dedicated test asserts the response never
+             # carries the raw integer id). Capped at 200 recent entries,
+             # not paginated — a review surface, not a table browser,
+             # matching `AdminUsersController`'s own "no browse-all-learners
+             # picker" scope discipline (v3-D128); a `subject` query param
+             # narrows to one pseudonym. RED confirmed at every layer: the
+             # backend route did not exist (all 5 new PHPUnit cases 404'd
+             # against unmodified `routes/api.php`); `lib/admin/audit.ts`
+             # and `AuditLogPanel.tsx` were each moved aside with their
+             # tests kept and `vitest run` re-executed — both failed on
+             # module resolution; every file restored byte-identically, all
+             # green after. `TZ=UTC make test`: 2204 passing (was 2187, +17
+             # — exactly this run's new tests: 5 PHPUnit + 7 + 5 vitest).
+             # `check-test-floor.mjs`: OK, 2204 >= floor 1899 (+305 margin).
+             # `TZ=UTC make build`: exit 0, 25 routes (was 24 —
+             # `/settings/audit` is new). `npx tsc --noEmit`: clean. `npm
+             # run gates`: all green (fonts degraded-but-non-blocking,
+             # pre-existing; boundaries 238 files, up from 233, five new
+             # files). No `v1/**`/`v2/**` edit (stray
+             # `v2/tsconfig.tsbuildinfo` reverted before committing). No
+             # Arabic codepoint (every new/changed file swept over the
+             # Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms blocks, plus a `\u06xx`/`\u08xx`-escape and
+             # `fromCharCode` sweep — zero matches). NOT addressed:
+             # `FlagRampAudit` (v3-D125) has the identical "written, never
+             # read" shape and its own audit viewer is still unbuilt;
+             # `GlossDraftsController` remains ratification-gated;
+             # `distractor`/`group` override authoring (v3-D126) and
+             # role-based UI gating within the admin console (v3-D127) are
+             # both unchanged. See DECISIONS.md v3-D129.
              # NOTE (v3-D128): `Admin\RevealController` and
              # `Admin\AdminUsersController::exportCsv` — WIREFRAME §16's
              # reveal-identity and bulk-CSV-export surfaces, two of the three

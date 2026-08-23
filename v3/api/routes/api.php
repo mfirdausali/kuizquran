@@ -4,6 +4,7 @@ use App\Http\Controllers\AccountController;
 use App\Http\Controllers\Auth\EmailVerificationController;
 use App\Http\Controllers\Auth\PasswordResetController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\Admin\AdminAuditController;
 use App\Http\Controllers\Admin\AdminAuthController;
 use App\Http\Controllers\Admin\AdminRevealController;
 use App\Http\Controllers\Admin\AdminUsersController;
@@ -97,6 +98,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/users/{userId}/reveal', [AdminRevealController::class, 'reveal']);
         Route::get('/reveal/{token}', [AdminRevealController::class, 'check']);
         Route::get('/users/export.csv', [AdminUsersController::class, 'exportCsv']);
+
+        // The audit viewer (BUILD-PLAN M8's own "nav homes for ... audit
+        // viewer"). Read-only — see AdminAuditController's own header.
+        Route::get('/audit', [AdminAuditController::class, 'index']);
 
         // System Health (step 24). #167: a failed probe renders `unknown`,
         // never 0 — the console must distinguish "healthy" from "blind".
