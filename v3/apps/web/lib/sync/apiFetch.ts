@@ -187,6 +187,20 @@ export async function apiFetch(
   return apiFetch(path, init, true);
 }
 
+/**
+ * Adopt `token` as the current identity — the same mechanism
+ * `mintAnonymous()` uses for a fresh anonymous mint, exposed here for a
+ * caller that already HAS a token from somewhere else (today: admin login,
+ * `lib/admin/session.ts#adminLogin`). Notifies the same identity-change
+ * handler `mintAnonymous` does, so a pull cursor from a PRIOR identity is
+ * never carried into this one (the same reasoning `setIdentityChangeHandler`'s
+ * own docstring gives for the anonymous case).
+ */
+export async function setAuthenticatedIdentity(token: string): Promise<void> {
+  setToken(token, token);
+  if (onIdentityChange) await onIdentityChange(token);
+}
+
 /** Test seam: reset the brakes' state between tests. */
 export function resetApiFetchForTests(): void {
   mintInFlight = null;

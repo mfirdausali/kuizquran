@@ -1355,3 +1355,15 @@
   gap: 8px;
   flex-wrap: wrap;
 }
+
+/* The admin client-side gate (AdminGate.tsx, new this run). A thin status
+   bar above staff content — reuses `.caption` for the identity line, so the
+   only new rule is the bar's own layout. */
+.admin-session-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: var(--hairline) solid var(--border-stronger);
+}

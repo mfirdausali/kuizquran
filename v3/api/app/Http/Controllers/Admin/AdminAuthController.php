@@ -94,4 +94,25 @@ class AdminAuthController extends Controller
     {
         return response()->json(['error' => self::GENERIC_ERROR], 403);
     }
+
+    /**
+     * `GET /api/admin/whoami` — sits behind the SAME `admin` middleware chain
+     * (`auth:sanctum` + `EnsureIsAdmin`) as every real admin read/write, so a
+     * 200 here is not a separate, weaker claim of "admin" — it is the exact
+     * gate the workbench and every `/settings/*` screen already depend on.
+     *
+     * Built for the CLIENT-SIDE admin gate: every admin screen's own docblock
+     * has said, since v3-D92, that a redirect with no real check behind it
+     * would be "security theatre." This is that check — a real 401/403 from
+     * the real gate, never a client-invented flag.
+     */
+    public function whoami(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        return response()->json([
+            'pseudonym' => app(Pseudonymizer::class)->for($user->id),
+            'roles' => $user->adminRoles(),
+        ]);
+    }
 }

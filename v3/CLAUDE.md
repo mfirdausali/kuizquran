@@ -53,9 +53,42 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2144 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 278 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 975 apps/web. (v3-D126, 2026-08-23)
+make test    # 2165 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 283 v3/api + 111 corpus-compiler
+             # + 417 engine + 61 fold-runner + 991 apps/web. (v3-D127, 2026-08-23)
+             # NOTE (v3-D127): the admin client-side auth gate — named unbuilt
+             # since v3-D92 and repeated through v3-D100/D124/D125/D126, each
+             # quoting the same reason: "a redirect with no server
+             # enforcement behind it would be security theatre." The missing
+             # half was a real login+check round-trip, not a backend gap —
+             # `POST /api/admin/login` (`AdminAuthController`) has existed,
+             # timing-oracle-hardened, since build-plan step 24, with zero
+             # frontend callers. Fixed: new `GET /api/admin/whoami` (same
+             # `admin` middleware chain every write already sits behind) +
+             # `lib/admin/session.ts` (checkAdminSession/adminLogin/
+             # adminLogout) + `components/admin/AdminGate.tsx`, wired into
+             # `(admin)/layout.tsx` around `{children}` — gates all five
+             # admin screens (`/workbench`, `/settings/health`, `/settings/
+             # flags`, `/settings/content-freeze`, `/settings/stripe`) with
+             # one change, since they share this layout. Changes NOTHING
+             # about what data an unauthorized REQUEST can reach (every
+             # admin write was already `EnsureIsAdmin`-gated); it only stops
+             # an unauthorized VISITOR from seeing staff chrome instead of a
+             # real login form. This run also swept `v3/worker/fold-runner/src`
+             # (the layer v3-D126 named as the next unswept one) and found it
+             # genuinely clean — see DECISIONS.md v3-D127 for both the
+             # negative fold-runner finding and the gate fix's full write-up.
+             # `TZ=UTC make test`: 2165 passing (was 2144, +21 — exactly this
+             # run's new tests: 5 PHPUnit + 16 vitest). `check-test-floor.mjs`:
+             # OK, 2165 >= floor 1899 (+266 margin). `TZ=UTC make build`: exit
+             # 0, 23 routes (unchanged — no new route). `npm run gates`: all
+             # green (fonts degraded-but-non-blocking, pre-existing;
+             # boundaries 226 files, up from 223, three new production
+             # files). No `v1/**`/`v2/**` edit. No Arabic codepoint. NOT
+             # addressed: `distractor`/`group` override authoring; role-based
+             # UI gating within the admin console (AdminGate proves ADMIN,
+             # not WHICH admin role); the three other zero-caller admin
+             # surfaces v3-D125 named. See DECISIONS.md v3-D127.
              # NOTE (v3-D126): `OverridesController::store` (`POST
              # /api/overrides`, the admin WRITE path B1/B3's closures depend
              # on) had zero frontend callers — v3-D125's own closing note

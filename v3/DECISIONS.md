@@ -7879,3 +7879,195 @@ other zero-caller surfaces v3-D125 named (`AdminRevealController`/
 `AdminUsersController`, `GlossDraftsController`) are unchanged by this run —
 still deliberately left for their own stated reasons. `v3/worker/fold-runner/src`
 remains entirely unswept for this bug class.
+
+---
+
+## Ratified 2026-08-23 (nightly) — the `v3/worker/fold-runner/src` sweep (negative), and the admin client-side gate (named since v3-D92, closed here)
+
+### The fold-runner sweep — genuinely clean, a real negative finding
+
+This run started per NIGHTLY.md's rule: `git status` clean, but HEAD was
+**detached** at `83d364e` (v3-D126) with `origin/main` cached stale at
+`7295325` — a `git fetch origin main` confirmed `83d364e` IS `origin/main`
+(the stale ref was just a pre-fetch cache, not real divergence) and
+`git branch -f main HEAD && git checkout main` put the checkout on a real
+branch before any further work — the exact class of staleness NIGHTLY.md's
+own header warns cost a prior run hours (v3-D77 Finding 0), caught here in
+under a minute by fetching before trusting a cached ref. `TZ=UTC make test`
+reproduced 2144 passing, matching CLAUDE.md's documented v3-D126 number
+before any change.
+
+v3-D126's own closing note named `v3/worker/fold-runner/src` as the one
+layer of the recurring "built + tested + zero production caller" sweep
+never yet walked. Walked it: every exported function in all seven files
+(`canonicalOrder.ts`, `fold.ts`, `determinism.ts`, `foldCheck.ts`,
+`selectionCheck.ts`, `severity.ts`, `engineVersion.ts`) checked against the
+three `bin/*.ts` runners and the rest of the repo. Two things stood out and
+both were traced to real, non-actionable explanations rather than a fix:
+
+1. `determinism.ts#foldDeterminismCheck` (the simple compare-and-fold
+   wrapper) has zero callers outside its own test file —
+   `foldCheck.ts#foldDeterminismCheckRun` (the REAL runner, wired into
+   `bin/fold-determinism-check.ts`) needs per-row severity classification
+   this simpler function cannot provide, so it composes `foldEvents` +
+   `compareAtomCaches` (both real, wired) directly instead of calling the
+   wrapper. `foldDeterminismCheck` is fully subsumed, tested scaffolding
+   from an earlier stage of this module, not a missing feature — nothing a
+   learner, admin or nightly check needs is unreachable through it.
+2. `severity.ts#severityFromExitCode`/`resetsWindow`/`countsAsGreen` have
+   zero callers anywhere in this repo, TS or PHP — but this is NOT the
+   same-runtime "lazy inline copy" shape v3-D83/D113 found (where an actual
+   `import` was skipped). PHP cannot import a `.ts` module at all; the
+   Node↔PHP boundary is a subprocess exit code, by design (the header:
+   "the process's exit code, the narrowest, hardest-to-fake channel
+   available across the Node/PHP boundary"). `DeterminismCheckCommand::
+   SEVERITY_BY_EXIT` and `NightlyWindowLedger`'s green/reset logic are
+   PHP's own, necessarily separate, re-implementations of the identical
+   taxonomy — checked line by line against `severity.ts` and found to
+   agree (`SEVERITY_BY_EXIT` is `EXIT_CODE`'s exact inverse; the ledger's
+   `$green = $missing === [] && every severity is green/warn` matches
+   `countsAsGreen`; a P1 night ending the streak matches `resetsWindow`).
+   Each side is independently tested (`severity.test.ts` — not present as
+   its own file, folded into `determinism.test.ts`'s coverage — TS-side;
+   `WindowLedgerTest.php`/`DeterminismCheckCommandTest.php` PHP-side,
+   mutation-verified per HANDOVER.md's own Spot-check 3). A drift risk is
+   real (nothing enforces the two definitions stay in sync across a future
+   edit to either file) but restructuring around it — e.g. a `--describe`
+   flag Node prints and PHP parses at boot — is a real, separate
+   architecture change, not this sweep's job, and would add a runtime
+   dependency neither side has today for no proven bug. Recorded, not
+   fixed, so a future run does not re-discover the zero-caller grep as new
+   and mistake it for the established bug class.
+
+`canonicalOrder`, `foldEvents`/`fold.ts`, `compareAtomCaches` are all real,
+wired production callers (traced: `canonicalOrder` → `fold.ts#foldEvents` →
+both `bin/rebuild-atom-cache.ts` and `foldCheck.ts#foldDeterminismCheckRun`
+→ `bin/fold-determinism-check.ts`; `compareAtomCaches` → `foldCheck.ts`
+directly). `apps/web/lib/sync/merge.test.ts` imports `canonicalOrder`/
+`compareAtomCaches` too, but as an **oracle for its own test assertions**,
+not a production caller — legitimate test-time reuse, the same shape
+`merge.test.ts`'s own header already states ("the real ordering rule, not
+a local reimplementation").
+
+**This sweep is a genuine negative finding, the same shape as v3-D95's
+first empty sweep and v3-D123's clean ENGINE-layer retrace** — recorded so
+a future run does not re-walk this exact file list expecting to find the
+same bug class here.
+
+### v3-D127 — the admin client-side auth gate, named unbuilt since v3-D92 and repeated through v3-D100/D124/D125/D126, closed
+
+**Not a fold-runner finding — the sweep above came back clean, so this run
+picked up the next-most-repeated named gap instead.** Five separate prior
+entries (v3-D92, D100, D124, D125, D126) each independently found a new
+admin screen and each independently declined to gate it client-side, every
+one quoting the same reasoning: `QariMode.tsx`'s own header (v3-D92):
+"shipping half of it — a redirect with no server enforcement behind it —
+would be security theatre." What was missing for the OTHER half:
+`POST /api/admin/login` (`AdminAuthController`) has existed, timing-oracle-
+hardened (`AdminAuthOracleTest.php`, 6 tests) and fully tested since
+build-plan step 24 — `grep -rln "admin/login" apps/web` (excluding this
+run's new files) returned nothing. It mints an ordinary Sanctum bearer
+token scoped to the SAME `User` model and the SAME `EnsureIsAdmin` check
+(env allowlist + verified email) every real admin write already sits
+behind — "admin" is an allowlist fact about a user, not a different kind
+of session — so there was never a missing backend piece, only a missing
+frontend one.
+
+**What was genuinely missing, and built here:** a way for the CLIENT to
+ask "is the current token actually admin?" without guessing from a 403 on
+an unrelated resource. New `GET /api/admin/whoami`
+(`AdminAuthController::whoami`), inside the exact same `admin` middleware
+group every other admin read/write already sits behind — a 200 here is not
+a separate, weaker claim of "admin," it is the identical gate. Returns the
+same `{pseudonym, roles}` shape `login()` already returns on success, so
+both the initial per-page-load check and a fresh login resolve to the same
+`AdminIdentity` type client-side.
+
+**Fixed:** `lib/sync/apiFetch.ts` gained `setAuthenticatedIdentity(token)`
+— the exact mechanism `mintAnonymous()` already uses to adopt a fresh
+token and notify the sync layer's identity-change handler, exposed for a
+caller (admin login) that already has a token from somewhere else, rather
+than inventing a second identity-adoption path. New `lib/admin/session.ts`
+(`checkAdminSession`/`adminLogin`/`adminLogout`) — mirrors `lib/admin/
+flags.ts`'s three-state discipline (`checking`/`signed-out`/`authorized`/
+`denied`, `signed-out` distinct from `denied` the same way `unavailable`
+is distinct from a real reading elsewhere in this codebase) and echoes the
+server's own generic denial verbatim, per `AdminAuthController`'s own
+oracle rule — never elaborates, never invents its own wording. New
+`components/admin/AdminGate.tsx`, wired into `(admin)/layout.tsx` around
+`{children}` — every one of the five admin screens (`/workbench`,
+`/settings/health`, `/settings/flags`, `/settings/content-freeze`,
+`/settings/stripe`) is gated by this one change, with no per-page edit,
+because they all already share this layout.
+
+**What this does NOT change.** Every admin API route was already protected
+server-side before this file existed (`EnsureIsAdmin` on every write; the
+reads this console makes are either admin-gated too, or — verifications,
+overrides, specs — deliberately PUBLIC transparency reads, each route's own
+docblock states which). This component changes nothing about what data an
+unauthorized REQUEST can reach; it only stops an unauthorized VISITOR from
+seeing the staff chrome and the "this screen requires an admin account"
+error banners `lib/admin/*.ts`'s existing `unavailable`/403 branches already
+render in their place. That is exactly why building it now, and not
+earlier, is not theatre: the redirect is backed by a real 401/403 from the
+real gate, never a client-invented flag — the missing half named five times
+over was the real login+check round-trip, and it now exists.
+
+**A deliberate, named side effect, not a bug:** `AdminGate`'s mount-time
+`checkAdminSession()` call goes through the ordinary `apiFetch`, which
+mints a fresh anonymous LEARNER identity on an unauthenticated 401 exactly
+as it does for every other route in this app — so a completely token-less
+visitor opening `/workbench` once mints one throwaway anonymous account
+before landing on the login form. Not fixed: this app's whole architecture
+is anonymous-by-default (every route bootstraps an identity on first
+touch, not only learner ones), so this is consistent with, not a
+regression against, the rest of the product; adding an opt-out parameter
+to `apiFetch` (the sole, heavily B8-hardened egress point) to special-case
+one screen was judged not worth the risk to a module this build has
+mutation-tested nine separate ways. Named here so a future run does not
+mistake it for new.
+
+**Verified:**
+- RED confirmed at both layers, each by reverting only the source (new
+  tests kept): the backend route+controller reverted via `git stash` of
+  the two changed files reproduced `Expected response status code [200]
+  but received 404` on all 5 new `AdminWhoamiTest` cases; restored
+  byte-identically, 5/5 green. The frontend source (`session.ts`,
+  `AdminGate.tsx`) moved aside (both are new, untracked files — no `git
+  stash` target) reproduced `Failed to resolve import` on both new test
+  files; restored, 16/16 green again.
+- `TZ=UTC make test`: **2165 passing** (was 2144, +21 — exactly this run's
+  new tests: 5 in `AdminWhoamiTest.php`, 10 in `lib/admin/session.test.ts`,
+  6 in `test/admin-gate.test.tsx`; no other suite's count moved — 255 v2
+  vitest + 47 v2/api + 283 v3/api (was 278) + 111 corpus-compiler + 417
+  engine + 61 fold-runner + 991 apps/web (was 975)). `check-test-floor.mjs`:
+  OK, 2165 >= floor 1899 (+266 margin, `TEST-FLOOR` left unmoved). `TZ=UTC
+  make build`: exit 0, 23 routes (unchanged — `AdminGate` renders inside
+  the existing `(admin)` layout, no new route file). `npm run gates`:
+  locked-css OK, fonts degraded-but-non-blocking (pre-existing,
+  unrelated), boundaries OK (226 files, up from 223 — three new production
+  files: `session.ts`, `AdminGate.tsx`, plus the whoami route addition —
+  no violation), corpus-morphology and corpus-glyphs OK. `npx tsc
+  --noEmit`: clean.
+
+No `v1/**`/`v2/**` edit: `git status --porcelain -- v1 v2` empty
+immediately before committing (a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff from running the suite was reverted first, same
+discipline as every prior entry). No Arabic codepoint introduced: every
+new/changed file swept programmatically for the Arabic, Arabic Supplement,
+Arabic Extended-A and both Presentation Forms Unicode blocks — zero
+matches; every new line addresses an email/password an admin types, a
+pseudonym or role string the server already computed, or a token — never
+corpus text.
+
+**Not addressed, named so a future run doesn't re-discover it as new:**
+`distractor`/`group` override authoring (needs the word-tap CorpusRef
+picker, unchanged since v3-D126); the three other zero-caller admin
+surfaces v3-D125 named (`AdminRevealController`/`AdminUsersController`,
+`GlossDraftsController`) remain unwired, each for its own stated reason;
+`severity.ts`'s cross-runtime duplication (above) is recorded, not
+restructured; role-based UI gating (e.g. hiding `QariMode` from a
+non-qari admin, the client-side half of v3-D92's own finding) is a
+separate, smaller follow-on this run did not scope into — `AdminGate`
+proves ADMIN, not WHICH admin role, and every admin screen still shows the
+same chrome to any allowlisted admin regardless of their `roles` array.

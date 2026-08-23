@@ -88,6 +88,11 @@ Route::middleware('auth:sanctum')->group(function () {
     // Every route behind BOTH gates: `admin` (the env allowlist — the OUTER gate,
     // whose break-glass is an env fix + restart, per edge case #146) and Sanctum.
     Route::middleware('admin')->prefix('admin')->group(function () {
+        // The client-side admin gate's own check (DECISIONS.md — named
+        // unbuilt since v3-D92, closed here): "is THIS token actually
+        // admin?", answered by the real gate, not a client-invented flag.
+        Route::get('/whoami', [AdminAuthController::class, 'whoami']);
+
         // Privacy / reveal (WIREFRAME §16, edge cases #147/#148).
         Route::post('/users/{userId}/reveal', [AdminRevealController::class, 'reveal']);
         Route::get('/reveal/{token}', [AdminRevealController::class, 'check']);

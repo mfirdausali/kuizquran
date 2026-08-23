@@ -15,6 +15,7 @@
 // #72 (a server render has no log, so it paints 0 and React keeps the zero).
 
 import type { ReactNode } from "react";
+import { AdminGate } from "@/components/admin/AdminGate";
 
 export default function AdminShellLayout({ children }: { children: ReactNode }) {
   return (
@@ -26,7 +27,11 @@ export default function AdminShellLayout({ children }: { children: ReactNode }) 
       </a>
 
       <main id="main" className="app-main">
-        {children}
+        {/* THE CLIENT-SIDE ADMIN GATE (new, this run — see AdminGate.tsx's
+            own header). A server component (this layout) rendering a client
+            component around server-rendered `children` is a supported
+            pattern; AdminGate never inspects what it wraps. */}
+        <AdminGate>{children}</AdminGate>
       </main>
     </div>
   );
