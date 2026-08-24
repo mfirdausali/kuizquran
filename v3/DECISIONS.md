@@ -8570,3 +8570,94 @@ a gloss/distractor display. The `API_BASE_URL` default
 backend URL) is still open and should set this explicitly once decided. See
 DEFECTS.md's `E-07` (per-surah corpus fetch unguarded) — unchanged, this
 fix does not touch that shape.
+
+### v3-D133 — a passed-gate-only session's summary read "0 ayat", the last
+"explicitly not addressed" line B11 left open (v3-D101) and never re-picked
+up across 30+ later decisions
+
+`packages/engine/src/sessionSummary.ts#summarizeSession` — the pure function
+behind the real end-of-session screen (`SessionIsland.tsx:591`, "{N} ayat ·
+{M} taps", wired since build-plan step 18) — counted `ayatCompleted` only
+from `ayah_complete`/`ayah_produced` events. B11's own closing note
+(DEFECTS.md, v3-D101, 2026-08-17) named the resulting gap explicitly: "a
+session whose only work was a passed gate now shows 0 ayat completed on the
+summary screen... a small, separate UI question." Confirmed still true by
+grepping every DECISIONS.md entry since for `ayatCompleted` — one other hit,
+an unrelated internal reference — so this sat unaddressed through the entire
+admin-console/wiring-gap sweep (v3-D111 through D132).
+
+The mechanism: `answerAfterTap`'s gate branch (v3-D101) commits `gate_result`
+INSTEAD OF `ayah_produced` for a completed cold-gate item, by design — a
+gate is a re-check of an ayah already produced on an earlier day, and
+B11/B12's whole point was routing it through the dedicated `gate_result`
+resolver rather than the ordinary production event. But `summarizeSession`
+had no branch for `gate_result` at all, so a queue whose ONLY due item was a
+gate (real, reachable: `floorQueue`'s own top priority, v3-D108) committed
+zero events `summarizeSession` recognized as a completed ayah. A learner who
+did nothing all session but pass their cold check — genuine, graded,
+scheduling-critical work — saw "0 ayat" on the screen built to credit
+exactly that.
+
+**Fixed:** a third branch in `summarizeSession`'s fold loop — a `gate_result`
+event with `correct === true` pushes its `ayah` onto `ayatRefs` exactly like
+`ayah_produced`/`ayah_complete` already do (deduped the same way, so a
+rescaffold warm-up's own S2 `ayah_produced` for the same ayah, v3-D109,
+still counts once, not twice). A FAILED gate (`correct: false`) is
+deliberately excluded — the gate was not passed, nothing was completed.
+
+**Verified:**
+- RED confirmed directly at the engine layer: reverted only
+  `sessionSummary.ts` (tests kept) and reran `sessionSummary.test.ts` — the
+  new "counts a PASSED gate_result" case failed (`expected +0 to be 1`); the
+  "does NOT count a FAILED gate_result" and "de-duplicates... rescaffold"
+  cases passed vacuously against the unfixed source (both already expected
+  0/1 for inputs the old code happened to get right), which is exactly why a
+  single well-chosen positive case, not just edge cases, is load-bearing
+  here. Restored; 14/14 green.
+- RED confirmed a second, independent way at the real wiring layer
+  (`apps/web/lib/session/run.test.ts`): a new test drives an actual
+  `startFloorSession` → real gate completion through `answerCurrent` (the
+  same graded path a live tap uses) → `sessionSummaryOf(started.run)` — the
+  same function `SessionIsland.tsx` calls for the summary screen. Against
+  the reverted engine source this failed identically
+  (`expected 0 to be greater than or equal to 1`); restored, green. This
+  test does NOT reuse this file's own shared `playThrough` helper — that
+  helper hardcodes taps at a fixed `T0`-anchored `now`, which pre-dates a
+  session started on a later day and so (harmlessly, for every OTHER
+  assertion in the file, which reads the raw log unfiltered by time) falls
+  outside `sessionSummaryOf`'s own `ts >= run.startedAt` slice. That is a
+  test-harness quirk, not a production behavior — a real tap's `now` is
+  always the actual wall clock, always at or after its own session's start
+  — so this test drives the same real functions with its own correctly
+  time-ordered loop rather than either reusing the misleading helper or
+  widening this run's scope to touch 29 other call sites that rely on it.
+- `TZ=UTC make test`: **2245 passing** (was 2241, +4 — exactly this run's
+  new tests: 3 in `sessionSummary.test.ts` + 1 net new in `run.test.ts`; no
+  other suite moved — 255 v2 vitest + 47 v2/api + 295 v3/api + 111
+  corpus-compiler + 420 engine + 61 fold-runner + 1056 apps/web).
+  `check-test-floor.mjs`: OK, 2245 >= floor 1899 (+346 margin, `TEST-FLOOR`
+  left unmoved). `TZ=UTC make build`: exit 0, 25 routes (unchanged — no new
+  route, no new UI, a pure logic fix inside an already-wired function).
+  `npx tsc --noEmit`: clean, `Version 5.9.3` confirmed. `npm run gates`:
+  locked-css OK, fonts degraded-but-non-blocking (pre-existing, unrelated),
+  boundaries OK (247 files checked, unchanged file count — no new
+  production file, only edited ones), corpus-morphology and corpus-glyphs
+  OK. No `v1/**`/`v2/**` edit: `git status --porcelain -- v1 v2` empty
+  immediately before committing (a stray `v2/tsconfig.tsbuildinfo`
+  build-cache diff produced by running the suite was reverted first, same
+  discipline as every prior entry). No Arabic codepoint introduced: the full
+  diff swept over the Arabic, Arabic Supplement, Arabic Extended-A and both
+  Presentation Forms Unicode blocks, plus a `\u06xx`/`\u08xx`-escape and
+  `fromCharCode` sweep — zero matches; every new line addresses an ayah
+  number, a boolean `correct` flag, or a millisecond timestamp, never corpus
+  text.
+
+**Not addressed, named so a future run doesn't re-discover it as new:** the
+`playThrough` test helper's fixed-`T0` timing quirk described above is
+untouched — it affects only which of a test's OWN assertions can validly
+depend on wall-clock-relative filtering (like `sessionSummaryOf`'s `ts >=
+startedAt` slice), and 29 existing call sites already rely on its current
+shape for other, unaffected assertions; rewriting it is a real, separate,
+wider-reaching change, not part of this fix's scope. The SSR override gap
+adjacent items from v3-D132 (six `loadCorpus` callers, `API_BASE_URL`,
+E-07) are all unchanged.

@@ -53,9 +53,65 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2241 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2245 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 295 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 1055 apps/web. (v3-D132, 2026-08-24)
+             # + 420 engine + 61 fold-runner + 1056 apps/web. (v3-D133, 2026-08-24)
+             # NOTE (v3-D133): B11's own closing note (v3-D101, 2026-08-17)
+             # named a gap it deliberately left open — "a session whose only
+             # work was a passed gate now shows 0 ayat completed on the
+             # summary screen... a small, separate UI question" — and it sat
+             # untouched through 30+ later decisions (confirmed by grepping
+             # every DECISIONS.md entry since for `ayatCompleted`).
+             # `packages/engine/src/sessionSummary.ts#summarizeSession`
+             # counted `ayatCompleted` only from `ayah_complete`/
+             # `ayah_produced` events; a completed cold gate commits
+             # `gate_result` INSTEAD (by design, v3-D101/D107), so a queue
+             # whose only due item was a gate (real and reachable — a due
+             # gate is `floorQueue`'s own top priority, v3-D108) credited
+             # nothing on `SessionIsland.tsx:591`'s real "{N} ayat" summary
+             # line for a learner who had just passed their scheduling-
+             # critical cold check. Fixed: a third fold branch — a PASSED
+             # `gate_result` pushes its ayah onto `ayatRefs` exactly like
+             # `ayah_produced`/`ayah_complete` already do, deduped against a
+             # same-session rescaffold warm-up's own S2 completion for the
+             # same ayah (v3-D109); a FAILED gate still counts as nothing.
+             # RED confirmed twice, independently: reverting the engine
+             # source alone failed the new positive `sessionSummary.test.ts`
+             # case (`expected +0 to be 1`) while two same-file edge cases
+             # passed vacuously against the unfixed code — proof that a
+             # well-chosen positive case, not just edge cases, was
+             # load-bearing here; separately, a new `run.test.ts` case drives
+             # a REAL `startFloorSession` → gate completion through
+             # `answerCurrent` → `sessionSummaryOf`, the exact function
+             # `SessionIsland` calls, and failed identically against the
+             # reverted source. That second test deliberately does NOT reuse
+             # this file's own shared `playThrough` helper, which hardcodes
+             # taps at a fixed `T0`-anchored `now` — harmless for every OTHER
+             # assertion in the file (all read the raw log unfiltered by
+             # time) but wrong for anything that depends on
+             # `sessionSummaryOf`'s own `ts >= run.startedAt` slice, since a
+             # real tap's `now` is always at or after its own session's
+             # start; a local, correctly time-ordered loop was used instead,
+             # rather than widening this fix into the 29 other call sites
+             # that already rely on the helper's current shape. `TZ=UTC make
+             # test`: 2245 passing (was 2241, +4 — exactly this run's new
+             # tests: 3 + 1 net; no other suite moved). `check-test-floor.mjs`:
+             # OK, 2245 >= floor 1899 (+346 margin). `TZ=UTC make build`: exit
+             # 0, 25 routes (unchanged — no new route, no new UI, a pure
+             # logic fix inside an already-wired function). `npx tsc
+             # --noEmit`: clean. `npm run gates`: all green (fonts
+             # degraded-but-non-blocking, pre-existing; boundaries 247 files,
+             # unchanged count — no new production file). No `v1/**`/`v2/**`
+             # edit. No Arabic codepoint (every new/changed file swept over
+             # the Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms blocks, plus a `\u06xx`/`\u08xx`-escape and
+             # `fromCharCode` sweep — zero matches; every new line addresses
+             # an ayah number, a boolean, or a millisecond timestamp, never
+             # corpus text). NOT addressed: the `playThrough` helper's
+             # fixed-T0 timing quirk itself (real, separate, wider-reaching);
+             # v3-D132's own "not addressed" list (six other `loadCorpus`
+             # callers, `API_BASE_URL`, E-07) is unchanged. See DECISIONS.md
+             # v3-D133.
              # NOTE (v3-D132): the SSR corpus loader (`lib/corpus/load.ts`)
              # never applied overrides — a qari/admin gloss correction
              # written through the already-shipped `POST /api/overrides`

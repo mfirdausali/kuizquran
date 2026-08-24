@@ -1368,6 +1368,56 @@ describe("v3-D108 — FR9, the 2-minute floor session (floorQueue wired into a r
     expect(atoms.get(atomKey(SURAH, "ayah", gatedAyah))?.gatePassed).toBe(true);
   });
 
+  it("v3-D133/B11 follow-up: a passed-gate-only session's summary credits the gated ayah, not '0 ayat'", async () => {
+    // `playThrough` (above) always taps at a fixed T0-anchored `now`, which
+    // pre-dates a floor session started on day2 — fine for every OTHER
+    // assertion in this file (they read the raw log, unfiltered by time),
+    // but it means those events fall outside `sessionSummaryOf`'s own
+    // `ts >= run.startedAt` slice, which never happens in production (a
+    // real tap's `now` is always the actual wall clock, always at or after
+    // its own session's start). This test drives the same real graded path
+    // (`answerCurrent`) with `now` genuinely at-or-after the floor
+    // session's own start, so the summary sees exactly what a live session
+    // would have written.
+    const c = corpus();
+    const gatedAyah = 1;
+
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah: gatedAyah, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+
+    const day2 = T0 + 86_400_000;
+    const started = await startFloorSession({ surah: SURAH, now: day2, tz: TZ }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    expect(started.run.queue[0]?.kind).toBe("gate");
+    expect(started.run.queue[0]?.ayah).toBe(gatedAyah);
+
+    let run = started.run;
+    let cur = currentItem(run, c);
+    let taps = 0;
+    while (cur && taps < 500) {
+      run = await answerCurrent(run, c, correctIndexFor(run, c), { now: day2 + taps * 1000, tz: TZ });
+      taps++;
+      cur = currentItem(run, c);
+    }
+    expect(taps).toBeGreaterThan(0);
+
+    const events = await getAllEvents();
+    const gateResults = events.filter((e) => e.type === "gate_result" && e.ts >= day2);
+    expect(gateResults.length).toBeGreaterThan(0);
+    expect(gateResults.every((e) => e.correct === true)).toBe(true);
+
+    // Before the sessionSummary.ts fix, a gate-only session committed no
+    // ayah_produced/ayah_complete at all, so the real end-of-session screen
+    // (SessionIsland.tsx:591, "{summary.ayatCompleted} ayat") read "0 ayat"
+    // for a learner who had just passed their cold check.
+    const summary = await sessionSummaryOf(started.run);
+    expect(summary.ayatCompleted).toBeGreaterThanOrEqual(1);
+    expect(summary.ayatRefs).toContain(gatedAyah);
+  });
+
   it("falls back to a warm-up on the strongest carried atom once its gate is already passed and nothing else is due", async () => {
     const c = corpus();
     const gatedAyah = 1;

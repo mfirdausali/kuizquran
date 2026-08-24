@@ -204,14 +204,21 @@ through the real session loop; `gate.ts`'s own 13 tests exercise
   margin). `TZ=UTC make build`: exit 0, 19 routes (unchanged). No `v1/**`/
   `v2/**` edit, no Arabic codepoint introduced.
 
-**Explicitly not addressed, named so a future run doesn't re-discover it as
-new:** `sessionSummary.ts#summarizeSession` counts `ayatCompleted` only from
-`ayah_complete`/`ayah_produced` events, so a session whose only work was a
-passed gate now shows 0 ayat completed on the summary screen (previously it
-wrongly counted as 1, only because the gate was mis-emitted as
-`ayah_produced`). No existing test asserts on this combination. Whether/how
-the completion screen should credit a passed gate is a small, separate UI
-question, not part of this fix's scope.
+**Explicitly not addressed at the time, named so a future run doesn't
+re-discover it as new:** `sessionSummary.ts#summarizeSession` counted
+`ayatCompleted` only from `ayah_complete`/`ayah_produced` events, so a
+session whose only work was a passed gate showed 0 ayat completed on the
+summary screen (previously it wrongly counted as 1, only because the gate
+was mis-emitted as `ayah_produced`). No existing test asserted on this
+combination. Whether/how the completion screen should credit a passed gate
+was a small, separate UI question, not part of this fix's scope.
+
+**Closed 2026-08-24 (v3-D133).** `summarizeSession` now credits a PASSED
+`gate_result` as one completed ayah (deduped against a same-session
+rescaffold warm-up's own `ayah_produced` for the same ayah); a failed gate
+still counts as nothing completed. See DECISIONS.md v3-D133 for the full
+write-up, including the two independent RED confirmations (engine unit
+level and the real `startFloorSession` → `sessionSummaryOf` wiring).
 
 ## B10 — a tap graded against the engine's raw order, not the shuffled bank the learner actually saw ✅ CLOSED (build-plan step 18, v3-D99)
 

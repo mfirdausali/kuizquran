@@ -83,6 +83,13 @@ export function summarizeSession(
     } else if (e.type === "ayah_complete" || e.type === "ayah_produced") {
       if (e.ts > lastTapTs) lastTapTs = e.ts;
       if (!ayatRefs.includes(e.ayah)) ayatRefs.push(e.ayah);
+    } else if (e.type === "gate_result" && e.correct === true) {
+      // A PASSED cold gate is the whole point of a gate-only session (B11) —
+      // it commits no ayah_produced/ayah_complete of its own (rebuild.ts:88),
+      // so without this branch a learner who did nothing but pass their gate
+      // saw "0 ayat" on the summary screen for real, graded work.
+      if (e.ts > lastTapTs) lastTapTs = e.ts;
+      if (!ayatRefs.includes(e.ayah)) ayatRefs.push(e.ayah);
     }
   }
 

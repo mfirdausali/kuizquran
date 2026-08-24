@@ -89,6 +89,44 @@ describe("summarizeSession", () => {
     expect(s.ayatCompleted).toBe(1);
   });
 
+  it("counts a PASSED gate_result as one completed ayah (B11: a gate-only session's whole point was completing that ayah's check)", () => {
+    // A session whose ONLY due item is a cold gate emits no ayah_produced/
+    // ayah_complete at all — the gate branch commits gate_result exclusively
+    // (v3-D101/B11). Before this fix the summary screen read "0 ayat" for a
+    // learner who just passed their gate — real work, reported as nothing.
+    const s = summarizeSession([
+      ev({ type: "session_start", ts: 1000 }),
+      ev({ type: "reconstruct_tap", ts: 2000, correct: true, structured: true }),
+      ev({ type: "reconstruct_tap", ts: 3000, correct: true, structured: true }),
+      ev({ type: "gate_result", ts: 4000, ayah: 7, correct: true }),
+    ]);
+    expect(s.ayatCompleted).toBe(1);
+    expect(s.ayatRefs).toEqual([7]);
+    expect(s.durationMs).toBe(3000); // last tap ts (4000) − session_start (1000)
+  });
+
+  it("does NOT count a FAILED gate_result — the gate was not passed", () => {
+    const s = summarizeSession([
+      ev({ type: "session_start", ts: 0 }),
+      ev({ type: "gate_result", ts: 1000, ayah: 7, correct: false }),
+    ]);
+    expect(s.ayatCompleted).toBe(0);
+    expect(s.ayatRefs).toEqual([]);
+  });
+
+  it("de-duplicates a passed gate_result against an ayah already produced this same session (rescaffold warm-up, v2-D08)", () => {
+    // The rescaffold warm-up commits an ordinary S2 ayah_produced for the SAME
+    // ayah before the real cold check's own gate_result — both name ayah 7,
+    // and it is still exactly one completed ayah, not two.
+    const s = summarizeSession([
+      ev({ type: "session_start", ts: 0 }),
+      ev({ type: "ayah_produced", ts: 1000, ayah: 7, rung: "S2" }),
+      ev({ type: "gate_result", ts: 2000, ayah: 7, correct: true }),
+    ]);
+    expect(s.ayatCompleted).toBe(1);
+    expect(s.ayatRefs).toEqual([7]);
+  });
+
   it("greeting is derived from the session_start hour", () => {
     const morning = summarizeSession([ev({ type: "session_start", ts: 100 })], DEFAULT_DAY_CONFIG, () => 8);
     const night = summarizeSession([ev({ type: "session_start", ts: 100 })], DEFAULT_DAY_CONFIG, () => 23);
