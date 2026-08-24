@@ -52,6 +52,8 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { Corpus } from "@engine/types.ts";
+import { applyOverrides, type DisabledQuestion } from "@engine/overrides.ts";
+import { fetchServerOverrides } from "@/lib/overrides/fetchServer.ts";
 
 /** The surahs this build can actually serve — the launch set
  *  (`content-freeze.mjs`'s `LAUNCH_SURAHS`, v3-D59/v3-D63). Order matters:
@@ -93,4 +95,41 @@ export async function loadCorpus(surah: number): Promise<Corpus | null> {
     // not become an exception that escapes into a render.
     return null;
   }
+}
+
+/**
+ * A corpus AND the override decisions a caller cannot get from the corpus
+ * bytes alone — the SSR counterpart to `lib/corpus/client.ts#EffectiveCorpus`
+ * (v3-D96/v3-D110). Every route that reads `loadCorpus` directly serves the
+ * RAW compiled corpus, so a qari/admin correction written through the
+ * already-shipped `POST /api/overrides` never reached a server-rendered page
+ * — the exact gap those two decisions closed for the client fetch path only.
+ */
+export interface EffectiveCorpus {
+  corpus: Corpus;
+  disabled: DisabledQuestion[];
+}
+
+/**
+ * Load one surah's corpus WITH overrides applied, or null if this build
+ * cannot serve it. Delegates to `loadCorpus` for the heavy, static, cached
+ * read; the overrides fetch is NOT cached across requests (unlike the raw
+ * corpus) — overrides are admin-mutable data and this module's cache lives
+ * for the life of the server PROCESS, not one request, so caching a merged
+ * result would mean a correction never appears until the server restarts.
+ * The overrides fetch itself is a small JSON call, cheap to repeat.
+ *
+ * Never throws: `fetchServerOverrides` degrades to `[]` on any failure
+ * (network, malformed body), so a corrections outage serves the raw corpus
+ * rather than breaking the page — the same call every client caller makes.
+ */
+export async function loadEffectiveCorpus(surah: number): Promise<EffectiveCorpus | null> {
+  const corpus = await loadCorpus(surah);
+  if (corpus === null) return null;
+
+  const overrides = await fetchServerOverrides(surah);
+  if (overrides.length === 0) return { corpus, disabled: [] };
+
+  const resolved = applyOverrides(corpus, overrides);
+  return { corpus: resolved.corpus, disabled: resolved.disabled };
 }

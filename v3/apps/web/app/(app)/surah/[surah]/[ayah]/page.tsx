@@ -59,7 +59,7 @@
 // /progress/list uses, so every figure in one render decays to the same instant.
 
 import { notFound } from "next/navigation";
-import { loadCorpus } from "@/lib/corpus/load.ts";
+import { loadEffectiveCorpus } from "@/lib/corpus/load.ts";
 import { macroFactsFor } from "@/lib/macro/facts.ts";
 import { ayahWords, wordGloss } from "@engine/corpus.ts";
 import { buildFace } from "@engine/faces.ts";
@@ -109,7 +109,11 @@ export default async function AyahPage({
   // `null` for a surah this build cannot serve — never a throw and never an
   // empty corpus (see lib/corpus/load.ts for why that distinction is the whole
   // point). A missing corpus degrades to a designed state on this one route.
-  const corpus = await loadCorpus(surah);
+  // `loadEffectiveCorpus`, not `loadCorpus`: this page prints `wordGloss(word)`
+  // straight from the corpus, so a qari/admin gloss correction must reach it —
+  // the SSR half of the gap v3-D96 closed for the client fetch path only.
+  const effective = await loadEffectiveCorpus(surah);
+  const corpus = effective?.corpus ?? null;
   const verseFace = corpus ? buildFace(corpus, { kind: "verse", ayah }) : null;
   const words = corpus ? ayahWords(corpus, ayah) : [];
 

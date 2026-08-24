@@ -679,6 +679,15 @@ describe("the route is actually wired (not two stubs behind a green suite)", () 
     expect(src).not.toMatch(/StubNote/);
   });
 
+  it("reads the corpus through loadEffectiveCorpus, never the raw loadCorpus (SSR override gap)", () => {
+    // wordGloss(word) below prints straight from the corpus, so an admin
+    // gloss correction must reach this page. `loadCorpus` alone would silently
+    // serve the pre-correction text forever.
+    const src = pageSrc();
+    expect(src).toMatch(/loadEffectiveCorpus/);
+    expect(src).not.toMatch(/\bloadCorpus\(/);
+  });
+
   it("passes a highlight COORDINATE, and never narrows ayahCount to the current ayah (#90)", () => {
     const src = pageSrc();
     expect(src).toMatch(/highlight=\{\{\s*kind:\s*"ayah",\s*ayah\s*\}\}/);

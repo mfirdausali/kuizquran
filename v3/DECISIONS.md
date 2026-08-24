@@ -8465,3 +8465,108 @@ the unrecorded ratification; `distractor`/`group` override authoring
 BUILD-PLAN Q9's still-open "second admin at launch" question, or a new
 `AdminRole` member), it should follow this same pattern —
 `useAdminRoles()` already exists for it to call.
+
+### v3-D132 — the SSR corpus loader never applied overrides; a qari/admin gloss correction reached the client fetch path (v3-D96) but not a server-rendered page
+
+**The gap.** `lib/corpus/load.ts#loadCorpus` — the SSR reader behind `/plan`,
+`/progress`, `/progress/list`, `/surah/[surah]`, `/surah/[surah]/[ayah]`,
+`/drill`, `/practice` and `/workbench` — has always read the raw compiled
+corpus off disk with no override merge. v3-D96 fixed the CLIENT half of this
+same gap (`lib/corpus/client.ts#fetchCorpus`) for the learner's actual drill
+session, and its own closing note named the SSR half explicitly:
+"deliberately NOT done... this codebase has no established pattern for the
+Next.js server to call the Laravel API over HTTP." v3-D110 repeated the same
+"SSR override gap... unchanged" note. It sat untouched through v3-D111
+through v3-D131 while those runs worked the admin-console sweep instead.
+
+Concretely: `app/(app)/surah/[surah]/[ayah]/page.tsx` prints
+`wordGloss(word)` straight from `loadCorpus`'s raw corpus — an admin/qari
+correction written through the already-shipped, already-admin-gated
+`POST /api/overrides` never reached this page. `app/(admin)/workbench/page.tsx`
+is worse in kind, not just in learner impact: `WorkbenchIsland`'s
+`explain(corpus, spec)` traces a spec preview against whatever corpus it is
+handed, so an admin using the workbench to judge whether a gloss needs
+correcting — or to verify one already made — was shown the STALE,
+pre-correction text, from the very tool built to review it.
+
+**Why the "no established pattern" objection no longer fully blocks this.**
+`GET /api/overrides` (`OverridesController::index`) carries no `admin`
+middleware — verified by reading `routes/api.php` — it is a genuinely public,
+unauthenticated read. That removes the hard part of a server-to-server call
+(no bearer token, no anonymous-device mint, no 401 interceptor to reinvent
+server-side); what remained was a small, narrowly-scoped fetch, not a new
+auth subsystem.
+
+**Fixed.** New `lib/overrides/fetchServer.ts#fetchServerOverrides` — the SSR
+counterpart to `lib/overrides/fetch.ts#fetchOverrides`, duplicated rather than
+imported because a `"use client"` module's plain function exports do not
+resolve across the RSC boundary (the same failure `lib/corpus/staged.ts`
+documents for a constant — verified precedent, not a guess). Reads a new
+server-only `API_BASE_URL` env var (no `NEXT_PUBLIC_` prefix — it has no
+reason to reach the client bundle), defaulting to `http://localhost:8001`,
+the only port this repo names anywhere for v3's API (`Makefile`'s `dev-api3`
+target). Gate 20 (LAUNCH-CHECKLIST.md, hosting) has not yet decided the real
+staging/production shape; this default is a reasonable local-dev placeholder,
+not a claim that gate 20 is resolved.
+
+`lib/corpus/load.ts` gains `loadEffectiveCorpus(surah)` (mirrors
+`lib/corpus/client.ts#EffectiveCorpus` exactly) — delegates to the existing
+`loadCorpus` for the heavy, static, cached read, then merges overrides via
+the engine's own `applyOverrides`. Deliberately does NOT cache the merged
+result: `loadCorpus`'s cache lives for the life of the server PROCESS
+(explicitly documented in its own header), and overrides are admin-mutable
+— caching the merge would mean a correction never appears until the server
+restarts. The overrides fetch itself is a small JSON call, cheap to repeat
+per request. `loadCorpus` itself is UNCHANGED — every other caller
+(`/plan`, `/progress`, `/progress/list`, `/drill`, `/practice`,
+`lib/library/rows.ts`) keeps reading the raw corpus, since none of them
+render `gloss`/`distractor` text directly (verified by grep — no `.gloss` or
+`wordGloss` read outside the two pages fixed here); named explicitly so a
+future run does not mistake that for an oversight.
+
+`scripts/check-boundaries.mjs` clause 6 (single egress to `/api`) gained a
+second, narrowly-justified exemption for `fetchServer.ts` — its own comment
+explains why B8's concern (a dead Bearer token 401ing forever) cannot occur
+server-side, and why it cannot simply call `apiFetch.ts` instead.
+
+**RED confirmed genuinely, by reverting only the tracked source files** (the
+new `fetchServer.ts` and its test moved aside separately, tests kept): 9 of
+72 apps/web test files failed — `test/corpus-load-effective.test.ts` failed
+on module resolution (`loadEffectiveCorpus` did not exist), and the two new
+wiring assertions in `test/ayah-detail.test.tsx` and `test/workbench-ui.test.tsx`
+failed on `toMatch(/loadEffectiveCorpus/)` against the unmodified page
+sources. Restored byte-identically; all green again.
+
+`TZ=UTC make test`: **2241 passing** (was 2231, +10 — exactly this run's new
+tests: 8 in `corpus-load-effective.test.ts` + 1 each in `ayah-detail.test.tsx`
+and `workbench-ui.test.tsx`; no other suite moved — 255 v2 vitest + 47 v2/api
++ 295 v3/api (2 incomplete by design/PAY-1, 6 pre-existing skips unrelated to
+this change) + 111 corpus-compiler + 417 engine + 61 fold-runner + 1055
+apps/web). `check-test-floor.mjs`: OK, 2241 >= floor 1899 (+342 margin,
+`TEST-FLOOR` left unmoved). `TZ=UTC make build`: exit 0, **25 routes**
+(unchanged — no new route; both fixed pages already existed and are already
+dynamic). `npx tsc --noEmit`: clean, `Version 5.9.3` confirmed. `npm run
+gates`: locked-css OK, fonts degraded-but-non-blocking (pre-existing,
+unrelated — Inter ×3 and Source Serif 4 missing), boundaries OK (246 files
+checked, up from 244, two new files, zero violations), corpus-morphology and
+corpus-glyphs OK.
+
+No `v1/**`/`v2/**` edit: `git status --porcelain -- v1 v2` empty immediately
+before committing. No Arabic codepoint introduced: every new/changed file
+swept individually over the Arabic, Arabic Supplement, Arabic Extended-A and
+both Presentation Forms Unicode blocks, plus a `\u06xx`/`\u08xx`-escape and
+`fromCharCode` sweep — zero matches; the test marker string is a plain
+English constant (`TEST_SSR_OVERRIDE_GLOSS_MARKER`) applied over a fixture
+coordinate (surah 112, ayah 1, position 1), never authored Arabic.
+
+**Not addressed, named so a future run doesn't re-discover it as new.** Six
+other `loadCorpus` callers (`/plan`, `/progress`, `/progress/list`, `/drill`,
+`/practice`, `lib/library/rows.ts`) are unchanged — verified by grep that
+none of them render `gloss`/`distractor` text, so this is not a partial pass
+over a longer list, but worth re-checking if any of those routes later grows
+a gloss/distractor display. The `API_BASE_URL` default
+(`http://localhost:8001`) is a placeholder for local development only; gate
+20's real staging/production hosting shape (reverse proxy vs. a direct
+backend URL) is still open and should set this explicitly once decided. See
+DEFECTS.md's `E-07` (per-surah corpus fetch unguarded) — unchanged, this
+fix does not touch that shape.

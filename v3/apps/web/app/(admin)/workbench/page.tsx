@@ -69,7 +69,7 @@
 //   - The admin auth gate on this route (see above).
 
 import { notFound } from "next/navigation";
-import { loadCorpus, AVAILABLE_SURAHS } from "@/lib/corpus/load.ts";
+import { loadEffectiveCorpus, AVAILABLE_SURAHS } from "@/lib/corpus/load.ts";
 import { WorkbenchIsland } from "@/components/workbench/WorkbenchIsland";
 
 /** The surah under edit. A query parameter rather than a path segment: the
@@ -92,11 +92,16 @@ export default async function WorkbenchPage({
   const surah = parseSurah(rawSurah);
   if (surah === null) notFound();
 
-  const corpus = await loadCorpus(surah);
-  // `loadCorpus` returns null rather than throwing or fabricating an empty
-  // corpus (E-07's shape). A workbench with no corpus has nothing to trace, so
-  // it 404s rather than painting three empty panes that read as "this surah has
+  // `loadEffectiveCorpus`, not `loadCorpus`: `explain()` below traces the
+  // spec against whatever corpus it is given, so an admin previewing a site
+  // must see the CURRENT, override-corrected gloss/distractor text — the same
+  // SSR override gap v3-D96 closed for the learner-facing client fetch path
+  // only. Returns null rather than throwing or fabricating an empty corpus
+  // (E-07's shape). A workbench with no corpus has nothing to trace, so it
+  // 404s rather than painting three empty panes that read as "this surah has
   // no questions."
+  const effective = await loadEffectiveCorpus(surah);
+  const corpus = effective?.corpus ?? null;
   if (corpus === null) notFound();
 
   return (

@@ -53,9 +53,66 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2231 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2241 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 295 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 1045 apps/web. (v3-D131, 2026-08-24)
+             # + 417 engine + 61 fold-runner + 1055 apps/web. (v3-D132, 2026-08-24)
+             # NOTE (v3-D132): the SSR corpus loader (`lib/corpus/load.ts`)
+             # never applied overrides — a qari/admin gloss correction
+             # written through the already-shipped `POST /api/overrides`
+             # reached the CLIENT drill session (v3-D96) but never a
+             # server-rendered page. `/surah/[surah]/[ayah]` prints
+             # `wordGloss(word)` straight from the raw corpus; `/workbench`'s
+             # `explain(corpus, spec)` traces a preview against it too, so an
+             # admin judging whether a correction is needed — or verifying
+             # one already made — saw stale, pre-correction text from the
+             # very tool built to review it. v3-D96/D110 both named this SSR
+             # half explicitly and left it, reasoning the codebase "has no
+             # established pattern for the Next.js server to call the
+             # Laravel API over HTTP" — still mostly true, but
+             # `GET /api/overrides` carries no `admin` middleware (verified
+             # against `routes/api.php`), so no bearer token or 401
+             # interceptor needed reinventing server-side; what remained was
+             # a small, narrowly-scoped fetch. Fixed: new
+             # `lib/overrides/fetchServer.ts#fetchServerOverrides` (the SSR
+             # counterpart to `lib/overrides/fetch.ts`, duplicated rather
+             # than imported — a `"use client"` module's plain function
+             # exports do not resolve across the RSC boundary, the same
+             # failure `lib/corpus/staged.ts` documents for a constant) +
+             # `lib/corpus/load.ts#loadEffectiveCorpus` (mirrors
+             # `lib/corpus/client.ts#EffectiveCorpus`; delegates to the
+             # existing cached `loadCorpus` for the raw read, but does NOT
+             # cache the override merge itself — `loadCorpus`'s cache lives
+             # for the server PROCESS lifetime, and overrides are
+             # admin-mutable, so caching the merge would hide a correction
+             # until restart). `loadCorpus` itself is UNCHANGED; six other
+             # callers (`/plan`, `/progress`, `/progress/list`, `/drill`,
+             # `/practice`, `lib/library/rows.ts`) still read it directly,
+             # verified by grep to render no `gloss`/`distractor` text. RED
+             # confirmed by reverting the tracked source files (new files
+             # moved aside, tests kept): 9 of 72 apps/web test files failed —
+             # module resolution on `loadEffectiveCorpus`, plus two wiring
+             # assertions against the unmodified page sources. `TZ=UTC make
+             # test`: 2241 passing (was 2231, +10 — exactly this run's new
+             # tests: 8 + 1 + 1; no other suite moved). `check-test-floor.mjs`:
+             # OK, 2241 >= floor 1899 (+342 margin). `TZ=UTC make build`:
+             # exit 0, 25 routes (unchanged — no new route). `npx tsc
+             # --noEmit`: clean. `npm run gates`: all green (fonts
+             # degraded-but-non-blocking, pre-existing; boundaries 246 files,
+             # up from 244, two new files — `check-boundaries.mjs` clause 6
+             # gained a narrowly-justified second egress exemption for
+             # `fetchServer.ts`, explained in its own comment). No
+             # `v1/**`/`v2/**` edit. No Arabic codepoint (every new/changed
+             # file swept over the Arabic, Arabic Supplement, Arabic
+             # Extended-A and both Presentation Forms blocks, plus a
+             # `\u06xx`/`\u08xx`-escape and `fromCharCode` sweep — zero
+             # matches; the test marker is a plain English constant over a
+             # fixture coordinate). NOT addressed: the six other-callers list
+             # above (none currently render override-sensitive text, so this
+             # is not a partial pass); `API_BASE_URL`'s
+             # `http://localhost:8001` default is a local-dev placeholder —
+             # gate 20's real hosting shape is still open and should set it
+             # explicitly once decided; DEFECTS.md#E-07 (per-surah corpus
+             # fetch unguarded) is untouched. See DECISIONS.md v3-D132.
              # NOTE (v3-D131): `QariMode` offered the qari-tier signature to
              # every admin regardless of role — role-based UI gating,
              # named unaddressed since v3-D127 and repeated through

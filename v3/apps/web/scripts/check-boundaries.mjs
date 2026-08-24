@@ -122,7 +122,18 @@ for (const f of files.filter((f) => /^(app|components)\//.test(rel(f)))) {
 // proven pattern here. apiFetch.ts is the one exemption, and it earns it: its
 // mint call MUST bypass the interceptor, because a 401 from the mint endpoint
 // triggering a mint is the re-mint loop, directly.
-const EGRESS_EXEMPT = new Set(["lib/sync/apiFetch.ts"]);
+//
+// lib/overrides/fetchServer.ts is the second exemption, and it earns it on a
+// different basis: it runs SERVER-SIDE only (Next.js Server Components), where
+// there is no localStorage token and no anonymous device to mint — B8's whole
+// concern (a dead Bearer token 401ing forever) cannot occur, because nothing
+// server-side ever attaches a Bearer token to this call. It reaches
+// `GET /api/overrides`, a PUBLIC unauthenticated read (no `admin` middleware —
+// verified against routes/api.php), so there is no auth flow to bypass. See
+// that file's own header for why it cannot simply call apiFetch.ts instead (a
+// "use client" module's plain function exports do not resolve across the RSC
+// boundary — the same failure `lib/corpus/staged.ts` documents for a constant).
+const EGRESS_EXEMPT = new Set(["lib/sync/apiFetch.ts", "lib/overrides/fetchServer.ts"]);
 for (const f of files) {
   const r = rel(f);
   if (EGRESS_EXEMPT.has(r) || r.endsWith(".test.ts") || r.endsWith(".test.tsx")) continue;

@@ -333,3 +333,19 @@ describe("loadFrontier — failure is a STATE, never an exception", () => {
     if (load.state === "unavailable") expect(load.reason).toContain("no frontier");
   });
 });
+
+describe("the workbench route reads the corpus through loadEffectiveCorpus (SSR override gap)", () => {
+  // WorkbenchIsland's `explain(corpus, spec)` traces a spec against whatever
+  // corpus it is handed — so an admin previewing a site must see the
+  // override-corrected gloss/distractor text, not the raw compiled corpus.
+  // `loadCorpus` alone would let an admin sign off on, or judge, stale
+  // content that a correction has already superseded.
+  const pageSrc = () =>
+    readFileSync(resolve(HERE, "../app/(admin)/workbench/page.tsx"), "utf8");
+
+  it("imports and calls loadEffectiveCorpus, never the raw loadCorpus", () => {
+    const src = pageSrc();
+    expect(src).toMatch(/loadEffectiveCorpus/);
+    expect(src).not.toMatch(/\bloadCorpus\(/);
+  });
+});
