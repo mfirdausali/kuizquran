@@ -8,6 +8,7 @@ use App\Http\Controllers\Admin\AdminAuditController;
 use App\Http\Controllers\Admin\AdminAuthController;
 use App\Http\Controllers\Admin\AdminRevealController;
 use App\Http\Controllers\Admin\AdminUsersController;
+use App\Http\Controllers\Admin\FlagAuditController;
 use App\Http\Controllers\Admin\FlagController;
 use App\Http\Controllers\Admin\StripeSettingsController;
 use App\Http\Controllers\Admin\SystemHealthController;
@@ -115,6 +116,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/flags/{key}/kill', [FlagController::class, 'kill']);
         Route::post('/flags/{key}/enable', [FlagController::class, 'enable']);
         Route::post('/flags/{key}/ack', [FlagController::class, 'acknowledge']);
+
+        // The flag ramp audit viewer (BUILD-PLAN M8's own "nav homes for
+        // ... audit viewer", the FlagRampAudit half v3-D125 deferred and
+        // v3-D130 closed). Read-only — see FlagAuditController's own header.
+        // Registered AFTER the {key} routes above so a literal "audit" path
+        // segment can never be captured by {key}'s wildcard.
+        Route::get('/flags/audit', [FlagAuditController::class, 'index']);
 
         // ---- Build-plan step 27 (M9): the MS gloss authoring surface. ----
         // ADMIN-ONLY EVEN FOR READS, unlike /verifications (which is a public

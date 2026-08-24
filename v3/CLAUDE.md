@@ -53,9 +53,57 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2204 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 288 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 1025 apps/web. (v3-D129, 2026-08-23)
+make test    # 2223 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 295 v3/api + 111 corpus-compiler
+             # + 417 engine + 61 fold-runner + 1037 apps/web. (v3-D130, 2026-08-24)
+             # NOTE (v3-D130): `FlagRampAudit` had three writers
+             # (`FlagService::kill`/`ramp`/`acknowledgeKill`, the last also
+             # called unattended by the nightly `autoWaiveDueKills`
+             # scheduler) and zero readers — the exact gap v3-D125 named for
+             # this table and v3-D129 explicitly deferred ("picking one
+             # audit trail and doing it well... was the scope choice").
+             # Fixed: new `Admin\FlagAuditController::index()` (`GET
+             # /api/admin/flags/audit`, read-only — no write route
+             # registered at all) + `lib/admin/flagAudit.ts` (mirrors
+             # `lib/admin/audit.ts`'s three-state discipline) +
+             # `components/admin/FlagAuditPanel.tsx`, wired directly into
+             # the existing `/settings/flags` page beneath `FlagsPanel`
+             # (unlike `admin_audit`, this trail is scoped entirely to the
+             # flag plane, so it gets no second nav destination). The actor
+             # is pseudonymized on the way out, same as `AdminAuditController`
+             # — but `flag_ramp_audit.actor_admin_id` IS NULLABLE (the
+             # scheduler's auto-waive has no admin at all), so the naive
+             # port of that one-liner would have fataled on the first
+             # auto-waive row; `FlagAuditController` special-cases the null
+             # actor explicitly and a dedicated test seeds exactly that row
+             # and asserts a 200 with `actor: null`, not a 500. RED
+             # confirmed at every layer: the backend route did not exist
+             # (all 7 new PHPUnit cases 404'd against unmodified
+             # `routes/api.php`; one iteration needed — the controller's
+             # first draft omitted `use App\Http\Controllers\Controller;`
+             # and fataled on `Class "App\Http\Controllers\Admin\Controller"
+             # not found`, fixed, reran clean); `lib/admin/flagAudit.ts` and
+             # `FlagAuditPanel.tsx` were each moved aside with their tests
+             # kept and `vitest run` re-executed — both failed on module
+             # resolution; every file restored byte-identically, all green
+             # after. `TZ=UTC make test`: 2223 passing (was 2204, +19 —
+             # exactly this run's new tests: 7 PHPUnit + 7 + 5 vitest).
+             # `check-test-floor.mjs`: OK, 2223 >= floor 1899 (+324 margin).
+             # `TZ=UTC make build`: exit 0, 25 routes (unchanged — no new
+             # route). `npx tsc --noEmit`: clean. `npm run gates`: all green
+             # (fonts degraded-but-non-blocking, pre-existing; boundaries 242
+             # files, up from 238, four new files). No `v1/**`/`v2/**` edit.
+             # No Arabic codepoint (every new/changed file swept over the
+             # Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms blocks, plus a `\u06xx`/`\u08xx`-escape and
+             # `fromCharCode` sweep — zero matches). NOT addressed:
+             # `GlossDraftsController` (still ratification-gated);
+             # `distractor`/`group` override authoring (v3-D126); role-based
+             # UI gating within the admin console (v3-D127) — all unchanged.
+             # With this, both audit trails BUILD-PLAN M8 names have a real
+             # reader; the "built + populated + zero read surface" sweep
+             # that produced v3-D129/D130 has exhausted the two known
+             # append-only audit tables. See DECISIONS.md v3-D130.
              # NOTE (v3-D129): `admin_audit` had four writers
              # (`AdminRevealController::reveal`, `AdminUsersController
              # ::exportCsv`, `SystemHealthController::rebuildAtomCache`,

@@ -8272,3 +8272,100 @@ shape and its own viewer is still unbuilt; `GlossDraftsController`
 remains gated on the unrecorded ratification; `distractor`/`group`
 override authoring (v3-D126) and role-based UI gating within the admin
 console (v3-D127) are both unchanged.
+
+---
+
+### v3-D130 — `FlagRampAudit` had three writers and zero readers, exactly the gap v3-D125 named for it and v3-D129 deferred
+
+**v3-D129's own scope choice was explicit:** "`FlagRampAudit` shares the
+identical shape — four [sic; three] writer call sites in `FlagService`,
+zero readers — and stays **explicitly unaddressed** by this entry; picking
+one audit trail and doing it well, per NIGHTLY.md's 'one step per run,'
+was the scope choice." This entry is that picked-up trail.
+
+`FlagService::kill()`, `::ramp()` and `::acknowledgeKill()` (the last also
+called unattended by the nightly `autoWaiveDueKills` scheduler) each write
+an append-only `flag_ramp_audit` row — the enable-hard ceremony's four
+inputs (reason, both ethics booleans, the typed flag name) are, per the
+model's own docblock, "STORED, not merely validated — 'we checked at the
+time' is unverifiable after the fact." `grep -rln FlagRampAudit v3/api/app`
+found four files: three writers (all inside `FlagService`) and the model
+itself. No fifth, reading, file existed — an operator asking "who killed
+`social.leaderboard`, and when was it ramped back" had a database console
+and nothing else, the identical gap `AdminAuditController` closed for
+`admin_audit` one night earlier.
+
+**Fixed:** new `Admin\FlagAuditController::index()` (`GET
+/api/admin/flags/audit`, admin-gated, read-only — no POST/PUT/DELETE
+registered for it at all) + `lib/admin/flagAudit.ts` (`loadFlagAudit`,
+mirroring `lib/admin/audit.ts`'s three-state discipline exactly) +
+`components/admin/FlagAuditPanel.tsx`, wired directly into the existing
+`/settings/flags` page beneath `FlagsPanel` — unlike `admin_audit`
+(v3-D129), which got its own standalone route, `flag_ramp_audit` is
+scoped entirely to the flag plane, so its viewer belongs on the flag
+plane's own screen rather than a second nav destination for the same
+concern.
+
+**The actor is pseudonymized too, with one new wrinkle `admin_audit`
+never had.** Same HMAC `Pseudonymizer` `AdminAuditController` already
+uses on `actor_admin_id`. But `admin_audit.actor_admin_id` is `NOT NULL`
+while `flag_ramp_audit.actor_admin_id` **is nullable** —
+`FlagService::autoWaiveDueKills()` calls `acknowledgeKill($flag->key,
+null, $now, autoWaived: true)` from the unattended scheduler, no admin in
+the loop at all. `Pseudonymizer::for()` takes a non-nullable `int`, so a
+naive port of `AdminAuditController`'s one-liner would fatal on the very
+first auto-waive row. `FlagAuditController::index()` special-cases the
+null case explicitly (`$row->actor_admin_id === null ? null :
+$this->pseudonymizer->for(...)`) and a dedicated test
+(`test_a_system_actor_null_id_renders_as_null_not_a_crash`) seeds exactly
+that row and asserts a 200 with `actor: null`, never a 500. The frontend
+renders a null actor as the literal word "system" — never a blank cell,
+which would read as a missing value rather than a genuine absence of a
+human actor.
+
+**RED confirmed at every layer, each reverted byte-identically after:**
+the backend route did not exist before this run — moved
+`FlagAuditController.php` aside and deleted its route registration
+(keeping `FlagAuditTest`'s seven cases); all seven failed on a bare 404;
+restored, 7/7 green (one iteration needed: the controller's first version
+omitted `use App\Http\Controllers\Controller;`, since it isn't
+auto-imported by virtue of sharing the `Admin` sub-namespace — caught
+immediately by a `Class "App\Http\Controllers\Admin\Controller" not
+found` fatal on the first green-attempt run, fixed, re-ran clean).
+`lib/admin/flagAudit.ts` and `components/admin/FlagAuditPanel.tsx` were
+each moved aside with their tests kept and `vitest run` re-executed —
+both failed on module resolution (`Failed to load url ./flagAudit`,
+`Failed to resolve import "@/components/admin/FlagAuditPanel"`);
+restored, all green again.
+
+`TZ=UTC make test`: **2223 passing** (was 2204, +19 — exactly this run's
+new tests: 7 PHPUnit + 7 + 5 vitest; no other suite moved).
+`check-test-floor.mjs`: OK, 2223 >= floor 1899 (+324 margin, `TEST-FLOOR`
+left unmoved). `TZ=UTC make build`: exit 0, **25 routes** (unchanged — no
+new route; the panel renders inside the existing `/settings/flags`
+page). `npx tsc --noEmit` (run as part of `next build`): clean. `npm run
+gates`: locked-css OK, fonts degraded-but-non-blocking (pre-existing,
+unrelated — Inter ×3 and Source Serif 4 missing), boundaries OK (242
+files checked, up from 238 — four new files, zero violations),
+corpus-morphology and corpus-glyphs OK.
+
+No `v1/**`/`v2/**` edit: `git status --porcelain -- v1 v2` empty
+immediately before committing. No Arabic codepoint introduced: every
+new/changed file swept individually over the Arabic, Arabic Supplement,
+Arabic Extended-A and both Presentation Forms Unicode blocks, plus a
+`\u06xx`/`\u08xx`-escape and `fromCharCode` sweep — zero matches; every
+new line addresses a flag key an operator already knows, a pseudonym or
+`null` the server already decided, an action name from the closed
+`enable|kill|ack|auto_waive` set, a boolean, or an epoch-millisecond
+timestamp — never corpus text.
+
+**Not addressed, named so a future run doesn't re-discover it as new:**
+`GlossDraftsController` remains gated on the unrecorded ratification;
+`distractor`/`group` override authoring (v3-D126) is unchanged;
+role-based UI gating within the admin console (v3-D127) is unchanged.
+With this, both audit trails BUILD-PLAN M8 names ("nav homes for
+flags/reports/templates/audit viewer") have a real reader — the
+"built + populated + zero read surface" sweep that produced v3-D129 and
+this entry has exhausted the two known append-only audit tables; a
+future run should look elsewhere for the next instance of this bug
+class.

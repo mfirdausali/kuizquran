@@ -10,6 +10,7 @@
 // exactly what is and is not enforced client-side (nothing — the ceremony is
 // server-enforced, per BUILD-PLAN's own ethics gate).
 
+import { FlagAuditPanel } from "@/components/admin/FlagAuditPanel";
 import { FlagsPanel } from "@/components/admin/FlagsPanel";
 
 export default function FlagsPage() {
@@ -24,6 +25,7 @@ export default function FlagsPage() {
           </p>
         </header>
         <FlagsPanel />
+        <FlagAuditPanel />
       </div>
     </div>
   );
