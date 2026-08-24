@@ -27,6 +27,20 @@
 // collapsing it into "failed" would be a lie in the other direction (the row
 // exists; it is append-only; nothing was undone). It is its own state, in its
 // own words, with the re-review instruction attached.
+//
+// ---------------------------------------------------------------------------
+// WHY THE QARI TIER IS DISABLED, NOT MERELY REJECTED (v3-D131)
+// ---------------------------------------------------------------------------
+// `VerificationsController::store` has required `AdminRole::QARI` for
+// `tier: qari` since v3-D92 — server-enforced, correctly. But this pane
+// offered "Qari tier" to every admin regardless of role, so an operator or
+// moderator admin could fill in the whole form and learn only from a 403
+// that they were never eligible. That is the exact affordance-the-server-
+// will-refuse shape this codebase treats as a defect elsewhere (a locked
+// library row is not a link; a disabled control explains why rather than
+// pretending to work). `useAdminRoles()` reads the identity `AdminGate`
+// already fetched, over context — no second request, and nothing here
+// changes what the SERVER accepts.
 
 import { useState } from "react";
 import type { ChipState } from "@/lib/workbench/frontier.ts";
@@ -36,6 +50,7 @@ import {
   type SignResult,
   type Tier,
 } from "@/lib/workbench/sign.ts";
+import { useAdminRoles } from "@/lib/admin/identity-context";
 
 const TIERS: ReadonlyArray<{ value: Tier; label: string; covers: string }> = [
   // v3-D13's tiering, named on the screen so a reviewer knows what their
@@ -60,7 +75,14 @@ export interface QariModeProps {
 }
 
 export function QariMode({ surah, ayah, chip, onSigned }: QariModeProps) {
-  const [tier, setTier] = useState<Tier>("qari");
+  // Deny by default (`useAdminRoles()`'s own contract) — an admin with no
+  // resolvable identity gets the same posture as one with no roles at all.
+  const roles = useAdminRoles();
+  const canSignQariTier = roles.includes("qari");
+  // The initial selection reflects what THIS caller can actually sign —
+  // defaulting to a tier they cannot submit would just move the surprise
+  // from "the option is disabled" to "the button always fails."
+  const [tier, setTier] = useState<Tier>(canSignQariTier ? "qari" : "admin");
   // NO DEFAULT. See the header — a default here is how a false scholar claim
   // gets manufactured.
   const [reviewerKind, setReviewerKind] = useState<ReviewerKind | null>(null);
@@ -81,7 +103,7 @@ export function QariMode({ surah, ayah, chip, onSigned }: QariModeProps) {
     );
   }
 
-  const canSign = reviewerKind !== null && !busy;
+  const canSign = reviewerKind !== null && !busy && (tier !== "qari" || canSignQariTier);
 
   async function onSubmit() {
     if (reviewerKind === null || ayah === null || chip === null) return;
@@ -119,20 +141,27 @@ export function QariMode({ surah, ayah, chip, onSigned }: QariModeProps) {
       <fieldset className="wb-field">
         <legend className="caption">Tier being signed</legend>
         <div className="stack stack--tight">
-          {TIERS.map((t) => (
-            <label key={t.value} className="wb-lane-opt">
-              <input
-                type="radio"
-                name="qari-tier"
-                value={t.value}
-                checked={tier === t.value}
-                onChange={() => setTier(t.value)}
-              />
-              <span>
-                {t.label} <span className="caption">— {t.covers}</span>
-              </span>
-            </label>
-          ))}
+          {TIERS.map((t) => {
+            const disabled = t.value === "qari" && !canSignQariTier;
+            return (
+              <label key={t.value} className="wb-lane-opt">
+                <input
+                  type="radio"
+                  name="qari-tier"
+                  value={t.value}
+                  checked={tier === t.value}
+                  disabled={disabled}
+                  onChange={() => setTier(t.value)}
+                />
+                <span>
+                  {t.label} <span className="caption">— {t.covers}</span>
+                  {disabled && (
+                    <span className="caption"> — requires the qari role; ask an operator to grant it</span>
+                  )}
+                </span>
+              </label>
+            );
+          })}
         </div>
       </fieldset>
 

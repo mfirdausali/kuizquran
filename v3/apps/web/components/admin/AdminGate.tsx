@@ -26,10 +26,19 @@
 // pages, e.g. `/workbench`'s corpus load) — passing already-rendered
 // server output through a client component's `children` prop is a supported
 // React/Next pattern; this component never inspects or clones its children.
+//
+// ROLE-BASED UI GATING (v3-D131). The `roles` this screen fetches were
+// previously only ever printed in the session bar below — nothing
+// downstream could read them, so a role-gated affordance (e.g. `QariMode`'s
+// "Qari tier" option) was offered to every admin regardless of role.
+// `AdminIdentityProvider` threads the identity down via context so a
+// descendant can gate on it without a second `/whoami` round-trip. See
+// `lib/admin/identity-context.tsx`.
 
 import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { adminLogin, adminLogout, checkAdminSession, type AdminSession } from "@/lib/admin/session";
+import { AdminIdentityProvider } from "@/lib/admin/identity-context";
 
 export function AdminGate({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<AdminSession>({ state: "checking" });
@@ -56,24 +65,26 @@ export function AdminGate({ children }: { children: ReactNode }) {
 
   if (session.state === "authorized") {
     return (
-      <div>
-        <div className="admin-session-bar">
-          <span className="caption">
-            Signed in as <span className="ltr-island">{session.identity.pseudonym}</span>
-            {session.identity.roles.length > 0 ? ` · ${session.identity.roles.join(", ")}` : ""}
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              adminLogout();
-              refresh();
-            }}
-          >
-            Sign out
-          </button>
+      <AdminIdentityProvider identity={session.identity}>
+        <div>
+          <div className="admin-session-bar">
+            <span className="caption">
+              Signed in as <span className="ltr-island">{session.identity.pseudonym}</span>
+              {session.identity.roles.length > 0 ? ` · ${session.identity.roles.join(", ")}` : ""}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                adminLogout();
+                refresh();
+              }}
+            >
+              Sign out
+            </button>
+          </div>
+          {children}
         </div>
-        {children}
-      </div>
+      </AdminIdentityProvider>
     );
   }
 

@@ -53,9 +53,58 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2223 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2231 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 295 v3/api + 111 corpus-compiler
-             # + 417 engine + 61 fold-runner + 1037 apps/web. (v3-D130, 2026-08-24)
+             # + 417 engine + 61 fold-runner + 1045 apps/web. (v3-D131, 2026-08-24)
+             # NOTE (v3-D131): `QariMode` offered the qari-tier signature to
+             # every admin regardless of role — role-based UI gating,
+             # named unaddressed since v3-D127 and repeated through
+             # v3-D128/D129/D130's own "NOT addressed" lists.
+             # `VerificationsController::store` has required
+             # `AdminRole::QARI` for `tier: qari` since v3-D92,
+             # server-enforced correctly; the gap was that `GET
+             # /api/admin/whoami`'s own `roles` field, returned since
+             # v3-D127, was read in exactly one place — the session-bar
+             # string in `AdminGate` — so every admin saw "Qari tier" as a
+             # live option, defaulted to it, and only learned from a 403
+             # after filling in the whole form that they were never
+             # eligible. Fixed: new `lib/admin/identity-context.tsx`
+             # (`AdminIdentityProvider`/`useAdminRoles()`, deny-by-default —
+             # `[]` with no provider, never a throw) threads the identity
+             # `AdminGate` already fetches down via React context, no
+             # second `/whoami` call. `QariMode` disables the qari-tier
+             # radio (with a caption explaining why, never a silent hide),
+             # defaults the initial selection to `admin` when the caller
+             # cannot sign qari, and folds the check into the sign button's
+             # own `canSign` gate. The admin tier stays ungated (v3-D13
+             # never conditioned it on scholarship). Nothing about what the
+             # SERVER accepts changed — this is entirely what the UI
+             # honestly offers before a request is sent. RED confirmed two
+             # ways: moving the new context module aside failed the whole
+             # test file on import resolution; separately, restoring the
+             # context module but reverting only `AdminGate`/`QariMode`
+             # (old ungated `QariMode` against the new context) failed 5 of
+             # 8 new tests genuinely — the disabled state, the caption and
+             # the tier default were all absent — while 3 passed vacuously
+             # (the admin-tier-never-gated assertions). `TZ=UTC make test`:
+             # 2231 passing (was 2223, +8 — exactly this run's new tests in
+             # `test/workbench-qari-mode.test.tsx`). `check-test-floor.mjs`:
+             # OK, 2231 >= floor 1899 (+332 margin). `TZ=UTC make build`:
+             # exit 0, 25 routes (unchanged — no new route). `npx tsc
+             # --noEmit`: clean. `npm run gates`: all green (fonts
+             # degraded-but-non-blocking, pre-existing; boundaries 244
+             # files, up from 242, two new files). No `v1/**`/`v2/**` edit.
+             # No Arabic codepoint (every new/changed file swept over the
+             # Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms blocks, plus a `\u06xx`/`\u08xx`-escape
+             # and `fromCharCode` sweep — zero matches). A server-side
+             # grep (`hasAdminRole`/`AdminRole::`) confirms `tier: qari` is
+             # the ONLY role-gated action in the app today, so this closes
+             # the gap completely for the current surface rather than
+             # partially covering a longer list. NOT addressed:
+             # `GlossDraftsController` (still ratification-gated);
+             # `distractor`/`group` override authoring (v3-D126) — both
+             # unchanged. See DECISIONS.md v3-D131.
              # NOTE (v3-D130): `FlagRampAudit` had three writers
              # (`FlagService::kill`/`ramp`/`acknowledgeKill`, the last also
              # called unattended by the nightly `autoWaiveDueKills`

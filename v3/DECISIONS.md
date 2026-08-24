@@ -8369,3 +8369,99 @@ flags/reports/templates/audit viewer") have a real reader — the
 this entry has exhausted the two known append-only audit tables; a
 future run should look elsewhere for the next instance of this bug
 class.
+
+### v3-D131 — `QariMode` offered the qari-tier signature to every admin regardless of role; role-based UI gating, named unaddressed since v3-D127 and repeated through v3-D128/D129/D130
+
+**Named, not discovered, this run.** v3-D127's own closing note: "role-based
+UI gating within the admin console (`AdminGate` proves ADMIN, not WHICH
+admin role)" — repeated verbatim as a NOT-addressed item in v3-D128, D129
+and D130. This is that item.
+
+**The gap.** `VerificationsController::store` has required
+`AdminRole::QARI` for `tier: qari` since v3-D92, server-enforced, correctly
+— any operator/moderator admin who attempted to sign the qari tier already
+got a real 403. But `GET /api/admin/whoami` has returned the caller's own
+`roles` since `AdminGate` shipped (v3-D127), and nothing downstream of
+`AdminGate` ever read them: `session.identity.roles` was PRINTED in the
+session bar and nowhere else. `components/workbench/QariMode.tsx` offered
+"Qari tier" as a plain radio option to every signed-in admin, defaulted the
+selection TO it, and let the reviewer fill in the whole form (tier,
+reviewer kind, note) before the server's 403 told them they were never
+eligible — the exact affordance-the-server-will-refuse shape this codebase
+already treats as a defect elsewhere (a locked library row renders as
+non-clickable rather than a dead link; `OverrideEditor`'s disable dropdown
+only lists positions that exist). `grep -rn "roles" apps/web/components
+apps/web/lib/admin` before this run found the identity's `roles` field read
+in exactly one place: the session-bar string interpolation in `AdminGate`
+itself.
+
+**Fixed.** New `lib/admin/identity-context.tsx` — `AdminIdentityProvider` +
+`useAdminRoles()`, a small React context threading the identity `AdminGate`
+already fetched down to descendants without a second `/whoami` round-trip.
+Deny-by-default: `useAdminRoles()` returns `[]` — never throws — when no
+provider is present, the same fail-closed posture `EnsureIsAdmin` itself
+takes on an empty allowlist. `AdminGate` wraps its authorized branch's
+`{children}` in the provider (one line; the session bar's existing
+`roles.join(", ")` line is untouched). `QariMode` reads `useAdminRoles()`
+once, at the top: disables the "Qari tier" radio (with a caption —
+"requires the qari role; ask an operator to grant it" — rather than
+silently hiding it, so an ineligible admin learns WHY, not just that the
+option is gone), defaults the initial selection to `admin` rather than a
+tier the caller cannot submit, and folds the check into `canSign` so the
+button itself cannot be pressed for a `qari` selection an admin without the
+role could not have made anyway (defense in depth against a future change
+to how `tier` gets set, not a claim that the disabled radio is the only
+guard). The "Admin tier" option is never gated — v3-D13 never conditioned
+admin-tier writes on scholarship, and this fix does not change that.
+
+**Nothing about what the SERVER accepts changed.**
+`VerificationsController::store` is untouched; the fix is entirely what the
+UI honestly offers before a request is ever sent.
+
+**RED confirmed, two ways, each reverted byte-identically after:**
+1. Moving `identity-context.tsx` aside (source stashed, test kept): the
+   whole test file failed to resolve its import — proving the module is
+   actually load-bearing, not merely present.
+2. Restoring `identity-context.tsx` but stashing only the `AdminGate.tsx` +
+   `QariMode.tsx` edits (i.e. the OLD ungated `QariMode` against the NEW
+   context module): 5 of 8 new tests failed genuinely — the qari radio
+   rendered enabled with roles `[]`, the explanatory caption was absent,
+   and the initial selection stayed on the un-signable `qari` tier — while
+   3 passed vacuously (the admin-tier-never-gated assertions, which the old
+   code also satisfied by construction). This is the same two-step RED
+   discipline v3-D116's per-user-lock proof used: import-resolution alone
+   is a necessary but not sufficient RED, so the second revert isolates
+   the BEHAVIORAL claim.
+
+`TZ=UTC make test`: **2231 passing** (was 2223, +8 — exactly this run's new
+tests in `test/workbench-qari-mode.test.tsx`; no other suite moved).
+`check-test-floor.mjs`: OK, 2231 >= floor 1899 (+332 margin, `TEST-FLOOR`
+left unmoved). `TZ=UTC make build`: exit 0, **25 routes** (unchanged — no
+new route; the fix renders inside the existing `/workbench` page). `npx tsc
+--noEmit`: clean, `Version 5.9.3` confirmed. `npm run gates`: locked-css OK,
+fonts degraded-but-non-blocking (pre-existing, unrelated — Inter ×3 and
+Source Serif 4 missing), boundaries OK (244 files checked, up from 242 —
+two new files, zero violations), corpus-morphology and corpus-glyphs OK
+(post-`make build`, against the real compiled 12/67/103/112 corpus).
+
+No `v1/**`/`v2/**` edit: `git status --porcelain -- v1 v2` empty
+immediately before committing (a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff produced by running the suite was reverted first, same
+discipline as every prior entry). No Arabic codepoint introduced: all four
+new/changed files swept individually over the Arabic, Arabic Supplement,
+Arabic Extended-A and both Presentation Forms Unicode blocks, plus a
+`\u06xx`/`\u08xx`-escape and `fromCharCode` sweep — zero matches; every new
+line addresses a role name from the closed `operator|qari|moderator` set,
+a boolean, or a pseudonym string the server already decided — never corpus
+text.
+
+**Not addressed, named so a future run doesn't re-discover it as new.**
+`hasAdminRole`/`AdminRole::` server-side grep confirms `tier: qari` is the
+ONLY role-gated action anywhere in the app today — no other screen needs
+this treatment yet, so this fix is complete for the current surface, not a
+partial pass over a longer list. `GlossDraftsController` remains gated on
+the unrecorded ratification; `distractor`/`group` override authoring
+(v3-D126) is unchanged. If a future role-gated server action ships (per
+BUILD-PLAN Q9's still-open "second admin at launch" question, or a new
+`AdminRole` member), it should follow this same pattern —
+`useAdminRoles()` already exists for it to call.
