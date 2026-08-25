@@ -175,3 +175,28 @@ export function distractorOverride(
 ): SubmitOverrideInput {
   return { surah, ayah, position, questionType: "vocab", field: "distractor", payload: { distractors }, note };
 }
+
+/**
+ * Group two or more words in the SAME ayah into one probeable multi-word
+ * idiom — `engine/overrides.ts#GroupPayload`'s own contract: `position` is
+ * the anchor (the lowest position after `applyOverrides` sorts the member
+ * set — this function does not need to enforce the caller picks the
+ * numerically lowest one; `applyOverrides` sorts `[position, ...groupWith]`
+ * itself), `groupWith` names the OTHER member position(s), same ayah only
+ * (there is no cross-ayah key in `GroupPayload`, unlike `distractor`'s
+ * whole-surah pool). `questionType` is irrelevant to group resolution
+ * (`applyOverrides` keys group overrides on `ayah:position` alone, same as
+ * gloss/distractor ignore it) but the server still requires the field
+ * non-empty, so this always stamps `"s1"` — `ladder.ts`'s S1 pass is the
+ * one consumer that reads `groupPositions`, matching `glossOverride`'s own
+ * lane-name convention.
+ */
+export function groupOverride(
+  surah: number,
+  ayah: number,
+  position: number,
+  groupWith: number[],
+  note?: string,
+): SubmitOverrideInput {
+  return { surah, ayah, position, questionType: "s1", field: "group", payload: { groupWith }, note };
+}

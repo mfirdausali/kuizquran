@@ -12,22 +12,26 @@
 // (`QariMode`) but had no way to actually correct the thing they were
 // looking at. This panel is that missing write surface.
 //
-// SCOPED TO THREE OF THE FOUR OVERRIDE FIELDS. `gloss` (an English/Malay
-// text correction), `disable` (a boolean toggle over an existing word
-// position, chosen from a dropdown — never typed) and, as of this run,
-// `distractor` (a full replacement `CorpusDistractor[]` set) all need no
-// free-typed Arabic. `distractor`'s payload carries a raw Arabic `text`
-// field per entry, which is why DECISIONS.md v3-D125/D126/D132 left it
-// unbuilt — but the field does not require a FREE-TEXT box, only a
-// picker: each replacement entry's `text` is read back OUT of an existing
-// corpus word's own `text_uthmani`, exactly the discipline
-// `glossOverride`/`disableOverride` already use for word POSITIONS below.
-// A target-word dropdown (this ayah's own words) plus up to four
-// replacement-word dropdowns (any word in the SURAH, so a visual/semantic/
-// contextual substitute from elsewhere in the surah is choosable, not only
-// same-ayah neighbours) build the full replacement set; nothing is typed.
-// `group` (multi-word idiom grouping) is a smaller, rarer surface and
-// remains deferred, real, separate future work — not silently dropped.
+// ALL FOUR OVERRIDE FIELDS. `gloss` (an English/Malay text correction),
+// `disable` (a boolean toggle over an existing word position, chosen from
+// a dropdown — never typed), `distractor` (a full replacement
+// `CorpusDistractor[]` set) and, as of this run, `group` (multi-word idiom
+// grouping) all need no free-typed Arabic. `distractor`'s payload carries a
+// raw Arabic `text` field per entry, which is why DECISIONS.md
+// v3-D125/D126/D132 left it unbuilt — but the field does not require a
+// FREE-TEXT box, only a picker: each replacement entry's `text` is read
+// back OUT of an existing corpus word's own `text_uthmani`, exactly the
+// discipline `glossOverride`/`disableOverride` already use for word
+// POSITIONS below. A target-word dropdown (this ayah's own words) plus up
+// to four replacement-word dropdowns (any word in the SURAH, so a visual/
+// semantic/contextual substitute from elsewhere in the surah is choosable,
+// not only same-ayah neighbours) build the full replacement set; nothing
+// is typed. `group` is the SAME discipline over a narrower pool: an
+// anchor-word dropdown plus up to `GROUP_SLOTS` "group with" dropdowns,
+// both sourced from THIS AYAH's own `words` — `engine/overrides.ts
+// #GroupPayload` has no cross-ayah member key, unlike distractor's
+// whole-surah pool. Named deferred by DECISIONS.md v3-D126/D129/D130/D131
+// ("a smaller, rarer surface... real separate future work"); closed here.
 //
 // NO ARABIC IS WRITTEN HERE. `words[].text_uthmani`/`surahWords[].text_uthmani`
 // are read back OUT of the corpus prop the server component already loaded
@@ -40,13 +44,19 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CorpusWord } from "@engine/types.ts";
 import type { QuestionOverride } from "@engine/overrides.ts";
 import { fetchOverrides } from "@/lib/overrides/fetch.ts";
-import { disableOverride, distractorOverride, glossOverride, submitOverride } from "@/lib/overrides/write.ts";
+import { disableOverride, distractorOverride, glossOverride, groupOverride, submitOverride } from "@/lib/overrides/write.ts";
 
 /** How many replacement distractors the picker offers. Matches
  *  `options.ts#options()`'s widest eligible pool — the Learn band accepts
  *  distractors up to `rank: 4` before slicing to the 3 it actually shows —
  *  so a fourth slot is never wasted capacity for any real strength band. */
 const DISTRACTOR_SLOTS = 4;
+
+/** How many "group with" picks the grouping picker offers. Idioms in the
+ *  launch corpus are short (2-3 words); a fourth-plus-anchor member would be
+ *  an unusual shape, so this stays smaller than `DISTRACTOR_SLOTS` rather
+ *  than matching it by default. */
+const GROUP_SLOTS = 3;
 
 /** Mirrors `lib/test/build.ts#TestItemKind` — the actual set `isQuestionDisabled`
  *  is checked against at the one real consumer (a learner's Test route). */
@@ -76,6 +86,10 @@ function isDistractorListPayload(v: unknown): v is { distractors: unknown[] } {
   return typeof v === "object" && v !== null && Array.isArray((v as { distractors?: unknown }).distractors);
 }
 
+function isGroupWithPayload(v: unknown): v is { groupWith: unknown[] } {
+  return typeof v === "object" && v !== null && Array.isArray((v as { groupWith?: unknown }).groupWith);
+}
+
 function summarize(o: QuestionOverride): string {
   if (o.field === "gloss") {
     const p = o.payload;
@@ -92,7 +106,10 @@ function summarize(o: QuestionOverride): string {
     const count = isDistractorListPayload(o.payload) ? o.payload.distractors.length : 0;
     return `distractor @${o.position ?? "-"}: ${count} replacement${count === 1 ? "" : "s"}`;
   }
-  if (o.field === "group") return `group @${o.position ?? "-"}`;
+  if (o.field === "group") {
+    const members = isGroupWithPayload(o.payload) ? o.payload.groupWith.length : 0;
+    return `group @${o.position ?? "-"} + ${members} word${members === 1 ? "" : "s"}`;
+  }
   return o.field;
 }
 
@@ -126,6 +143,12 @@ export function OverrideEditor({ surah, ayah, words, surahWords }: OverrideEdito
   const [distractorBusy, setDistractorBusy] = useState(false);
   const [distractorMessage, setDistractorMessage] = useState<string | null>(null);
 
+  const [groupAnchor, setGroupAnchor] = useState<PositionChoice>("");
+  const [groupPicks, setGroupPicks] = useState<string[]>(() => Array(GROUP_SLOTS).fill(""));
+  const [groupNote, setGroupNote] = useState("");
+  const [groupBusy, setGroupBusy] = useState(false);
+  const [groupMessage, setGroupMessage] = useState<string | null>(null);
+
   // The replacement pool: every surah word EXCEPT the one currently being
   // replaced — offering a word as its own distractor would be a
   // self-defeating correction, and `distractorsFor`'s own consumers
@@ -133,6 +156,13 @@ export function OverrideEditor({ surah, ayah, words, surahWords }: OverrideEdito
   const distractorCandidates = useMemo(
     () => surahWords.filter((w) => !(w.ayah === ayah && w.position === distractorTarget)),
     [surahWords, ayah, distractorTarget],
+  );
+
+  // Same-ayah only — `GroupPayload#groupWith` has no cross-ayah member key,
+  // unlike distractor's whole-surah `surahWords` pool above.
+  const groupCandidates = useMemo(
+    () => words.filter((w) => w.position !== groupAnchor),
+    [words, groupAnchor],
   );
 
   const refresh = useCallback(() => {
@@ -242,6 +272,29 @@ export function OverrideEditor({ surah, ayah, words, surahWords }: OverrideEdito
       setDistractorMessage(outcome.reason);
     })();
   }, [surah, ayah, distractorTarget, distractorPicks, distractorNote, surahWords, refresh]);
+
+  const onSubmitGroup = useCallback(() => {
+    if (groupAnchor === "") return;
+    const members = groupPicks
+      .filter((v) => v !== "")
+      .map(Number)
+      .filter((n) => !Number.isNaN(n));
+    if (members.length === 0) return;
+    setGroupBusy(true);
+    setGroupMessage(null);
+    void (async () => {
+      const outcome = await submitOverride(groupOverride(surah, ayah, groupAnchor, members, groupNote.trim() || undefined));
+      setGroupBusy(false);
+      if (outcome.state === "created") {
+        setGroupPicks(Array(GROUP_SLOTS).fill(""));
+        setGroupNote("");
+        setGroupMessage("words grouped");
+        refresh();
+        return;
+      }
+      setGroupMessage(outcome.reason);
+    })();
+  }, [surah, ayah, groupAnchor, groupPicks, groupNote, refresh]);
 
   return (
     <section className="card" aria-labelledby="overrides-h">
@@ -434,6 +487,61 @@ export function OverrideEditor({ surah, ayah, words, surahWords }: OverrideEdito
         {distractorMessage ? (
           <p className="caption" role="status">
             {distractorMessage}
+          </p>
+        ) : null}
+      </fieldset>
+
+      <fieldset className="wb-field">
+        <legend className="caption">Group words (idiom)</legend>
+        <label>
+          Anchor word
+          <select
+            value={groupAnchor}
+            onChange={(e) => setGroupAnchor(e.target.value === "" ? "" : Number(e.target.value))}
+          >
+            <option value="">Choose a word</option>
+            {words.map((w) => (
+              <option key={w.position} value={w.position}>
+                #{w.position} {w.text_uthmani}
+              </option>
+            ))}
+          </select>
+        </label>
+        {Array.from({ length: GROUP_SLOTS }, (_, i) => i).map((i) => (
+          <label key={i}>
+            {`Group with ${i + 1}`}
+            <select
+              value={groupPicks[i]}
+              onChange={(e) => {
+                const next = [...groupPicks];
+                next[i] = e.target.value;
+                setGroupPicks(next);
+              }}
+            >
+              <option value="">—</option>
+              {groupCandidates.map((w) => (
+                <option key={w.position} value={w.position}>
+                  #{w.position} {w.text_uthmani}
+                </option>
+              ))}
+            </select>
+          </label>
+        ))}
+        <label>
+          Note (optional)
+          <input type="text" value={groupNote} onChange={(e) => setGroupNote(e.target.value)} />
+        </label>
+        <button
+          type="button"
+          className="btn"
+          onClick={onSubmitGroup}
+          disabled={groupBusy || groupAnchor === "" || !groupPicks.some((v) => v !== "")}
+        >
+          Group words
+        </button>
+        {groupMessage ? (
+          <p className="caption" role="status">
+            {groupMessage}
           </p>
         ) : null}
       </fieldset>

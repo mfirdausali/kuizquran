@@ -11,7 +11,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetApiFetchForTests } from "@/lib/sync/apiFetch";
-import { disableOverride, distractorOverride, glossOverride, submitOverride } from "./write.ts";
+import { disableOverride, distractorOverride, glossOverride, groupOverride, submitOverride } from "./write.ts";
 
 interface Recorded {
   url: string;
@@ -212,6 +212,26 @@ describe("distractorOverride — builds a full-replacement distractor set's wire
     const input = distractorOverride(12, 4, 1, [
       { rank: 1, text: "other", prd_rank: "override", src_type: "admin", why: "admin-selected replacement" },
     ]);
+    expect(input.note).toBeUndefined();
+  });
+});
+
+describe("groupOverride — builds a multi-word idiom grouping's wire shape", () => {
+  it("carries the anchor position and the other member positions, same ayah only", () => {
+    const input = groupOverride(12, 4, 8, [9, 10], "eleven-word idiom");
+    expect(input).toEqual({
+      surah: 12,
+      ayah: 4,
+      position: 8,
+      questionType: "s1",
+      field: "group",
+      payload: { groupWith: [9, 10] },
+      note: "eleven-word idiom",
+    });
+  });
+
+  it("carries no note when omitted, matching gloss/disableOverride's own optionality", () => {
+    const input = groupOverride(12, 4, 8, [9]);
     expect(input.note).toBeUndefined();
   });
 });

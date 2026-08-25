@@ -10,16 +10,16 @@
 // an admin/qari to actually correct a gloss or distractor... workbench signs
 // verifications only, never writes an override." This is that missing UI.
 //
-// Scoped to three fields that need no free-typed Arabic: `gloss` (an
-// English/Malay correction string), `disable` (a boolean toggle over an
-// existing word position, chosen from a dropdown built off the corpus's own
-// `text_uthmani`, never typed) and `distractor` (a full-replacement set
-// built the same way — a target-word dropdown plus up to
+// Scoped to all four override fields, none needing free-typed Arabic:
+// `gloss` (an English/Malay correction string), `disable` (a boolean toggle
+// over an existing word position, chosen from a dropdown built off the
+// corpus's own `text_uthmani`, never typed), `distractor` (a full-
+// replacement set built the same way — a target-word dropdown plus up to
 // `DISTRACTOR_SLOTS` replacement-word dropdowns, each option's label and
-// posted `text` read back out of the corpus prop, never typed). `group`
-// (multi-word idiom grouping) remains deferred, real, separate future
-// work — out of scope here, named so a future run does not mistake the gap
-// for an oversight.
+// posted `text` read back out of the corpus prop, never typed), and, as of
+// this run, `group` (multi-word idiom grouping — an anchor-word dropdown
+// plus up to `GROUP_SLOTS` "group with" dropdowns, both sourced from this
+// ayah's own `words`, never a free-text field).
 //
 // No Arabic literal anywhere in this file: `text_uthmani` fixtures below are
 // synthetic placeholders ("target"/"other"/"third"), matching
@@ -41,6 +41,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 const WORDS: CorpusWord[] = [
   { ayah: 4, position: 1, text_uthmani: "target", lemma: null, root: null, class: null, gloss: { en: "when", ms: null, ja: null }, act: null, sceneImage: null },
   { ayah: 4, position: 2, text_uthmani: "other", lemma: null, root: null, class: null, gloss: { en: "said", ms: null, ja: null }, act: null, sceneImage: null },
+  { ayah: 4, position: 3, text_uthmani: "member", lemma: null, root: null, class: null, gloss: { en: "of", ms: null, ja: null }, act: null, sceneImage: null },
 ];
 
 // The distractor picker's replacement pool spans the WHOLE surah, so this
@@ -350,6 +351,93 @@ describe("OverrideEditor — replacing a distractor set", () => {
     expect(submit.disabled).toBe(true);
 
     fireEvent.change(screen.getByLabelText(/replacement 1/i), { target: { value: "4:2" } });
+    expect(submit.disabled).toBe(false);
+  });
+});
+
+describe("OverrideEditor — grouping words into a multi-word idiom", () => {
+  const realFetch = globalThis.fetch;
+  beforeEach(() => resetApiFetchForTests());
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    vi.restoreAllMocks();
+  });
+
+  it("posts the anchor position and picked member positions, never a typed field", async () => {
+    const calls: Array<{ method: string; body: unknown }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      calls.push({ method, body: init?.body ? JSON.parse(String(init.body)) : null });
+      if (method === "POST") {
+        return jsonResponse(
+          {
+            override: {
+              id: 12, surah: 12, ayah: 4, position: 1, questionType: "s1", field: "group",
+              payload: { groupWith: [2, 3] }, editorId: 3, note: null, createdAt: 1_700_000_000_006,
+            },
+          },
+          201,
+        );
+      }
+      const posted = calls.some((c) => c.method === "POST");
+      return jsonResponse({
+        overrides: posted
+          ? [
+              {
+                id: 12, surah: 12, ayah: 4, position: 1, questionType: "s1", field: "group",
+                payload: { groupWith: [2, 3] }, editorId: 3, note: null, createdAt: 1_700_000_000_006,
+              },
+            ]
+          : [],
+      });
+    }) as unknown as typeof fetch;
+
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} />);
+    await waitFor(() => expect(screen.getByText(/no overrides recorded/i)).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText(/anchor word/i), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText(/group with 1/i), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText(/group with 2/i), { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: /^group words$/i }));
+
+    await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
+    const post = calls.find((c) => c.method === "POST")!;
+    expect(post.body).toMatchObject({
+      surah: 12,
+      ayah: 4,
+      position: 1,
+      field: "group",
+      payload: { groupWith: [2, 3] },
+    });
+
+    await waitFor(() => expect(screen.getByText(/group @1/)).toBeTruthy());
+  });
+
+  it("the anchor word is never offered as its own group-with pick", async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse({ overrides: [] })) as unknown as typeof fetch;
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} />);
+    await waitFor(() => expect(screen.getByText(/no overrides recorded/i)).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText(/anchor word/i), { target: { value: "1" } });
+    const groupWith1 = screen.getByLabelText(/group with 1/i) as HTMLSelectElement;
+    const optionValues = Array.from(groupWith1.options).map((o) => o.value);
+    expect(optionValues).not.toContain("1");
+    expect(optionValues).toContain("2");
+    expect(optionValues).toContain("3");
+  });
+
+  it("cannot submit without an anchor word and at least one group-with pick", async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse({ overrides: [] })) as unknown as typeof fetch;
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} />);
+    await waitFor(() => expect(screen.getByText(/no overrides recorded/i)).toBeTruthy());
+
+    const submit = screen.getByRole("button", { name: /^group words$/i }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+
+    fireEvent.change(screen.getByLabelText(/anchor word/i), { target: { value: "1" } });
+    expect(submit.disabled).toBe(true);
+
+    fireEvent.change(screen.getByLabelText(/group with 1/i), { target: { value: "2" } });
     expect(submit.disabled).toBe(false);
   });
 });

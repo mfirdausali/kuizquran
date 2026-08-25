@@ -53,9 +53,58 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2250 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2255 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 295 v3/api + 111 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1061 apps/web. (v3-D134, 2026-08-25)
+             # + 420 engine + 61 fold-runner + 1066 apps/web. (v3-D135, 2026-08-25)
+             # NOTE (v3-D135): `OverrideEditor` (v3-D125/D126/D134) still had
+             # no write surface for `group` (multi-word idiom grouping) — the
+             # LAST of the four override fields left unbuilt, named across
+             # v3-D126/D129/D130/D131/D134's own "not addressed" lists every
+             # time this file was touched. The READ side was never the gap:
+             # `applyOverrides` has resolved `group` overrides (stamping
+             # `CorpusWord.groupPositions`, read by `ladder.ts`'s S1 pass)
+             # since DATA-1 landed; only `POST /api/overrides` with
+             # `field: "group"` had zero frontend callers. Needs no word-tap,
+             # same proof as distractor's own closure last run: `GroupPayload
+             # #groupWith` is same-ayah-only member positions, narrower than
+             # distractor's whole-surah pool, so the picker is an anchor-word
+             # dropdown plus `GROUP_SLOTS` (3) "group with" dropdowns, both
+             # sourced from THIS AYAH's own `words` — never a free-text
+             # field, never `surahWords`. Fixed: `lib/overrides/write.ts
+             # #groupOverride` (mirrors glossOverride/disableOverride/
+             # distractorOverride, stamps `questionType: "s1"` matching
+             # `ladder.ts`'s S1 consumer) + a new "Group words (idiom)"
+             # fieldset in `OverrideEditor.tsx`, self-excluding the anchor
+             # from its own replacement pool (same discipline
+             # `distractorCandidates` already applies); `summarize()`'s
+             # existing but previously-unreachable `group` branch now also
+             # reports the member count. RED confirmed directly: `git stash`
+             # of the two source files alone (5 new tests kept — 2 in
+             # `write.test.ts`, 3 in `workbench-override-editor.test.tsx`)
+             # failed all 5, the 19 pre-existing cases in those files
+             # unaffected; restored byte-identically, 24/24 green. `TZ=UTC
+             # make test`: 2255 passing (was 2250, +5 — exactly this run's
+             # new tests; no other suite moved). `check-test-floor.mjs`: OK,
+             # 2255 >= floor 1899 (+356 margin). `TZ=UTC make build`: exit 0,
+             # 25 routes (unchanged — renders inside the existing
+             # `/workbench` page). `npx tsc --noEmit`: clean. `npm run
+             # gates`: all green (fonts degraded-but-non-blocking,
+             # pre-existing; boundaries 246 files, unchanged count — no new
+             # production file). `make doctor`: clean. No `v1/**`/`v2/**`
+             # edit. No Arabic codepoint (full diff swept over every Arabic
+             # block + presentation forms via a codepoint-aware scan, zero
+             # matches; every new line addresses a word position, an
+             # anchor/member integer, or a compound key string, never corpus
+             # text — test fixtures use synthetic placeholders
+             # "target"/"other"/"member"/"third", matching the file's own
+             # convention). With this, **all four** override fields
+             # (`gloss`, `disable`, `distractor`, `group`) have a real
+             # admin/qari write surface — the override authoring layer named
+             # across v3-D125/D126/D129/D130/D131/D134 is now complete. NOT
+             # addressed: `GlossDraftsController` (ratification-gated); the
+             # SSR override gap's own leftover items (v3-D132: six
+             # `loadCorpus` callers, `API_BASE_URL`, E-07). See
+             # DECISIONS.md v3-D135.
              # NOTE (v3-D134): `OverrideEditor` (v3-D125/D126) was scoped to
              # `gloss`/`disable` only — `distractor`'s own header named the
              # gap three times over ("needs a word-tap CorpusRef picker...

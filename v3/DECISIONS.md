@@ -8773,3 +8773,107 @@ With this, all three of the override layer's non-`group` fields
 (`gloss`, `disable`, `distractor`) have a real admin/qari write surface —
 the "distractor needs a word-tap picker" deferral that persisted across
 v3-D125/D126/D132 is closed.
+
+### v3-D135 — `OverrideEditor` gains a group (multi-word idiom) picker, closing the LAST deferred override field, named across v3-D126/D129/D130/D131/D134
+
+**Named, not discovered, this run.** `group` (multi-word idiom grouping)
+was the one override field `OverrideEditor` still had no write surface
+for — its own header (v3-D126) named it explicitly: "`group` (idiom
+grouping) is deferred alongside [distractor], both real separate future
+work," and every subsequent run that touched this file (v3-D129, v3-D130,
+v3-D131, v3-D134) repeated the same "NOT addressed" line rather than
+closing it. The READ side was never the gap: `engine/overrides.ts
+#applyOverrides` has resolved `group` overrides since DATA-1 landed —
+`groupLatest`/`groupPositionsByWord` stamp every member position of a
+group with `CorpusWord.groupPositions`, and `ladder.ts`'s S1 pass already
+reads that to probe the group ONCE at its lowest position. Only the WRITE
+surface (`POST /api/overrides`, `field: "group"`) had zero frontend
+callers — `OverridesController::store`'s closed field set has included
+`group` since the override layer shipped (build-plan step 15), fully
+admin-gated and tested on the Laravel side, same as every other field.
+
+**The picker needs no word-tap, same proof as distractor's own closure
+last run.** `GroupPayload#groupWith` is `number[]` — OTHER member
+position(s) in the SAME ayah as the override row's own anchor `position`
+(`engine/overrides.ts`'s own docblock: "the lowest position, the only one
+ever probed standalone in S1" — though `applyOverrides` itself sorts
+`[position, ...groupWith]`, so which member the caller happens to submit
+as the anchor vs. a `groupWith` entry does not change the resolved set).
+Unlike `distractor`'s whole-surah replacement pool, `group` has no
+cross-ayah member key at all, so the picker is narrower still: an
+anchor-word dropdown plus up to `GROUP_SLOTS` (3 — idioms in the launch
+corpus are short, 2-3 words; a wider slot count than `DISTRACTOR_SLOTS`
+would be unused capacity) "group with" dropdowns, both sourced from THIS
+AYAH's own `words` prop only (never `surahWords`).
+
+**Fixed.** `lib/overrides/write.ts` gains `groupOverride(surah, ayah,
+position, groupWith, note?)` — mirrors `glossOverride`/`disableOverride`/
+`distractorOverride` exactly, stamping `questionType: "s1"` (irrelevant to
+group resolution — `applyOverrides` keys group overrides on
+`ayah:position` alone, same as gloss/distractor ignore it — but the server
+still requires the field non-empty; `"s1"` matches `ladder.ts`'s S1 pass,
+the one real consumer of `groupPositions`, and `glossOverride`'s own
+lane-name convention). `OverrideEditor.tsx` gains a new "Group words
+(idiom)" fieldset: an anchor-word dropdown (this ayah's own `words`) plus
+`GROUP_SLOTS` "group with" dropdowns (also `words`, filtered to exclude
+the chosen anchor — grouping a word with itself is meaningless, the same
+self-exclusion discipline `distractorCandidates` already applies).
+`summarize()`'s existing `group` branch (previously a bare `group @N`
+placeholder, never reachable in practice since nothing wrote a group row)
+now reports the member count too (`"group @1 + 2 words"`), matching
+`distractor`'s own `"N replacements"` style.
+
+**NO ARABIC IS WRITTEN, by the same construction as every other field
+already proves.** `groupOverride` posts only integer positions — it has no
+field a caller could type free Arabic into, and the picker renders only
+`<select>`s built from the `words` prop's own `text_uthmani`/`position`,
+never a text input.
+
+**RED confirmed directly:** `git stash` of the two source files
+(`OverrideEditor.tsx`, `write.ts`) alone, all five new tests kept (2 in
+`write.test.ts`, 3 in `test/workbench-override-editor.test.tsx`) — all 5
+failed (2 on `groupOverride is not a function` from the import itself
+failing module resolution, 3 on the new fieldset/labels not existing —
+`getByLabelText(/anchor word/i)`/`getByRole("button", {name: /^group
+words$/i})` throwing `getElementError`), the 19 pre-existing cases across
+both files unaffected. Restored byte-identically (`git diff` empty after
+`git stash pop`); 24/24 green.
+
+`TZ=UTC make test`: **2255 passing** (was 2250, +5 — exactly this run's
+new tests: 2 in `write.test.ts` + 3 in
+`test/workbench-override-editor.test.tsx`; no other suite moved — 255 v2
+vitest + 47 v2/api + 295 v3/api + 111 corpus-compiler + 420 engine + 61
+fold-runner + 1066 apps/web). `check-test-floor.mjs`: OK, 2255 >= floor
+1899 (+356 margin, `TEST-FLOOR` left unmoved). `TZ=UTC make build`: exit
+0, 25 routes (unchanged — no new route; the fieldset renders inside the
+existing `/workbench` page). `npx tsc --noEmit`: clean (`Version 5.9.3`
+confirmed). `npm run gates`: locked-css OK, fonts degraded-but-non-blocking
+(pre-existing, unrelated — Inter ×3 and Source Serif 4 missing),
+boundaries OK (246 files checked, unchanged count — no new production
+file, only edited ones), corpus-morphology OK (3 corpus artifacts, 362
+words, no QAC fields reachable), corpus-glyphs OK (4 corpus artifacts,
+206 distinct codepoints, all mapped). `make doctor`: clean (node
+v22.22.2, php 8.4.19, composer 2.8.12, all env/key checks green).
+
+No `v1/**`/`v2/**` edit: `git status --porcelain -- v1 v2` empty
+immediately before committing (a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff produced by running the suite was reverted first, same
+discipline as every prior entry). No Arabic codepoint introduced: the full
+diff was swept with a Unicode-codepoint-aware scan (not a byte-oriented
+grep, which chokes on the wider presentation-forms ranges) over the
+Arabic, Arabic Supplement, Arabic Extended-A and both Presentation Forms
+Unicode blocks — zero matches; every new/changed line addresses a word
+position, an anchor/member integer, or free EN prose an admin types into
+a note field, never corpus text — and the test fixtures' `text_uthmani`
+values are synthetic placeholders (`"target"`/`"other"`/`"member"`/
+`"third"`), matching this file's own established convention.
+
+**Not addressed, named so a future run doesn't re-discover it as new:**
+`GlossDraftsController` remains gated on the unrecorded ratification;
+role-based UI gating is otherwise unchanged (v3-D131 already closed the
+one live case, `tier: qari`); the SSR override gap's own leftover items
+(v3-D132: six `loadCorpus` callers, `API_BASE_URL`, E-07) are unchanged.
+With this, **all four** override fields (`gloss`, `disable`, `distractor`,
+`group`) have a real admin/qari write surface — the override authoring
+layer named across v3-D125/D126/D129/D130/D131/D134's "not addressed"
+lists is now complete.
