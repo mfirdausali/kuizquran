@@ -8661,3 +8661,115 @@ shape for other, unaffected assertions; rewriting it is a real, separate,
 wider-reaching change, not part of this fix's scope. The SSR override gap
 adjacent items from v3-D132 (six `loadCorpus` callers, `API_BASE_URL`,
 E-07) are all unchanged.
+
+### v3-D134 — `OverrideEditor` gains a distractor-replacement picker, closing the "needs a word-tap CorpusRef picker" gap v3-D125/D126/D132 named three times and left as real, separate future work
+
+**Named, not discovered, this run.** `OverrideEditor`'s own header (v3-D126)
+scoped itself to `gloss` and `disable` only: "`distractor`'s payload is a
+full replacement `CorpusDistractor[]` set, which carries a raw Arabic
+`text` field — writing a free-text box for that would be the exact shape
+`WorkbenchIsland`'s own header already refuses... ship the picker with its
+CorpusRef plumbing intact, not a text input now." v3-D132 repeated it
+verbatim in its own "not addressed" list. `OverridesController::store`
+(`POST /api/overrides`, `field: distractor`) and the engine's own
+`applyOverrides`/`isDistractorPayload` resolution (`overrides.ts`) have
+been built and unit-tested since build-plan step 15 — `distractorLatest`
+keys on `ayah:position` and does a FULL replacement, exactly like
+`gloss`/`disable` already do for their own fields. Only the write SURFACE
+was missing.
+
+**The picker never needed a word-TAP.** Every existing override field
+(`gloss`, `disable`) already resolves its target word through a `<select>`
+built from `words[].text_uthmani`, never a free-text field or a tap
+gesture — `WorkbenchIsland`'s own "cannot type Arabic into any answer
+field" guarantee is about the SPEC EDITOR's answer picker (§22b, a
+genuinely different, still-unbuilt surface: an authored spec's `correct`
+CorpusRef, chosen while building a brand-new question), not about
+`OverrideEditor`'s existing discipline of reading `text_uthmani` back out
+of an already-loaded corpus. A `distractor` override's `text` field needs
+exactly the same thing gloss/disable's own position picker already
+proves works: a dropdown whose OPTIONS are corpus words and whose posted
+value is that word's own `text_uthmani`, never typed. The only genuinely
+new plumbing is that a distractor's replacement pool should span the
+WHOLE SURAH (a visual/semantic/contextual substitute is as likely to come
+from another ayah as the same one — matches NIGHTLY.md's own foil-kernel
+table: "same-root", "other words in the same surah"), and `CorpusWord
+.position` is only unique WITHIN an ayah, so the picker keys candidates
+`${ayah}:${position}` rather than by position alone.
+
+**Fixed.** `lib/overrides/write.ts` gains `distractorOverride(surah, ayah,
+position, distractors, note?)` — mirrors `glossOverride`/`disableOverride`
+exactly, stamping `questionType: "vocab"` (irrelevant to distractor
+resolution, same as gloss ignores it, but the server still requires the
+field non-empty). `OverrideEditor.tsx` gains a new "Replace distractors"
+fieldset: a target-word dropdown (this ayah's own `words`, same as the
+existing two fields) plus `DISTRACTOR_SLOTS` (4, matching
+`options.ts#options()`'s widest eligible pool — the Learn band accepts
+distractors up to `rank: 4` before slicing to the 3 it shows) replacement
+dropdowns, each populated from a NEW `surahWords` prop (the whole surah's
+words, threaded from `WorkbenchIsland`'s existing `corpus.words`) filtered
+to exclude the word currently being replaced — offering a word as its own
+distractor would be self-defeating, and mirrors `pickOptions`'s own `d.text
+!== correct` filter. Rank is assigned by pick order. `summarize()` gains a
+`distractor` branch (`"distractor @N: M replacements"`) so a replaced set
+shows in the existing override list, same as gloss/disable rows already
+do. `group` (multi-word idiom grouping) remains deferred — a smaller,
+rarer surface, real separate future work, not silently dropped.
+
+**NO ARABIC IS WRITTEN, by the same construction as gloss/disable
+already prove.** Every `text` value posted is read back OUT of a
+`CorpusWord` the corpus prop already loaded — `distractorOverride` has no
+field a caller could type free Arabic into, and `OverrideEditor` never
+renders a text input for it, only `<select>`s built from corpus data.
+
+**RED confirmed directly:** `git stash` of the three source files
+(`OverrideEditor.tsx`, `WorkbenchIsland.tsx`, `write.ts`) alone, all five
+new tests kept (2 in `write.test.ts`, 3 in
+`test/workbench-override-editor.test.tsx`) — all 5 failed (2 on
+`distractorOverride is not a function`, 3 on the new fieldset/labels not
+existing — `getByLabelText(/target word/i)` etc. throwing
+`getElementError`), the 14 pre-existing cases in those two files
+unaffected. Restored byte-identically; 19/19 green. One iteration was
+needed on the "posts a full-replacement set" test itself: its first draft
+mocked the refresh GET to always return `overrides: []`, so the
+list-summary assertion (`"2 replacements"`) failed even against the
+correct implementation — fixed by tracking whether a POST had landed yet
+and returning the created row afterward, the same pattern the pre-existing
+gloss-correction test already uses; not a defect in the source under test.
+
+`TZ=UTC make test`: **2250 passing** (was 2245, +5 — exactly this run's
+new tests: 2 in `write.test.ts` + 3 in
+`test/workbench-override-editor.test.tsx`; no other suite moved — 255 v2
+vitest + 47 v2/api + 295 v3/api + 111 corpus-compiler + 420 engine + 61
+fold-runner + 1061 apps/web). `check-test-floor.mjs`: OK, 2250 >= floor
+1899 (+351 margin, `TEST-FLOOR` left unmoved). `TZ=UTC make build`: exit
+0, 25 routes (unchanged — no new route; the fieldset renders inside the
+existing `/workbench` page). `npx tsc --noEmit`: clean. `npm run gates`:
+locked-css OK, fonts degraded-but-non-blocking (pre-existing, unrelated —
+Inter ×3 and Source Serif 4 missing), boundaries OK (246 files checked,
+unchanged count — no new production file, only edited ones),
+corpus-morphology and corpus-glyphs OK.
+
+No `v1/**`/`v2/**` edit: `git status --porcelain -- v1 v2` empty
+immediately before committing (a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff produced by running the suite was reverted first, same
+discipline as every prior entry). No Arabic codepoint introduced: the full
+diff swept over the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks — zero matches; every new/changed line
+addresses a word position, a rank integer, a compound `ayah:position` key
+string, or free EN prose an admin types into a note field, never corpus
+text — and the test fixtures' `text_uthmani` values are synthetic
+placeholders (`"target"`/`"other"`/`"third"`), matching this file's own
+established convention, never a real ayah's bytes.
+
+**Not addressed, named so a future run doesn't re-discover it as new:**
+`group` (multi-word idiom grouping) remains deferred — genuinely smaller
+and rarer than distractor authoring, and still real, separate future work;
+`GlossDraftsController` remains gated on the unrecorded ratification;
+role-based UI gating is otherwise unchanged (v3-D131 already closed the
+one live case, `tier: qari`); the SSR override gap's own leftover items
+(v3-D132: six `loadCorpus` callers, `API_BASE_URL`, E-07) are unchanged.
+With this, all three of the override layer's non-`group` fields
+(`gloss`, `disable`, `distractor`) have a real admin/qari write surface —
+the "distractor needs a word-tap picker" deferral that persisted across
+v3-D125/D126/D132 is closed.

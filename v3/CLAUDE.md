@@ -53,9 +53,54 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2245 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2250 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 295 v3/api + 111 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1056 apps/web. (v3-D133, 2026-08-24)
+             # + 420 engine + 61 fold-runner + 1061 apps/web. (v3-D134, 2026-08-25)
+             # NOTE (v3-D134): `OverrideEditor` (v3-D125/D126) was scoped to
+             # `gloss`/`disable` only — `distractor`'s own header named the
+             # gap three times over ("needs a word-tap CorpusRef picker...
+             # real, separate future work", repeated verbatim by v3-D132)
+             # without noticing gloss/disable's OWN picker — a `<select>`
+             # built from `words[].text_uthmani`, never a free-text field or
+             # a tap — already satisfies the "no typed Arabic" guarantee for
+             # exactly this shape; `WorkbenchIsland`'s "cannot type Arabic
+             # into any answer field" is about the SPEC EDITOR's still-
+             # unbuilt answer picker (§22b, a genuinely different surface),
+             # not about override authoring. Fixed: `lib/overrides/write.ts
+             # #distractorOverride` (mirrors glossOverride/disableOverride)
+             # + a new "Replace distractors" fieldset in `OverrideEditor.tsx`
+             # — a target-word dropdown (this ayah's `words`) plus 4
+             # replacement-word dropdowns sourced from a new `surahWords`
+             # prop (the WHOLE surah, threaded from `WorkbenchIsland`'s
+             # existing `corpus.words`), keyed `${ayah}:${position}` since
+             # `CorpusWord.position` is only unique within an ayah and a
+             # useful replacement may come from elsewhere in the surah (the
+             # foil-kernel table above: same-root, same-surah). Rank =
+             # pick order; the target word is excluded from its own
+             # replacement pool. `group` (idiom grouping) stays deferred —
+             # smaller, rarer, real separate work. RED confirmed directly:
+             # `git stash` of the three source files alone (5 new tests
+             # kept — 2 in `write.test.ts`, 3 in
+             # `workbench-override-editor.test.tsx`) failed all 5, the 14
+             # pre-existing cases in those files unaffected; restored
+             # byte-identically, 19/19 green. `TZ=UTC make test`: 2250
+             # passing (was 2245, +5 — exactly this run's new tests; no
+             # other suite moved). `check-test-floor.mjs`: OK, 2250 >= floor
+             # 1899 (+351 margin). `TZ=UTC make build`: exit 0, 25 routes
+             # (unchanged — renders inside the existing `/workbench` page).
+             # `npx tsc --noEmit`: clean. `npm run gates`: all green (fonts
+             # degraded-but-non-blocking, pre-existing; boundaries 246
+             # files, unchanged count — no new production file). No
+             # `v1/**`/`v2/**` edit. No Arabic codepoint (full diff swept
+             # over every Arabic block + presentation forms, zero matches;
+             # every new line addresses a word position, a rank integer, or
+             # a compound key string, never corpus text — test fixtures use
+             # synthetic placeholders "target"/"other"/"third", matching the
+             # file's own convention). NOT addressed: `group` override
+             # authoring; `GlossDraftsController` (ratification-gated); the
+             # SSR override gap's own leftover items (v3-D132: six
+             # `loadCorpus` callers, `API_BASE_URL`, E-07). See
+             # DECISIONS.md v3-D134.
              # NOTE (v3-D133): B11's own closing note (v3-D101, 2026-08-17)
              # named a gap it deliberately left open — "a session whose only
              # work was a passed gate now shows 0 ayat completed on the

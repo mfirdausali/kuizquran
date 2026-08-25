@@ -15,6 +15,14 @@
 // gloss or distractor... workbench signs verifications only, never writes
 // an override." This module is that missing write half.
 //
+// `distractorOverride` (below) closes the other half of that gap, named
+// deferred by DECISIONS.md v3-D126/D132: "distractor needs a word-tap
+// CorpusRef picker... real separate future work." The picker built for it
+// (`OverrideEditor`) is a dropdown over words the loaded corpus already
+// contains, the same discipline `glossOverride`/`disableOverride` already
+// use for word POSITIONS — never a free-text field, so no keyboard path to
+// typed Arabic opens here either.
+//
 // EGRESS: through `apiFetch` only (check-boundaries.mjs clause 6), same as
 // every other admin write module (`lib/admin/flags.ts`, `lib/workbench/sign.ts`).
 //
@@ -25,6 +33,7 @@
 
 import { apiFetch } from "@/lib/sync/apiFetch.ts";
 import type { OverrideField, QuestionOverride } from "@engine/overrides.ts";
+import type { CorpusDistractor } from "@engine/types.ts";
 
 export interface SubmitOverrideInput {
   surah: number;
@@ -139,4 +148,30 @@ export function disableOverride(
   note?: string,
 ): SubmitOverrideInput {
   return { surah, ayah, position, questionType, field: "disable", payload: { disabled }, note };
+}
+
+/**
+ * Replace one word's distractor set — a FULL replacement, never a merge
+ * (`engine/overrides.ts#DistractorPayload`'s own contract: "not a merge...
+ * each entry omits ayah/position"). `questionType` is irrelevant to
+ * distractor resolution (`applyOverrides` keys distractor overrides on
+ * `ayah:position` alone, same as gloss ignores it) but the server still
+ * requires the field non-empty, so this always stamps `"vocab"` — the
+ * question type `distractorsFor`'s own callers (S1/S2 meaning options) are
+ * shaped around.
+ *
+ * `distractors[].text` must be an EXISTING corpus word's own `text_uthmani`
+ * — this function has no field a caller could type free Arabic into. The
+ * caller (`OverrideEditor`) builds each entry by reading `text_uthmani`
+ * back OUT of the corpus prop the server component already loaded, never
+ * by typing it.
+ */
+export function distractorOverride(
+  surah: number,
+  ayah: number,
+  position: number,
+  distractors: Array<Omit<CorpusDistractor, "ayah" | "position">>,
+  note?: string,
+): SubmitOverrideInput {
+  return { surah, ayah, position, questionType: "vocab", field: "distractor", payload: { distractors }, note };
 }

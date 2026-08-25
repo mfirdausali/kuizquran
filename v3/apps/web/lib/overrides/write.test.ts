@@ -11,7 +11,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetApiFetchForTests } from "@/lib/sync/apiFetch";
-import { disableOverride, glossOverride, submitOverride } from "./write.ts";
+import { disableOverride, distractorOverride, glossOverride, submitOverride } from "./write.ts";
 
 interface Recorded {
   url: string;
@@ -177,5 +177,41 @@ describe("disableOverride — builds a disable/re-enable wire shape", () => {
   it("re-enabling posts disabled:false, an append-only correction — never an edit in place", () => {
     const input = disableOverride(12, 87, 3, "vocab", false);
     expect((input.payload as { disabled: boolean }).disabled).toBe(false);
+  });
+});
+
+describe("distractorOverride — builds a full-replacement distractor set's wire shape", () => {
+  it("carries the target position and the ranked replacement set", () => {
+    const input = distractorOverride(
+      12,
+      4,
+      1,
+      [
+        { rank: 1, text: "other", prd_rank: "override", src_type: "admin", why: "admin-selected replacement" },
+        { rank: 2, text: "third", prd_rank: "override", src_type: "admin", why: "admin-selected replacement" },
+      ],
+      "visually similar surface",
+    );
+    expect(input).toEqual({
+      surah: 12,
+      ayah: 4,
+      position: 1,
+      questionType: "vocab",
+      field: "distractor",
+      payload: {
+        distractors: [
+          { rank: 1, text: "other", prd_rank: "override", src_type: "admin", why: "admin-selected replacement" },
+          { rank: 2, text: "third", prd_rank: "override", src_type: "admin", why: "admin-selected replacement" },
+        ],
+      },
+      note: "visually similar surface",
+    });
+  });
+
+  it("carries no note when omitted, matching gloss/disableOverride's own optionality", () => {
+    const input = distractorOverride(12, 4, 1, [
+      { rank: 1, text: "other", prd_rank: "override", src_type: "admin", why: "admin-selected replacement" },
+    ]);
+    expect(input.note).toBeUndefined();
   });
 });

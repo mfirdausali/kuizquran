@@ -190,7 +190,7 @@ export function WorkbenchIsland({ surah, corpus }: WorkbenchIslandProps) {
         onSigned={() => setFrontierEpoch((n) => n + 1)}
       />
 
-      <OverrideEditor surah={surah} ayah={ayah} words={ayahWords} />
+      <OverrideEditor surah={surah} ayah={ayah} words={ayahWords} surahWords={corpus.words} />
 
       <ExplainTrace explanation={explanation} surah={surah} />
     </div>

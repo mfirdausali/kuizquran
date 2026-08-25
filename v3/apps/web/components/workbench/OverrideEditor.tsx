@@ -12,30 +12,41 @@
 // (`QariMode`) but had no way to actually correct the thing they were
 // looking at. This panel is that missing write surface.
 //
-// SCOPED TO TWO OF THE FOUR OVERRIDE FIELDS, ON PURPOSE. `gloss` (an
-// English/Malay text correction) and `disable` (a boolean toggle over an
-// EXISTING word position, chosen from a dropdown — never typed) both need no
-// free-typed Arabic. `distractor`'s payload is a full replacement
-// `CorpusDistractor[]` set, which carries a raw Arabic `text` field — writing
-// a free-text box for that would be the exact shape `WorkbenchIsland`'s own
-// header already refuses for the spec editor's answer picker ("cannot type
-// Arabic into any answer field — no such field exists... ship the picker
-// with its CorpusRef plumbing intact, not a text input now"). `group` is a
-// smaller, rarer editing surface (multi-word idiom grouping) deferred
-// alongside it. Both remain real, separate, future work — not silently
-// dropped.
+// SCOPED TO THREE OF THE FOUR OVERRIDE FIELDS. `gloss` (an English/Malay
+// text correction), `disable` (a boolean toggle over an existing word
+// position, chosen from a dropdown — never typed) and, as of this run,
+// `distractor` (a full replacement `CorpusDistractor[]` set) all need no
+// free-typed Arabic. `distractor`'s payload carries a raw Arabic `text`
+// field per entry, which is why DECISIONS.md v3-D125/D126/D132 left it
+// unbuilt — but the field does not require a FREE-TEXT box, only a
+// picker: each replacement entry's `text` is read back OUT of an existing
+// corpus word's own `text_uthmani`, exactly the discipline
+// `glossOverride`/`disableOverride` already use for word POSITIONS below.
+// A target-word dropdown (this ayah's own words) plus up to four
+// replacement-word dropdowns (any word in the SURAH, so a visual/semantic/
+// contextual substitute from elsewhere in the surah is choosable, not only
+// same-ayah neighbours) build the full replacement set; nothing is typed.
+// `group` (multi-word idiom grouping) is a smaller, rarer surface and
+// remains deferred, real, separate future work — not silently dropped.
 //
-// NO ARABIC IS WRITTEN HERE. `words[].text_uthmani` is read back OUT of the
-// corpus prop the server component already loaded (same discipline as
-// `lib/test/build.ts`'s own header) — this file supplies not one byte of its
-// own; it only reads position numbers, language codes and free EN/MS prose
-// the admin types into the gloss field (never Arabic).
+// NO ARABIC IS WRITTEN HERE. `words[].text_uthmani`/`surahWords[].text_uthmani`
+// are read back OUT of the corpus prop the server component already loaded
+// (same discipline as `lib/test/build.ts`'s own header) — this file
+// supplies not one byte of its own; it only reads position numbers,
+// language codes, and free EN/MS prose the admin types into the gloss
+// field (never Arabic).
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CorpusWord } from "@engine/types.ts";
 import type { QuestionOverride } from "@engine/overrides.ts";
 import { fetchOverrides } from "@/lib/overrides/fetch.ts";
-import { disableOverride, glossOverride, submitOverride } from "@/lib/overrides/write.ts";
+import { disableOverride, distractorOverride, glossOverride, submitOverride } from "@/lib/overrides/write.ts";
+
+/** How many replacement distractors the picker offers. Matches
+ *  `options.ts#options()`'s widest eligible pool — the Learn band accepts
+ *  distractors up to `rank: 4` before slicing to the 3 it actually shows —
+ *  so a fourth slot is never wasted capacity for any real strength band. */
+const DISTRACTOR_SLOTS = 4;
 
 /** Mirrors `lib/test/build.ts#TestItemKind` — the actual set `isQuestionDisabled`
  *  is checked against at the one real consumer (a learner's Test route). */
@@ -49,10 +60,20 @@ export interface OverrideEditorProps {
   ayah: number;
   /** Already filtered to this ayah by the caller (`WorkbenchIsland`). */
   words: readonly CorpusWord[];
+  /** The WHOLE surah's words — the distractor picker's replacement pool.
+   *  Never filtered to this ayah: a visual/semantic/contextual substitute
+   *  is as likely to come from elsewhere in the surah as from the same
+   *  ayah, and `CorpusWord.position` is only unique WITHIN an ayah, so
+   *  candidates here are always keyed `${ayah}:${position}`. */
+  surahWords: readonly CorpusWord[];
 }
 
 function isDisabledPayload(v: unknown): v is { disabled?: boolean } {
   return typeof v === "object" && v !== null;
+}
+
+function isDistractorListPayload(v: unknown): v is { distractors: unknown[] } {
+  return typeof v === "object" && v !== null && Array.isArray((v as { distractors?: unknown }).distractors);
 }
 
 function summarize(o: QuestionOverride): string {
@@ -67,6 +88,10 @@ function summarize(o: QuestionOverride): string {
     const scope = o.position != null ? `@${o.position}` : "(ayah-wide)";
     return `${disabled ? "disabled" : "re-enabled"} ${o.questionType} ${scope}`;
   }
+  if (o.field === "distractor") {
+    const count = isDistractorListPayload(o.payload) ? o.payload.distractors.length : 0;
+    return `distractor @${o.position ?? "-"}: ${count} replacement${count === 1 ? "" : "s"}`;
+  }
   if (o.field === "group") return `group @${o.position ?? "-"}`;
   return o.field;
 }
@@ -78,7 +103,7 @@ function isActiveDisable(o: QuestionOverride): boolean {
   return o.field === "disable" && (!isDisabledPayload(o.payload) || o.payload.disabled !== false);
 }
 
-export function OverrideEditor({ surah, ayah, words }: OverrideEditorProps) {
+export function OverrideEditor({ surah, ayah, words, surahWords }: OverrideEditorProps) {
   const [rows, setRows] = useState<QuestionOverride[] | null>(null);
 
   const [glossPosition, setGlossPosition] = useState<PositionChoice>("");
@@ -94,6 +119,21 @@ export function OverrideEditor({ surah, ayah, words }: OverrideEditorProps) {
   const [disableNote, setDisableNote] = useState("");
   const [disableBusy, setDisableBusy] = useState(false);
   const [disableMessage, setDisableMessage] = useState<string | null>(null);
+
+  const [distractorTarget, setDistractorTarget] = useState<PositionChoice>("");
+  const [distractorPicks, setDistractorPicks] = useState<string[]>(() => Array(DISTRACTOR_SLOTS).fill(""));
+  const [distractorNote, setDistractorNote] = useState("");
+  const [distractorBusy, setDistractorBusy] = useState(false);
+  const [distractorMessage, setDistractorMessage] = useState<string | null>(null);
+
+  // The replacement pool: every surah word EXCEPT the one currently being
+  // replaced — offering a word as its own distractor would be a
+  // self-defeating correction, and `distractorsFor`'s own consumers
+  // (`options.ts#pickOptions`) already filter `d.text !== correct`.
+  const distractorCandidates = useMemo(
+    () => surahWords.filter((w) => !(w.ayah === ayah && w.position === distractorTarget)),
+    [surahWords, ayah, distractorTarget],
+  );
 
   const refresh = useCallback(() => {
     void (async () => {
@@ -158,6 +198,50 @@ export function OverrideEditor({ surah, ayah, words }: OverrideEditorProps) {
     },
     [surah, refresh],
   );
+
+  const onSubmitDistractor = useCallback(() => {
+    if (distractorTarget === "") return;
+    // Rank = pick order, matching `distractorsFor`'s own "sorted by rank
+    // ascending" contract — the FIRST slot filled is the strongest
+    // (lowest-rank, most-often-served) distractor, not necessarily slot 1
+    // literally, since an admin may leave an earlier slot empty.
+    const chosen = distractorPicks
+      .filter((key) => key !== "")
+      .map((key) => {
+        const [a, p] = key.split(":").map(Number);
+        return surahWords.find((w) => w.ayah === a && w.position === p);
+      })
+      .filter((w): w is CorpusWord => w != null);
+    if (chosen.length === 0) return;
+    setDistractorBusy(true);
+    setDistractorMessage(null);
+    void (async () => {
+      const outcome = await submitOverride(
+        distractorOverride(
+          surah,
+          ayah,
+          distractorTarget,
+          chosen.map((w, i) => ({
+            rank: i + 1,
+            text: w.text_uthmani,
+            prd_rank: "override",
+            src_type: "admin",
+            why: "admin-selected replacement",
+          })),
+          distractorNote.trim() || undefined,
+        ),
+      );
+      setDistractorBusy(false);
+      if (outcome.state === "created") {
+        setDistractorPicks(Array(DISTRACTOR_SLOTS).fill(""));
+        setDistractorNote("");
+        setDistractorMessage("distractors replaced");
+        refresh();
+        return;
+      }
+      setDistractorMessage(outcome.reason);
+    })();
+  }, [surah, ayah, distractorTarget, distractorPicks, distractorNote, surahWords, refresh]);
 
   return (
     <section className="card" aria-labelledby="overrides-h">
@@ -295,6 +379,61 @@ export function OverrideEditor({ surah, ayah, words }: OverrideEditorProps) {
         {disableMessage ? (
           <p className="caption" role="status">
             {disableMessage}
+          </p>
+        ) : null}
+      </fieldset>
+
+      <fieldset className="wb-field">
+        <legend className="caption">Replace distractors</legend>
+        <label>
+          Target word
+          <select
+            value={distractorTarget}
+            onChange={(e) => setDistractorTarget(e.target.value === "" ? "" : Number(e.target.value))}
+          >
+            <option value="">Choose a word</option>
+            {words.map((w) => (
+              <option key={w.position} value={w.position}>
+                #{w.position} {w.text_uthmani}
+              </option>
+            ))}
+          </select>
+        </label>
+        {Array.from({ length: DISTRACTOR_SLOTS }, (_, i) => i).map((i) => (
+          <label key={i}>
+            {`Replacement ${i + 1}`}
+            <select
+              value={distractorPicks[i]}
+              onChange={(e) => {
+                const next = [...distractorPicks];
+                next[i] = e.target.value;
+                setDistractorPicks(next);
+              }}
+            >
+              <option value="">—</option>
+              {distractorCandidates.map((w) => (
+                <option key={`${w.ayah}:${w.position}`} value={`${w.ayah}:${w.position}`}>
+                  {w.ayah}:{w.position} {w.text_uthmani}
+                </option>
+              ))}
+            </select>
+          </label>
+        ))}
+        <label>
+          Note (optional)
+          <input type="text" value={distractorNote} onChange={(e) => setDistractorNote(e.target.value)} />
+        </label>
+        <button
+          type="button"
+          className="btn"
+          onClick={onSubmitDistractor}
+          disabled={distractorBusy || distractorTarget === "" || !distractorPicks.some((k) => k !== "")}
+        >
+          Replace distractors
+        </button>
+        {distractorMessage ? (
+          <p className="caption" role="status">
+            {distractorMessage}
           </p>
         ) : null}
       </fieldset>
