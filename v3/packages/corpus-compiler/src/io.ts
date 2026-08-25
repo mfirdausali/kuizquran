@@ -68,6 +68,12 @@ export interface LoadedInputs {
   /** Vendored mushaf geometry — undefined when this surah has none yet
    * (build-plan step 4). */
   geometry?: RawGeometryVerse[];
+  /** Vendored Tanzil ruku count for this surah — undefined when this surah
+   * has none yet. Feeds `macro.ts#classify()`'s RING rule (v3-D21); an
+   * absent count can never satisfy that rule (see classify's own guard), so
+   * omitting the file degrades to the classifier's existing ARC fallback
+   * rather than crashing. */
+  rukuCount?: number;
   qac: QacData;
   generatedFrom: string[];
 }
@@ -84,6 +90,8 @@ export function loadInputs(surah: number): LoadedInputs {
   const mcqItems = readJsonIfExists<RawMcqItem[]>(resolve(DATA_DIR, `${surah}-mcq-items.json`)) ?? [];
   const mentalModel = readJsonIfExists<RawMentalModel>(resolve(DATA_DIR, `${surah}-mental-model.json`));
   const geometry = readJsonIfExists<RawGeometryVerse[]>(resolve(DATA_DIR, `${surah}-geometry.json`));
+  const rukuFile = readJsonIfExists<{ rukuCount: number }>(resolve(DATA_DIR, `${surah}-ruku.json`));
+  const rukuCount = rukuFile?.rukuCount;
   const qac = parseQac(QAC_PATH);
 
   const generatedFrom = [
@@ -91,9 +99,10 @@ export function loadInputs(surah: number): LoadedInputs {
     ...(mcqItems.length > 0 ? [`v3/packages/corpus-compiler/data/raw/${surah}-mcq-items.json`] : []),
     ...(mentalModel ? [`v3/packages/corpus-compiler/data/raw/${surah}-mental-model.json`] : []),
     ...(geometry ? [`v3/packages/corpus-compiler/data/raw/${surah}-geometry.json`] : []),
+    ...(rukuCount !== undefined ? [`v3/packages/corpus-compiler/data/raw/${surah}-ruku.json`] : []),
     "v3/packages/corpus-compiler/data/raw/quran-morphology.txt (QAC v0.4)",
   ];
-  return { surah, verses, mcqItems, mentalModel, geometry, qac, generatedFrom };
+  return { surah, verses, mcqItems, mentalModel, geometry, rukuCount, qac, generatedFrom };
 }
 
 /** Every surah with vendored Uthmani verse data — the foil-kernel candidate
@@ -155,6 +164,7 @@ export function buildFromInputs(inp: LoadedInputs): CorpusJson {
     mcqItems: inp.mcqItems,
     mentalModel: inp.mentalModel,
     geometry: inp.geometry,
+    rukuCount: inp.rukuCount,
     morph,
     foilPool: buildFoilPool(inp.qac),
     curatedThreads: extras.curatedThreads,

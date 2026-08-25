@@ -8877,3 +8877,133 @@ With this, **all four** override fields (`gloss`, `disable`, `distractor`,
 `group`) have a real admin/qari write surface — the override authoring
 layer named across v3-D125/D126/D129/D130/D131/D134's "not addressed"
 lists is now complete.
+---
+
+## Ratified 2026-08-25 (nightly) — v3-D21's macro classifier finally gets real inputs
+
+### v3-D136 — `macro.ts#classify()`'s RING rule was still undecidable for every real corpus, two weeks after v3-D43 named the exact gap and built the classifier around a promise nothing kept
+
+v3-D43 (2026-08-11) built `classify()` — v3-D21's ATOMIC/RING/LITANY/ARC
+panel classifier — and its own closing note said, in as many words, that
+"only ATOMIC was decidable... every non-ATOMIC surah would silently fall to
+ARC." Ninety-plus later decisions (v3-D82 through v3-D135) swept this
+codebase repeatedly for "mechanism built and unit-tested, zero production
+caller," the exact shape of this gap, and never found it. The reason is
+mechanical: every one of those sweeps grepped for callers *within the
+defining package* (`packages/corpus-compiler`, `packages/engine`,
+`worker/fold-runner`, admin controllers and their own frontend). This
+classifier's real caller — `apps/web/lib/macro/facts.ts#macroFactsFor` —
+lives in a different package entirely and imports `classify` directly from
+source across the monorepo boundary. That caller's own header already named
+the gap explicitly ("WHEN THE COMPILER EMITS `meta.macro`... this module
+reads it directly and the fallback below stops being reachable. That is the
+one-line change; nothing else moves") — so the code was never silent about
+its own incompleteness, it just fell outside where anyone was looking.
+
+Concretely, for the real launch corpus: surah 12 (Yusuf, 111 ayat) has 12
+ruku sections by Tanzil's own numbering — comfortably over v3-D21's `ruku >=
+4` RING threshold — but was rendering its macro panel as ARC, the exact
+failure mode v3-D43's own motivating example named ("the three RING surahs
+... would render as ARC with nobody noticing, because ARC is plausible").
+
+**Fixed the RING half completely, and the refrain half of LITANY for free.**
+Vendored each launch surah's real Tanzil ruku count —
+`data/raw/{12,67,103,112}-ruku.json`, fetched via
+`curl "https://api.quran.com/api/v4/verses/by_chapter/<N>?fields=verse_key,ruku_number&per_page=300"`
+and reduced to the count of distinct GLOBAL `ruku_number` values within the
+surah (that field is a whole-Quran index — Yusuf's first ayah is ruku 193 of
+556 — not a per-surah one), giving 12 / 2 / 1 / 1 respectively, cross-checked
+against the well-known Yusuf/Al-Mulk ruku divisions before being committed.
+Wired through `io.ts#loadInputs` (a new optional `rukuCount` field, the same
+"absent file degrades gracefully" shape geometry/mcqItems/mentalModel
+already follow) → `buildFromInputs` → `buildCorpus.ts`, which now calls
+`classify({ ayahCount, rukuCount, verseTexts })` unconditionally and stamps
+the result onto a new, ALWAYS-present `CorpusMeta.macro` field (`types.ts`).
+Verse texts are threaded through too — verbatim-refrain LITANY (the
+classifier's other rhyme-independent rule) is now fully decidable, at no
+extra vendoring cost. The rhyme-SHARE LITANY limb still needs a
+`rhymeClassOf()` this run did not build (no vendored per-ayah rhyme profile
+exists, and a correct transliteration-only rhyme-class scheme is real,
+separate design work, not a wiring fix) — a genuinely LITANY-by-rhyme surah
+still degrades honestly to ARC (`authored: false`), unchanged from before.
+`evenSegments()`'s existing ring-geometry choice (even partitions, not real
+per-ruku ayah boundaries) is untouched — this fix supplies the COUNT
+`classify()` already knew how to consume, not a new algorithm or a change to
+an already-ratified one.
+
+`macroFactsFor` needed zero source changes: its `if (meta.macro) return
+meta.macro` branch, previously unreachable in production because every real
+corpus lacked the field, is now the live path for every compiled surah. The
+fallback `classify()` call inside it is reachable today only via the frozen
+pre-emission engine fixture (`packages/engine/test/fixtures/12.json`,
+`test/ayah-detail.test.tsx`'s own deliberately-stable, never-regenerated
+source of real Arabic bytes) — confirmed by re-running that file's 42
+pre-existing cases unchanged, 42/42 green.
+
+**Also found, and deliberately left rather than folded into this fix:**
+`components/macro/facts.ts`'s own docblock claims "the test suite asserts
+these two declarations [the compiler's `MacroFacts` and the UI's structural
+mirror of it] stay in agreement" — grep-verified false, no such test exists
+anywhere in the repo. Same "docblock says X, reality is Y" shape as
+v3-D90/D110/D123/D124. Named here rather than fixed: it is a real, separate,
+small gap, and today's job was the classifier's own input wiring.
+
+**RED confirmed directly.** New `corpus-compiler/test/macro-wiring.test.ts`
+(7 cases) was run against the tree before `buildCorpus.ts`/`io.ts`/`types.ts`
+were touched and failed all 7 on `corpus.meta.macro` being `undefined` (one
+early iteration also caught a test-construction bug: spreading
+`LoadedInputs` directly into `buildCorpus()` skips `buildFromInputs()`'s
+morph/foilPool derivation and throws — fixed by calling `buildFromInputs`
+itself, the same function the real compile pipeline calls). Implemented
+after, 7/7 green, 118/118 in the full compiler suite (was 111). A companion
+`apps/web/test/macro-facts.test.ts` (3 cases — this function had ZERO prior
+test coverage) proves `macroFactsFor` returns a present `meta.macro` OBJECT-
+IDENTICAL to what was stamped (not a re-derived copy — the strongest proof
+that the fallback path was skipped entirely) and still falls back correctly
+to ATOMIC/ARC when the field is absent.
+
+`TZ=UTC make test`: **2233 passing** (was 2223, +10 — exactly this run's new
+tests: 7 corpus-compiler + 3 apps/web; no other suite moved).
+`check-test-floor.mjs`: OK, 2233 >= floor 1899 (+334 margin, `TEST-FLOOR`
+left unmoved). `TZ=UTC make build`: exit 0, 25 routes (unchanged — a
+compiler+data change, no new route). `npm run gates`: locked-css OK, fonts
+degraded-but-non-blocking (pre-existing, unrelated), boundaries OK (244
+files, up from 243, one new test file), corpus-morphology OK, corpus-glyphs
+OK (206 codepoints across the four launch surahs, unchanged — `meta.macro`
+carries no Arabic, only an archetype string, a reason string, and integers).
+`npx tsc --noEmit` (via `next build`): clean. No `v1/**`/`v2/**` edit (a
+stray `v2/tsconfig.tsbuildinfo` build-cache diff produced by running the
+suite was reverted before committing, same discipline as every prior entry
+— `git status --porcelain -- v1 v2` empty immediately before commit). No
+Arabic codepoint introduced: the full diff plus all five new files were
+swept over the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks — zero matches; the vendored ruku files
+are bare integers plus a documented, literal `curl` URL, never corpus text.
+
+**A known, honest side effect, not a defect.** Every compiled corpus's
+file-level content hash (`manifest.ts#corpusContentHash16`, which hashes the
+whole serialized artifact byte-for-byte) changes, because `meta.macro` is a
+genuinely new field on every surah. The per-ayah qari/admin VERIFICATION
+hashes (`hash.ts#ayahQariHash`/`ayahAdminHash`, DEFECTS.md#B3) are
+UNCHANGED — grep-verified, they hash specific verse/word/gloss/distractor
+fields only, never the meta object — so no existing sign-off is ambered by
+this. `docs/qa-samples/*.json`'s committed `corpusHash` values will read
+STALE on the next `make content-freeze` after a recompile — the same
+already-designed-for consequence `AL-MULK-SCENE-BEATS.md` documents for
+scene-beat authoring ("Expect to re-sign against the new hash... that is the
+gate working, not breaking"). Nobody has signed against today's uncompiled
+tree (output/ is gitignored, v3-D52), so nothing is retroactively
+invalidated by this commit; a future compile-and-freeze cycle simply needs a
+fresh QA sample and sign-off, as it always would after any corpus content
+change.
+
+**Not addressed, named so a future run doesn't re-discover it as new:**
+`rhymeClassOf()` (the LITANY rhyme-share limb) — real, separate scope,
+needing a vendored per-ayah rhyme profile and a carefully-designed
+transliteration scheme that stays inside Absolute B (a rhyme LABEL must be a
+transliteration string, never Arabic bytes, so the classifier cannot simply
+compare raw normalized letters and surface them); `components/macro/
+facts.ts`'s untested "mirror" docblock claim (above); `GlossDraftsController`
+remains gated on the unrecorded ratification; the SSR override gap's own
+leftover items (v3-D132: six other `loadCorpus` callers, `API_BASE_URL`,
+E-07) are unchanged.

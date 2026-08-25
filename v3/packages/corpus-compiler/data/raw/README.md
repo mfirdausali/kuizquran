@@ -59,3 +59,26 @@ against the corresponding `-verses.json` file before being committed;
 mismatch rather than silently mis-mapping a line number onto the wrong word.
 
 Numbers only — no Arabic text in these files.
+
+## `12-ruku.json`, `67-ruku.json`, `103-ruku.json`, `112-ruku.json`
+
+Per-surah **ruku count** — the input `packages/corpus-compiler/src/macro.ts`'s
+`classify()` needs for its RING rule (v3-D21: "RING is `ruku >= 4`") and which
+v3-D43 built the classifier around but never supplied, so every non-ATOMIC
+surah silently fell to ARC (see v3-D43, and the closing decision that wires
+this file in).
+
+Fetched 2026-08-25 via:
+
+```
+curl "https://api.quran.com/api/v4/verses/by_chapter/<N>?fields=verse_key,ruku_number&per_page=300"
+```
+
+`ruku_number` in that response is the GLOBAL ruku index (Yusuf's first ayah is
+ruku 193 of 556 in the whole Quran, not ruku 1 of Yusuf), so the vendored file
+stores only the count of distinct values within the surah — the single fact
+`classify()`'s `ring.segments` needs (it partitions the surah into that many
+EVEN segments; it does not use real per-ruku boundaries — that is `evenSegments()`'s
+existing, already-ratified behaviour, unchanged by this file). Counts: 12→12,
+67→2, 103→1, 112→1 — cross-checked against the well-known Yusuf/Al-Mulk ruku
+divisions before being committed. Numbers only — no Arabic text.

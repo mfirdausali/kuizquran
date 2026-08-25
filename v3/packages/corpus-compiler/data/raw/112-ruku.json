@@ -1,0 +1,7 @@
+{
+  "surah": 112,
+  "rukuCount": 1,
+  "source": "https://api.quran.com/api/v4/verses/by_chapter/112?fields=verse_key,ruku_number&per_page=300",
+  "method": "count of distinct global ruku_number values across all 4 verses",
+  "fetchedAt": "2026-08-25"
+}

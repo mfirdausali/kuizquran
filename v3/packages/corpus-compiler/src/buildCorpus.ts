@@ -33,6 +33,7 @@ import { ayahToAct, buildSceneBeats } from "./sceneBeats.ts";
 import { mapPrdRank } from "./prdRank.ts";
 import { HASH_SPEC_VERSION } from "./hash.ts";
 import { admitAuthored, generateFoils, type KernelContext, type PoolEntry } from "./foilKernels.ts";
+import { classify } from "./macro.ts";
 
 /** Foils generated per un-authored word. 5 matches the authored surahs' shape
  * (surah 12 ships 5 per word, 4 after a collision drop) and gives the engine's
@@ -55,6 +56,11 @@ export interface BuildInputs {
   /** Vendored mushaf geometry (page/line) — undefined when this surah has
    * none yet (build-plan step 4; edge case #63's degraded mode). */
   geometry?: RawGeometryVerse[];
+  /** Vendored Tanzil ruku count — undefined when this surah has none yet.
+   * Feeds `macro.ts#classify()`'s RING rule (v3-D21); an absent count can
+   * never satisfy that rule (classify's own guard), so an unvendored surah
+   * degrades to the classifier's existing ARC fallback, never a crash. */
+  rukuCount?: number;
   /** Candidate forms the foil kernels may DERIVE distractors from, keyed by
    * engine grading key (see foilKernels.ts `buildPool`). Every entry's
    * `surface` is real corpus bytes. Omitted/empty => no kernel generation, so
@@ -259,12 +265,25 @@ export function buildCorpus(inp: BuildInputs): CorpusJson {
   const lookalikes = buildLookAlikes(surah, verses, inp.curatedThreads ?? []);
   const sceneBeats = mentalModel ? buildSceneBeats(surah, mentalModel.acts, inp.sceneBeatLabels ?? {}) : [];
 
+  // ---- macro-panel classification (v3-D21, wired v3-D43's own named gap) ----
+  // Rhyme-class input is not computed yet (no `rhymeClassOf` exists) — an
+  // absent `rhymeClasses` can never satisfy the LITANY rhyme rule (classify's
+  // own guard), so this degrades honestly to ARC for a surah that would
+  // actually be LITANY, rather than guessing. Verbatim-refrain LITANY (the
+  // classifier's OTHER limb) needs no rhyme data and is fully decided here.
+  const macro = classify({
+    ayahCount,
+    rukuCount: inp.rukuCount,
+    verseTexts: verses.map((v) => v.text_uthmani),
+  });
+
   return {
     meta: {
       surah,
       ayahCount,
       wordCount: wordsOut.length,
       generatedFrom: inp.generatedFrom,
+      macro,
       droppedCollisions,
       distractorsAuthored: mcqItems.length > 0,
       distractorOrigin: { authored: authoredRows, kernel: kernelRows },

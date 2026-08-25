@@ -4,6 +4,8 @@
 // per-row; that is exactly the bug v3/DEFECTS.md#E-01 names — Yusuf ayah 5 and
 // a second surah's ayah 5 must never collide once a second surah exists.
 
+import type { MacroFacts } from "./macro.ts";
+
 /** POS class as reported by QAC's coarse tag: N=noun, V=verb, P=particle. */
 export type WordClass = "N" | "V" | "P";
 
@@ -124,6 +126,11 @@ export interface CorpusMeta {
   ayahCount: number;
   wordCount: number;
   generatedFrom: string[];
+  /** v3-D21's macro-panel classification (ATOMIC/RING/LITANY/ARC), computed
+   * once here from structural facts that never change per-learner — see
+   * `macro.ts#classify()`. Always present: an unclassifiable surah still
+   * gets an honest ARC with `authored: false`, never an absent field. */
+  macro: MacroFacts;
   /** Distractor items whose self-collision was dropped during compile. A
    * collision is now detected with the ENGINE's grading equivalence (NFC +
    * tatweel strip), not byte equality — see foilKernels.ts. */
