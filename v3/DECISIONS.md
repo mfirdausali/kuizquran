@@ -9007,3 +9007,86 @@ facts.ts`'s untested "mirror" docblock claim (above); `GlossDraftsController`
 remains gated on the unrecorded ratification; the SSR override gap's own
 leftover items (v3-D132: six other `loadCorpus` callers, `API_BASE_URL`,
 E-07) are unchanged.
+
+---
+
+### v3-D137 — `components/macro/facts.ts`'s docblock claimed a test asserted the compiler/UI `MacroFacts` mirror agreement; none existed. Now one does.
+
+v3-D136's own "not addressed" list named this exactly: the docblock reads
+"The test suite asserts these two declarations stay in agreement, so the
+mirror cannot drift silently" — grep-verified false, repeated by v3-D136
+rather than fixed because that run's scope was the classifier's input
+wiring, not this. Everything else on BUILD-PLAN's 32-step order is either
+DONE or blocked on a human/calendar item this run cannot move (steps
+27/28 — surah 67 scene beats and the qari sessions; PAY-1 — a live Stripe
+account; step 30's remaining items — a staging host, a live SMTP account,
+seven real elapsed nights), so this run continued the established pattern
+(v3-D82 onward) of sweeping for a real, narrowly-scoped, previously-named
+gap and closing it.
+
+**Why a plain `expect()` cannot check this.** `MacroFacts` is a TypeScript
+interface — erased entirely at compile time. There is no object at runtime
+to inspect for "these two declarations agree"; by the time any code runs,
+both declarations have already become nothing. The only place "agreement"
+is a checkable fact is inside the type checker itself.
+
+**Fixed:** new `apps/web/lib/macro/facts-agreement.test.ts`. A type-only
+import of each declaration (`CompilerMacroFacts` from
+`packages/corpus-compiler/src/macro.ts`, `UIMacroFacts` from
+`components/macro/facts.ts`) feeds a standard strict-type-equality helper
+(the `(<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2)`
+distributive-conditional-invariance trick, which — unlike a two-way
+`extends` assignability check — also catches a field's optionality
+changing on only one side) into an `AssertMacroFactsAgree<T extends true>`
+alias. If the two ever diverge, `Equal<...>` evaluates to `false`, and the
+alias declaration itself fails to compile — `tsc --noEmit` (`make test`'s
+`typecheck-v3` step, which already runs across all of `apps/web` before
+vitest starts) fails on that exact line, naming both declarations, rather
+than on some unrelated cast three files away. The file's `it()` block
+contains no assertion that could ever be false; it exists only so the guard
+is a counted, running test rather than an unreferenced type nobody notices
+went stale. The import is `type`-only, so — unlike `lib/macro/facts.ts`'s
+existing, deliberate, server-only value import of `classify` from the
+compiler — it produces zero runtime bytes and carries none of the "ships
+the classifier to the browser" risk `components/macro/facts.ts`'s own
+header warns against; it would compile away to nothing even if the test
+lived in a client file, which it doesn't.
+
+**Verified RED, not merely asserted.** Added a throwaway
+`__drift_probe_v3D137?: string` field to the UI's `MacroFacts` only, ran
+`npx tsc --noEmit`: exactly one error,
+`lib/macro/facts-agreement.test.ts(40,57): error TS2344: Type 'false' does
+not satisfy the constraint 'true'.` — the guard's own line, not a cascade
+of unrelated failures. Reverted byte-identically (`git diff` empty on
+`components/macro/facts.ts`); `npx tsc --noEmit` clean again. `npx vitest
+run lib/macro/facts-agreement.test.ts`: 1/1 green.
+
+**`TZ=UTC make test`: 2266 passing (was 2265, +1 — exactly this run's one
+new test; no other suite moved).** `check-test-floor.mjs`: OK, 2266 >= floor
+1899 (+367 margin, `TEST-FLOOR` left unmoved, same discipline as every
+prior entry). `TZ=UTC make build`: exit 0, 25 routes (unchanged — no new
+route, no production source file touched, only a new test file). `npm run
+gates`: locked-css OK, fonts degraded-but-non-blocking (pre-existing,
+unrelated), boundaries OK (249 files, up from 248 — exactly the one new
+file), corpus-morphology OK, corpus-glyphs OK (206 codepoints, unchanged —
+this change carries no corpus data at all). `npx tsc --noEmit`: clean.
+
+No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the suite was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2` empty
+immediately before commit). No Arabic codepoint introduced: the new file
+and the temporary mutation were both swept over the Arabic, Arabic
+Supplement, Arabic Extended-A and both Presentation Forms Unicode blocks —
+zero matches; the only string literals in the new file are TypeScript
+identifiers, a docblock, and the literal `"@/components/macro/facts.ts"`
+import specifier already used verbatim by `apps/web/test/macro-facts.test.ts`.
+
+**Not addressed, named so a future run doesn't re-discover it as new:**
+`rhymeClassOf()` (v3-D136's own deferred LITANY rhyme-share limb);
+`GlossDraftsController` (still ratification-gated); the SSR override gap's
+leftover items (v3-D132: six other `loadCorpus` callers, `API_BASE_URL`,
+E-07) — none of these are touched by this entry. With this, every "docblock
+says X, reality is Y" claim this run's own sweep re-checked from
+v3-D90/D110/D123/D124/D136's lists reads true again; a future run should
+pick a fresh gap rather than re-verify this one, the same discipline every
+prior entry in this file follows.

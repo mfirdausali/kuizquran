@@ -53,9 +53,67 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2265 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2266 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 295 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1069 apps/web. (v3-D136, 2026-08-25)
+             # + 420 engine + 61 fold-runner + 1070 apps/web. (v3-D137, 2026-08-25)
+             # NOTE (v3-D137): v3-D136's own "not addressed" list named this
+             # exactly: `components/macro/facts.ts`'s docblock claimed "the
+             # test suite asserts these two declarations [the compiler's
+             # `MacroFacts` and the UI's structural mirror of it] stay in
+             # agreement" — grep-verified false, no such test existed
+             # anywhere. Every other item on BUILD-PLAN's 32-step order is
+             # DONE or human/calendar-blocked (27/28 need surah 67's scene
+             # beats + the qari sessions; PAY-1 needs a live Stripe account;
+             # step 30's remainder needs a staging host, live SMTP, and seven
+             # real elapsed nights), so this run continued the v3-D82-onward
+             # pattern of closing a real, narrowly-scoped, already-named gap.
+             #
+             # `MacroFacts` is erased at compile time, so "the two
+             # declarations agree" has no runtime object to `expect()` — the
+             # only place it is checkable is inside the type checker. New
+             # `apps/web/lib/macro/facts-agreement.test.ts` type-only-imports
+             # both declarations and feeds them into the standard strict
+             # type-equality trick (`(<T>() => T extends A ? 1 : 2) extends
+             # (<T>() => T extends B ? 1 : 2)`, which also catches a lone
+             # field's optionality flipping); a divergence fails `tsc
+             # --noEmit` (`typecheck-v3`, already part of `make test`) right
+             # on that line, naming both declarations. The import is
+             # `type`-only, so — unlike `lib/macro/facts.ts`'s existing,
+             # deliberate, server-only VALUE import of `classify` — it
+             # produces zero runtime bytes and never risks shipping the
+             # classifier to the browser, the exact risk
+             # `components/macro/facts.ts`'s own header warns against.
+             #
+             # RED confirmed directly: added a throwaway
+             # `__drift_probe_v3D137?: string` field to the UI's `MacroFacts`
+             # only, ran `npx tsc --noEmit` — exactly one error, on the
+             # guard's own line (`TS2344: Type 'false' does not satisfy the
+             # constraint 'true'`); reverted byte-identically (`git diff`
+             # empty), clean again. `npx vitest run
+             # lib/macro/facts-agreement.test.ts`: 1/1 green.
+             #
+             # `TZ=UTC make test`: 2266 passing (was 2265, +1 — exactly this
+             # run's one new test; no other suite moved). `check-test-floor.mjs`:
+             # OK, 2266 >= floor 1899 (+367 margin). `TZ=UTC make build`: exit
+             # 0, 25 routes (unchanged — no new route, no production source
+             # file touched). `npm run gates`: locked-css OK, fonts
+             # degraded-but-non-blocking (pre-existing), boundaries OK (249
+             # files, up from 248 — exactly the one new file), corpus-
+             # morphology OK, corpus-glyphs OK (206 codepoints, unchanged —
+             # this change carries no corpus data). `npx tsc --noEmit`:
+             # clean. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted before
+             # committing). No Arabic codepoint (the new file and the
+             # temporary mutation both swept over every Arabic block plus
+             # both Presentation Forms blocks — zero matches; every string in
+             # the new file is a TypeScript identifier, a docblock, or the
+             # `"@/components/macro/facts.ts"` import specifier already used
+             # verbatim by `apps/web/test/macro-facts.test.ts`). NOT
+             # addressed: `rhymeClassOf()` (v3-D136's own deferred LITANY
+             # rhyme-share limb); `GlossDraftsController` (still
+             # ratification-gated); the SSR override gap's leftover items
+             # (v3-D132: six other `loadCorpus` callers, `API_BASE_URL`,
+             # E-07) — all unchanged. See DECISIONS.md v3-D137.
              # NOTE (v3-D136): v3-D43 (2026-08-11) built `macro.ts#classify()`
              # (v3-D21's ATOMIC/RING/LITANY/ARC panel classifier) and its own
              # closing note said so explicitly: "only ATOMIC was decidable...
