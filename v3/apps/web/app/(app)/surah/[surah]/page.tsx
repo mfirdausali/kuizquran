@@ -11,26 +11,15 @@
 // loader with NaN.
 //
 // A SERVER COMPONENT. Corpus is server. The per-ayah strength dots are
-// log-derived and will arrive as a client island (step 19), never from here.
+// log-derived, so the AYAT list below is a client island
+// (`SurahAyahListIsland`) reading the log, exactly like the macro panel's own
+// node data — an RSC has no IndexedDB and would paint every row "Not
+// started" (edge case #72).
 //
-// TODO(build-plan step 7 → M5, WIREFRAME §3 + v3-D21): the macro panel.
-//   - v3-D21 classifies rather than authors: four archetypes, first match
-//     wins — ATOMIC (<= 8 ayat -> NO PANEL; at 3-8 ayat the list already IS
-//     the macro view), RING (ruku >= 4), LITANY (dominant rhyme >= 70% or a
-//     verbatim refrain), ARC (everything else).
-//   - The ring renders CONNECTION atoms as joints, not just ayat (edge case
-//     #90: connection atoms are ~40% of a short surah's memory graph and are
-//     currently unrendered — half the graph invisible).
-//   - Flat 1->N strip fallback when the ring is meaningless at small n
-//     (v2-D29; Al-Kawthar is 3 ayat).
-//   - The ring's documented TEXT ALTERNATIVE is /progress/list (§15) — not
-//     aria-labels bolted onto <circle> elements.
-
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { StubNote } from "@/components/shell/StubNote";
-import { StageBadge } from "@/components/progress/StageBadge";
 import { MacroPanelIsland } from "@/components/macro/MacroPanelIsland";
+import { SurahAyahListIsland } from "@/components/surah/SurahAyahListIsland";
 import { macroFactsFor } from "@/lib/macro/facts.ts";
 import { loadCorpus } from "@/lib/corpus/load.ts";
 
@@ -57,6 +46,10 @@ export default async function SurahPage({
   const corpus = await loadCorpus(surah);
   const ayahCount = corpus?.meta.ayahCount ?? 0;
   const facts = corpus === null ? null : macroFactsFor(corpus);
+
+  // Resolved ONCE and passed down, so every row the ayat list renders decays
+  // to the same instant (the same discipline /progress/list follows).
+  const now = Date.now();
 
   return (
     <div className="screen">
@@ -97,24 +90,14 @@ export default async function SurahPage({
               AYAT
             </h2>
           </div>
-          <nav aria-label={`Ayat of surah ${surah}`}>
-            <Link href={`/surah/${surah}/1`} className="row-link">
-              <span>Ayah 1</span>
-              {/* Never colour alone (§15): the stage carries a text label AND
-                  a number. Rendered through StageBadge, which is the ONLY
-                  stage renderer in the app (#87) — an inline dot here is
-                  exactly the drift that resolution exists to prevent, and
-                  progress-list.test.tsx fails the build if one reappears.
-                  The real values arrive from the engine as data. */}
-              <StageBadge stage="learn" stageLabel="Not started" strengthPct={0} />
-            </Link>
-          </nav>
+          {corpus === null ? (
+            <p className="stub-note">
+              No corpus is available for surah {surah} in this build.
+            </p>
+          ) : (
+            <SurahAyahListIsland corpus={corpus} now={now} />
+          )}
         </section>
-
-        <StubNote step="step 6 (M5/M6), WIREFRAME §3">
-          The full ayah list for this surah, read from the corpus, with each
-          row&apos;s stage and strength arriving from the engine as data.
-        </StubNote>
       </div>
     </div>
   );

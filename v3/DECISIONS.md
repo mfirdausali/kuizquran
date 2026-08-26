@@ -9214,3 +9214,127 @@ gap above was, since `/test`'s self-quiz route may legitimately be the only
 consumer of gloss-language choice if `/session`'s reconstruct loop never
 renders a meaning/gloss question type at all) — none of these are touched
 by this entry.
+
+## Ratified 2026-08-26 (nightly) — `glossLang`'s parallel gap resolved (negative), and `/surah/[surah]`'s ayat list was still the hardcoded stub v3-D76/D96/D110 never replaced
+
+### v3-D139 — the surah page's AYAT list rendered exactly one row, "Ayah 1", for every surah, on every visit — `lib/progress/rows.ts#rowAtomKey`'s own docblock named the intended caller ("Exported for the surah page's own use") that never existed
+
+**First, closing v3-D138's own open item.** v3-D138 flagged, but did not
+independently confirm, "a possible parallel gap in `glossLang`" — the worry
+that `lib/onboarding/choices.ts`'s own docblock claim (`glossLang` →
+`corpus.ts#wordGloss(word, lang)`, "decides which gloss every meaning
+question shows") might have a second, unwired consumer the way `pace` did.
+Traced directly this run: `wordGloss` is called from exactly two engine
+modules, `ladder.ts#s1Options` and `variant.ts`. `ladder.ts`'s own header is
+explicit and was written at the port itself (v3-D25): "S1 meaning items
+never grade strength; see reconstruct.ts... `initLadder`/`s1Options` alone
+are load-bearing: test.ts's live `vocabItem` generator calls them directly."
+`grep -rn s1Options` confirms the only caller anywhere is
+`packages/engine/src/test.ts#vocabItem` — the Self-Quiz item builder — and
+`grep -rn buildTestItems\|TestIsland` confirms `/test` is `vocabItem`'s only
+production route. The real session loop (`lib/session/run.ts`) never calls
+`s1Options`, `buildQuestion`'s `lane: "s1"` branch, or `wordGloss` at all —
+its reconstruct machine grades whole-ayah recall, never a per-word meaning
+question, exactly what `ladder.ts`'s header already says. So `/test` is
+`glossLang`'s sole consumer **by design**, not by an unwired gap: this run's
+sweep closes the worry negatively, the same "genuine negative finding" shape
+as v3-D95/D123/D127's own clean sweeps. No code changed for this half.
+
+**Second, a real gap found by the same sweep.** `/surah/[surah]`
+(`app/(app)/surah/[surah]/page.tsx`) is linked from the dashboard's "MY
+SURAHS" list (`components/home/MySurahs.tsx`) and the library
+(`lib/library/rows.ts`) — a real, currently-reachable route, not a stub
+nobody visits. Its AYAT section hardcoded exactly one `<Link href="/surah/
+{surah}/1">Ayah 1</Link>` with a hardcoded `stage="learn" stageLabel="Not
+started" strengthPct={0}`, followed by a `StubNote` reading "The full ayah
+list for this surah... step 6 (M5/M6)" — regardless of which surah was open
+or how many ayat it actually has. M5 and M6 have been done milestones for
+two weeks. `lib/progress/rows.ts#rowAtomKey`'s own docblock already named
+the intended fix: "Exported for the surah page's own use: the same keying,
+one atom at a time" — `grep -rn rowAtomKey` (excluding its own definition)
+returned nothing anywhere in the app. That caller never existed; a learner
+opening their own surah page, on any of the four launch surahs, saw one
+fabricated "Not started" row no matter how much of the surah they had
+actually carried.
+
+**Fixed:** new `components/surah/SurahAyahListIsland.tsx`
+(`SurahAyahListIsland` + the exported pure `SurahAyahListView`, the same
+island/view split `AyahStatsIsland.tsx#AyahStatsView` already established so
+a test can drive each `LogState` directly without touching real IndexedDB).
+Rather than a second, competing implementation of stage/strength decisions —
+DEFECTS.md#B2's whole point — it reuses `buildProgressRows()` (the one place
+`/progress/list` and the ayah-detail route already trust) and filters to
+`kind === "ayah"`; seam rows are deliberately excluded, since the macro
+panel pinned above this list already renders the ring/joints and this list's
+job is per-ayah navigation, not a second memory-graph rendering. Three
+states, the same discipline as every other log-reading island: `pending` →
+skeletons, never zeros (#73); `empty` → every ayah still gets its own row,
+reading "Not started" honestly rather than being omitted; `broken` → says so
+and names the reason, never a silent fall-back to empty. The page itself
+drops the hardcoded `<Link>`/`StageBadge`/`StubNote` and passes the real
+`corpus` plus a server-resolved `now` (matching `/progress/list`'s own "one
+clock read, so every row decays to the same instant" discipline) to the
+island; the `corpus === null` branch keeps a designed empty state rather
+than crashing (E-07).
+
+**RED confirmed directly:** the new component file (untracked — no `git
+stash` target) was moved aside with its test kept; `npx vitest run
+test/surah-ayah-list.test.tsx` failed on `Failed to resolve import
+"@/components/surah/SurahAyahListIsland"`. Restored byte-identically, 9/9
+green. The load-bearing case seeds 9 real `ayah_produced` events for ayah 3
+of a 4-ayah corpus through the actual engine `rebuild()`/`buildProgressRows`
+pipeline (not a hand-built `ProgressRow`) and asserts the rendered row's
+text does NOT read "Not started" and carries a real `.stage-dot`/label/value
+triple — proving the wiring (log → rows → paint), not a fixture shortcut.
+A separate case asserts the row COUNT equals the corpus's real `ayahCount`
+(parametrized over 1/4/7/10 ayat) rather than any fixed number, so the fix
+cannot regress to a different hardcoded constant and still pass.
+
+**`TZ=UTC make test`: 2281 passing** (was 2272, +9 — exactly this run's new
+`test/surah-ayah-list.test.tsx` cases; no other suite moved — 255 v2 vitest
++ 47 v2/api + 295 v3/api + 118 corpus-compiler + 420 engine + 61 fold-runner
++ 1085 apps/web). `check-test-floor.mjs`: OK, 2281 >= floor 1899 (+382
+margin, `TEST-FLOOR` left unmoved). `TZ=UTC make build`: exit 0, 25 routes
+(unchanged — `/surah/[surah]` already existed; this is a data-flow fix
+inside it, no new route). `npm run gates`: locked-css OK, fonts
+degraded-but-non-blocking (pre-existing, unrelated — Inter/Source Serif
+still unacquired), boundaries OK (251 files, up from 250 — exactly the one
+new component file, no violation), corpus-morphology OK, corpus-glyphs OK
+(206 codepoints, unchanged — this change carries no corpus data). `npx tsc
+--noEmit` (run as part of `next build`): clean.
+
+No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the suite was reverted before committing; `git status
+--porcelain -- v1 v2` empty immediately before commit). No Arabic codepoint
+introduced: the full diff (the page edit, the new component, the new test)
+was swept programmatically over the Arabic, Arabic Supplement, Arabic
+Extended-A and both Presentation Forms Unicode blocks plus a `\u06xx`-class
+escape and `fromCharCode` sweep — zero matches; every new line addresses an
+ayah number, a boolean, or an href/testid string, never corpus text. Every
+Arabic byte the new test's assertions touch arrives at runtime from the real
+`packages/engine/test/fixtures/12.json` corpus fixture, addressed by
+coordinate, matching `progress-list.test.tsx`'s own established convention.
+
+**A process note, recorded because it cost real time this run:** the
+session started with a **detached HEAD** three commits ahead of the locally
+cached `main` ref — the exact "detached HEAD, stale local `main`" shape
+v3-D77 Finding 0 named and v3-D78/D87/D89/D90/D91 each re-hit since. This
+time `origin/main` itself was already current at the detached HEAD's commit
+(`9e85aca`, v3-D138) — a previous run's work had genuinely been pushed, only
+the LOCAL branch ref was stale — so `git fetch origin main` followed by
+`git checkout -B main origin/main` was the correct, non-destructive fix (no
+force-push, nothing to reconcile). Also: this sandbox's `composer install`
+for both Laravel apps intermittently fails to authenticate against GitHub's
+dist-zip API through the proxy and falls back to a `git clone` per package,
+which is slow and can hit composer's own 300s per-process timeout on a large
+package (`phpunit/phpunit` here) — worth a future run's attention if `make
+setup` stalls again; the fix this run used was a plain retry with
+`COMPOSER_PROCESS_TIMEOUT=900`, which succeeded from the partially-warmed
+cache.
+
+**Not addressed, named so a future run doesn't re-discover it as new:**
+`rhymeClassOf()`/the LITANY rhyme-share limb (v3-D136); `GlossDraftsController`
+(ratification-gated); the SSR override gap's leftover items (v3-D132: six
+`loadCorpus` callers, `API_BASE_URL`, E-07) — all unchanged. See DEFECTS.md's
+`permitsIssuance`/`permitsReview` cluster (v3-D88 and 20+ entries since) —
+still correctly left alone as an open product question, not re-flagged here.

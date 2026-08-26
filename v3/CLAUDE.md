@@ -53,9 +53,65 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2272 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2281 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 295 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1076 apps/web. (v3-D138, 2026-08-26)
+             # + 420 engine + 61 fold-runner + 1085 apps/web. (v3-D139, 2026-08-26)
+             # NOTE (v3-D139): `/surah/[surah]`'s AYAT section rendered exactly
+             # one hardcoded row, "Ayah 1", regardless of which surah was open
+             # or how many ayat it has — a real, currently-reachable defect
+             # (this route is linked from the dashboard's "MY SURAHS" list and
+             # the library). `lib/progress/rows.ts#rowAtomKey`'s own docblock
+             # already named the intended caller ("Exported for the surah
+             # page's own use") that never existed. Also closed, negatively:
+             # v3-D138's own flagged-but-unconfirmed `glossLang` worry —
+             # traced directly, `/test` IS gloss-language's sole consumer BY
+             # DESIGN (`ladder.ts`'s own header: S1 meaning items never grade
+             # strength, and `s1Options`'s only caller anywhere is
+             # `test.ts#vocabItem`), not an unwired gap.
+             #
+             # Fixed: new `components/surah/SurahAyahListIsland.tsx`
+             # (island + exported pure `SurahAyahListView`, the same split
+             # `AyahStatsIsland.tsx#AyahStatsView` already established) reuses
+             # `buildProgressRows()` — the one place `/progress/list` and the
+             # ayah-detail route already trust for stage/strength — filtered
+             # to `kind === "ayah"` (seams stay the macro panel's job, not a
+             # second rendering of the same joints). Three states: pending →
+             # skeletons never zeros (#73); empty → every ayah still gets its
+             # own honest "Not started" row, never omitted; broken → says so,
+             # names the reason. The page drops its hardcoded Link/StageBadge/
+             # StubNote and passes the real corpus + a server-resolved `now`.
+             #
+             # RED confirmed directly: the new (untracked) component file
+             # moved aside, test kept — `Failed to resolve import
+             # ".../SurahAyahListIsland"`; restored byte-identically, 9/9
+             # green. The load-bearing case seeds 9 real `ayah_produced`
+             # events through the actual `rebuild()`/`buildProgressRows`
+             # pipeline and asserts the rendered row does NOT read "Not
+             # started" and carries a real stage dot/label/value — proving
+             # the wiring, not a fixture shortcut; a second case asserts the
+             # row COUNT equals the corpus's real `ayahCount` (parametrized
+             # 1/4/7/10), so a regression to a different hardcoded constant
+             # still fails.
+             #
+             # `TZ=UTC make test`: 2281 passing (was 2272, +9 — exactly this
+             # run's new test file; no other suite moved). `check-test-floor.mjs`:
+             # OK, 2281 >= floor 1899 (+382 margin). `TZ=UTC make build`: exit
+             # 0, 25 routes (unchanged — `/surah/[surah]` already existed).
+             # `npm run gates`: locked-css OK, fonts degraded-but-non-blocking
+             # (pre-existing), boundaries OK (251 files, up from 250 — exactly
+             # the one new component file), corpus-morphology OK, corpus-
+             # glyphs OK (206 codepoints, unchanged). `npx tsc --noEmit`
+             # (via next build): clean. No `v1/**`/`v2/**` edit (stray
+             # `v2/tsconfig.tsbuildinfo` reverted before committing). No
+             # Arabic codepoint (full diff swept over every Arabic block plus
+             # both Presentation Forms blocks and a `\u06xx`/`fromCharCode`
+             # sweep — zero matches; every new line addresses an ayah number,
+             # a boolean, or an href/testid string; the test's own Arabic
+             # comes from the real `packages/engine/test/fixtures/12.json`
+             # fixture, addressed by coordinate). NOT addressed: `rhymeClassOf()`
+             # (v3-D136); `GlossDraftsController` (ratification-gated); the
+             # SSR override gap's leftover items (v3-D132) — all unchanged.
+             # See DECISIONS.md v3-D139.
              # NOTE (v3-D138): a fresh sweep for the recurring "mechanism built
              # and unit-tested, zero production caller" bug class (v3-D82
              # onward) found `packages/engine/src/pace.ts` — the Steady/
