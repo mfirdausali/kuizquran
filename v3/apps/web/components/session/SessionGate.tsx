@@ -21,11 +21,12 @@ import { ONBOARDING_HREF } from "@/lib/onboarding/surahs";
 import type { SessionMode } from "@/lib/session/run";
 import type { DrillSpec } from "@/lib/drill/handoff";
 import type { PracticeSpec } from "@/lib/practice/handoff";
+import { DEFAULT_PACE_MODE, type PaceMode } from "@engine/pace.ts";
 
 type State =
   | { kind: "loading" }
   | { kind: "not-enrolled" }
-  | { kind: "ready"; surah: number };
+  | { kind: "ready"; surah: number; pace: PaceMode };
 
 export interface SessionGateProps {
   /** Which queue to drill — the ordinary daily assembly, or FR9's floor
@@ -54,7 +55,7 @@ export function SessionGate({ mode = "full", drill = null, practice = null }: Se
       if (!alive) return;
       setState(
         choices && typeof choices.surah === "number"
-          ? { kind: "ready", surah: choices.surah }
+          ? { kind: "ready", surah: choices.surah, pace: choices.pace ?? DEFAULT_PACE_MODE }
           : { kind: "not-enrolled" },
       );
     })();
@@ -80,5 +81,7 @@ export function SessionGate({ mode = "full", drill = null, practice = null }: Se
     );
   }
 
-  return <SessionIsland surah={state.surah} mode={mode} drill={drill} practice={practice} />;
+  return (
+    <SessionIsland surah={state.surah} pace={state.pace} mode={mode} drill={drill} practice={practice} />
+  );
 }

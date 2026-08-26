@@ -759,17 +759,51 @@ describe("v3-D98 — Door 1, 'extra Learn' after the assembled queue is done", (
   });
 
   it("reports 'nothing left to Learn' once every ayah in the surah is already encoded", async () => {
-    // Surah 112 is small enough that a single natural session already learns
-    // every one of its 4 ayat (see the corpus12 comment above) — the other
-    // half of Door 1's contract: it must not keep offering once there is
-    // genuinely nothing left.
+    // Surah 112 has only 4 ayat, but a single NATURAL session no longer
+    // learns all of them: Steady's own `newAyahCeiling` (v3-D138) caps one
+    // session at exactly one new ayah, by design ("how much the scheduler
+    // hands out per day"). So this seeds every ayah encoded directly — the
+    // same public `append()` a real Carry-band completion uses, mirroring
+    // the virgin-log test above's own ad-hoc `SessionRun` rather than
+    // relying on a session's Learn interleave to reach "everything encoded".
+    // Door 1's contract under test is the OTHER half: it must not keep
+    // offering once there is genuinely nothing left.
     const c = corpus();
-    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
-    if (!started.ok) throw new Error("session must start");
-    const { run } = await playThrough(started.run, c);
-    expect(run.done).toBe(true);
+    for (let ayah = 1; ayah <= 4; ayah++) {
+      await append(
+        {
+          type: "ayah_produced",
+          ts: T0 + ayah,
+          tz: TZ,
+          surah: SURAH,
+          ayah,
+          rung: "S3",
+          structured: true,
+        } as DrillEvent,
+        { now: T0 + ayah, tz: TZ },
+      );
+    }
+    const atoms = rebuild(await getAllEvents());
+    expect([...atoms.values()].filter((a) => a.kind === "ayah").length).toBe(4);
 
-    const offer = await extraLearnOfferFor(run, c, T0 + 10_000);
+    const offer = await extraLearnOfferFor(
+      {
+        surah: SURAH,
+        queue: [],
+        cursor: 0,
+        machine: {} as SessionRun["machine"],
+        startedAt: T0,
+        slips: 0,
+        lastTap: null,
+        done: true,
+        gateSlipped: false,
+        rescaffolding: false,
+        structured: true,
+        openPracticeDrill: null,
+      },
+      c,
+      T0 + 10_000,
+    );
     expect(offer.granted).toBe(false);
     expect(offer.ayah).toBeNull();
     expect(offer.reason).toBe("nothing left to Learn");
@@ -2186,5 +2220,170 @@ describe("cold-success adoption — adoptionOfferFor / acceptAdoption (freeplay.
       (e) => e.type === "ayah_produced" && e.ayah === ayah && e.structured === true,
     ).length;
     expect(structuredAfterSecond).toBe(1);
+  });
+});
+
+// v2-BUG-1 / v3-D138 — the pace dial (`packages/engine/src/pace.ts`) was
+// built to fix "v1's useSession.ts hardcoded budgetMin:8, so Steady and
+// Sprint collapsed to the same drip." `PaceConfig` is real and unit-tested
+// (`pace.test.ts`); onboarding screen 6 lets a learner pick Steady/Sprint/
+// Maintain and `commitOnboarding` persists it — `choices.ts`'s own docblock
+// claims "Every field is consumed by the scheduler." But `assembleFor` never
+// read `OnboardingChoices.pace` back: `cfg` only ever set `learnCandidates`,
+// so `assembleQueue` fell back to its own hardcoded `DEFAULT_BUDGET=8` and
+// `gateTolerance ?? 0` regardless of what the learner chose, and
+// `learnCandidatesFor`'s full list was never clipped by
+// `candidatesForPace`/`newAyahCeiling` at all. A Maintain learner ("doesn't
+// unlock at all") still got new Learn items; a Sprint learner never got the
+// 16-minute budget or the loosened 1-gate tolerance the UI told them they'd
+// picked.
+describe("v3-D138 — pace mode reaches the real session assembly, not just IndexedDB", () => {
+  it("a fresh learner's first session queues exactly ONE new-ayah Learn item under the default (Steady) pace, not every eligible ayah", async () => {
+    // Surah 112 has 4 ayat and ~15 words total — small enough that, before
+    // this fix, ALL FOUR fit inside the scheduler's 8-minute budget with no
+    // ceiling ever applied, so a virgin learner's very first session silently
+    // unlocked the whole surah in one sitting. Steady's own `newAyahCeiling`
+    // is 1 — "how much the scheduler hands out per day."
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+
+    const learnItems = started.run.queue.filter((q) => q.kind === "learn");
+    expect(learnItems.length).toBe(1);
+  });
+
+  it("Maintain pace blocks new Learn even when a real review is due, so the queue is non-empty for a different reason", async () => {
+    // A virgin Maintain-pace queue would be EMPTY (nothing yet due for
+    // review, and Maintain never unlocks new Learn) — `nothing-due`, not a
+    // useful proof that clipping is what's happening. So this teaches ayah 1
+    // for real (an ordinary Learn pass, then its next-day cold gate, both
+    // through the real session loop) and waits until it is genuinely due for
+    // review, so the assembled queue is non-empty on its own — proving
+    // Maintain's `newAyahCeiling: 0` specifically withholds the OTHER three
+    // ayat's new-Learn candidacy, not merely that nothing was due at all.
+    const c = corpus();
+    const taughtAyah = 1;
+    await append(
+      {
+        type: "ayah_produced",
+        ts: T0,
+        tz: TZ,
+        surah: SURAH,
+        ayah: taughtAyah,
+        rung: "S3",
+        structured: true,
+      } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+    const day2 = T0 + 86_400_000;
+    const gateSession = await startSession({ surah: SURAH, now: day2, tz: TZ }, c);
+    if (!gateSession.ok) throw new Error("session must start");
+    await playThrough(gateSession.run, c);
+    const gateResults = (await getAllEvents()).filter((e) => e.type === "gate_result");
+    expect(gateResults.every((e) => e.correct === true)).toBe(true);
+
+    // Many days later, ayah 1's review is genuinely due (real forgetting-risk
+    // decay), and ayah 2-4 remain eligible, un-encoded new-Learn candidates.
+    const muchLater = day2 + 60 * 86_400_000;
+    const maintain = await startSession(
+      { surah: SURAH, now: muchLater, tz: TZ, pace: "maintain" },
+      c,
+    );
+    expect(maintain.ok).toBe(true);
+    if (!maintain.ok) return;
+    expect(
+      maintain.run.queue.some((q) => q.kind === "review" && q.ayah === taughtAyah),
+    ).toBe(true);
+    expect(maintain.run.queue.some((q) => q.kind === "learn")).toBe(false);
+  });
+
+  it("Sprint pace queues up to its 3-ayah ceiling, more than Steady's one", async () => {
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ, pace: "sprint" }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+
+    // Only 4 ayat exist in this surah; Sprint's ceiling (3) is the binding
+    // constraint here, not the corpus running out of candidates.
+    const learnItems = started.run.queue.filter((q) => q.kind === "learn");
+    expect(learnItems.length).toBe(3);
+  });
+
+  it("Steady's strict gate tolerance (0) blocks new Learn while a gate is pending; Sprint's looser tolerance (1) permits it", async () => {
+    const gatedAyah = 1;
+
+    // Seed the state a genuine Carry-band S3 completion leaves behind — the
+    // same wire event a real full production emits — so ayah 1 has a due,
+    // unpassed cold gate the next learning-day. Mirrors the seeding already
+    // used above for "completing a due cold gate...".
+    async function seedDueGate() {
+      await append(
+        {
+          type: "ayah_produced",
+          ts: T0,
+          tz: TZ,
+          surah: SURAH,
+          ayah: gatedAyah,
+          rung: "S3",
+          structured: true,
+        } as DrillEvent,
+        { now: T0, tz: TZ },
+      );
+    }
+
+    const day2 = T0 + 86_400_000;
+    const c = corpus();
+
+    await seedDueGate();
+    const seededAtoms = rebuild(await getAllEvents());
+    expect(seededAtoms.get(atomKey(SURAH, "ayah", gatedAyah))?.gateDueAt).not.toBeNull();
+
+    const steady = await startSession({ surah: SURAH, now: day2, tz: TZ, pace: "steady" }, c);
+    expect(steady.ok).toBe(true);
+    if (!steady.ok) return;
+    expect(steady.run.queue.some((q) => q.kind === "gate" && q.ayah === gatedAyah)).toBe(true);
+    expect(steady.run.queue.some((q) => q.kind === "learn")).toBe(false);
+  });
+
+  it("Sprint's looser gate tolerance (1) permits new Learn alongside the SAME pending gate Steady blocks", async () => {
+    const gatedAyah = 1;
+    await append(
+      {
+        type: "ayah_produced",
+        ts: T0,
+        tz: TZ,
+        surah: SURAH,
+        ayah: gatedAyah,
+        rung: "S3",
+        structured: true,
+      } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+
+    const day2 = T0 + 86_400_000;
+    const c = corpus();
+
+    const sprint = await startSession({ surah: SURAH, now: day2, tz: TZ, pace: "sprint" }, c);
+    expect(sprint.ok).toBe(true);
+    if (!sprint.ok) return;
+    expect(sprint.run.queue.some((q) => q.kind === "gate" && q.ayah === gatedAyah)).toBe(true);
+    expect(sprint.run.queue.some((q) => q.kind === "learn")).toBe(true);
+  });
+
+  it("an omitted pace behaves exactly like explicit Steady — the default is not a fifth, unwritten mode", async () => {
+    const c = corpus();
+    const withDefault = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    if (!withDefault.ok) throw new Error("session must start");
+    const explicitSteady = await startSession(
+      { surah: SURAH, now: T0, tz: TZ, pace: "steady" },
+      // A second, independent read of the SAME log (nothing was appended by
+      // the call above — assembleFor is read-only) must agree exactly.
+      c,
+    );
+    if (!explicitSteady.ok) throw new Error("session must start");
+    expect(explicitSteady.run.queue.map((q) => q.kind)).toEqual(
+      withDefault.run.queue.map((q) => q.kind),
+    );
   });
 });

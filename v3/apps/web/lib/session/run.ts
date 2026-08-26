@@ -84,6 +84,14 @@ import { isSameLearningDay } from "@engine/daybound.ts";
 // `acceptGateDemote` below for why `gateForgiveness`/`demoteToLearn` were
 // UNREACHABLE (not merely unwired) until this run's slip-tracking fix.
 import { gateForgiveness } from "@engine/gate.ts";
+// v2-BUG-1 / v3-D138 — the pace dial (Steady/Sprint/Maintain, `pace.ts`'s own
+// header) was the fix for "v1's useSession.ts hardcoded budgetMin:8, so Steady
+// and Sprint collapsed to the same drip." `PaceConfig` is real and unit-tested
+// (`pace.test.ts`) and `commitOnboarding` persists the learner's chosen mode
+// (`choices.ts`'s own docblock: "Every field is consumed by the scheduler")
+// — but nothing between IndexedDB and `assembleQueue` ever read it back.
+// `assembleFor`, below, is the one place that gap closes: see its own comment.
+import { paceConfig, candidatesForPace, DEFAULT_PACE_MODE, type PaceMode } from "@engine/pace.ts";
 // DEFECTS.md#B2 / v3-D26: gradeClassToWire() is "the ONE function" that may
 // resolve a grading decision to a wire Rung — see its own header. A hardcoded
 // `rung: full ? "S3" : "S2"` here would be B2's exact ternary shape reborn in
@@ -137,6 +145,15 @@ export interface StartInput {
    *  (invariant 5); capturing it here and passing it in is this layer's job. */
   now: number;
   tz: string;
+  /** v3-D138 — the learner's chosen pace (`lib/onboarding/choices.ts`'s
+   *  `OnboardingChoices.pace`), or `DEFAULT_PACE_MODE` ("steady") when the
+   *  caller has none to offer (e.g. a bare `StartInput` from an older test).
+   *  Read only by `assembleFor` below — `startFloorSession`/
+   *  `startDrillSession`/`startOpenPractice` all take a `StartInput` but
+   *  none of them assembles via `assembleQueue`, so none of them consult
+   *  this field; it rides along on the shared type rather than forcing every
+   *  entry point to redeclare it. */
+  pace?: PaceMode;
 }
 
 /** Which queue a session was started from — the ordinary daily assembly, or
@@ -309,12 +326,25 @@ export interface AssembledQueue {
  * Returns `null` when the corpus cannot produce anything — the caller
  * distinguishes that from "nothing due", because a learner cannot tell a
  * missing corpus from a finished day out of one shared empty state.
+ *
+ * ---------------------------------------------------------------------------
+ * PACE (v3-D138)
+ * ---------------------------------------------------------------------------
+ * `pace` defaults to `DEFAULT_PACE_MODE` ("steady") — the same numbers
+ * `scheduler.ts`'s own `DEFAULT_BUDGET`/`gateTolerance ?? 0` fell back to
+ * before this wiring existed, so an omitted pace changes nothing for a
+ * caller that hasn't been updated yet. A supplied pace decides all three of
+ * `ScheduleConfig`'s pace-scoped fields together, from the ONE source
+ * (`pace.ts#paceConfig`), so Steady/Sprint/Maintain can never drift out of
+ * step with each other the way a hand-copied budget number would.
  */
 export async function assembleFor(
-  input: { surah: number; now: number },
+  input: { surah: number; now: number; pace?: PaceMode },
   c: Corpus,
 ): Promise<AssembledQueue | null> {
   const { surah, now } = input;
+  const pace = input.pace ?? DEFAULT_PACE_MODE;
+  const paceCfg = paceConfig(pace);
 
   if (!Array.isArray(c.words) || c.words.length === 0) return null;
 
@@ -337,7 +367,11 @@ export async function assembleFor(
     now,
     lastActiveDay,
     wordCounts,
-    cfg: { learnCandidates: learnCandidatesFor(c, atomsMap) },
+    cfg: {
+      budgetMin: paceCfg.budgetMin,
+      gateTolerance: paceCfg.gateTolerance,
+      learnCandidates: candidatesForPace(learnCandidatesFor(c, atomsMap), pace),
+    },
   });
 
   return { queue, atoms: atomsMap, prior };
@@ -357,9 +391,9 @@ export async function assembleFor(
  * reload look like a fresh sitting.
  */
 export async function startSession(input: StartInput, c: Corpus): Promise<StartResult> {
-  const { surah, now, tz } = input;
+  const { surah, now, tz, pace } = input;
 
-  const assembled = await assembleFor({ surah, now }, c);
+  const assembled = await assembleFor({ surah, now, pace }, c);
   if (!assembled) {
     return { ok: false, unavailable: "no-corpus" };
   }

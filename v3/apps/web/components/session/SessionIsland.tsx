@@ -67,6 +67,7 @@ import type { DrillSpec } from "@/lib/drill/handoff";
 import type { PracticeSpec } from "@/lib/practice/handoff";
 import { formatDuration, type Greeting, type SessionSummary } from "@engine/sessionSummary.ts";
 import type { AdoptionOffer, ExtraLearnGrant, WeakSpot } from "@engine/freeplay.ts";
+import { DEFAULT_PACE_MODE, type PaceMode } from "@engine/pace.ts";
 
 // `summarizeSession`'s own header names this as one of the four facts "the
 // completion screen shows" — the ENGINE decides which of the four buckets an
@@ -88,6 +89,14 @@ export interface SessionIslandProps {
    *  the 2-minute floor session. Decided by the route (`?mode=`), never by
    *  this component. */
   mode?: SessionMode;
+  /** v3-D138 — the learner's chosen pace (Steady/Sprint/Maintain), read by
+   *  `SessionGate` from the onboarding choices and passed straight down.
+   *  Applies only to the ordinary daily assembly (`startSession`, below) —
+   *  the floor session, drills and open practice don't assemble via
+   *  `assembleQueue` and so don't consult it. Defaults to
+   *  `DEFAULT_PACE_MODE` for a caller (or an older test) that has none to
+   *  offer. */
+  pace?: PaceMode;
   /** Step 20 — a continuous drill request from `/drill` (a chosen range or
    *  page + graded/victory-lap), or null for an ordinary session. When present
    *  it takes precedence over `mode`. The ayat and the structured flag are
@@ -117,6 +126,7 @@ type Phase =
 export function SessionIsland({
   surah,
   mode = "full",
+  pace = DEFAULT_PACE_MODE,
   drill = null,
   practice = null,
 }: SessionIslandProps) {
@@ -224,10 +234,9 @@ export function SessionIsland({
                 { surah, now: Date.now(), tz: currentTz(), ayah: practice.ayah, drill: practice.drill },
                 c,
               )
-            : await (mode === "floor" ? startFloorSession : startSession)(
-                { surah, now: Date.now(), tz: currentTz() },
-                c,
-              );
+            : mode === "floor"
+              ? await startFloorSession({ surah, now: Date.now(), tz: currentTz() }, c)
+              : await startSession({ surah, now: Date.now(), tz: currentTz(), pace }, c);
         if (!alive) return;
         if (!started.ok) {
           setPhase({ kind: "unavailable", reason: started.unavailable });

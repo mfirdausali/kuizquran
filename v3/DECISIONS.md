@@ -9090,3 +9090,127 @@ says X, reality is Y" claim this run's own sweep re-checked from
 v3-D90/D110/D123/D124/D136's lists reads true again; a future run should
 pick a fresh gap rather than re-verify this one, the same discipline every
 prior entry in this file follows.
+
+### v3-D138 — the pace dial (Steady/Sprint/Maintain) was persisted by onboarding and read by nobody; the real session ran hardcoded Steady numbers regardless of what the learner picked
+
+v2-BUG-1 was "v1's `useSession.ts` hardcoded `budgetMin:8`, so Steady and
+Sprint collapsed to the same drip" — `packages/engine/src/pace.ts` is that
+fix's v3 port: three real, distinct, unit-tested `PaceConfig`s (Steady
+`{budgetMin:8, newAyahCeiling:1, gateTolerance:0}`, Sprint `{16,3,1}`,
+Maintain `{8,0,0}`). Onboarding screen 6 lets a learner pick one, shows the
+real numbers from `paceConfig()`, and `commitOnboarding` persists it as
+`OnboardingChoices.pace` — `choices.ts`'s own docblock claims flatly "Every
+field is consumed by the scheduler." That claim was false for this field.
+`SessionGate.tsx` read `choices.surah` and threw the rest of `choices` away;
+`lib/session/run.ts#assembleFor` (the ONE place `/session` and `/home`'s due
+count both assemble from, by the module's own design) built
+`assembleQueue`'s `cfg` with `learnCandidates` only — no `budgetMin`, no
+`gateTolerance` — so `assembleQueue` fell back to its own hardcoded
+`DEFAULT_BUDGET=8`/`gateTolerance ?? 0` (Steady's own numbers, which is
+exactly why this went unnoticed for a learner who happened to pick Steady,
+the default) and `candidatesForPace()`/`newAyahCeiling` was never called at
+all, so the Learn-candidate list was never clipped by anyone.
+
+**Concrete, live consequences, not merely theoretical:** a Maintain learner
+("doesn't unlock at all", per `pace.ts`'s own comment) still got new-ayah
+Learn items interleaved into a real session. A Sprint learner never got the
+16-minute budget or the loosened 1-gate tolerance the onboarding screen told
+them they'd picked — they silently ran as Steady. And on a small surah
+(112, 4 ayat / 15 words), Steady's own `newAyahCeiling:1` was never
+enforced either: a virgin learner's very first session unlocked **all
+four** ayat in one sitting, not the one-per-day cadence Steady is supposed
+to be. This was hiding in plain sight in this file's own existing test
+comments (`run.test.ts`'s `corpus12` helper: "Surah 112 has just 4 ayat...
+a fresh learner's very first session already... encodes the whole surah in
+one sitting" — read, at the time, as a fact about the corpus being small,
+not as a symptom of the ceiling never being applied).
+
+**Found by:** a general-purpose sweep (this run's first step) for the
+recurring "mechanism built and unit-tested, zero production caller" bug
+class this build has closed ~50 times over (v3-D82 through v3-D137) —
+`packages/engine/src` had been swept clean before (v3-D123), but
+`pace.ts` was overlooked because its ONE call site,
+`commitOnboarding`/`readChoices`, is real and does write/read the field;
+the gap was one hop further down, in what `assembleFor` did with the value
+once read.
+
+**Fixed**, threaded end to end: `lib/session/run.ts#assembleFor` takes an
+optional `pace` (defaulting to `DEFAULT_PACE_MODE`, i.e. today's implicit
+behavior, so an un-migrated caller changes nothing) and calls
+`paceConfig(pace)` once, feeding `budgetMin`, `gateTolerance` and
+`candidatesForPace(learnCandidatesFor(...), pace)` into `assembleQueue`'s
+`cfg` together — the three fields can no longer drift out of step with each
+other the way separately-hand-copied numbers could. `StartInput` (hence
+`startSession`) gains the same optional `pace`; `startFloorSession`/
+`startDrillSession`/`startOpenPractice` inherit the field on the shared type
+but don't read it, since none of them assembles via `assembleQueue`.
+`lib/home/queue.ts#buildHomeSurah` (the dashboard's due-count oracle, which
+this module's OWN header insists must equal what the session will actually
+serve — "a dashboard that says '5 items due' and then hands over a session
+of 3 has broken the one promise this product makes about its numbers") gets
+the identical `pace` parameter, so the two callers of `assembleFor` cannot
+disagree. `SessionGate.tsx` reads `choices.pace` (defaulting to
+`DEFAULT_PACE_MODE` for a malformed/legacy row, never a throw) and passes it
+to `SessionIsland`, which passes it to `startSession`; `TodaySession.tsx`
+passes the same `choices.pace` to `buildHomeSurah`.
+
+**RED confirmed directly:** `git stash` of the six source files alone (the
+new/edited test files kept) reran the new `run.test.ts` describe block
+("v3-D138 — pace mode reaches the real session assembly") — 4 of 6 cases
+failed exactly as predicted (a fresh Steady session queued 4 learn items,
+not 1; Maintain queued a learn item at all; Sprint capped at 4, not 3;
+Sprint's looser gate tolerance never actually unlocked alongside a pending
+gate Steady also blocked) while the other 2 passed vacuously (an
+omitted-pace-equals-explicit-Steady check, and a Steady-blocks-unlock check
+that was already true by the pre-fix hardcoded default). Restored
+byte-identically; 6/6 green.
+
+**Two pre-existing tests broke on the (correct) behavior change and were
+updated, not weakened:** `run.test.ts`'s own Door-1 test "reports 'nothing
+left to Learn' once every ayah in the surah is already encoded" relied on
+the exact bug this fix closes (its own comment: "a single natural session
+already learns every one of its 4 ayat") — rewritten to seed all four ayat
+encoded directly via the same public `append()` a real completion uses,
+rather than depending on one session's Learn interleave to reach that
+state; the property under test (Door 1 correctly reports nothing left once
+everything really is encoded) is unchanged, only the setup no longer leans
+on unclipped `learnCandidates`. `test/home-today.test.tsx`'s own
+`engineDueCount()` — a deliberately independent second implementation of
+the scheduler call, so the test proves the dashboard agrees with the
+*engine*, not merely with itself — never applied a pace ceiling either
+(pre-dating this fix); it now calls `paceConfig`/`candidatesForPace` the
+same way `assembleFor` does, defaulting to Steady (matching every
+`enroll()` call in that file), so it remains an honest oracle rather than
+a re-legitimized copy of the old bug.
+
+**`TZ=UTC make test`: 2272 passing (was 2266, +6 — exactly this run's six
+new `run.test.ts` cases; the two rewritten tests are net +0, and no other
+suite moved).** `check-test-floor.mjs`: OK, 2272 >= floor 1899 (+373
+margin, `TEST-FLOOR` left unmoved). `TZ=UTC make build`: exit 0, 25 routes
+(unchanged — no new route, this is a data-flow fix inside three existing
+components and two existing library modules). `npm run gates`: locked-css
+OK, fonts degraded-but-non-blocking (pre-existing, unrelated), boundaries
+OK (248 files — unchanged count, since this run added zero new files),
+corpus-morphology OK, corpus-glyphs OK (206 codepoints, unchanged — this
+change carries no corpus data). `npx tsc --noEmit`: clean (`Version 6.0.2`
+confirmed, not a TeX banner).
+
+No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the suite was reverted before committing; `git status
+--porcelain -- v1 v2` empty immediately before commit). No Arabic codepoint
+introduced: the full diff was swept programmatically over the Arabic,
+Arabic Supplement, Arabic Extended-A and both Presentation Forms Unicode
+blocks — zero matches; every changed line addresses a pace mode (a
+closed-set string literal already used throughout this codebase), an ayah
+number, a minute count, or a boolean.
+
+**Not addressed, named so a future run doesn't re-discover it as new:**
+`rhymeClassOf()`/the LITANY rhyme-share limb (v3-D136); `GlossDraftsController`
+(ratification-gated); the SSR override gap's leftover items (v3-D132: six
+`loadCorpus` callers, `API_BASE_URL`, E-07); a possible parallel gap in
+`glossLang` (flagged by this run's own sweep agent as unresolved — worth a
+future run's attention, but NOT independently confirmed the way the pace
+gap above was, since `/test`'s self-quiz route may legitimately be the only
+consumer of gloss-language choice if `/session`'s reconstruct loop never
+renders a meaning/gloss question type at all) — none of these are touched
+by this entry.

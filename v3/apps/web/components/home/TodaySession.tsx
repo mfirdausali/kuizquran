@@ -87,7 +87,12 @@ export function TodaySession() {
         // The clock is captured HERE and passed in. The engine never reaches
         // for `Date.now()` (invariant 5) and neither does `lib/home/queue.ts`;
         // supplying it is the frontend's job.
-        const row = await buildHomeSurah({ surah, corpus, now: Date.now() });
+        //
+        // v3-D138 — `choices.pace` is threaded through so this due count is
+        // the SAME number `startSession` will actually serve; leaving it out
+        // is exactly the "5 due, session serves 3" drift this module's own
+        // header warns against.
+        const row = await buildHomeSurah({ surah, corpus, now: Date.now(), pace: choices.pace });
         if (!alive) return;
         if (!row) {
           setState({ kind: "unavailable", surah });

@@ -42,6 +42,7 @@ import type { Corpus } from "@engine/types.ts";
 import { completedDayIndices, computeStreak } from "@engine/streak.ts";
 import { DEFAULT_DAY_CONFIG } from "@engine/daybound.ts";
 import { floorQueue, floorMinutes } from "@engine/floor.ts";
+import type { PaceMode } from "@engine/pace.ts";
 
 import { assembleFor, type AssembledQueue } from "@/lib/session/run";
 import { OFFERED_SURAHS, surahLabel } from "@/lib/onboarding/surahs";
@@ -124,6 +125,13 @@ export interface BuildHomeSurahInput {
   /** Frontend-captured clock (invariant 5 — the engine never reaches for one,
    *  and neither does this module; the island captures it and passes it in). */
   now: number;
+  /** v3-D138 — the learner's chosen pace, threaded to the SAME `assembleFor`
+   *  `startSession` will assemble from. Omitting this (or passing the wrong
+   *  one) is exactly the drift this module's own header names as the one
+   *  broken promise: "a dashboard that says '5 items due' and then hands
+   *  over a session of 3." Optional only so an untouched caller keeps
+   *  today's behavior (`DEFAULT_PACE_MODE`, `assembleFor`'s own default). */
+  pace?: PaceMode;
 }
 
 /**
@@ -139,9 +147,9 @@ export interface BuildHomeSurahInput {
 export async function buildHomeSurah(
   input: BuildHomeSurahInput,
 ): Promise<HomeSurahRow | null> {
-  const { surah, corpus, now } = input;
+  const { surah, corpus, now, pace } = input;
 
-  const assembled = await assembleFor({ surah, now }, corpus);
+  const assembled = await assembleFor({ surah, now, pace }, corpus);
   if (!assembled) return null;
 
   const dueCount = assembled.queue.length;

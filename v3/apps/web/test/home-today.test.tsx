@@ -45,6 +45,7 @@ import { assembleQueue } from "@engine/scheduler.ts";
 import { completedDayIndices, computeStreak } from "@engine/streak.ts";
 import { DEFAULT_DAY_CONFIG } from "@engine/daybound.ts";
 import { floorQueue, floorMinutes } from "@engine/floor.ts";
+import { paceConfig, candidatesForPace, DEFAULT_PACE_MODE } from "@engine/pace.ts";
 
 import { DB_NAME, append, currentTz, openDb, resetDbForTests, writeLock } from "@/lib/idb";
 import { getEventsForSurah } from "@/lib/idb/read";
@@ -148,8 +149,18 @@ async function addEvent(ev: Partial<DrillEvent> & { ts: number }): Promise<void>
  * This is deliberately a second call to `assembleQueue` rather than a call into
  * `lib/home/queue.ts`: asserting the component agrees with the module it calls
  * would be a tautology. Asserting it agrees with the SCHEDULER is the property.
+ *
+ * v3-D138 — `pace` defaults to `DEFAULT_PACE_MODE` ("steady", matching every
+ * `enroll()` call in this file) and feeds `assembleQueue`'s `budgetMin`/
+ * `gateTolerance`/clipped `learnCandidates` from the SAME `pace.ts#paceConfig`
+ * `lib/home/queue.ts#buildHomeSurah` now reads — an oracle that skipped this
+ * would silently go back to asserting against the pre-fix, unclipped count.
  */
-async function engineDueCount(surah: number, now: number): Promise<number> {
+async function engineDueCount(
+  surah: number,
+  now: number,
+  pace = DEFAULT_PACE_MODE,
+): Promise<number> {
   const prior = await getEventsForSurah(surah);
   const atomsMap = rebuild(prior);
   const wordCounts = new Map<number, number>();
@@ -163,6 +174,7 @@ async function engineDueCount(surah: number, now: number): Promise<number> {
   const learnCandidates = [...new Set(corpus.words.map((w) => w.ayah))]
     .sort((x, y) => x - y)
     .filter((n) => !seen.has(n));
+  const paceCfg = paceConfig(pace);
 
   return assembleQueue({
     surah,
@@ -170,7 +182,11 @@ async function engineDueCount(surah: number, now: number): Promise<number> {
     now,
     lastActiveDay,
     wordCounts,
-    cfg: { learnCandidates },
+    cfg: {
+      budgetMin: paceCfg.budgetMin,
+      gateTolerance: paceCfg.gateTolerance,
+      learnCandidates: candidatesForPace(learnCandidates, pace),
+    },
   }).length;
 }
 

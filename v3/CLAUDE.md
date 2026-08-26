@@ -53,9 +53,79 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2266 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2272 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 295 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1070 apps/web. (v3-D137, 2026-08-25)
+             # + 420 engine + 61 fold-runner + 1076 apps/web. (v3-D138, 2026-08-26)
+             # NOTE (v3-D138): a fresh sweep for the recurring "mechanism built
+             # and unit-tested, zero production caller" bug class (v3-D82
+             # onward) found `packages/engine/src/pace.ts` — the Steady/
+             # Sprint/Maintain pace dial, v2-BUG-1's own fix ("v1's
+             # useSession.ts hardcoded budgetMin:8, so Steady and Sprint
+             # collapsed to the same drip") — had its READ half (onboarding
+             # screen 6 -> `commitOnboarding`) wired but its CONSUMING half
+             # missing: `lib/session/run.ts#assembleFor` built
+             # `assembleQueue`'s `cfg` with `learnCandidates` only, never
+             # `budgetMin`/`gateTolerance`, and never called
+             # `candidatesForPace()` at all — so `choices.ts`'s own docblock
+             # claim ("Every field is consumed by the scheduler") was false
+             # for `pace`. A Maintain learner ("doesn't unlock at all") still
+             # got new Learn items; a Sprint learner never got the 16-minute
+             # budget or the looser 1-gate tolerance; and on the small 112
+             # surah, Steady's own newAyahCeiling:1 was never enforced either
+             # — a virgin learner's first session silently unlocked all 4
+             # ayat at once, hiding in this file's own pre-existing test
+             # comments as "a fact about the corpus being small."
+             #
+             # Fixed end to end: `assembleFor`/`StartInput` gain an optional
+             # `pace` (default `DEFAULT_PACE_MODE`, so an unmigrated caller is
+             # unchanged), feeding `paceConfig(pace)`'s three fields into
+             # `assembleQueue` together so they cannot drift apart;
+             # `lib/home/queue.ts#buildHomeSurah` (the dashboard's due-count,
+             # which must equal what the session actually serves — this
+             # module's own header says so) takes the same parameter;
+             # `SessionGate.tsx`/`TodaySession.tsx` read `choices.pace` and
+             # thread it through `SessionIsland` to `startSession`.
+             #
+             # RED confirmed directly: `git stash` of the six source files
+             # (tests kept) failed 4 of 6 new `run.test.ts` cases exactly as
+             # predicted (Steady queued 4 learn items not 1; Maintain queued
+             # one at all; Sprint capped at 4 not 3; Sprint's looser gate
+             # tolerance never actually unlocked); restored, 6/6 green. Two
+             # PRE-EXISTING tests broke on the (correct) behavior change and
+             # were updated, not weakened: a Door-1 test whose own comment
+             # admitted it relied on "a single natural session already learns
+             # every one of its 4 ayat" now seeds all four directly via the
+             # same public `append()` a real completion uses; and
+             # `test/home-today.test.tsx`'s own independent second
+             # implementation of the scheduler call (`engineDueCount` — kept
+             # deliberately separate from `lib/home/queue.ts` so the test
+             # proves agreement with the ENGINE, not with itself) now applies
+             # the same pace ceiling, so it stays an honest oracle rather than
+             # a re-legitimized copy of the old bug.
+             #
+             # `TZ=UTC make test`: 2272 passing (was 2266, +6 — exactly this
+             # run's six new cases; the two rewritten tests are net +0, no
+             # other suite moved). `check-test-floor.mjs`: OK, 2272 >= floor
+             # 1899 (+373 margin). `TZ=UTC make build`: exit 0, 25 routes
+             # (unchanged — a data-flow fix inside existing components/lib
+             # modules, no new route). `npm run gates`: locked-css OK, fonts
+             # degraded-but-non-blocking (pre-existing), boundaries OK (248
+             # files, unchanged — zero new files this run), corpus-morphology
+             # OK, corpus-glyphs OK (206 codepoints, unchanged). `npx tsc
+             # --noEmit`: clean (`Version 6.0.2` confirmed). No
+             # `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff reverted before committing). No Arabic
+             # codepoint (full diff swept programmatically over every Arabic
+             # block plus both Presentation Forms blocks — zero matches;
+             # every changed line addresses a pace-mode string literal, an
+             # ayah number, a minute count, or a boolean). NOT addressed:
+             # `rhymeClassOf()` (v3-D136); `GlossDraftsController`
+             # (ratification-gated); the SSR override gap's leftover items
+             # (v3-D132); a possible parallel gap in `glossLang` flagged but
+             # NOT independently confirmed by this run's sweep (the `/test`
+             # route may legitimately be gloss-language's only consumer if
+             # `/session` never renders a meaning-question type) — all
+             # unchanged/unconfirmed. See DECISIONS.md v3-D138.
              # NOTE (v3-D137): v3-D136's own "not addressed" list named this
              # exactly: `components/macro/facts.ts`'s docblock claimed "the
              # test suite asserts these two declarations [the compiler's
