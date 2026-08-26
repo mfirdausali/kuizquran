@@ -6,6 +6,7 @@ use App\Http\Controllers\Auth\PasswordResetController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\Admin\AdminAuditController;
 use App\Http\Controllers\Admin\AdminAuthController;
+use App\Http\Controllers\Admin\AdminBillingController;
 use App\Http\Controllers\Admin\AdminRevealController;
 use App\Http\Controllers\Admin\AdminUsersController;
 use App\Http\Controllers\Admin\FlagAuditController;
@@ -109,6 +110,10 @@ Route::middleware('auth:sanctum')->group(function () {
         // The audit viewer (BUILD-PLAN M8's own "nav homes for ... audit
         // viewer"). Read-only — see AdminAuditController's own header.
         Route::get('/audit', [AdminAuditController::class, 'index']);
+
+        // BUILD-PLAN M7's own named deliverable, never built until now: "admin
+        // billing surface." Read-only — see AdminBillingController's own header.
+        Route::get('/billing', [AdminBillingController::class, 'index']);
 
         // System Health (step 24). #167: a failed probe renders `unknown`,
         // never 0 — the console must distinguish "healthy" from "blind".
