@@ -14,6 +14,7 @@
 
 import { AccountExportPanel } from "@/components/settings/AccountExportPanel";
 import { AccountDeletionPanel } from "@/components/settings/AccountDeletionPanel";
+import { AnchorHourPanel } from "@/components/settings/AnchorHourPanel";
 
 export default function SettingsPage() {
   return (
@@ -21,8 +22,19 @@ export default function SettingsPage() {
       <div className="stack">
         <header className="page-head">
           <h1>Account &amp; data</h1>
-          <p className="caption">Export what is recorded, or delete your account.</p>
+          <p className="caption">
+            Your daily anchor, what is recorded, and deleting your account.
+          </p>
         </header>
+
+        <section className="card" aria-labelledby="anchor-h">
+          <div className="card-header">
+            <h2 id="anchor-h" style={{ margin: 0, fontSize: 12, fontWeight: 600 }}>
+              YOUR DAILY ANCHOR
+            </h2>
+          </div>
+          <AnchorHourPanel />
+        </section>
 
         <section className="card" aria-labelledby="export-h">
           <div className="card-header">

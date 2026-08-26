@@ -18,6 +18,7 @@ use App\Http\Controllers\ContentFreezeController;
 use App\Http\Controllers\EventsController;
 use App\Http\Controllers\GlossDraftsController;
 use App\Http\Controllers\OverridesController;
+use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\SpecsController;
 use App\Http\Controllers\VerificationsController;
 use Illuminate\Support\Facades\Route;
@@ -53,6 +54,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/auth/register', [AuthController::class, 'register']);
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::get('/me', [AuthController::class, 'me']);
+
+    // The one persisted learner preference (v3-D140): the daily anchor hour
+    // already round-trips on every identity response — this is its write path.
+    Route::get('/settings', [SettingsController::class, 'show']);
+    Route::post('/settings', [SettingsController::class, 'update']);
 
     Route::get('/email/verify/{id}/{hash}', [EmailVerificationController::class, 'verify'])
         ->middleware(['signed', 'throttle:6,1'])

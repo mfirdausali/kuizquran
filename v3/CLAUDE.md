@@ -53,9 +53,72 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2281 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 295 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1085 apps/web. (v3-D139, 2026-08-26)
+make test    # 2299 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 302 v3/api + 118 corpus-compiler
+             # + 420 engine + 61 fold-runner + 1096 apps/web. (v3-D140, 2026-08-26)
+             # NOTE (v3-D140): the daily anchor hour (`daybound.ts#anchorTime()`,
+             # `User.anchor_hour`, `AuthController`'s `anchorHour` field on every
+             # identity response) has existed since build-plan steps 5/13 with no
+             # write path anywhere in `v3/api` and no reader anywhere in
+             # `apps/web` — the value was silently discarded on arrival
+             # (`apiFetch.ts#mintAnonymous` parses it into `AnonymousIdentity`
+             # and never reads it again). Found by a fresh sweep of areas the
+             # prior ~50 "built and tested, zero production caller" runs
+             # (v3-D82 through v3-D139) had not explicitly checked clean:
+             # `corpus-compiler/src`, `api/app` outside `Http/Controllers`, and
+             # a full export sweep of `apps/web/lib`+`components`. Confirmed
+             # via grep that `cfg.anchorHour` has exactly one reader anywhere in
+             # `packages/engine/src` (`anchorTime()` itself) — it genuinely does
+             # not change what the scheduler does tomorrow, which is why this
+             # stayed OUT of onboarding: `lib/onboarding/choices.ts`'s own
+             # header requires every captured field to "name the engine
+             # function that consumes it," and this one doesn't.
+             #
+             # Fixed as a Settings-only preference, deliberately not a new
+             # onboarding screen or a notification feature (the landing page's
+             # own FAQ promises "no guilt notifications... a reminder that they
+             # failed" — this run built no delivery mechanism of any kind, only
+             # a stored preference and a display of it): new
+             # `SettingsController` (`GET`/`POST /api/settings`, a near-verbatim
+             # port of v2's own controller of the same name) +
+             # `lib/settings/anchorHour.ts` (the `apiFetch`-only client,
+             # mirroring `lib/account/api.ts`'s never-throws discipline) + a new
+             # `AnchorHourPanel` card added to the existing `/settings` page.
+             # `ANCHOR_CHOICES` (six secular, no-prayer-name time labels) is
+             # ported verbatim from v2's `session/anchor.ts`.
+             #
+             # RED confirmed at all three layers: backend (`SettingsController`
+             # moved aside + the two new route lines reverted, test kept) —
+             # 404 on all 7 new PHPUnit cases; the fetch client (`anchorHour.ts`
+             # moved aside, test kept) — module-resolution failure on all 6; the
+             # component (`AnchorHourPanel.tsx` moved aside, the 5 new cases in
+             # `test/settings-ui.test.tsx` kept) — module-resolution failure on
+             # all 5. Each restored byte-identically and reran green. The
+             # load-bearing component case proves a rejected save keeps
+             # reporting the PREVIOUS confirmed value, never the failed
+             # attempt — a bug this run's own first draft had, caught and fixed
+             # during authoring before any test ran against it.
+             #
+             # `TZ=UTC make test`: 2299 passing (was 2281, +18 — exactly this
+             # run's new tests: 7 PHPUnit + 6 + 5 vitest; no other suite moved).
+             # `check-test-floor.mjs`: OK, 2299 >= floor 1899 (+400 margin).
+             # `TZ=UTC make build`: exit 0, 25 routes (unchanged — `/settings`
+             # already existed, this adds a card not a route). `npm run gates`:
+             # locked-css OK, fonts degraded-but-non-blocking (pre-existing),
+             # boundaries OK (253 files, up from 250 — exactly the three new
+             # apps/web files), corpus-morphology OK, corpus-glyphs OK (206
+             # codepoints, unchanged). `npx tsc --noEmit`: clean. No
+             # `v1/**`/`v2/**` edit (stray `v2/tsconfig.tsbuildinfo` reverted
+             # before committing). No Arabic codepoint (every new/changed file
+             # swept over the Arabic, Arabic Supplement, Arabic Extended-A and
+             # both Presentation Forms blocks — zero matches; every new line
+             # addresses an hour, an English label ported verbatim from v2's
+             # own copy, a boolean, or an href/testid string, never corpus
+             # text). NOT addressed: `rhymeClassOf()` (v3-D136);
+             # `GlossDraftsController` (ratification-gated); the SSR override
+             # gap's leftover items (v3-D132); v2's "anchor adherence" admin
+             # metric — v3 has no `AdminMetrics` equivalent at all, porting one
+             # is real, separate, larger scope. See DECISIONS.md v3-D140.
              # NOTE (v3-D139): `/surah/[surah]`'s AYAT section rendered exactly
              # one hardcoded row, "Ayah 1", regardless of which surah was open
              # or how many ayat it has — a real, currently-reachable defect

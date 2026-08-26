@@ -9338,3 +9338,126 @@ cache.
 `loadCorpus` callers, `API_BASE_URL`, E-07) — all unchanged. See DEFECTS.md's
 `permitsIssuance`/`permitsReview` cluster (v3-D88 and 20+ entries since) —
 still correctly left alone as an open product question, not re-flagged here.
+
+### v3-D140 — the daily anchor hour had no write path anywhere in `v3/api`, and the value it already round-trips on every identity response was silently discarded by every reader
+
+A fresh sweep for this build's recurring "mechanism built and tested, zero
+production caller" class (v3-D82 through v3-D139, ~50 instances) checked the
+areas the prior 50 sweeps had not explicitly confirmed clean —
+`packages/corpus-compiler/src`, `api/app` outside `Http/Controllers`, and a
+full `export function|const|class` pass over `apps/web/lib` + `components`.
+Nearly everything resolved to a real caller or a documented, deliberately
+excluded gap (`rhymeClassOf()`, `GlossDraftsController`, the SSR override
+leftovers, PAY-1). One genuine, previously undiscussed instance remained:
+`packages/engine/src/daybound.ts#anchorTime()` — "epoch-ms of today's session
+anchor" — has real test coverage (`daybound-tz.test.ts`) and zero callers
+anywhere outside that file. `grep -rn "anchorTime\|anchorHour"
+packages/engine/src/*.ts` (excluding tests) confirms `cfg.anchorHour` has
+exactly one reader in the whole engine: `anchorTime()` itself. It genuinely
+does not change what the scheduler does tomorrow — `dayStart`/
+`learningDayIndex`/everything the scheduler actually calls reads
+`cfg.rolloverHour` only.
+
+**The backend and DB halves were real but write-less.** `api/app/Models/
+User.php` has carried a persisted `anchor_hour` column (default `4.5`) since
+the Laravel skeleton (build-plan step 13); `AuthController::anonymous()`/
+`login()`/`me()` have returned `anchorHour` on every identity response for
+just as long. `apps/web/lib/sync/apiFetch.ts`'s own `AnonymousIdentity` type
+has declared `anchorHour?: number` since it was written — but `mintAnonymous()`
+only ever reads `body.token`; `anchorHour` is parsed into the type and then
+dropped on the floor. `grep -rn "anchorHour" apps/web` outside that one type
+declaration and its test mock: zero production reads. There was also no
+route to CHANGE it: `grep -rn "anchor" v3/api/routes/api.php` before this run
+returned nothing — the value could only ever read its own DB-level default.
+
+**Why this was never flagged before, across 139 prior decisions:** it is
+genuinely absent from DECISIONS.md, DEFECTS.md and `docs/WIREFRAME.md`/
+`BUILD-PLAN.md` — none of them mention "anchor" at all. v2 had the full
+feature (`v2/api/app/Http/Controllers/SettingsController.php`,
+`v2/src/session/anchor.ts`'s `ANCHOR_CHOICES`, an onboarding "anchor" screen
+in `v2/src/onboarding/Onboarding.tsx`, and an admin "anchor adherence"
+metric in `AdminMetrics.php`) but v3 ported only the lowest layers (the pure
+engine function at step 5, the User column + AuthController fields at step
+13) and never made a decision either way about the rest.
+
+**Scope, decided deliberately narrow, and why.** `lib/onboarding/choices.ts`'s
+own header is explicit about what onboarding may capture: "every member has
+to name the engine function that consumes it... if a question doesn't
+change what the engine does tomorrow, it isn't asked" — and the grep above
+proves `anchorHour` doesn't. Porting v2's onboarding "anchor" screen would
+directly contradict that documented rule. The landing page's own FAQ
+(`lib/landing/copy.ts`) separately promises "no guilt notifications, because
+a person who missed three days needs a way back in, not a reminder that
+they failed" — so this run built NO notification/reminder delivery of any
+kind (there is none anywhere in this app to hook into) and the panel's own
+copy says so explicitly, rather than silently implying one. What this run
+DID build: `SettingsController` (`GET`/`POST /api/settings`, a near-verbatim
+port of v2's — same validation, same shape), `lib/settings/anchorHour.ts`
+(the `apiFetch`-only client, mirroring `lib/account/api.ts`'s never-throws
+discipline) and a new `AnchorHourPanel` card on the existing `/settings`
+page (chosen over a new onboarding screen or a new route — `/settings` is
+the one place in this app already scoped to "things about you, not the
+scheduler," alongside PDPA export/delete). `ANCHOR_CHOICES` — the six
+secular, no-prayer-name time labels (D16/D34) — is ported verbatim from
+v2's `session/anchor.ts`.
+
+**Verified, three layers, RED confirmed on each before green:**
+- Backend: with `SettingsController.php` moved aside AND `routes/api.php`'s
+  two new route lines reverted (the test file kept), `SettingsTest` failed
+  all 7 new cases on 404 (route did not exist); restoring both together,
+  17/17 green in the fuzzy-matched filter run (7 new + 10 pre-existing
+  `StripeSettingsTest` cases, unaffected).
+- Frontend fetch client: moving `lib/settings/anchorHour.ts` aside (test
+  kept) failed the whole file on module resolution (`Failed to load url
+  ./anchorHour.ts`); restored, 6/6 green.
+- Component: moving `components/settings/AnchorHourPanel.tsx` aside (the 5
+  new cases in `test/settings-ui.test.tsx` kept) failed the whole file on
+  module resolution; restored, 15/15 green (5 new + 10 pre-existing
+  `AccountExportPanel`/`AccountDeletionPanel` cases, unaffected).
+
+The load-bearing component case is the "failed save keeps reporting the
+PREVIOUS saved value" test: the `View` union's `saved` field is populated
+only from a confirmed read or a confirmed write, never from the in-flight
+attempt, specifically so a rejected `updateAnchorHour` call cannot make the
+UI claim a value the server never actually stored. This run's own first
+draft of the component carried exactly that bug (the error state stored the
+ATTEMPTED hour, not the last-known-good one) — caught and fixed during
+authoring, before the component was ever run against a test, by re-reading
+the draft against this same failure mode; the test above exists so a future
+regression to that shape fails for real rather than relying on another
+author noticing it again by inspection.
+
+`TZ=UTC make test`: **2299 passing** (was 2281, +18 — exactly this run's new
+tests: 7 PHPUnit (`SettingsTest`) + 6 (`anchorHour.test.ts`) + 5
+(`AnchorHourPanel` cases in `settings-ui.test.tsx`); no other suite moved).
+`check-test-floor.mjs`: OK, 2299 >= floor 1899 (+400 margin, `TEST-FLOOR`
+left unmoved, same discipline as every prior entry). `TZ=UTC make build`:
+exit 0, 25 routes (unchanged — `/settings` already existed; this adds a
+card, not a route). `npm run gates`: locked-css OK, fonts degraded-but-
+non-blocking (pre-existing), boundaries OK (253 files, up from 250 —
+exactly the three new `apps/web` files: `anchorHour.ts`, its test, and
+`AnchorHourPanel.tsx` — `SettingsController.php`/its PHPUnit test live under
+`v3/api`, which this gate does not scan), corpus-morphology OK, corpus-
+glyphs OK (206 codepoints, unchanged — this change carries no corpus data).
+`npx tsc --noEmit`: clean.
+
+No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+was reverted before committing; `git status --porcelain -- v1 v2` empty
+immediately before commit). No Arabic codepoint introduced: every new/changed
+file (the two new PHP files, the three new `apps/web` files, and the two
+edited files) was swept programmatically over the Arabic, Arabic Supplement,
+Arabic Extended-A and both Presentation Forms Unicode blocks — zero matches;
+every new line addresses an hour (a float), a label string ("Early morning"
+… "Before sleep", ported verbatim from v2's own English labels), a boolean,
+or an href/testid string, never corpus text.
+
+**Not addressed, named so a future run doesn't re-discover it as new:**
+`rhymeClassOf()` (v3-D136); `GlossDraftsController` (ratification-gated);
+the SSR override gap's leftover items (v3-D132); v2's "anchor adherence"
+admin metric (`AdminMetrics.php`) — v3 has no `AdminMetrics` equivalent at
+all, porting one is real, separate, larger scope, not part of this fix; the
+onboarding "anchor" screen itself, deliberately, per the scope note above —
+all unchanged/not built. See DEFECTS.md — no defect entry opened for this
+one; it is a port omission closed directly, not a live-corrupting bug, so
+DECISIONS.md alone records it, matching the precedent E-05's reclassification
+note set for a finding that is real but isn't defect-shaped.

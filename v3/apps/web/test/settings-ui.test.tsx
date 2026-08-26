@@ -24,6 +24,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { fireEvent } from "@testing-library/dom";
 import { AccountExportPanel } from "@/components/settings/AccountExportPanel";
 import { AccountDeletionPanel } from "@/components/settings/AccountDeletionPanel";
+import { AnchorHourPanel } from "@/components/settings/AnchorHourPanel";
 
 interface Recorded {
   url: string;
@@ -214,6 +215,72 @@ describe("AccountDeletionPanel — request, then restore in the SAME session", (
     const status = await screen.findByRole("status");
     expect(status.textContent).toContain("Deletion scheduled for");
     expect(status.textContent).not.toContain("secret");
+  });
+});
+
+describe("AnchorHourPanel (v3-D140)", () => {
+  it("LOADING then IDLE — the picker is not offered until the real value is known", async () => {
+    queue.push({ status: 200, body: { anchorHour: 8 } });
+    render(<AnchorHourPanel />);
+
+    expect(screen.queryByRole("button", { name: /after breakfast/i })).toBeNull();
+    expect(await screen.findByRole("button", { name: /after breakfast/i })).toBeTruthy();
+    expect(recorded).toEqual([{ url: "/api/settings", method: "GET", body: undefined }]);
+  });
+
+  it("UNAVAILABLE on a failed read — no picker, and the reason is shown", async () => {
+    queue.push({ status: 500, body: {} });
+    render(<AnchorHourPanel />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Could not read your daily anchor");
+    expect(screen.queryByRole("button", { name: /evening/i })).toBeNull();
+  });
+
+  it("marks the currently saved hour as pressed, not merely highlighted", async () => {
+    queue.push({ status: 200, body: { anchorHour: 13 } });
+    render(<AnchorHourPanel />);
+
+    const midday = await screen.findByRole("button", { name: /^midday$/i });
+    expect(midday.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: /evening/i }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
+  });
+
+  it("choosing a new anchor POSTs exactly that hour and re-renders it as saved", async () => {
+    queue.push({ status: 200, body: { anchorHour: 8 } });
+    queue.push({ status: 200, body: { ok: true, anchorHour: 20 } });
+    render(<AnchorHourPanel />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^evening$/i }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^evening$/i }).getAttribute("aria-pressed")).toBe(
+        "true",
+      ),
+    );
+    const postCall = recorded.find((r) => r.method === "POST");
+    expect(postCall).toEqual({ url: "/api/settings", method: "POST", body: { anchorHour: 20 } });
+  });
+
+  it("a failed save keeps reporting the PREVIOUS saved value, never the rejected attempt", async () => {
+    queue.push({ status: 200, body: { anchorHour: 8 } });
+    queue.push({ status: 400, body: { error: "anchorHour (number, 0-24) required" } });
+    render(<AnchorHourPanel />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^evening$/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Could not save your anchor");
+    // The original choice (8 = "after breakfast") is still the pressed one —
+    // the rejected "evening" attempt never became the displayed truth.
+    expect(
+      screen.getByRole("button", { name: /after breakfast/i }).getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(screen.getByRole("button", { name: /^evening$/i }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
   });
 });
 
