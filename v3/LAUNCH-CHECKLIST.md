@@ -530,10 +530,21 @@ scheduling was never written".
 
 Two named, still-open sub-gaps inside this gate:
 
-- **The pager is not wired.** v3-D18 says a `fold_determinism` P1 "pages by
-  email, not phone". `DeterminismCheckCommand` logs at error level and records
-  the P1 permanently in the ledger, but **no mail dispatch exists** — there is
-  no operational mailer configured. A P1 at 3am currently pages nobody.
+- **The pager CODE is wired (v3-D82); live delivery is not.** ~~The pager is
+  not wired~~ — **stale as of v3-D82 (2026-08-13), corrected here at v3-D144.**
+  v3-D18 says a `fold_determinism` P1 "pages by email, not phone".
+  `DeterminismCheckCommand::record()` calls `pageOnCall()`, which sends
+  `App\Mail\DeterminismP1Alert` to `config('nightly.pager_emails')` (defaults
+  to `ADMIN_EMAILS`) for every recorded P1 — proven by
+  `tests/Feature/Nightly/DeterminismP1PagerTest.php` (5 tests, mutation-
+  verified). What is still genuinely open: no real SMTP account/config exists
+  in this sandbox (Laravel's `mail` driver defaults to `log`, swappable to
+  `smtp` by env — a production deploy needs that env set), and BUILD-PLAN Q12
+  ("who carries the 3am pager") remains an unratified open question — the
+  code pages a configured allowlist, not a named human. A P1 today logs at
+  error level and lands in the ledger permanently either way; it pages nobody
+  only because nothing in this sandbox HAS a live mailbox to receive it, not
+  because the send-mail code path is missing.
 - ~~**Per-user advisory locks remain deferred**~~ **CLOSED (v3-D116,
   2026-08-21).** `App\Support\PerUserFoldLock` wraps both
   `AtomCacheRebuilder::rebuild()` and `DeterminismCheckCommand`'s DB-sampling

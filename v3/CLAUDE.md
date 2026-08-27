@@ -56,6 +56,21 @@ make dev     # SPA :5273, API :8000
 make test    # 2359 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 323 v3/api + 118 corpus-compiler
              # + 420 engine + 61 fold-runner + 1135 apps/web. (v3-D143, 2026-08-27)
+             # NOTE (v3-D144, 2026-08-27): `LAUNCH-CHECKLIST.md` gate 20 and
+             # `routes/console.php`'s own `onFailure` comment both still said
+             # "no mail dispatch exists... no operational mailer configured"
+             # for the P1 pager — false since v3-D82 (2026-08-13), which built
+             # `DeterminismCheckCommand::record()`'s real `pageOnCall()` +
+             # `App\Mail\DeterminismP1Alert`, proven by
+             # `DeterminismP1PagerTest.php`. Both documents corrected to say
+             # what actually remains: a live SMTP account/config in
+             # production and BUILD-PLAN Q12 (who is on call), not the
+             # send-mail code. Documentation-only; test/build numbers
+             # unchanged. A fresh zero-caller sweep across engine/api/apps-web
+             # found nothing else safely in scope (see DECISIONS.md v3-D144
+             # for the full write-up, incl. a ruled-out B6-shaped hypothesis
+             # on `test.ts#isCorrectChoice` and the confirmed-real-but-out-
+             # of-scope `EntitlementMachine::merge()` gap).
              # NOTE (v3-D143): the 7-consecutive-green-nights window
              # (BUILD-PLAN M10's launch gate, `NightlyWindowLedger::status()`)
              # was readable only via `php artisan nightly:window` on a

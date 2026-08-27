@@ -9672,3 +9672,124 @@ have a real admin-facing reader; what remains genuinely open for the 7-night
 window is calendar and infrastructure (a host running `schedule:run`, live
 staging data, seven elapsed real days, and `nightly:window --start` itself),
 none of which is a wiring gap this run could close.
+
+---
+
+## Ratified 2026-08-27 (nightly) — two launch-facing documents still claimed the P1 pager "does not exist" — 14 decisions after v3-D82 built it
+
+### v3-D144 — `LAUNCH-CHECKLIST.md` gate 20 and `routes/console.php`'s own `onFailure` comment both said "no mail dispatch exists... no operational mailer configured", contradicting `DeterminismCheckCommand::record()`'s real `pageOnCall()` since v3-D82
+
+This run started, per NIGHTLY.md's rule, by re-deriving state from `git log`
+and the repo rather than trusting NIGHTLY.md's own stale "Phase 0 complete as
+of `283dab8`" line — the exact trap v3-D77 Finding 0 already named. HEAD was
+detached at `df312e6` (v3-D143), 14 commits ahead of the checked-out local
+`main` (`1a9c055`, v3-D130) — a pure fast-forward, not diverged history. Fast-
+forwarded `main` to `df312e6` and pushed; `git fetch origin main` then showed
+`origin/main` was ALREADY at `df312e6` — the local clone's remote-tracking ref
+was simply stale from checkout, not a repeat of v3-D77's lost-push scenario.
+No commit was needed for that step, only `git push` (a no-op) and a fetch to
+confirm. `TZ=UTC make test` (2359 passing) and `TZ=UTC make build` (exit 0, 26
+routes) both re-confirmed green on that commit before anything else proceeded.
+
+**The sweep.** All 32 build-plan steps are DONE or human/calendar/infra-gated
+(27/28: surah 67 scene beats + qari sessions, HANDOVER.md §C; 30: a staging
+host, a live SMTP account, and seven elapsed real days). `DEFECTS.md` has no
+open entry except PAY-1 (needs a live Stripe account) and E-07 (correctly
+open — no multi-surah dashboard exists). Repeated this build's own established
+"mechanism built and tested, zero production caller" sweep independently
+across `packages/engine/src` (every exported function/const cross-referenced
+against `apps/web` + `worker` + `api`), `v3/api/app/Support` + `app/Jobs`,
+`v3/api/app/Http/Controllers` (every controller has a route), and `apps/web`
+components/lib (a filename-based orphan scan) — all came back clean, matching
+v3-D113's/v3-D127's own "the seam is exhausted" findings for those trees.
+`placement.ts` (FR10) remains the one known, deliberately-unwired cluster,
+unchanged since v3-D111 named it a design choice, not a wiring gap.
+
+**One hypothesis investigated and ruled out, recorded so a future run doesn't
+re-open it as new:** `test.ts#isCorrectChoice` grades cloze/junction items
+with raw `choice === item.correct` on Arabic corpus text — structurally the
+same shape as DEFECTS.md#B6's string-match grading. Traced end to end:
+unlike `reconstruct.ts`'s pre-fix defect (where `item.correct` came from a
+FRESH, independent `pickOptions` call at grade time, separate from whatever
+the UI happened to render), `TestIsland.tsx`'s `mcqDisplay` is a pure
+permutation of `current.options` (`perm.map(i => current.options[i])`), and
+`handleMcqTap`'s `choice` is always `displayed[displayIndex]` — literally one
+of `item.options[]`'s own entries, byte-identical, never re-derived. Since
+`item.correct` IS `item.options[0]` by construction (`clozeItem`/
+`junctionTestItem`/`vocabItem` all build `options: [correct, ...distractors]`),
+`choice === item.correct` can only ever diverge from the component's own
+already-computed `correctIndex === 0` if the SAME array entry somehow
+stringifies differently on two reads within one render — not a real risk in
+this codebase. No fix made; no test added, since there is no counter-example
+to write one against.
+
+**The two real, small, confirmed staleness bugs, found by checking every
+document a human or a future nightly run would actually read against gate
+20's real code state, rather than trusting an older run's prose**:
+
+1. `v3/api/routes/console.php`'s `onFailure` block comment (written before
+   v3-D82) said: "there is no mailer configured for operational alerts in
+   this repo, and inventing one here would produce a pager nobody receives."
+   False since 2026-08-13 — `DeterminismCheckCommand::record()` calls a real
+   `pageOnCall()` that sends `App\Mail\DeterminismP1Alert` to
+   `config('nightly.pager_emails')` for every recorded P1, proven by
+   `tests/Feature/Nightly/DeterminismP1PagerTest.php` (5 tests, mutation-
+   verified at v3-D82 itself). Nobody had touched this comment across the 61
+   decisions since.
+2. `LAUNCH-CHECKLIST.md` gate 20's own bullet said the identical thing:
+   "`DeterminismCheckCommand` logs at error level and records the P1
+   permanently in the ledger, but **no mail dispatch exists** — there is no
+   operational mailer configured. A P1 at 3am currently pages nobody." Same
+   false claim, in the document this build's own launch-readiness judgement
+   is supposed to rest on — the exact kind of "gate document doesn't reflect
+   reality" risk this build has repeatedly caught in code (v3-D90's
+   `sync.ts` header, v3-D110's `fetch.ts` header, v3-D123's two false
+   docblocks, v3-D124's `ContentFreezeController` header) but had not yet
+   caught in its OWN gate tracking document.
+
+**Why this is worth a run, not a one-line footnote:** a stale "the pager
+doesn't exist" claim sitting in the actual launch checklist risks a future
+run (agent or human) re-implementing `DeterminismP1Alert` from scratch, or —
+worse — understating how close gate 20 actually is by conflating "no live
+SMTP account in this sandbox" (genuinely infra-gated) with "the send-mail
+code was never written" (false since v3-D82). Both documents now say
+precisely what remains: a real SMTP account/config in production, and
+BUILD-PLAN Q12 ("who carries the 3am pager") — still an unratified open
+question with no named human, which `pager_emails`'s `ADMIN_EMAILS` fallback
+answers with a working default, not a ratified decision.
+
+**Verified:**
+- `php -l v3/api/routes/console.php`: no syntax errors (comment-only edit,
+  inside a `/* ... */` block already used for prose elsewhere in this file).
+- `TZ=UTC make test`: **2359 passing** (unchanged from this run's own
+  pre-change baseline — a documentation-only change touches no test file and
+  no source file `vitest`/`phpunit` collect from). `check-test-floor.mjs`:
+  OK, 2359 >= floor 1899 (+460 margin, unmoved). `TZ=UTC make build`: exit 0,
+  26 routes (unchanged). `npm run gates` (run as part of `make build`):
+  locked-css OK, boundaries OK (266 files, unchanged — no source file
+  touched), corpus-morphology OK, corpus-glyphs OK (206 codepoints,
+  unchanged).
+- No `v1/**`/`v2/**` edit. No Arabic codepoint introduced: both edited files
+  swept over the Arabic, Arabic Supplement, Arabic Extended-A and both
+  Presentation Forms Unicode blocks — zero matches; every changed line is
+  English prose about a mailer, a config key, or a decision number.
+
+**Not addressed, named so a future run doesn't re-discover it as new:**
+`rhymeClassOf()` (v3-D136); `GlossDraftsController` (ratification-gated); the
+SSR override gap's leftover items (v3-D132 — re-verified clean again this run:
+`DrillPicker.tsx`/`PracticePicker.tsx` render no `gloss`/`distractor` text,
+confirmed by direct grep, so the six remaining `loadCorpus` SSR callers are
+still not a live bug); `EntitlementMachine::merge()` — the account-adoption
+merge job (v3-D88..D94's own repeated deferral) — traced this run to a real,
+reachable gap: `AuthController::register()`'s `Rule::unique('users','email')`
+means a learner adopting an email that already belongs to ANOTHER account
+(edge case #113) gets a bare 422, never reaches `merge()` at all. Left
+unbuilt deliberately: a real fix means migrating one user's events/
+atom_cache/entitlement rows onto another user's id under a mutex, which is
+genuine BUILD-PLAN M6 scope this build has consistently (and correctly)
+treated as needing its own careful design pass, not a single-night wiring
+fix — rushing it risks the append-only event log itself (invariant #2) on
+the one path that touches two users' histories at once. The operational
+mailer's remaining gap (a live SMTP account, gate 20) and the 7-night window
+(calendar + a host) are unchanged, now accurately described in both
+documents above.

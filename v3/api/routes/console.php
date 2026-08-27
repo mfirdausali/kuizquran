@@ -43,12 +43,19 @@ Artisan::command('inspire', function () {
 | scheduler from even queueing a second one while a long run is in flight.
 |
 | ── onFailure ──
-| v3-D18: "A fold_determinism P1 pages by email, not phone." The MAIL side of
-| that is M3 infra and is not wired — there is no mailer configured for
-| operational alerts in this repo, and inventing one here would produce a
-| pager nobody receives. What IS wired: a non-zero exit is logged at error
-| level, and the ledger row records the P1 permanently. The gap is named in
-| LAUNCH-CHECKLIST rather than hidden behind a green schedule entry.
+| v3-D18: "A fold_determinism P1 pages by email, not phone." STALE UNTIL
+| v3-D144 — this comment previously said "there is no mailer configured...
+| inventing one here would produce a pager nobody receives", which stopped
+| being true at v3-D82: `DeterminismCheckCommand::record()`'s own
+| `pageOnCall()` already sends `App\Mail\DeterminismP1Alert` to
+| `config('nightly.pager_emails')` for every recorded P1 — see
+| `tests/Feature/Nightly/DeterminismP1PagerTest.php`. What genuinely remains
+| BLOCKED-ON-INFRA (gate 20) is a real SMTP account/config in production and
+| BUILD-PLAN Q12 (who is actually on call) — not the send-mail code path,
+| which this comment wrongly implied for over 60 decisions' worth of runs.
+| `onFailure` here additionally logs at error level as a same-process,
+| no-network-dependency backstop; the ledger row records the P1 permanently
+| either way.
 */
 Schedule::command(DeterminismCheckCommand::class, ['both', '--trigger=schedule'])
     ->dailyAt((string) config('nightly.run_at_utc', '03:00'))
