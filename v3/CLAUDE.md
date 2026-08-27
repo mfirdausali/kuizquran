@@ -53,9 +53,59 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2299 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 302 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1096 apps/web. (v3-D140, 2026-08-26)
+make test    # 2340 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 317 v3/api + 118 corpus-compiler
+             # + 420 engine + 61 fold-runner + 1122 apps/web. (v3-D142, 2026-08-27)
+             # NOTE (v3-D142): a fresh sweep for this build's recurring
+             # "mechanism built and tested, zero production caller" class
+             # (v3-D82 onward) found `purge_ledger` — the PDPA hard-purge
+             # audit trail `pdpa:purge-due` (scheduled nightly since v3-D79)
+             # writes to on every hard delete — had a real writer and zero
+             # admin-facing readers, the same "written, never read" shape
+             # v3-D129/D130/D141 each closed for `admin_audit`/
+             # `flag_ramp_audit`/`entitlement_transitions`. An operator asked
+             # "was learner X actually purged, and when" had a database
+             # console and nothing else. Fixed on the same template:
+             # `Admin\PurgeLedgerController::index()` (`GET
+             # /api/admin/purge-ledger`, read-only) + `lib/admin/purgeLedger.ts`
+             # + `PurgeLedgerPanel.tsx`, added beneath the existing
+             # `PrivacyPanel` on `/settings/privacy` (no new route needed —
+             # that page already hosts the other privacy-plane tools). RED
+             # confirmed at all three layers (backend route+controller moved
+             # aside, fetch client moved aside, panel component moved aside;
+             # each failed on 404 or module resolution, each restored
+             # byte-identically and reran green). `TZ=UTC make test`: 2340
+             # passing (was 2320, +20 — exactly this run's new tests: 7
+             # PHPUnit + 7 + 6 vitest). `check-test-floor.mjs`: OK, 2340 >=
+             # floor 1899 (+441 margin). `TZ=UTC make build`: exit 0, 26
+             # routes (unchanged — `/settings/privacy` already existed).
+             # `npm run gates`: all green (fonts degraded-but-non-blocking,
+             # pre-existing; boundaries 263 files, up from 259 — exactly the
+             # four new apps/web files). `npx tsc --noEmit`: clean. No
+             # `v1/**`/`v2/**` edit. No Arabic codepoint (every new/changed
+             # file swept over the Arabic, Arabic Supplement, Arabic
+             # Extended-A and both Presentation Forms blocks — zero matches).
+             # NOT addressed: `rhymeClassOf()` (v3-D136);
+             # `GlossDraftsController` (ratification-gated); the SSR override
+             # gap's leftover items (v3-D132); the account-adoption frontend
+             # (v3-D88..D94, deliberately deferred); the TEST-FLOOR margin
+             # (left unmoved on purpose, v3-D95 onward). See DECISIONS.md
+             # v3-D142.
+             #
+             # NOTE (v3-D141 — backfilled): commit `57cb7c3` wired the admin
+             # billing surface (`Admin\AdminBillingController`, `GET
+             # /api/admin/billing`, `lib/admin/billingAudit.ts`,
+             # `BillingAuditPanel`, new `/settings/billing` route) closing
+             # `entitlement_transitions`'s own "written, never read" gap —
+             # same shape as v3-D129/D130. That commit's own message cited
+             # "DECISIONS.md v3-D141 for the full writeup," but no such entry
+             # was ever written, and this running comment was never updated
+             # to the 2320 the commit itself reported. This note and a short
+             # DECISIONS.md entry ("v3-D141 documentation gap") record that
+             # the gap exists and point at the commit's own diff and test
+             # file (`AdminBillingTest.php`, 8 cases) as the honest record of
+             # what that run did, rather than fabricating a RED-confirmation
+             # narrative this run did not itself perform.
              # NOTE (v3-D140): the daily anchor hour (`daybound.ts#anchorTime()`,
              # `User.anchor_hour`, `AuthController`'s `anchorHour` field on every
              # identity response) has existed since build-plan steps 5/13 with no

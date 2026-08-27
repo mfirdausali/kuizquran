@@ -9461,3 +9461,119 @@ all unchanged/not built. See DEFECTS.md — no defect entry opened for this
 one; it is a port omission closed directly, not a live-corrupting bug, so
 DECISIONS.md alone records it, matching the precedent E-05's reclassification
 note set for a finding that is real but isn't defect-shaped.
+
+### v3-D141 documentation gap — recorded here, not reconstructed
+
+Commit `57cb7c3` ("wire the admin billing surface — entitlement_transitions
+had zero readers (v3-D141)") shipped real, tested code (`AdminBillingController`,
+`lib/admin/billingAudit.ts`, `BillingAuditPanel`, `/settings/billing`) and its
+own commit message and code comments cite "DECISIONS.md v3-D141 for the full
+RED-before-green writeup" — but that run never actually wrote the entry, and
+never updated `v3/CLAUDE.md`'s own running `make test` comment (it still read
+2299, D140's number, instead of the 2320 the D141 commit message itself
+reports). Found while starting this run's own sweep. Not reconstructed here
+by fabricating a RED-confirmation narrative this run did not perform — the
+code and its own test file (`AdminBillingTest.php`) are the honest record of
+what v3-D141 did; this note exists only so a future run does not waste time
+searching for an entry that was always missing, and does not mistake the gap
+for evidence the work itself is untrustworthy. `CLAUDE.md`'s running comment
+is corrected in this same commit to the current, re-verified number below.
+
+### v3-D142 — `purge_ledger` (the PDPA hard-purge audit trail) had a real nightly writer and zero admin-facing readers
+
+Continuing the sweep this build has run every night since v3-D82 for the
+recurring "mechanism built and tested, zero production caller" class — most
+recently closed for `entitlement_transitions` (v3-D141, `admin_audit` for
+its own audit trail, and `flag_ramp_audit`) — this run found the same shape
+in a table that had not been named before: `purge_ledger`.
+`App\Console\Commands\PurgeDueAccountsCommand` (`pdpa:purge-due`, scheduled
+nightly at 02:00 UTC since v3-D79) writes one append-only
+`PurgeLedgerEntry` row every time an elapsed PDPA deletion request is
+hard-purged — permanently recording which learner was purged, when, and why.
+`grep -rn "PurgeLedgerEntry" v3/api/app` before this run showed exactly two
+references: the model itself and `BackupRestoreDrillCommand`, which reads
+the table back purely for the drill's OWN internal reconciliation (per
+LAUNCH-CHECKLIST.md gate 13's own note) — never a route, never anything an
+operator can load. `PurgeLedgerEntry`'s own docblock invites the comparison
+directly: "APPEND-ONLY, same two-layer guarantee as `AdminAudit`." An
+operator asked "was learner X actually purged, and when" — the one question
+this table exists to answer — had a database console and nothing else.
+v3-D79/D80 built the learner-facing self-service export/delete/restore UI at
+`/settings`; neither that work nor anything through v3-D141 ever discusses
+an *admin* viewer for the ledger those actions eventually feed.
+
+Fixed exactly on the template `AdminBillingController`/`FlagAuditController`
+already established: new `Admin\PurgeLedgerController::index()`
+(`GET /api/admin/purge-ledger`, read-only — no route registered for
+anything but GET, so a forged POST 405s by construction, not by a guard
+clause) + `lib/admin/purgeLedger.ts` (mirrors `billingAudit.ts`'s
+never-throws, three-state discipline) + `PurgeLedgerPanel.tsx`, added
+beneath the existing `PrivacyPanel` on `/settings/privacy` — the page
+already hosts the other privacy-plane tools (reveal, bulk export), and a
+purge is the terminal PDPA action those sit alongside, so this needed no
+new route. `user_id` is pseudonymized on the way out via the same
+`Pseudonymizer` every other admin-audit surface uses: the migration
+deliberately carries no FK on this column (the user row is already gone by
+the time the row is written), so this is the FIRST surface that ever
+renders it to a human, and returning it verbatim would be the one screen
+that deanonymizes a purged learner to every admin who can load it. A
+`userId` query filter (a raw id, never a pseudonym — pseudonyms are
+one-way by design, edge case #147) narrows to one learner's purge history,
+matching `AdminBillingController`'s own filter convention.
+
+**Verified, RED confirmed at every layer, each reverted byte-identically
+after:**
+- Backend: `PurgeLedgerController.php` moved aside and the route line
+  reverted (test file kept) — all 7 new `PurgeLedgerTest` cases failed on
+  404; restored, 7/7 green (28 assertions).
+- Frontend fetch client: `lib/admin/purgeLedger.ts` moved aside (test
+  kept) — failed on `Failed to load url ./purgeLedger`; restored, 7/7
+  green.
+- Component: `PurgeLedgerPanel.tsx` moved aside (the 6 new cases in
+  `test/purge-ledger-panel.test.tsx` kept) — failed on module resolution
+  (`Failed to resolve import "@/components/admin/PurgeLedgerPanel"`);
+  restored, 6/6 green.
+
+The load-bearing backend case seeds through the REAL writer
+(`$this->artisan(PurgeDueAccountsCommand::class)`, never a hand-built row
+shaped like one) and reads back the row's OWN `purged_at_ms` rather than
+assuming a fixture timestamp survives the real command — the command
+stamps its own `now()`, not a caller-supplied value, and an earlier draft
+of this test asserted a fixed timestamp and failed for the wrong reason
+(a test bug, not a wiring bug) until corrected to read the actual written
+value back before asserting on it.
+
+`TZ=UTC make test`: **2340 passing** (was 2320, +20 — exactly this run's
+new tests: 7 PHPUnit (`PurgeLedgerTest`) + 7 (`purgeLedger.test.ts`) + 6
+(`purge-ledger-panel.test.tsx`); no other suite moved). `check-test-floor.mjs`:
+OK, 2340 >= floor 1899 (+441 margin, `TEST-FLOOR` left unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 26 routes
+(unchanged — `/settings/privacy` already existed; this adds a panel, not a
+route). `npm run gates`: locked-css OK, fonts degraded-but-non-blocking
+(pre-existing), boundaries OK (263 files, up from 259 — exactly the four
+new `apps/web` production/test files this run added; the two new PHP files
+live under `v3/api`, which this gate does not scan), corpus-morphology OK,
+corpus-glyphs OK (206 codepoints, unchanged — this change carries no
+corpus data). `npx tsc --noEmit`: clean.
+
+No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+was reverted before committing; `git status --porcelain -- v1 v2` empty
+immediately before commit). No Arabic codepoint introduced: all eight
+new/changed files swept programmatically over the Arabic, Arabic Supplement,
+Arabic Extended-A and both Presentation Forms Unicode blocks — zero matches;
+every new line addresses a user id, a millisecond timestamp, a reason
+string (`"pdpa_delete"`, the command's own literal), or an href/testid
+string, never corpus text.
+
+**Not addressed, named so a future run doesn't re-discover it as new:**
+`rhymeClassOf()` (v3-D136); `GlossDraftsController` (ratification-gated);
+the SSR override gap's leftover items (v3-D132); the account-adoption
+frontend (no `/reset-password` or account-claim UI in `apps/web`,
+deliberately deferred as real M6 design work across v3-D88 through D94);
+the `TEST-FLOOR` (1899) vs. the real, now-larger `2340` margin — every
+decision from v3-D95 onward has left this unmoved on purpose, since
+`check-test-floor.mjs`'s job is to catch shrinkage, not to track the exact
+count. See DEFECTS.md — no defect entry opened for this one; a nightly
+audit trail with no reader is the same "port omission closed directly, not
+a live-corrupting bug" shape v3-D129/D130/D140/D141 each recorded in
+DECISIONS.md alone.

@@ -11,6 +11,7 @@ use App\Http\Controllers\Admin\AdminRevealController;
 use App\Http\Controllers\Admin\AdminUsersController;
 use App\Http\Controllers\Admin\FlagAuditController;
 use App\Http\Controllers\Admin\FlagController;
+use App\Http\Controllers\Admin\PurgeLedgerController;
 use App\Http\Controllers\Admin\StripeSettingsController;
 use App\Http\Controllers\Admin\SystemHealthController;
 use App\Http\Controllers\Billing\EntitlementController;
@@ -106,6 +107,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/users/{userId}/reveal', [AdminRevealController::class, 'reveal']);
         Route::get('/reveal/{token}', [AdminRevealController::class, 'check']);
         Route::get('/users/export.csv', [AdminUsersController::class, 'exportCsv']);
+
+        // The PDPA purge-ledger viewer — `purge_ledger` has been written every
+        // night by `pdpa:purge-due` since v3-D79/D80 with no admin-facing
+        // reader anywhere. Read-only — see PurgeLedgerController's own header.
+        Route::get('/purge-ledger', [PurgeLedgerController::class, 'index']);
 
         // The audit viewer (BUILD-PLAN M8's own "nav homes for ... audit
         // viewer"). Read-only — see AdminAuditController's own header.

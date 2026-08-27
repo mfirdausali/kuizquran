@@ -12,8 +12,16 @@
 // for what is and is not enforced client-side (nothing beyond form
 // usability — the reason-code set, the >=10-char minimum, the PII scan and
 // the reveal TTL are all server-decided and rendered verbatim).
+//
+// Also hosts the PDPA purge-ledger viewer (new, see
+// `components/admin/PurgeLedgerPanel.tsx`'s own header) — the missing read
+// half of `purge_ledger`, the nightly `pdpa:purge-due` command's append-only
+// record of every learner actually purged. This page is its natural home:
+// it already houses the OTHER privacy-plane tools (reveal, export), and a
+// purge is the terminal PDPA action those tools sit alongside.
 
 import { PrivacyPanel } from "@/components/admin/PrivacyPanel";
+import { PurgeLedgerPanel } from "@/components/admin/PurgeLedgerPanel";
 
 export default function PrivacyPage() {
   return (
@@ -27,6 +35,7 @@ export default function PrivacyPage() {
           </p>
         </header>
         <PrivacyPanel />
+        <PurgeLedgerPanel />
       </div>
     </div>
   );
