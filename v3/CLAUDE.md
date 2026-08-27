@@ -53,9 +53,57 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2359 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2377 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 323 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1135 apps/web. (v3-D143, 2026-08-27)
+             # + 420 engine + 61 fold-runner + 1153 apps/web. (v3-D145, 2026-08-27)
+             # NOTE (v3-D145, 2026-08-27): `GlossDraftsController` (the MS
+             # gloss authoring workflow, live and tested since build-plan
+             # step 27) had been mislabeled "ratification-gated" wholesale
+             # in every nightly note since v3-D125. Re-read the actual gate
+             # (BUILD-PLAN's agent-deployment rule, the migration's own
+             # header, the controller's own header): ratification is scoped
+             # to AUTHORING MALAY CONTENT, not to building the workflow tool
+             # a human authors through — the table still ships empty, and
+             # `merged` (the one transition that would ship content) stays
+             # refused unconditionally server-side regardless of who calls
+             # it. Wired the missing scaffold: `lib/admin/glossDrafts.ts`
+             # (load/save/review, never throws) + `GlossDraftsPanel.tsx`
+             # (per-surah worklist, a coordinate-keyed draft form — never a
+             # corpus-word picker, since this authors words the corpus
+             # doesn't have yet — and exactly two review actions,
+             # deliberately NO merge button anywhere) + new
+             # `/settings/gloss-drafts` route. A fresh zero-caller sweep
+             # this run also extended to `worker/fold-runner/src` (clean,
+             # matches v3-D127) and `corpus-compiler/src` (6 candidates, all
+             # verified internal-only uses, not gaps) — the two packages no
+             # prior sweep had named explicitly — plus a re-check of
+             # `/surah/[surah]` (new since v3-D139, added after v3-D132's
+             # SSR-override fix) confirming it renders no gloss/distractor
+             # text, so the SSR override gap stays not-a-live-bug. One real
+             # gate catch along the way: the panel's first caption draft
+             # ("cannot amber a qari signature") tripped
+             # `check-boundaries.mjs`'s scholar-claim guard (v3-D22) despite
+             # being a negation the guard can't parse — reworded to "cannot
+             # move any ayah's verified frontier," same claim, no trigger
+             # phrase. `TZ=UTC make test`: 2377 passing (was 2359, +18 —
+             # exactly this run's new tests: 10 + 8; no other suite moved).
+             # `check-test-floor.mjs`: OK, 2377 >= floor 1899 (+478 margin,
+             # unmoved). `TZ=UTC make build`: exit 0, 27 routes (was 26 —
+             # `/settings/gloss-drafts` is new). `npm run gates`: all green
+             # (fonts degraded-but-non-blocking, pre-existing; boundaries
+             # 272 files, up from 266 — exactly the six new files — green
+             # only after the caption reword, a real RED from the gate
+             # itself). `npx tsc --noEmit`: clean. No `v1/**`/`v2/**` edit.
+             # No Arabic codepoint (all five new files swept over every
+             # Arabic block plus both Presentation Forms blocks — zero
+             # matches; every string is workflow prose, a coordinate
+             # integer, or a closed-set value, never gloss content). NOT
+             # addressed: `rhymeClassOf()` (v3-D136); the SSR override
+             # gap's other leftover items (v3-D132, unchanged);
+             # `EntitlementMachine::merge()` (v3-D88..D94/D144, correctly
+             # deferred — real M6 scope); the operational mailer's live-SMTP
+             # gap and the 7-night window (both infra/calendar, unchanged).
+             # See DECISIONS.md v3-D145.
              # NOTE (v3-D144, 2026-08-27): `LAUNCH-CHECKLIST.md` gate 20 and
              # `routes/console.php`'s own `onFailure` comment both still said
              # "no mail dispatch exists... no operational mailer configured"

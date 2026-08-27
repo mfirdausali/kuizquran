@@ -9793,3 +9793,150 @@ the one path that touches two users' histories at once. The operational
 mailer's remaining gap (a live SMTP account, gate 20) and the 7-night window
 (calendar + a host) are unchanged, now accurately described in both
 documents above.
+
+### v3-D145 — `GlossDraftsController` was mislabeled "ratification-gated" wholesale since v3-D125; only AUTHORING CONTENT into it needs Firdaus's ratification, not building the workflow tool a human authors through
+
+This run started, per NIGHTLY.md's rule, by re-deriving state from `git log`
+and the repo rather than trusting any stale line in NIGHTLY.md itself. HEAD
+was detached at `bd9daed` (v3-D144), 15 commits ahead of the checked-out
+local `main` (`1a9c055`, v3-D129) — a pure fast-forward, not diverged
+history, the same stale-local-ref shape v3-D144 itself hit one commit
+earlier. Fast-forwarded `main` to `bd9daed`; `git push origin main` reported
+"Everything up-to-date" — `origin/main` was already at `bd9daed`, confirming
+(as v3-D144 found for its own case) this was a stale local remote-tracking
+ref, not a repeat of v3-D77's lost-push scenario.
+
+**The sweep, before touching anything.** v3-D144's own sweep across
+`packages/engine/src`, `v3/api/app/Support`+`app/Jobs`,
+`v3/api/app/Http/Controllers`, and `apps/web` components/lib had come back
+clean. This run extended the same "zero production caller" mechanical check
+to the two packages neither that sweep nor any prior one named explicitly:
+every exported function/const in `v3/worker/fold-runner/src` and
+`v3/packages/corpus-compiler/src`, cross-referenced against the rest of the
+repo. `fold-runner` came back fully clean (matches v3-D127's own finding for
+that tree). `corpus-compiler` surfaced six candidates
+(`foilKernels.ts#displayKey`, `io.ts#PKG_ROOT`/`DATA_DIR`,
+`macro.ts#RING_MIN_RUKU`, `manifest.ts#corpusContentHash16`,
+`sceneBeats.ts#expandRange`) — each verified, by reading the file, to be
+used within its OWN defining module (an internal helper that happens to be
+`export`ed, not a built-and-abandoned feature); none is a real gap. Also
+re-verified `foilKernels.ts` itself (NIGHTLY.md's own "Distractors —
+decided" section describes it prominently, which read as if it might still
+be open work): it is fully wired through `buildCorpus.ts`/`io.ts`/
+`validate.ts`/`types.ts` and `test/compile-all-surahs.test.ts` already
+asserts "103 and 112 are now filled by the foil kernels" — closed, not
+new. Also checked `/surah/[surah]/page.tsx` (new since v3-D139, added AFTER
+v3-D132's SSR-override fix and therefore never audited against it): it
+calls raw `loadCorpus`, not `loadEffectiveCorpus`, but its own
+`SurahAyahListIsland` renders only an ayah number and a `StageBadge`
+(stage/strength, log-derived) — grep-verified zero `gloss`/`distractor`
+reads anywhere in that component or in `macroFactsFor`/`MacroPanelIsland` —
+so, like the six routes v3-D132/D144 already cleared, this is not a live
+instance of B13's shape.
+
+**What WAS a real, findable gap.** `GlossDraftsController`
+(`GET/POST /api/admin/gloss-drafts`, `POST /api/admin/gloss-drafts/{id}/
+review`) has been live, admin-gated, and fully tested
+(`GlossDraftsTest.php`, `GlossDraftIsolationTest.php`) since build-plan step
+27 shipped, and every CLAUDE.md nightly note since v3-D125 has listed it as
+the one deferred zero-caller admin surface, always with the same one-line
+reason: "ratification-gated." Re-reading the actual gate — BUILD-PLAN's own
+agent-deployment rule ("agents may draft into a flagged non-shipping table
+only if Firdaus ratifies that; scaffold-empty otherwise"), the migration's
+own header ("BUILD-PLAN permits agents to draft into a flagged non-shipping
+table ONLY if Firdaus ratifies that... this step ships the WORKFLOW and
+zero rows"), and the controller's own header ("this controller is the
+workflow that lets a human do that... without any of it reaching a learner
+or moving a scholar's hash") — the ratification requirement is scoped to
+AUTHORING MALAY GLOSS CONTENT, not to building the tool a human uses to do
+so. `merged` (the one transition that would put drafted text in front of a
+learner) is refused UNCONDITIONALLY server-side regardless of who calls it,
+proven by `GlossDraftsTest::test_merging_is_refused_at_hash_v1`. A dozen
+nights read "ratification-gated" as covering the whole controller and moved
+on without re-checking that boundary; it covers only the content.
+
+**Fixed: the missing scaffold, and nothing else.** New
+`lib/admin/glossDrafts.ts` (mirrors `lib/admin/purgeLedger.ts`'s
+never-throws-on-read discipline and `lib/overrides/write.ts`'s
+never-throws-on-write discipline — three functions: `loadGlossDrafts`,
+`saveGlossDraft`, `reviewGlossDraft`) + `components/admin/GlossDraftsPanel.tsx`
+(a per-surah worklist with counts, a draft form keyed on
+surah/ayah/position — never a corpus-word picker, because this surface
+authors words that do not exist in the corpus yet, unlike `OverrideEditor`'s
+pickers over EXISTING corpus text — and one review action per row: "Mark
+reviewed" on a draft, "Reject to draft" on a reviewed row) + a new
+standalone `/settings/gloss-drafts` route, mirroring `/settings/flags`'s and
+`/settings/content-freeze`'s shape. **Deliberately no "merge" button
+anywhere** — offering an action the server always 422s is the dark pattern
+this build does not ship; the panel's own caption states the closure and
+why, in the server's own terms. Every fixture and every string an admin
+types in the test suite is a plain English placeholder ("first draft
+text") — the same convention the backend's own `GlossDraftsTest.php`
+already established — never real Malay gloss prose; this module and its
+tests supply not one byte of gloss content of their own, matching the
+"scaffold, not content" reading above.
+
+**One real finding along the way, fixed before it reached the gate:** the
+panel's first draft caption read "...it cannot amber a qari signature
+(v3-D15) — gloss.ms is excluded from the hash v1 a scholar signs," which
+`check-boundaries.mjs`'s clause 9-adjacent scholar-claim guard (v3-D22:
+"no UI claims scholar verification for a surah lacking a human row")
+correctly flagged — "a qari signature" matches the guard's `(a|the|human)
+qari ... sign\w*` pattern regardless of the sentence being a NEGATION
+("cannot ... signature"), which the guard cannot parse. Reworded to "cannot
+move any ayah's verified frontier... gloss.ms is excluded from hash v1, the
+digest that frontier is computed from" — same claim, same honesty, no
+trigger phrase. Recorded here rather than silently fixed, because it is a
+real instance of the gate doing its job (catching a religious-authority-
+adjacent phrase in a new file) even though the phrase itself was accurate;
+a future run reading "cannot X" near "qari"/"scholar" should expect the
+same trip and reword rather than weaken the gate.
+
+**Verified:**
+- RED confirmed at both layers, each by moving the new source file aside
+  with its test kept and re-running `vitest run`: `lib/admin/glossDrafts.ts`
+  aside → all 10 new `glossDrafts.test.ts` cases failed on module
+  resolution; `components/admin/GlossDraftsPanel.tsx` aside → all 8 new
+  `gloss-drafts-panel.test.tsx` cases failed on module resolution (via
+  `@/components/admin/GlossDraftsPanel` import resolution). Both restored
+  byte-identically, `git diff` empty, both green after.
+- The load-bearing panel tests assert what is NOT offered, not only what
+  is: a draft row's only button matches `/mark reviewed/i` and
+  `queryByRole("button", {name: /merge/i})` is null; a reviewed row's only
+  button matches `/reject to draft/i`, same null assertion — proving the
+  merge button's absence is structural, not incidental to the fixtures
+  chosen.
+- `TZ=UTC make test`: **2377 passing** (was 2359, +18 — exactly this run's
+  new tests: 10 in `glossDrafts.test.ts` + 8 in `gloss-drafts-panel.test.tsx`;
+  no other suite moved). `check-test-floor.mjs`: OK, 2377 >= floor 1899
+  (+478 margin, `TEST-FLOOR` left unmoved, same discipline as every prior
+  entry). `TZ=UTC make build`: exit 0, **27 routes** (was 26 —
+  `/settings/gloss-drafts` is new). `npm run gates`: locked-css OK, fonts
+  degraded-but-non-blocking (pre-existing, unrelated), **boundaries OK, 272
+  files (up from 266 — exactly the 6 new files), after the caption reword
+  above** (first run genuinely failed the scholar-claim clause — a real RED
+  from the gate itself, not a staged demonstration), corpus-morphology OK,
+  corpus-glyphs OK (206 codepoints, unchanged — this change carries no
+  corpus data). `npx tsc --noEmit`: clean, `Version 5.9.3` confirmed.
+- No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache
+  diff produced by running the suite was reverted before committing, same
+  discipline as every prior entry — `git status --porcelain -- v1 v2`
+  empty immediately before commit). No Arabic codepoint introduced: all
+  five new files swept programmatically over the Arabic, Arabic
+  Supplement, Arabic Extended-A and both Presentation Forms Unicode
+  blocks — zero matches; every string in every new file is English prose
+  about the workflow, a coordinate integer, a closed-set status/author-kind
+  value, or an href/testid string — never gloss content.
+
+**Not addressed, named so a future run doesn't re-discover it as new:**
+`rhymeClassOf()` (v3-D136); the SSR override gap's leftover items (v3-D132
+— re-verified again this run for the one new route since, `/surah/[surah]`,
+per the sweep above: clean, not a live bug); `EntitlementMachine::merge()`
+— the account-adoption merge job (v3-D88..D94/D144's own repeated,
+correct, deferral: real BUILD-PLAN M6 scope, risks invariant #2 if rushed);
+the operational mailer's remaining gap (a live SMTP account, gate 20) and
+the 7-night window (calendar + a host) — both unchanged. With this,
+`GlossDraftsController` is no longer a zero-caller surface; the actual
+content-ratification gate (an authored Malay gloss corpus, and the named
+reviewer BUILD-PLAN Q2 still has no answer for) is exactly as open as it
+was before this run and requires the same human decision it always has.
