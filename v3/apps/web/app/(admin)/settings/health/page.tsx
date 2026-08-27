@@ -10,6 +10,7 @@
 // is and is not rendered.
 
 import { SystemHealthPanel } from "@/components/admin/SystemHealthPanel";
+import { NightlyWindowPanel } from "@/components/admin/NightlyWindowPanel";
 
 export default function SystemHealthPage() {
   return (
@@ -22,6 +23,7 @@ export default function SystemHealthPage() {
           </p>
         </header>
         <SystemHealthPanel />
+        <NightlyWindowPanel />
       </div>
     </div>
   );

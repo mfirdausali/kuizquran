@@ -9577,3 +9577,98 @@ count. See DEFECTS.md — no defect entry opened for this one; a nightly
 audit trail with no reader is the same "port omission closed directly, not
 a live-corrupting bug" shape v3-D129/D130/D140/D141 each recorded in
 DECISIONS.md alone.
+
+### v3-D143 — the 7-consecutive-green-nights window (BUILD-PLAN M10's launch gate) was readable only via SSH, never from an admin screen
+
+`NightlyWindowLedger::status()` — the streak arithmetic BUILD-PLAN's M10 gate
+and edge case #169 both name explicitly ("both determinism checks green
+nightly... confirmed P1 resets the window") — has been real and fully unit
+tested (`tests/Feature/Nightly/WindowLedgerTest.php`) since it shipped, but
+its only caller anywhere was `php artisan nightly:window`, a CLI command.
+`grep -n "nightly" v3/api/routes/api.php` returned nothing; `grep -rln
+"nightly" v3/apps/web/lib v3/apps/web/components v3/apps/web/app` matched only
+unrelated hits (`flagAudit.ts`'s own "nightly" prose, `wordAccuracy.ts`, the
+`/settings/health` and `/settings/privacy` pages' copy) — zero admin surface
+ever read `NightlyCheckRun`/`NightlyWindow` back. Same "built + populated +
+zero read surface" shape as `admin_audit`/`flag_ramp_audit`/
+`entitlement_transitions`/`purge_ledger` (v3-D129/D130/D141/D142), but with
+sharper stakes than any of those: HANDOVER.md's own C5 names the direct
+consequence — "the 7-night window needs a human checking `nightly:window`
+daily," and H5 flags that nobody is paged on a P1 either (no operational
+mailer). A human reading raw terminal output, by hand, every single day, is
+the ENTIRE safety net for the one gate that blocks PUBLIC LAUNCH.
+
+Fixed on the same template as the four prior audit-trail viewers: new
+`Admin\NightlyWindowController::index()` (`GET /api/admin/nightly-window`,
+read-only — no route registered for anything but GET) is a THIN,
+UNTRANSFORMED pass-through of `NightlyWindowLedger::status()` — it adds no
+second implementation of the streak arithmetic, the same discipline
+`ContentFreezeController` already follows for the freeze gate. No
+pseudonymization needed: this table carries no learner identity at all, only
+check names, severities and calendar dates. `lib/admin/nightlyWindow.ts`
+(mirrors `purgeLedger.ts`'s three-state discipline) + `NightlyWindowPanel.tsx`
+render every field verbatim — the streak, `windowStartedAt`, `blockedBy`, the
+per-night evidence table (night / green-or-not / which check ran at what
+severity / which check is MISSING), and — the load-bearing case — a confirmed
+`lastP1` as an explicit, visible alert naming the night and the check, not
+just a lower number a reader has to notice on their own. Wired beneath the
+existing `SystemHealthPanel` on `/settings/health`, which already hosts "the
+two nightly determinism checks" — the window is derived from exactly those
+same two checks, so it needed no new route.
+
+READ-ONLY BY CONSTRUCTION, deliberately: this screen may never declare or
+reset the window. That stays `nightly:window --start`, a human CLI action
+BUILD-PLAN requires explicitly ("starts only after the last engine/selection
+merge... no automation can know whether today's merge touched selection
+semantics"). A route that let staff self-serve past that check would defeat
+the one human judgement call BUILD-PLAN insists on.
+
+**RED confirmed at every layer, each reverted byte-identically after:**
+- Backend: the new `NightlyWindowController.php` moved aside and the two new
+  route lines reverted (test file kept) — all 6 new `NightlyWindowTest` cases
+  failed on 404; restored, 6/6 green (24 assertions).
+- Frontend fetch client: `lib/admin/nightlyWindow.ts` moved aside (test kept)
+  — failed on module resolution; restored, 7/7 green.
+- Component: `NightlyWindowPanel.tsx` moved aside (the 6 new cases in
+  `test/nightly-window-panel.test.tsx` kept) — failed on module resolution;
+  restored, 6/6 green.
+
+These tests assert the HTTP CONTRACT and the RENDERING (auth, response
+shape, the P1-visibility case, the missing-check case, the read-only
+guarantee) — the streak ARITHMETIC itself is already exhaustively covered by
+`WindowLedgerTest.php` and is deliberately not re-proven here, since this
+controller is a thin pass-through with no logic of its own to diverge from
+its one dependency.
+
+`TZ=UTC make test`: **2359 passing** (was 2340, +19 — exactly this run's new
+tests: 6 PHPUnit (`NightlyWindowTest`) + 7 (`nightlyWindow.test.ts`) + 6
+(`nightly-window-panel.test.tsx`); no other suite moved). `check-test-floor.mjs`:
+OK, 2359 >= floor 1899 (+460 margin, `TEST-FLOOR` left unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 26 routes
+(unchanged — `/settings/health` already existed; this adds a panel, not a
+route). `npm run gates` (run as part of `make build`): locked-css OK,
+boundaries OK (266 files), corpus-morphology OK, corpus-glyphs OK (206
+codepoints, unchanged — this change carries no corpus data). `npx tsc
+--noEmit` (via `next build`): clean.
+
+No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+reverted before committing; `git status --porcelain -- v1 v2` empty
+immediately before commit). No Arabic codepoint introduced: all eight
+new/changed files swept programmatically over the Arabic, Arabic Supplement,
+Arabic Extended-A and both Presentation Forms Unicode blocks — zero matches;
+every new line addresses a check name, a severity string, a calendar date, or
+an href/testid string, never corpus text.
+
+**Not addressed, named so a future run doesn't re-discover it as new:**
+`rhymeClassOf()` (v3-D136); `GlossDraftsController` (ratification-gated); the
+SSR override gap's leftover items (v3-D132); the account-adoption frontend
+(v3-D88..D94, deliberately deferred); the `TEST-FLOOR` margin (left unmoved
+on purpose); the operational mailer gap HANDOVER.md's own C5 names (a
+confirmed P1 is now VISIBLE on this screen, but still pages nobody — that is
+a separate, real fix, gate 20's own open item). With this, the two
+BUILD-PLAN M10 launch-gate primitives (`fold_determinism_check`/
+`selection_determinism_check` themselves, and now the window they feed) both
+have a real admin-facing reader; what remains genuinely open for the 7-night
+window is calendar and infrastructure (a host running `schedule:run`, live
+staging data, seven elapsed real days, and `nightly:window --start` itself),
+none of which is a wiring gap this run could close.

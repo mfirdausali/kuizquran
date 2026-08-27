@@ -53,9 +53,53 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2340 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 317 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1122 apps/web. (v3-D142, 2026-08-27)
+make test    # 2359 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 323 v3/api + 118 corpus-compiler
+             # + 420 engine + 61 fold-runner + 1135 apps/web. (v3-D143, 2026-08-27)
+             # NOTE (v3-D143): the 7-consecutive-green-nights window
+             # (BUILD-PLAN M10's launch gate, `NightlyWindowLedger::status()`)
+             # was readable only via `php artisan nightly:window` on a
+             # machine with SSH access — no HTTP route, no admin screen, ever
+             # read `NightlyCheckRun`/`NightlyWindow` back, the same "built +
+             # populated + zero read surface" shape v3-D129/D130/D141/D142
+             # each closed for `admin_audit`/`flag_ramp_audit`/
+             # `entitlement_transitions`/`purge_ledger`. HANDOVER.md's own C5
+             # names the consequence directly: a human has to check the CLI
+             # daily by hand, and (H5) nobody is paged on a P1 either — that
+             # manual daily check was the ENTIRE safety net for the one gate
+             # that blocks public launch. Fixed on the same template:
+             # `Admin\NightlyWindowController::index()` (`GET
+             # /api/admin/nightly-window`, read-only, a thin pass-through of
+             # `NightlyWindowLedger::status()` — no second implementation of
+             # the streak arithmetic) + `lib/admin/nightlyWindow.ts` +
+             # `NightlyWindowPanel.tsx`, added beneath the existing
+             # `SystemHealthPanel` on `/settings/health` (already hosts "the
+             # two nightly determinism checks" this window is derived from —
+             # no new route needed). A confirmed P1 renders as an explicit,
+             # visible alert naming the night and the check, not just a lower
+             # streak number. READ-ONLY BY CONSTRUCTION: this screen may
+             # never declare or reset the window — that stays
+             # `nightly:window --start`, BUILD-PLAN's own required human CLI
+             # action. RED confirmed at all three layers (backend
+             # route+controller moved aside, fetch client moved aside, panel
+             # component moved aside; each failed on 404 or module
+             # resolution, each restored byte-identically and reran green).
+             # `TZ=UTC make test`: 2359 passing (was 2340, +19 — exactly this
+             # run's new tests: 6 PHPUnit + 7 + 6 vitest). `check-test-floor.mjs`:
+             # OK, 2359 >= floor 1899 (+460 margin). `TZ=UTC make build`: exit
+             # 0, 26 routes (unchanged — `/settings/health` already existed).
+             # `npm run gates`: all green (boundaries 266 files). `npx tsc
+             # --noEmit`: clean. No `v1/**`/`v2/**` edit. No Arabic codepoint
+             # (every new/changed file swept over the Arabic, Arabic
+             # Supplement, Arabic Extended-A and both Presentation Forms
+             # blocks — zero matches). NOT addressed: `rhymeClassOf()`
+             # (v3-D136); `GlossDraftsController` (ratification-gated); the
+             # SSR override gap's leftover items (v3-D132); the
+             # account-adoption frontend (v3-D88..D94, deliberately
+             # deferred); the operational mailer gap (HANDOVER.md C5/gate
+             # 20 — a confirmed P1 is now visible on this screen but still
+             # pages nobody); the TEST-FLOOR margin (left unmoved on
+             # purpose). See DECISIONS.md v3-D143.
              # NOTE (v3-D142): a fresh sweep for this build's recurring
              # "mechanism built and tested, zero production caller" class
              # (v3-D82 onward) found `purge_ledger` — the PDPA hard-purge

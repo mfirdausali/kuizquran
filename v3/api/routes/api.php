@@ -11,6 +11,7 @@ use App\Http\Controllers\Admin\AdminRevealController;
 use App\Http\Controllers\Admin\AdminUsersController;
 use App\Http\Controllers\Admin\FlagAuditController;
 use App\Http\Controllers\Admin\FlagController;
+use App\Http\Controllers\Admin\NightlyWindowController;
 use App\Http\Controllers\Admin\PurgeLedgerController;
 use App\Http\Controllers\Admin\StripeSettingsController;
 use App\Http\Controllers\Admin\SystemHealthController;
@@ -127,6 +128,13 @@ Route::middleware('auth:sanctum')->group(function () {
         // The ONLY mutating action on this surface. It RE-DERIVES from the event
         // log and never invents (WIREFRAME §16: staff may never edit graded state).
         Route::post('/health/rebuild-atom-cache', [SystemHealthController::class, 'rebuildAtomCache']);
+
+        // The 7-consecutive-green-nights window (BUILD-PLAN M10's launch
+        // gate) — previously reachable only via `php artisan nightly:window`
+        // on a machine with SSH access. Read-only — see
+        // NightlyWindowController's own header; declaring/resetting the
+        // window stays a CLI-only human action.
+        Route::get('/nightly-window', [NightlyWindowController::class, 'index']);
 
         // Flag plane (step 26). KILL is deliberately the lightest route here.
         Route::get('/flags', [FlagController::class, 'index']);
