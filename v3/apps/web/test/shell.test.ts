@@ -253,19 +253,39 @@ describe("the corpus/log boundary in the route tree (edge case #72)", () => {
     expect(code(read("app/(app)/layout.tsx"))).not.toMatch(/from\s+["'][^"']*lib\/idb/);
   });
 
-  it("the dashboard's log-derived line is an exhaustively-stated client island", () => {
-    const raw = read("components/home/LogSummary.tsx");
+  it("the dashboard's log-derived line is an exhaustively-stated client island, and is actually rendered on /home", () => {
+    // v3-D146: this test used to inspect components/home/LogSummary.tsx — a
+    // real, exhaustively-stated island that satisfied every assertion below
+    // and was nonetheless dead code. `TodaySession` (build-plan step
+    // 18/19/v3-D74) superseded it as the dashboard's real log-derived line,
+    // but nothing ever repointed this test, so it kept passing against a file
+    // no route imports — a shape check with no wiring check is exactly the
+    // "tests pass, the wiring is not proven" shape this codebase has caught
+    // repeatedly elsewhere (B6's mutation survivor, v3-D83's gradeClassToWire
+    // finding). `LogSummary.tsx` is deleted; this test both re-verifies the
+    // discipline against the REAL live file and proves it is the one /home
+    // actually renders, so a future supersession cannot silently repeat this.
+    const raw = read("components/home/TodaySession.tsx");
     const island = code(raw);
     expect(raw.split("\n")[0]).toMatch(/^"use client"/);
-    // All four LogState cases. A missing one is already a type error under
-    // strict; this asserts the SHAPE so a later refactor to `if (data)` —
-    // which type-checks and reintroduces edge case #73 — fails a test too.
-    for (const status of ["pending", "empty", "ready", "broken"]) {
+    // Every State case. A missing one is already a type error under strict;
+    // this asserts the SHAPE so a later refactor to `if (data)` — which
+    // type-checks and reintroduces edge case #73 — fails a test too.
+    for (const status of ["loading", "not-enrolled", "unavailable", "broken", "ready"]) {
       expect(island, `case "${status}" missing`).toMatch(
-        new RegExp(`case "${status}":`),
+        new RegExp(`case "${status}"`),
       );
     }
-    // Skeletons are never zeros: the pending branch paints .skel, not a digit.
+    // Skeletons are never zeros: the loading branch paints .skel, not a digit.
     expect(island).toMatch(/className="skel"/);
+    // The wiring itself: not merely well-shaped, but the file /home renders.
+    expect(code(read("app/(app)/home/page.tsx"))).toMatch(/<TodaySession\b/);
+  });
+
+  it("has no dead client island left behind by a supersession", () => {
+    // The concrete regression this guards: a component fully superseded by
+    // another (TodaySession replaced LogSummary, v3-D146) left on disk,
+    // unimported, with its own test still asserting on its source text.
+    expect(has("components/home/LogSummary.tsx")).toBe(false);
   });
 });

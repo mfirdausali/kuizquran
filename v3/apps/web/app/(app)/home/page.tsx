@@ -4,7 +4,7 @@
 // start_url is /home. This is where an onboarded learner lands, every time.
 //
 // This page is a SERVER COMPONENT. Everything log-derived is delegated to a
-// client island (<LogSummary/>) — see edge case #72: a server render has no
+// client island (<TodaySession/>) — see edge case #72: a server render has no
 // log, so an RSC that read one would paint 0 while the client hydrates the
 // real number. check-boundaries.mjs clause 2 fails the build if this file ever
 // imports lib/idb without "use client".

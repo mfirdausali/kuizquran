@@ -9940,3 +9940,117 @@ the 7-night window (calendar + a host) — both unchanged. With this,
 content-ratification gate (an authored Malay gloss corpus, and the named
 reviewer BUILD-PLAN Q2 still has no answer for) is exactly as open as it
 was before this run and requires the same human decision it always has.
+
+---
+
+## 2026-08-28 (nightly) — v3-D146: a test verified a dead client island, masking that `/home`'s real due-count line was untested for wiring
+
+Re-derived state from `git log`/the repo per NIGHTLY.md's own rule rather
+than trusting any stale step number in NIGHTLY.md itself: HEAD was clean at
+`541264b` (v3-D145), `git status` empty except the usual regenerated
+`v2/tsconfig.tsbuildinfo` (reverted before touching anything, same
+discipline as every prior entry). All 32 build-plan steps are DONE or
+human/calendar-gated exactly as v3-D145 left them (27/28 on surah 67's
+scene beats + qari calendar; step 30's remaining items are all infra/human:
+a live SMTP account, the 7-night window, PAY-1's Stripe account). Dispatched
+a fresh, read-only Explore agent to sweep for the next instance of this
+build's recurring "mechanism built, zero real caller" bug class, explicitly
+excluding every item already named and deferred (`rhymeClassOf()`,
+`EntitlementMachine::merge()`, multi-surah enrollment, the mailer, the
+7-night window, PAY-1, scene beats, human a11y/security review). It swept
+artisan commands, the ethics-gate notification-template row, a literal
+`grep -n "^export"` pass over every engine export, `BackupRestoreDrillCommand`,
+`api/app/Models/*`, and an orphaned-component scan — all came back clean or
+already-tracked, with two small candidates.
+
+**What was real:** `apps/web/components/home/LogSummary.tsx` — the
+ORIGINAL `/home` due-count client island (edge cases #72/#73, "how many
+events the log holds") — was fully superseded by `TodaySession.tsx` once
+the real due-count/CTA pipeline landed (build-plan step 18/19, v3-D74), and
+`app/(app)/home/page.tsx` has rendered `<TodaySession/>` instead of
+`<LogSummary/>` ever since. Nothing was ever repointed: `grep -rn
+"LogSummary"` returned exactly three hits before this fix — the dead file's
+own export, a stale doc-comment in `home/page.tsx` still claiming
+`<LogSummary/>` was the delegate, and `test/shell.test.ts`'s own "the
+dashboard's log-derived line is an exhaustively-stated client island" test,
+which read `LogSummary.tsx` as raw source text and asserted its four-state
+shape — genuinely, correctly — without ever checking the file was reachable
+from a real route. A structurally sound, well-tested component with zero
+wiring is precisely the "tests pass, the wiring is not proven" shape this
+build has caught repeatedly elsewhere (B6's mutation-survivor guard,
+v3-D83's `gradeClassToWire` finding) — here on the test side rather than
+the source side: the test was not lying about `LogSummary`, but its own
+name ("the dashboard's...line") asserted a wiring claim it never checked.
+
+**Fixed:** deleted `LogSummary.tsx` (dead code, fully superseded — its
+event-count copy was already the pre-due-count placeholder `TodaySession`
+replaced). Corrected `home/page.tsx`'s stale header comment to name
+`<TodaySession/>`. Retargeted `shell.test.ts`'s test to the REAL live file
+— asserting the same discipline (`"use client"` first line, every `State`
+case in `TodaySession`'s own five-way union: `loading`/`not-enrolled`/
+`unavailable`/`broken`/`ready` — a superset of `LogSummary`'s four, since
+`TodaySession` also distinguishes "not enrolled" and "corpus unavailable"
+from a genuine empty state; the skeleton-not-zero class) — and added a new,
+permanent wiring assertion (`home/page.tsx` source must match
+`/<TodaySession\b/`) so a future supersession cannot repeat this silently.
+A second new test asserts `components/home/LogSummary.tsx` no longer exists
+at all, naming the concrete regression class ("a dead island left behind by
+a supersession, with its own stale test") directly.
+
+**RED confirmed directly, before any fix.** Added a temporary probe
+assertion — `expect(code(read("app/(app)/home/page.tsx"))).toMatch(/<LogSummary\b/)`
+— to the still-unmodified test file and ran `npx vitest run test/shell.test.ts`
+alone: 1 failed, 43 passed, exactly on that line — proof that `/home`
+genuinely does not render `LogSummary` today. Removed the probe as part of
+implementing the real fix (folded into the retargeted test + the new
+file-absence test) rather than left running alongside it.
+
+**Verified:**
+- `npx vitest run test/shell.test.ts`: 44/44 green after the fix (was 43;
+  the probe was temporary, the retargeted test + the new absence test net
+  +1).
+- `npx tsc --noEmit`: clean.
+- `node scripts/check-boundaries.mjs`: OK, 271 files (was 272 — exactly the
+  one deleted file; nothing else changed the boundary-scanned set).
+- `TZ=UTC make test`: **2378 passing** (was 2377, +1 — exactly this run's
+  net new test; no other suite moved). `check-test-floor.mjs`: OK, 2378 >=
+  floor 1899 (+479 margin, `TEST-FLOOR` left unmoved, same discipline as
+  every prior entry).
+- `TZ=UTC make build`: exit 0, 27 routes (unchanged — no route was added or
+  removed; this is a component deletion plus a test/doc fix inside an
+  existing route).
+- `npm run gates`: locked-css OK, fonts degraded-but-non-blocking
+  (pre-existing, unrelated), boundaries OK (271 files, above), corpus-
+  morphology OK, corpus-glyphs OK (206 codepoints, unchanged — this change
+  carries no corpus data).
+- No `v1/**`/`v2/**` edit: `git status --porcelain -- v1 v2` empty
+  immediately before commit (the usual `v2/tsconfig.tsbuildinfo` build-cache
+  diff from running the suite was reverted first, same discipline as every
+  prior entry).
+- No Arabic codepoint introduced: the full diff (the two changed files) was
+  swept programmatically, character by character, over the Arabic, Arabic
+  Supplement, Arabic Extended-A and both Presentation Forms Unicode
+  blocks — zero matches. Every changed line is English prose (a doc
+  comment, a test description, an assertion message) or a TypeScript/JSX
+  identifier.
+
+**Scope, deliberate.** The sweep's other candidate,
+`api/app/Models/AccountDeletionRequest.php#isDue()` (a zero-caller
+convenience method — `PurgeDueAccountsCommand` independently re-implements
+the identical `purge_at_ms <= now` check as a raw query-level `where`
+clause rather than calling it per-row), was considered and left alone: it
+is genuinely unused, but fixing it either way (delete the method, or
+replace a query-level filter with a per-row Eloquent-hydrating loop calling
+it) trades a real efficiency property for a marginal, non-behavioral
+tidiness gain, and unlike `LogSummary` nothing about it is currently
+misleading — no test claims `isDue()` is exercised by the real purge path.
+Named here so a future run does not re-discover it as new, without treating
+it as a live defect.
+
+**Not addressed, unchanged:** `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145 — real BUILD-PLAN M6 scope); multi-surah enrollment
+on `/home`/`/library`/`/progress` (a product decision, not a wiring gap);
+the operational mailer's live SMTP account and the 7-night window (both
+infra/calendar); PAY-1's Stripe fixtures (needs a real Stripe account);
+surah 67's scene beats (human-only content authoring). See DEFECTS.md for
+the standing ledger.

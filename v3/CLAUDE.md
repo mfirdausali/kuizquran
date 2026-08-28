@@ -53,9 +53,51 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2377 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2378 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 323 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1153 apps/web. (v3-D145, 2026-08-27)
+             # + 420 engine + 61 fold-runner + 1154 apps/web. (v3-D146, 2026-08-28)
+             # NOTE (v3-D146, 2026-08-28): `test/shell.test.ts`'s "the
+             # dashboard's log-derived line is an exhaustively-stated client
+             # island" test verified `components/home/LogSummary.tsx`'s shape
+             # correctly but never checked it was reachable from a real
+             # route — and it wasn't. `TodaySession.tsx` superseded it as
+             # `/home`'s real due-count island back at build-plan step
+             # 18/19 (v3-D74); nothing was ever repointed. A fresh sweep (an
+             # Explore agent, excluding every already-named deferred item —
+             # rhymeClassOf, EntitlementMachine::merge, multi-surah
+             # enrollment, the mailer, the 7-night window, PAY-1, scene
+             # beats) found this: a structurally sound, well-tested
+             # component with zero wiring, the "tests pass, wiring unproven"
+             # shape this build has caught before (B6, v3-D83) — here on the
+             # test side. Deleted `LogSummary.tsx`; corrected `home/page.tsx`'s
+             # stale doc-comment; retargeted the test to the real live file
+             # (`TodaySession`'s five-way state union, a superset of
+             # `LogSummary`'s four) plus a new permanent wiring assertion
+             # (`home/page.tsx` must render `<TodaySession/>`) and a new
+             # test asserting `LogSummary.tsx` no longer exists at all. RED
+             # confirmed directly: a temporary probe asserting `/home`
+             # rendered `<LogSummary/>` failed exactly as predicted (1
+             # failed, 43 passed) before any fix; folded into the real fix
+             # rather than left running. `TZ=UTC make test`: 2378 passing
+             # (was 2377, +1 — exactly this run's net new test). `check-
+             # test-floor.mjs`: OK, 2378 >= floor 1899 (+479 margin, unmoved).
+             # `TZ=UTC make build`: exit 0, 27 routes (unchanged). `npm run
+             # gates`: all green (fonts degraded-but-non-blocking,
+             # pre-existing; boundaries 271 files, down from 272 — exactly
+             # the one deleted file). `npx tsc --noEmit`: clean. No
+             # `v1/**`/`v2/**` edit. No Arabic codepoint (the two changed
+             # files swept over every Arabic block plus both Presentation
+             # Forms blocks — zero matches). NOT addressed: the sweep's
+             # other candidate, `AccountDeletionRequest::isDue()` (a
+             # zero-caller convenience method; `PurgeDueAccountsCommand`
+             # already does the equivalent check at the query level, so
+             # nothing is misleading about it — left alone deliberately, see
+             # DECISIONS.md v3-D146); `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+             # multi-surah enrollment (a product decision, not a wiring
+             # gap); the mailer/7-night window (infra/calendar); PAY-1
+             # (needs a real Stripe account); surah 67's scene beats
+             # (human-only). See DECISIONS.md v3-D146.
              # NOTE (v3-D145, 2026-08-27): `GlossDraftsController` (the MS
              # gloss authoring workflow, live and tested since build-plan
              # step 27) had been mislabeled "ratification-gated" wholesale
