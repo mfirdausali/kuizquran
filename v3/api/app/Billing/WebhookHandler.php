@@ -84,26 +84,36 @@ class WebhookHandler
 
         $row = BillingEvent::where('provider', $provider)->where('provider_event_id', $eventId)->first();
 
+        // Resolved ONCE, here — not only for `process()` below, but so the
+        // journal row itself can carry `user_id` (v3-D148). Previously this
+        // column existed on the migration and the model's own `user()`
+        // relation, with NOTHING anywhere ever writing to it: every journal
+        // row was permanently `user_id: null`, silently defeating the one
+        // filter (`?userId=`) and the one correlation (which learner did
+        // this delivery concern) an operator debugging a failed webhook
+        // would actually want. A resolution failure (no matching customer)
+        // is not an error — it is `null`, exactly like `ignored_unhandled`.
+        $entitlement = $this->resolveEntitlement($event);
+
         try {
-            $outcome = $this->process($event, $type, $eventId, $providerCreatedAt, $now);
+            $outcome = $this->process($event, $type, $eventId, $providerCreatedAt, $now, $entitlement);
         } catch (\Throwable $e) {
-            $row->update(['outcome' => 'error', 'error' => $e->getMessage(), 'processed_at' => $now]);
+            $row->update(['outcome' => 'error', 'error' => $e->getMessage(), 'processed_at' => $now, 'user_id' => $entitlement?->user_id]);
 
             throw $e;
         }
 
-        $row->update(['outcome' => $outcome, 'processed_at' => $now]);
+        $row->update(['outcome' => $outcome, 'processed_at' => $now, 'user_id' => $entitlement?->user_id]);
 
         return $outcome;
     }
 
-    private function process(array $event, string $type, string $eventId, ?int $providerCreatedAt, int $now): string
+    private function process(array $event, string $type, string $eventId, ?int $providerCreatedAt, int $now, ?Entitlement $entitlement): string
     {
         if (! in_array($type, self::HANDLED, true)) {
             return 'ignored_unhandled';
         }
 
-        $entitlement = $this->resolveEntitlement($event);
         if (! $entitlement) {
             return 'ignored_unhandled';
         }

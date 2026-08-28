@@ -53,9 +53,90 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2393 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 330 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1162 apps/web. (v3-D147, 2026-08-28)
+make test    # 2416 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 339 v3/api + 118 corpus-compiler
+             # + 420 engine + 61 fold-runner + 1176 apps/web. (v3-D148, 2026-08-28)
+             # NOTE (v3-D148, 2026-08-28): `billing_events` — the RAW webhook
+             # journal `WebhookHandler::ingest()` writes on every inbound
+             # Stripe delivery, `insertOrIgnore`-first-then-`outcome`-updated
+             # — had a fully-cast model (`App\Models\BillingEvent`, a
+             # `user()` relation) since step 23 with ZERO readers anywhere:
+             # `grep -rln "BillingEvent::" app/Http` returned nothing. A
+             # DIFFERENT table than the one v3-D141/D147's admin billing
+             # surface already wired — `AdminBillingController::index()`
+             # reads `entitlement_transitions` (the DERIVED state-change
+             # log, which only gains a row when a webhook actually changes
+             # state); a delivery that fails to parse, hits an unhandled
+             # type, or throws mid-`process()` leaves NOTHING there — only a
+             # row in the raw journal, with `outcome: "ignored_unhandled"`
+             # or `outcome: "error"` and the real exception message. Same
+             # "written, populated, zero read surface" shape this build has
+             # closed four times before (`admin_audit` v3-D129,
+             # `flag_ramp_audit` v3-D130, `entitlement_transitions` v3-D141,
+             # `purge_ledger` v3-D142), missed here because each of those
+             # four looked only at the table its own ticket named. Fixed:
+             # new `Admin\BillingEventsController::index()` (`GET
+             # /api/admin/billing/events`, read-only, no write route
+             # registered) + `lib/admin/billingEvents.ts` +
+             # `BillingEventsPanel` added beneath the existing
+             # `BillingAuditPanel` on `/settings/billing` (no new route).
+             # `userId`/`outcome` filters and `user_id` pseudonymization
+             # mirror every other admin audit viewer.
+             #
+             # A SECOND, DEEPER BUG surfaced while writing the RED test for
+             # pseudonymization: `billing_events.user_id` (nullable,
+             # `nullOnDelete`, with a full `user()` relation) was NEVER
+             # WRITTEN by anything — `WebhookHandler::ingest()`'s
+             # `insertOrIgnore` and both later `->update()` calls all
+             # omitted it, so every journal row in production has been
+             # permanently `user_id: null` since step 23, defeating the
+             # `?userId=` filter and the one correlation an operator would
+             # actually want. Not hypothetical — the first RED run of
+             # `test_the_subject_is_pseudonymized_not_the_raw_user_id`
+             # failed genuinely (null where a real pseudonym was expected)
+             # against the untouched `WebhookHandler`. Fixed in the same
+             # file: `resolveEntitlement($event)` now runs ONCE in
+             # `ingest()` itself (`process()` takes it as a parameter,
+             # avoiding a second DB read) and its `user_id` is threaded into
+             # both `update()` calls, including the error path.
+             #
+             # RED confirmed at three independent layers: backend
+             # (`BillingEventsController.php` moved aside + the route
+             # addition reverted) — all 9 new PHPUnit cases failed on 404;
+             # restored, then 2 of 9 STILL failed genuinely before
+             # `WebhookHandler.php` was touched (the `user_id` bug, proving
+             # the test caught a real gap, not a tautology); frontend
+             # (`billingEvents.ts`/`BillingEventsPanel.tsx` never existed
+             # before this run, so their absence was the RED signal) — 8 + 6
+             # cases, all green after. `TZ=UTC make test`: 2416 passing (was
+             # 2393, +23 — exactly this run's new tests: 9 PHPUnit + 8 + 6
+             # vitest; no other suite moved). `check-test-floor.mjs`: OK,
+             # 2416 >= floor 1899 (+517 margin, unmoved). `TZ=UTC make
+             # build`: exit 0, 27 routes (unchanged — renders inside the
+             # existing `/settings/billing` page). `npm run gates`: all
+             # green (fonts degraded-but-non-blocking, pre-existing;
+             # boundaries 275 files, up from 271 — exactly the four new
+             # apps/web files). `npx tsc --noEmit`: clean, `Version 5.9.3`
+             # confirmed. No `v1/**`/`v2/**` edit (`git status --porcelain
+             # -- v1 v2` empty immediately before commit — a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted first,
+             # same discipline as every prior entry). No Arabic codepoint
+             # (every changed/new file swept over the Arabic, Arabic
+             # Supplement, Arabic Extended-A and both Presentation Forms
+             # blocks — zero matches; every new line addresses a provider
+             # event id, an outcome by closed-set string, a PHP-identifier
+             # error message, or a user id, never corpus text). NOT
+             # addressed: a single-event detail view (the raw `payload`,
+             # deliberately withheld from the list) is real, separate,
+             # smaller follow-up work; `App\Billing\TrialAttribution` is a
+             # fully-built, zero-caller class found during this same sweep,
+             # traced to the identical root cause v3-D147 already named (no
+             # code path creates the first `Entitlement` row — a real,
+             # separate, Stripe-checkout-gated M7 scope item, not a new
+             # gap); `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+             # (v3-D88..D94/D144/D145); multi-surah enrollment; the
+             # operational mailer/7-night window; PAY-1's Stripe fixtures;
+             # surah 67's scene beats. See DECISIONS.md v3-D148.
              # NOTE (v3-D147, 2026-08-28): `EntitlementMachine::CAUSE_ADMIN_OVERRIDE`
              # (one of four declared transition causes, alongside
              # CAUSE_WEBHOOK/CAUSE_TRIAL_START/CAUSE_RECONCILE — all three of

@@ -10,8 +10,15 @@
 // read half of `entitlement_transitions`, which every entitlement state
 // change has written to since the state machine shipped with no route ever
 // reading it back. See `components/admin/BillingAuditPanel.tsx`'s own header.
+//
+// v3-D148 adds a second, independent card below: the RAW webhook journal
+// (`billing_events`), a different table than the derived state-change log
+// above. See `components/admin/BillingEventsPanel.tsx`'s own header for why
+// both are needed — a webhook that never changed state leaves no row in the
+// derived log at all.
 
 import { BillingAuditPanel } from "@/components/admin/BillingAuditPanel";
+import { BillingEventsPanel } from "@/components/admin/BillingEventsPanel";
 
 export default function BillingAuditPage() {
   return (
@@ -25,6 +32,7 @@ export default function BillingAuditPage() {
           </p>
         </header>
         <BillingAuditPanel />
+        <BillingEventsPanel />
       </div>
     </div>
   );

@@ -9,6 +9,7 @@ use App\Http\Controllers\Admin\AdminAuthController;
 use App\Http\Controllers\Admin\AdminBillingController;
 use App\Http\Controllers\Admin\AdminRevealController;
 use App\Http\Controllers\Admin\AdminUsersController;
+use App\Http\Controllers\Admin\BillingEventsController;
 use App\Http\Controllers\Admin\FlagAuditController;
 use App\Http\Controllers\Admin\FlagController;
 use App\Http\Controllers\Admin\NightlyWindowController;
@@ -125,6 +126,11 @@ Route::middleware('auth:sanctum')->group(function () {
         // existed with no caller until now (v3-D147). Registered as a nested
         // path so `POST /api/admin/billing` (no id) still 405s, unchanged.
         Route::post('/billing/{userId}/override', [AdminBillingController::class, 'override']);
+        // The RAW webhook journal viewer (v3-D148) — `billing_events` has been
+        // written on every Stripe delivery since step 23 with no reader
+        // anywhere; a different table than the one `/billing` above reads. Read-only —
+        // see BillingEventsController's own header.
+        Route::get('/billing/events', [BillingEventsController::class, 'index']);
 
         // System Health (step 24). #167: a failed probe renders `unknown`,
         // never 0 — the console must distinguish "healthy" from "blind".
