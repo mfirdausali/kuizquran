@@ -74,6 +74,77 @@ class DeterminismCheckCommandTest extends TestCase
         $this->assertSame([], $run->report['divergences']);
     }
 
+    /**
+     * `config('nightly.sample_size')` ("How many learners the fold check
+     * samples per night") is the operator-facing knob for the nightly's
+     * sample size — but `DeterminismCheckCommand`'s own signature hardcodes
+     * a SECOND, independent default (`{--sample=50}`), and the scheduled
+     * invocation (`routes/console.php`) never passes `--sample` at all. So
+     * `NIGHTLY_SAMPLE_SIZE` had zero effect on the run that actually feeds
+     * the launch-gate ledger every night — an operator narrowing or
+     * widening the nightly sample in production silently did nothing.
+     *
+     * MUTATION: reverting the config-fallback (making `runFold()` always
+     * use the signature default regardless of config) goes back to
+     * `usersChecked === 3` here, proving this assertion is load-bearing.
+     */
+    public function test_the_nightly_sample_size_config_is_honoured_when_no_sample_flag_is_given(): void
+    {
+        $users = collect(range(1, 3))->map(function (int $i) {
+            $user = User::factory()->create();
+            Event::create([
+                'user_id' => $user->id, 'uuid' => (string) Str::uuid(),
+                'type' => 'rung_complete', 'ts' => 1_000 + $i, 'surah' => 112, 'ayah' => 1,
+                'rung' => 'S2', 'correct' => true, 'received_at' => 1_000 + $i,
+            ]);
+
+            return $user;
+        });
+
+        // Genuine clean atom_cache for all three, via the real fold-runner —
+        // same discipline as the poisoned-learner test above.
+        app(\App\Support\AtomCacheRebuilder::class)->rebuild();
+
+        config(['nightly.sample_size' => 2]);
+
+        // No --sample flag — this is exactly what the nightly schedule does.
+        $this->artisan('determinism:check', ['check' => 'fold'])->assertExitCode(0);
+
+        $run = NightlyCheckRun::query()->where('check', 'fold_determinism_check')->firstOrFail();
+
+        $this->assertSame(
+            2,
+            $run->report['usersChecked'],
+            'config(nightly.sample_size) must cap the sample when --sample is not given',
+        );
+        $this->assertCount(3, $users, 'sanity: three learners exist so the cap is actually exercised');
+    }
+
+    public function test_an_explicit_sample_flag_still_overrides_config(): void
+    {
+        $users = collect(range(1, 3))->map(function (int $i) {
+            $user = User::factory()->create();
+            Event::create([
+                'user_id' => $user->id, 'uuid' => (string) Str::uuid(),
+                'type' => 'rung_complete', 'ts' => 1_000 + $i, 'surah' => 112, 'ayah' => 1,
+                'rung' => 'S2', 'correct' => true, 'received_at' => 1_000 + $i,
+            ]);
+
+            return $user;
+        });
+
+        app(\App\Support\AtomCacheRebuilder::class)->rebuild();
+
+        config(['nightly.sample_size' => 2]);
+
+        $this->artisan('determinism:check', ['check' => 'fold', '--sample' => 1])->assertExitCode(0);
+
+        $run = NightlyCheckRun::query()->where('check', 'fold_determinism_check')->firstOrFail();
+
+        $this->assertSame(1, $run->report['usersChecked'], 'an explicit --sample must win over config');
+        $this->assertCount(3, $users);
+    }
+
     public function test_an_empty_database_sample_is_an_ERROR_night_never_a_green_one(): void
     {
         // No users, no events — the DB-fed path with nothing to sample.

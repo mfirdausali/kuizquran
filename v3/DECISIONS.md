@@ -10311,3 +10311,84 @@ separate, Stripe-checkout-gated M7 scope item, not a new gap);
 `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
 (v3-D88..D94/D144/D145); multi-surah enrollment; the operational
 mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats.
+
+---
+
+## Ratified 2026-08-28 (nightly) — v3-D149: `config('nightly.sample_size')` was written, documented, and never read — the scheduled nightly always sampled a hardcoded 50 regardless of the operator's setting
+
+A fresh sweep for this build's recurring "mechanism built/configured and
+never actually consulted" class (v3-D82 through v3-D148) checked every
+`config/*.php` key against a real reader in `api/app`/`api/routes`, an area
+no prior sweep had framed this way (prior sweeps checked for zero-caller
+*classes/controllers/routes*, not zero-reader *config keys*). Found:
+`config('nightly.sample_size')` (`env('NIGHTLY_SAMPLE_SIZE', 50)`) — its own
+docblock: "How many learners the fold check samples per night" — had
+**zero** readers anywhere (`grep -rn "sample_size\|NIGHTLY_SAMPLE_SIZE"
+api/app api/config api/routes` returned only the definition itself).
+
+`App\Console\Commands\DeterminismCheckCommand` — the nightly
+`fold_determinism_check`, BUILD-PLAN M10's launch-gate feeding the
+7-consecutive-green-nights window — is the ONLY thing this config key could
+mean to control, and it never read it: its own signature hardcoded a
+SECOND, independent default (`{--sample=50}`), and `routes/console.php`'s
+scheduled invocation (`Schedule::command(DeterminismCheckCommand::class,
+['both', '--trigger=schedule'])`) never passes `--sample` at all. So an
+operator setting `NIGHTLY_SAMPLE_SIZE` in production to narrow or widen the
+nightly sample had **zero effect** on the run that actually feeds the
+ledger every night — the exact "operator knob silently does nothing" shape,
+one layer up from this build's usual "controller/route never built" gap.
+
+**Fixed:** the signature's hard default is removed (`{--sample= : ...
+Defaults to config(nightly.sample_size).}`, docblock updated in place);
+`runFold()` now resolves the limit as `$this->option('sample') ?? int-cast
+: (int) config('nightly.sample_size', 50)` — an explicit `--sample` still
+wins (manual/CI invocations, and the existing `PerUserFoldLockWiringTest`
+cases, which always pass `--sample` explicitly, are unaffected byte-for-
+byte), and the scheduled invocation — which passes neither — now actually
+honours the config value. `NIGHTLY_SAMPLE_SIZE`'s existing default (`50`)
+matches the signature's old hardcoded default exactly, so this is
+backward-compatible for any deployment that never set the env var.
+
+**RED confirmed directly:** two new `DeterminismCheckCommandTest` cases —
+one seeds 3 clean learners (real events, real `atom_cache` rows via
+`AtomCacheRebuilder::rebuild()`), sets `config(['nightly.sample_size' =>
+2])`, runs `determinism:check fold` with **no** `--sample` flag (exactly
+what the schedule does), and asserts `report['usersChecked'] === 2`; the
+other proves an explicit `--sample=1` still overrides a conflicting config
+value. Against the untouched command the first case failed exactly as
+predicted — `Failed asserting that 3 is identical to 2` (all three learners
+sampled, config ignored) — the second passed vacuously (an explicit flag
+already worked, which is why it doesn't alone prove the bug). Mutation-
+verified by `git stash` of the source file alone (tests kept): reproduced
+the identical RED; `git stash pop` restored byte-identically, 13/13 green
+in the file again.
+
+`php artisan test`: **341 passing** (was 339, +2 — exactly this run's new
+tests; 2 incomplete by design for PAY-1, unmoved). `TZ=UTC make test`
+(full monorepo): **2418 passing** (was 2416, +2; no other suite moved).
+`check-test-floor.mjs` (inlined in `make test`): OK, 2418 >= floor 1899
+(+519 margin, unmoved). `TZ=UTC make build`: exit 0, 27 routes (unchanged —
+a backend-only fix, no route/UI touched). No `v1/**`/`v2/**` edit
+(`git status --porcelain -- v1 v2` empty immediately before commit — a
+stray `v2/tsconfig.tsbuildinfo` build-cache diff from running the suite was
+reverted first, same discipline as every prior entry). No Arabic codepoint
+(both changed files swept programmatically over the Arabic, Arabic
+Supplement, Arabic Extended-A and both Presentation Forms Unicode blocks —
+zero matches; every new line addresses a learner count, a config key, or a
+PHP identifier, never corpus text).
+
+**NOT addressed, named so a future run doesn't re-discover it as new:**
+`config('pricing.offline_ttl_days')` (`api/config/pricing.php`) is also
+never read anywhere in `api/app`/`routes` — but `apps/web/lib/entitlement
+/cache.ts` independently hardcodes the identical value
+(`OFFLINE_TTL_MS = 7 * 24 * 60 * 60 * 1000`), and this codebase has no
+established Next→Laravel config-sharing pattern (the same reasoning that
+already rules out fixing the SSR override gap via a live API call,
+v3-D96/D132) — two sources of truth that happen to agree today, a smaller
+and less clean-cut gap than this one, left for a future run to weigh
+separately rather than folded into this fix. `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148); multi-surah enrollment; the
+operational mailer/7-night window itself (the sample-size knob now works,
+but the window still needs a live host, live SMTP and seven real elapsed
+nights); PAY-1's Stripe fixtures; surah 67's scene beats.

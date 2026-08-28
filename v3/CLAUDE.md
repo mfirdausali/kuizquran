@@ -53,9 +53,55 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2416 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 339 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1176 apps/web. (v3-D148, 2026-08-28)
+make test    # 2418 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 341 v3/api + 118 corpus-compiler
+             # + 420 engine + 61 fold-runner + 1176 apps/web. (v3-D149, 2026-08-28)
+             # NOTE (v3-D149, 2026-08-28): `config('nightly.sample_size')`
+             # ("How many learners the fold check samples per night") was
+             # written, documented, and never read by anything —
+             # `DeterminismCheckCommand`'s own signature hardcoded a SECOND,
+             # independent default (`{--sample=50}`), and the scheduled
+             # nightly invocation (`routes/console.php`) never passes
+             # `--sample` at all. So `NIGHTLY_SAMPLE_SIZE` had ZERO effect on
+             # the run that actually feeds the 7-consecutive-green-nights
+             # launch-gate ledger every night — a config knob silently
+             # doing nothing, one layer up from this build's usual
+             # "controller never built" gap (found by extending the
+             # zero-caller sweep to config KEYS, not just classes/routes).
+             # Fixed: the signature's hard default is removed; `runFold()`
+             # now falls back to `config('nightly.sample_size', 50)` only
+             # when `--sample` is genuinely absent — an explicit `--sample`
+             # still wins (the existing `PerUserFoldLockWiringTest` cases,
+             # which always pass it explicitly, are unaffected). RED
+             # confirmed directly: a new test seeds 3 clean learners, sets
+             # `config(['nightly.sample_size' => 2])`, runs the command with
+             # NO `--sample` flag (exactly what the schedule does), and
+             # asserts `report['usersChecked'] === 2` — against the
+             # untouched command this failed exactly as predicted (`3` vs
+             # `2`, all three sampled, config ignored); mutation-verified via
+             # `git stash` of the source file alone, tests kept — identical
+             # RED reproduced, reverted byte-identically, 13/13 green again.
+             # `php artisan test`: 341 passing (was 339, +2). `TZ=UTC make
+             # test`: 2418 passing (was 2416, +2; no other suite moved).
+             # `check-test-floor.mjs`: OK, 2418 >= floor 1899 (+519 margin,
+             # unmoved). `TZ=UTC make build`: exit 0, 27 routes (unchanged —
+             # backend-only fix, no route/UI touched). No `v1/**`/`v2/**`
+             # edit (stray `v2/tsconfig.tsbuildinfo` reverted first, same
+             # discipline as every prior entry). No Arabic codepoint (both
+             # changed files swept over the Arabic, Arabic Supplement,
+             # Arabic Extended-A and both Presentation Forms blocks — zero
+             # matches; every new line addresses a learner count, a config
+             # key, or a PHP identifier, never corpus text). NOT addressed:
+             # `config('pricing.offline_ttl_days')` has the identical
+             # zero-Laravel-reader shape but a matching hardcoded value
+             # already lives in `apps/web/lib/entitlement/cache.ts` with no
+             # established Next→Laravel config-sharing pattern to fix it
+             # through (smaller, less clean-cut, left for a future run);
+             # `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+             # (v3-D88..D94/D144/D145); `TrialAttribution` (v3-D148);
+             # multi-surah enrollment; the 7-night window itself (still
+             # needs a live host/SMTP/seven real nights); PAY-1's Stripe
+             # fixtures; surah 67's scene beats. See DECISIONS.md v3-D149.
              # NOTE (v3-D148, 2026-08-28): `billing_events` — the RAW webhook
              # journal `WebhookHandler::ingest()` writes on every inbound
              # Stripe delivery, `insertOrIgnore`-first-then-`outcome`-updated

@@ -62,7 +62,7 @@ class DeterminismCheckCommand extends Command
     protected $signature = 'determinism:check
         {check=both : fold | selection | both}
         {--fixture : Run against committed fixtures instead of the database (no DB needed)}
-        {--sample=50 : How many learners to sample for the fold check}
+        {--sample= : How many learners to sample for the fold check. Defaults to config(nightly.sample_size).}
         {--trigger=manual : Recorded on the ledger row: schedule | manual | ci}
         {--night= : Override the UTC night date (YYYY-MM-DD) — tests and backfills only}
         {--no-record : Run and print the verdict without appending a ledger row}';
@@ -144,7 +144,14 @@ class DeterminismCheckCommand extends Command
             return $this->record('fold_determinism_check', $exit, $report);
         }
 
-        $envelope = $this->sampleFromDatabase((int) $this->option('sample'));
+        // No hard default on the SIGNATURE itself (see its own docblock)
+        // so the scheduled invocation — which never passes --sample —
+        // actually honours config('nightly.sample_size')/NIGHTLY_SAMPLE_SIZE
+        // rather than silently overriding it with a second, independent
+        // hardcoded number. An explicit --sample still wins.
+        $sample = $this->option('sample');
+        $limit = $sample !== null ? (int) $sample : (int) config('nightly.sample_size', 50);
+        $envelope = $this->sampleFromDatabase($limit);
         $deadLetters = $envelope['deadLetters'];
         $samples = $envelope['samples'];
 
