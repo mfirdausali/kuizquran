@@ -219,4 +219,125 @@ class AdminBillingTest extends TestCase
         $this->assertCount(200, $response->json('entries'));
         $this->assertSame(200, $response->json('limit'));
     }
+
+    // ---- override() — the ONE write route on this surface. `CAUSE_ADMIN_OVERRIDE`
+    // has existed on `EntitlementMachine` since M7 with no caller anywhere; these
+    // prove it gets one, through the SAME guarded `apply()` every webhook uses. ----
+
+    public function test_override_requires_admin(): void
+    {
+        $learnerNoAuth = $this->learner();
+        $this->postJson("/api/admin/billing/{$learnerNoAuth->id}/override", ['reason' => 'refund per ticket 1'])
+            ->assertStatus(401);
+
+        Sanctum::actingAs($this->learner());
+        $this->postJson("/api/admin/billing/{$learnerNoAuth->id}/override", ['reason' => 'refund per ticket 1'])
+            ->assertStatus(403);
+    }
+
+    public function test_override_requires_a_reason_of_at_least_ten_characters(): void
+    {
+        $this->admin();
+        $learner = $this->learner();
+        Entitlement::create(['user_id' => $learner->id, 'state' => 'trial', 'tier' => 'none', 'state_version' => 0]);
+
+        $this->postJson("/api/admin/billing/{$learner->id}/override", [
+            'state' => 'active',
+            'reason' => 'too short',
+        ])->assertStatus(422)->assertJsonPath('error', 'reason must be at least 10 characters');
+    }
+
+    public function test_override_requires_at_least_one_of_state_or_tier(): void
+    {
+        $this->admin();
+        $learner = $this->learner();
+        Entitlement::create(['user_id' => $learner->id, 'state' => 'trial', 'tier' => 'none', 'state_version' => 0]);
+
+        $this->postJson("/api/admin/billing/{$learner->id}/override", [
+            'reason' => 'a well-formed reason with nothing to change',
+        ])->assertStatus(422)->assertJsonPath('error', 'at least one of state or tier is required');
+    }
+
+    public function test_override_rejects_an_unknown_state_value(): void
+    {
+        $this->admin();
+        $learner = $this->learner();
+        Entitlement::create(['user_id' => $learner->id, 'state' => 'trial', 'tier' => 'none', 'state_version' => 0]);
+
+        $this->postJson("/api/admin/billing/{$learner->id}/override", [
+            'state' => 'not_a_real_state',
+            'reason' => 'refund per support ticket 9911',
+        ])->assertStatus(422);
+    }
+
+    public function test_override_returns_404_when_the_learner_has_no_entitlement_row(): void
+    {
+        $this->admin();
+        $learner = $this->learner();
+
+        $this->postJson("/api/admin/billing/{$learner->id}/override", [
+            'state' => 'active',
+            'reason' => 'refund per support ticket 9911',
+        ])->assertStatus(404);
+    }
+
+    /**
+     * THE LOAD-BEARING CASE. Proves the override goes through the real
+     * `EntitlementMachine::apply()` (not a raw `Entitlement::update()`): the
+     * state actually changes, `state_version` increments, and a REAL
+     * `entitlement_transitions` row lands with `cause: admin_override` and
+     * the calling admin's id as `actor` — the exact wiring
+     * `test_a_system_actor_renders_verbatim_a_numeric_actor_is_pseudonymized`
+     * above already proved the READ side is ready for.
+     */
+    public function test_override_applies_through_the_real_state_machine_and_records_the_admin_as_actor(): void
+    {
+        $admin = $this->admin();
+        $learner = $this->learner();
+        $entitlement = Entitlement::create([
+            'user_id' => $learner->id, 'state' => 'active', 'tier' => 'monthly', 'state_version' => 0,
+        ]);
+
+        $response = $this->postJson("/api/admin/billing/{$learner->id}/override", [
+            'state' => 'lapsed_review_only',
+            'reason' => 'refund per support ticket 9911',
+        ])->assertOk();
+
+        $response->assertJson(['applied' => true, 'state' => 'lapsed_review_only', 'tier' => 'monthly']);
+
+        $fresh = $entitlement->fresh();
+        $this->assertSame('lapsed_review_only', $fresh->state->value);
+        $this->assertSame(1, $fresh->state_version);
+
+        $transition = EntitlementTransition::where('user_id', $learner->id)->latest('id')->first();
+        $this->assertNotNull($transition);
+        $this->assertSame(EntitlementMachine::CAUSE_ADMIN_OVERRIDE, $transition->cause);
+        $this->assertSame('active', $transition->from_state);
+        $this->assertSame('lapsed_review_only', $transition->to_state);
+        $this->assertSame((string) $admin->id, $transition->actor);
+        $this->assertSame('refund per support ticket 9911', $transition->reason);
+
+        // And the read side (already proven ready in the test above) now has a
+        // REAL row to pseudonymize, not a hand-built fixture.
+        $entries = $this->getJson('/api/admin/billing')->assertOk()->json('entries');
+        $expectedActor = app(Pseudonymizer::class)->for($admin->id);
+        $this->assertSame($expectedActor, $entries[0]['actor']);
+    }
+
+    /** Overriding only `tier` leaves `state` untouched — the two fields are independent. */
+    public function test_override_changes_only_the_field_provided(): void
+    {
+        $this->admin();
+        $learner = $this->learner();
+        $entitlement = Entitlement::create([
+            'user_id' => $learner->id, 'state' => 'active', 'tier' => 'none', 'state_version' => 0,
+        ]);
+
+        $this->postJson("/api/admin/billing/{$learner->id}/override", [
+            'tier' => 'lifetime',
+            'reason' => 'goodwill lifetime grant per ticket 4471',
+        ])->assertOk()->assertJson(['applied' => true, 'state' => 'active', 'tier' => 'lifetime']);
+
+        $this->assertSame('active', $entitlement->fresh()->state->value);
+    }
 }

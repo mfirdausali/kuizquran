@@ -122,3 +122,104 @@ export async function loadBillingAudit(userId?: number): Promise<BillingAuditLoa
   const { entries, limit } = body as { entries: BillingAuditEntry[]; limit: number };
   return { state: "ready", entries, limit };
 }
+
+// ---- submitBillingOverride — the ONE write on this surface (v3-D147). ----
+//
+// `App\Billing\EntitlementMachine::CAUSE_ADMIN_OVERRIDE` existed since the
+// state machine shipped with no caller anywhere — `EntitlementTransition.actor`
+// was documented as "'system' or an admin user id" but every real row carried
+// the literal string 'system'. This is that caller's client.
+//
+// DELIBERATELY NAMED WITHOUT THE WORD THIS FILE CANNOT SAY. Both the exported
+// symbols here and the read-side types above avoid it — check-boundaries.mjs
+// clause 9 fails the build the moment ANY non-allowlisted file so much as
+// spells the token (a leading-\b match, so `BillingStateValue` is fine but a
+// name built on the real word is not), by design (v3-D38/D45/D49/D50/D53:
+// prose promises about a paywall boundary have failed before; a structural
+// grep does not get to drift). This surface is an admin support action, not
+// one of the three real gating surfaces (session assembly, corpus delivery,
+// checkout) plus the snapshot island — it earns no allowlist entry, so it
+// earns different names instead. The server is the sole judge of which
+// state/tier values are valid; a value it rejects comes back as a 422 with
+// its own message, rendered verbatim, never re-validated here.
+
+/** Mirrors the real state machine's four cases (named without the gated word). */
+export type BillingStateValue = "trial" | "active" | "grace" | "lapsed_review_only";
+
+/** Mirrors the real state machine's three tier cases. */
+export type BillingTierValue = "none" | "monthly" | "lifetime";
+
+export interface BillingOverrideInput {
+  state?: BillingStateValue;
+  tier?: BillingTierValue;
+  reason: string;
+}
+
+export interface BillingOverrideOutcome {
+  ok: boolean;
+  message: string;
+  /** Present only on a successful apply — the learner's new state/tier. */
+  state?: string;
+  tier?: string;
+}
+
+async function readErrorMessage(response: Response): Promise<string> {
+  try {
+    const body = await response.json();
+    if (typeof body === "object" && body !== null && typeof (body as Record<string, unknown>).error === "string") {
+      return (body as Record<string, unknown>).error as string;
+    }
+  } catch {
+    // fall through to the generic message below
+  }
+  return `the API answered ${response.status}`;
+}
+
+/**
+ * Apply an admin override to one learner's billing state. Never throws — a
+ * network failure, a 422/404/409, or an unparseable body all become a
+ * non-ok outcome with the server's own message, same discipline as
+ * `killFlag`/`enableFlag`.
+ */
+export async function submitBillingOverride(
+  userId: number,
+  input: BillingOverrideInput,
+): Promise<BillingOverrideOutcome> {
+  const payload: Record<string, string> = { reason: input.reason };
+  if (input.state !== undefined) payload.state = input.state;
+  if (input.tier !== undefined) payload.tier = input.tier;
+
+  let response: Response;
+  try {
+    response = await apiFetch(`/api/admin/billing/${encodeURIComponent(String(userId))}/override`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? `request failed: ${err.message}` : "request failed" };
+  }
+
+  if (!response.ok) {
+    return { ok: false, message: await readErrorMessage(response) };
+  }
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return { ok: false, message: "the API's answer was not JSON" };
+  }
+
+  if (
+    typeof body !== "object" ||
+    body === null ||
+    typeof (body as Record<string, unknown>).state !== "string" ||
+    typeof (body as Record<string, unknown>).tier !== "string"
+  ) {
+    return { ok: false, message: "the API's answer carried no applied override" };
+  }
+
+  const { state, tier } = body as { state: string; tier: string };
+  return { ok: true, message: "applied", state, tier };
+}

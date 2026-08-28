@@ -53,9 +53,75 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2378 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 323 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1154 apps/web. (v3-D146, 2026-08-28)
+make test    # 2393 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 330 v3/api + 118 corpus-compiler
+             # + 420 engine + 61 fold-runner + 1162 apps/web. (v3-D147, 2026-08-28)
+             # NOTE (v3-D147, 2026-08-28): `EntitlementMachine::CAUSE_ADMIN_OVERRIDE`
+             # (one of four declared transition causes, alongside
+             # CAUSE_WEBHOOK/CAUSE_TRIAL_START/CAUSE_RECONCILE — all three of
+             # which have real callers) existed since M7 shipped with zero
+             # callers anywhere. `AdminBillingController`'s own header said
+             # "READ-ONLY BY CONSTRUCTION" — true, and also the entire gap: a
+             # test (v3-D141) had already manufactured an EntitlementTransition
+             # row with this cause directly via Eloquent, specifically to prove
+             # the READ side's actor-pseudonymization was "ready for that day"
+             # that never arrived — the same "tests the read side, no write
+             # side exists" shape as v3-D129/D130/D141/D142/D143. Fixed: new
+             # `AdminBillingController::override()` (`POST
+             # /api/admin/billing/{userId}/override`, admin-gated, >=10-char
+             # reason, optional state/tier via EntitlementState::tryFrom/
+             # EntitlementTier::tryFrom, at least one required) routes through
+             # the SAME guarded `EntitlementMachine::apply()` every webhook
+             # uses — never a raw `Entitlement::update()` — passing the calling
+             # admin's own id as `actor` for the first time ever (every other
+             # cause still passes 'system'). Deliberately scoped to
+             # state/tier only — no provider/period/grace fields, which would
+             # let an admin fabricate or backdate a real payment relationship.
+             # `lib/admin/billingAudit.ts` gained `submitBillingOverride()` +
+             # `BillingStateValue`/`BillingTierValue`/`BillingOverrideInput`/
+             # `BillingOverrideOutcome` (named WITHOUT the word
+             # check-boundaries.mjs clause 9 forbids outside its allowlist —
+             # the first draft used `EntitlementStateValue`/
+             # `overrideEntitlement` and tripped 18 real violations on `make
+             # build`, renamed and reran clean); `BillingAuditPanel.tsx` gained
+             # the override form beneath the existing read table.
+             #
+             # ALSO FOUND, real but genuinely out of scope, named so a future
+             # run doesn't re-discover it: no code path anywhere in `v3/api`
+             # ever creates the FIRST `Entitlement` row for a real user — no
+             # checkout route/controller exists at all. Row provisioning is
+             # M7's still-unbuilt checkout flow, the same Stripe-account-gated
+             # scope PAY-1 already names. `override()` requires an EXISTING
+             # row (404 otherwise) rather than guessing defaults for one.
+             #
+             # RED confirmed at all three layers before implementing: 7 new
+             # `AdminBillingTest` cases all failed (404s — the route did not
+             # exist), 5 new `billingAudit.test.ts` cases all failed
+             # (`submitBillingOverride is not a function`), 3 new
+             # `billing-audit-panel.test.tsx` cases all failed (no such
+             # label). Mutation-verified both layers: a fake-success backend
+             # response (skipping `apply()` entirely) failed exactly the
+             # load-bearing state-changed assertion; a fake-success frontend
+             # handler (skipping `submitBillingOverride()` entirely) failed
+             # both the success- and rejection-wiring cases. Both reverted
+             # byte-identically. `TZ=UTC make test`: 2393 passing (was 2378,
+             # +15 — exactly this run's new tests: 7 PHPUnit + 5 + 3 vitest;
+             # no other suite moved). `check-test-floor.mjs`: OK, 2393 >=
+             # floor 1899 (+494 margin, unmoved). `TZ=UTC make build`: exit 0,
+             # 27 routes (unchanged — renders inside the existing
+             # `/settings/billing` page). `npm run gates`: all green (fonts
+             # degraded-but-non-blocking, pre-existing; boundaries 271 files,
+             # unchanged count). `npx tsc --noEmit`: clean. No
+             # `v1/**`/`v2/**` edit. No Arabic codepoint (all seven changed
+             # files swept over every Arabic block plus both Presentation
+             # Forms blocks — zero matches; every new line addresses a
+             # state/tier by closed-set string, a user id, a reason string,
+             # or an identifier, never corpus text). NOT addressed: the
+             # missing checkout-flow entitlement provisioning above;
+             # `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+             # (v3-D88..D94/D144/D145); multi-surah enrollment; the mailer/
+             # 7-night window; PAY-1's Stripe fixtures; surah 67's scene
+             # beats. See DECISIONS.md v3-D147.
              # NOTE (v3-D146, 2026-08-28): `test/shell.test.ts`'s "the
              # dashboard's log-derived line is an exhaustively-stated client
              # island" test verified `components/home/LogSummary.tsx`'s shape

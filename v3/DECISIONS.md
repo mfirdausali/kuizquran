@@ -10054,3 +10054,145 @@ the operational mailer's live SMTP account and the 7-night window (both
 infra/calendar); PAY-1's Stripe fixtures (needs a real Stripe account);
 surah 67's scene beats (human-only content authoring). See DEFECTS.md for
 the standing ledger.
+
+### v3-D147 — `EntitlementMachine::CAUSE_ADMIN_OVERRIDE` existed since M7 shipped with zero callers; `AdminBillingController` was read-only by construction with nowhere to route it
+
+A fresh Explore-agent sweep (excluding every already-named deferred item —
+`rhymeClassOf`, `EntitlementMachine::merge`, multi-surah enrollment, the
+mailer/7-night window, PAY-1, surah 67's scene beats,
+`AccountDeletionRequest::isDue()`) checked Models, Console Commands,
+Jobs/Listeners/Notifications, a full `packages/engine/src` export-caller
+audit, an `apps/web` unused-export sweep, and several docblock spot-checks.
+It found `App\Billing\EntitlementMachine::CAUSE_ADMIN_OVERRIDE` — one of
+four declared transition causes, alongside `CAUSE_WEBHOOK`/
+`CAUSE_TRIAL_START`/`CAUSE_RECONCILE`, all three of which have real
+call sites in `WebhookHandler.php`/`TrialAttribution.php`/
+`EntitlementMachine::reconcile()`. The fourth had none — `grep -rn
+"CAUSE_ADMIN_OVERRIDE" app tests routes` before this run matched only the
+constant's own declaration, two docblock comments naming the gap, and one
+test (`AdminBillingTest::test_a_system_actor_renders_verbatim_a_numeric_actor_is_pseudonymized`,
+v3-D141's `AdminBillingController`) that manufactured an
+`EntitlementTransition` row with it directly via Eloquent specifically to
+prove the READ side's actor-pseudonymization was "ready for that day" — the
+same "tests the read side, no write side exists" shape as v3-D129/D130/D141/
+D142/D143. `AdminBillingController`'s own header said "READ-ONLY BY
+CONSTRUCTION. No route is registered for anything but GET" — true, and
+also the entire gap.
+
+This is a genuinely different, narrower question than `EntitlementMachine
+::merge()` (v3-D88..D94/D144/D145's open product question about
+device/account-adoption semantics, correctly still deferred): admin
+override is a fully-specified support action ("a missed webhook, a
+goodwill refund, a manual grant") with no open design question, on the
+exact template `FlagController::kill/enable` and `AdminRevealController
+::reveal` already establish for a ceremony-gated admin write.
+
+A related, LARGER, and genuinely out-of-scope finding along the way,
+recorded so a future run does not re-discover it as new: **no code path
+anywhere in `v3/api` ever creates the first `Entitlement` row for a real
+user** (`grep -rn "new Entitlement\|Entitlement::create\|firstOrCreate"
+app` outside tests returns nothing) — `WebhookHandler::resolveEntitlement`
+only looks one up by `provider_customer_id` and returns null if absent, and
+`TrialAttribution::apply()` itself takes an existing row as a precondition.
+There is also no `CheckoutController` or `/checkout` route at all. Row
+provisioning is squarely part of M7's still-unbuilt checkout flow
+(BUILD-PLAN: "Checkout (card monthly; FPX/GrabPay lifetime; email capture
+before purchase)") — the same Stripe-account-gated, vacuous-verification
+concern PAY-1 already names ("hand-written JSON would prove the handlers
+parse hand-written JSON... here it would be on the revenue path"), not a
+tonight-sized wiring fix. `override()` below therefore requires an
+EXISTING entitlement row (404 otherwise) rather than silently
+`firstOrCreate`-ing one with guessed defaults.
+
+**Fixed, scoped narrowly to the two fields a support action actually
+needs.** Backend: `AdminBillingController::override()` — `POST
+/api/admin/billing/{userId}/override`, added beside the existing read
+route inside the SAME `admin`-middleware group (no new gate invented).
+Validates `reason` (>=10 chars, mirroring `AdminRevealController`'s own
+`reason_text` floor), and an optional `state`/`tier` (`EntitlementState::
+tryFrom`/`EntitlementTier::tryFrom`, 422 on an unknown value) — at least
+one of the two is required. Routes through the SAME guarded
+`EntitlementMachine::apply()` every webhook uses (never a raw
+`Entitlement::update()`, which would both bypass the optimistic lock and
+leave the transition log incomplete), passing `(string) $request->user()->id`
+as `actor` — the first call site ever to do so; every other cause still
+passes `'system'`. Deliberately does NOT accept `provider`/
+`provider_subscription_id`/`current_period_end`/`grace_until` — those would
+let an admin fabricate or backdate a real payment relationship, well
+outside "fix a missed webhook."
+
+Frontend: `lib/admin/billingAudit.ts` gained `submitBillingOverride()` +
+`BillingStateValue`/`BillingTierValue`/`BillingOverrideInput`/
+`BillingOverrideOutcome` — deliberately named WITHOUT the gated word.
+`check-boundaries.mjs` clause 9 (the entitlement-read allowlist, v3-D55)
+fails the build the instant ANY non-allowlisted file spells a leading-`\b`
+match on `Entitlement`/`entitlement`/`Paywall`/`entitled` — including a
+brand-new exported TYPE name, not just an import from `lib/entitlement/`.
+This surface's own read-side types made exactly this choice already
+(`fromState`/`toState` typed as plain `string | null`, per the file's own
+header); the new write-side code just needed the same discipline extended
+to its own symbols and one `aria-label` string. `BillingAuditPanel.tsx`
+gained an "Override a learner's billing state" form beneath the existing
+read table — target user id, a state `<select>`, a tier `<select>`, a
+reason field, one "Apply override" button. The "state or tier required"
+check client-side is advisory only (the server enforces the same rule and
+its 422 renders verbatim on rejection) — it only saves a round trip.
+
+**RED confirmed at every layer, before any implementation:**
+- Backend: 7 new `AdminBillingTest` cases run against the unmodified
+  controller/routes all failed — the 6 requiring the new route 404'd, the
+  ordering/validation ones inapplicable; reran green after implementing
+  (15/15 in the file, was 8/8).
+- Frontend lib: 5 new `billingAudit.test.ts` cases run against the
+  unmodified module all failed with `TypeError: submitBillingOverride is
+  not a function`; reran green after implementing (12/12, was 7/7).
+- Frontend component: 3 new `billing-audit-panel.test.tsx` cases run
+  against the unmodified panel all failed on `Unable to find a label with
+  the text of: /target user id/i` (the form did not exist yet); reran
+  green after implementing (9/9, was 6/6).
+
+**Mutation-verified, both layers, both reverted byte-identically after:**
+- Backend: replaced `override()`'s real `$this->machine->apply(...)` call
+  and its conflict check with a hardcoded `{applied:true, ...}` response
+  that never touches the database. The load-bearing
+  `test_override_applies_through_the_real_state_machine_and_records_the_admin_as_actor`
+  case failed exactly on `assertSame('lapsed_review_only',
+  $fresh->state->value)` (`-'lapsed_review_only' +'active'` — the row
+  never actually changed); the other 14 cases in the file were unaffected.
+- Frontend: replaced `onOverride`'s real `submitBillingOverride()` call
+  with a hardcoded success message, never calling the server at all. Both
+  the success-wiring case and the rejection-wiring case failed — the
+  rejection case timed out waiting for the server's own 422 message, which
+  a fake-always-succeeds handler can never produce.
+
+Also caught along the way, not a separate finding: the FIRST attempt at
+the write-side types (`EntitlementStateValue`/`overrideEntitlement`/etc.)
+tripped `check-boundaries.mjs` clause 9 with 18 violations the moment
+`make build` ran — a real RED from the gate itself, not a hypothetical.
+Renamed to the `Billing*`/`submitBillingOverride` forms above and reran;
+zero violations.
+
+`TZ=UTC make test`: 2393 passing (was 2378, +15 — exactly this run's new
+tests: 7 PHPUnit + 5 + 3 vitest; no other suite moved).
+`check-test-floor.mjs`: OK, 2393 >= floor 1899 (+494 margin, unmoved).
+`TZ=UTC make build`: exit 0, 27 routes (unchanged — renders inside the
+existing `/settings/billing` page, no new route). `npm run gates`: all
+green (fonts degraded-but-non-blocking, pre-existing; boundaries 271 files,
+unchanged count — no new file, only new symbols in two existing files;
+corpus-morphology and corpus-glyphs unchanged). `npx tsc --noEmit`: clean,
+`Version 5.9.3` confirmed. No `v1/**`/`v2/**` edit (`git status --porcelain
+-- v1 v2` empty immediately before commit — a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff from running the suite was
+reverted first, same discipline as every prior entry). No Arabic codepoint
+(the full diff across all seven changed files swept over the Arabic,
+Arabic Supplement, Arabic Extended-A and both Presentation Forms Unicode
+blocks — zero matches; every new line addresses a state/tier by a closed-set
+string, a user id, a reason string, or a TypeScript/PHP identifier, never
+corpus text).
+
+**NOT addressed, named so a future run doesn't re-discover it as new:** the
+missing `Entitlement`-row provisioning / checkout flow described above
+(real, separate, Stripe-account-gated M7 scope); `rhymeClassOf()`
+(v3-D136); `EntitlementMachine::merge()` (v3-D88..D94/D144/D145); multi-surah
+enrollment; the operational mailer/7-night window; PAY-1's Stripe fixtures;
+surah 67's scene beats. See DEFECTS.md for the standing ledger.

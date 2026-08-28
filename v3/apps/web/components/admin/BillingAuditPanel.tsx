@@ -24,9 +24,26 @@
 //
 // EGRESS: through `lib/admin/billingAudit.ts`, which itself goes through
 // `apiFetch` only (check-boundaries.mjs clause 6).
+//
+// THE OVERRIDE FORM (v3-D147) IS THE ONE WRITE ON THIS SCREEN. Everything
+// above is read-only. `App\Billing\EntitlementMachine::CAUSE_ADMIN_OVERRIDE`
+// existed since the state machine shipped with no caller anywhere — this
+// form is that caller. The client-side "state or tier required" check is
+// advisory only; the server enforces the same rule and its 422 message
+// renders verbatim on rejection, same discipline as `FlagsPanel`'s ceremony
+// form.
 
 import { useCallback, useEffect, useState } from "react";
-import { loadBillingAudit, type BillingAuditLoad } from "@/lib/admin/billingAudit";
+import {
+  loadBillingAudit,
+  submitBillingOverride,
+  type BillingAuditLoad,
+  type BillingStateValue,
+  type BillingTierValue,
+} from "@/lib/admin/billingAudit";
+
+const STATE_OPTIONS: BillingStateValue[] = ["trial", "active", "grace", "lapsed_review_only"];
+const TIER_OPTIONS: BillingTierValue[] = ["none", "monthly", "lifetime"];
 
 export function BillingAuditPanel() {
   const [userIdDraft, setUserIdDraft] = useState("");
@@ -42,6 +59,47 @@ export function BillingAuditPanel() {
     refresh(appliedUserId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appliedUserId]);
+
+  // ---- the admin override form (v3-D147) ----
+  const [overrideUserIdDraft, setOverrideUserIdDraft] = useState("");
+  const [overrideState, setOverrideState] = useState<BillingStateValue | "">("");
+  const [overrideTier, setOverrideTier] = useState<BillingTierValue | "">("");
+  const [overrideReason, setOverrideReason] = useState("");
+  const [overrideMessage, setOverrideMessage] = useState<string | null>(null);
+  const [overrideBusy, setOverrideBusy] = useState(false);
+
+  const onOverride = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      const parsed = Number.parseInt(overrideUserIdDraft.trim(), 10);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        setOverrideMessage("enter a valid learner id");
+        return;
+      }
+      // CLIENT-SIDE, ADVISORY ONLY — the server enforces this same rule (422
+      // "at least one of state or tier is required") and its message would
+      // render just as honestly; this check only saves a round trip.
+      if (overrideState === "" && overrideTier === "") {
+        setOverrideMessage("choose a state or a tier to override");
+        return;
+      }
+
+      setOverrideBusy(true);
+      void (async () => {
+        const outcome = await submitBillingOverride(parsed, {
+          state: overrideState === "" ? undefined : overrideState,
+          tier: overrideTier === "" ? undefined : overrideTier,
+          reason: overrideReason,
+        });
+        setOverrideBusy(false);
+        setOverrideMessage(
+          outcome.ok ? `applied — state: ${outcome.state}, tier: ${outcome.tier}` : outcome.message,
+        );
+        if (outcome.ok) refresh(appliedUserId);
+      })();
+    },
+    [overrideUserIdDraft, overrideState, overrideTier, overrideReason, appliedUserId, refresh],
+  );
 
   const onFilter = useCallback(
     (e: React.FormEvent) => {
@@ -91,6 +149,58 @@ export function BillingAuditPanel() {
             </button>
           ) : null}
         </div>
+      </form>
+
+      <form onSubmit={onOverride} className="stack" aria-label="Override a learner's billing state">
+        <label>
+          Target user id
+          <input
+            type="text"
+            inputMode="numeric"
+            placeholder="42"
+            value={overrideUserIdDraft}
+            onChange={(e) => setOverrideUserIdDraft(e.target.value)}
+          />
+        </label>
+        <label>
+          State
+          <select value={overrideState} onChange={(e) => setOverrideState(e.target.value as BillingStateValue | "")}>
+            <option value="">(leave unchanged)</option>
+            {STATE_OPTIONS.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Tier
+          <select value={overrideTier} onChange={(e) => setOverrideTier(e.target.value as BillingTierValue | "")}>
+            <option value="">(leave unchanged)</option>
+            {TIER_OPTIONS.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Reason
+          <input
+            type="text"
+            placeholder="refund per support ticket 9911"
+            value={overrideReason}
+            onChange={(e) => setOverrideReason(e.target.value)}
+          />
+        </label>
+        <button type="submit" className="btn" disabled={overrideBusy}>
+          Apply override
+        </button>
+        {overrideMessage !== null ? (
+          <p className="caption" role="status">
+            {overrideMessage}
+          </p>
+        ) : null}
       </form>
 
       {load.state === "loading" ? <p className="caption">Loading…</p> : null}

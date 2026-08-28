@@ -2,7 +2,11 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Billing\EntitlementMachine;
+use App\Billing\EntitlementState;
+use App\Billing\EntitlementTier;
 use App\Http\Controllers\Controller;
+use App\Models\Entitlement;
 use App\Models\EntitlementTransition;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -21,7 +25,13 @@ use Illuminate\Http\Request;
  * learner's tier flip to lapsed_review_only, and when" had a database console
  * and nothing else.
  *
- * READ-ONLY BY CONSTRUCTION. No route is registered for anything but GET.
+ * `override()` IS THE ONE WRITE ROUTE HERE (v3-D147). Every other action stays
+ * read-only by construction — no route is registered for anything but GET and
+ * this one POST. `EntitlementMachine::CAUSE_ADMIN_OVERRIDE` existed since the
+ * state machine shipped with no caller anywhere in `app/`; this is that caller,
+ * routed through the SAME guarded `apply()` every webhook uses — never a raw
+ * `Entitlement::update()`, which would both bypass the optimistic lock and
+ * leave no transition row behind.
  *
  * BOTH IDENTITIES ARE PSEUDONYMIZED ON THE WAY OUT.
  *  - `user_id` (the learner whose entitlement changed) is a raw FK, never
@@ -29,16 +39,19 @@ use Illuminate\Http\Request;
  *    this is the first surface that ever reads it back to a human, so it must
  *    pseudonymize here or be the one billing screen that deanonymizes a
  *    learner to every admin who can load it.
- *  - `actor` is documented ("'system' or an admin user id. Never a learner.")
- *    but every current call site passes the literal string 'system' —
- *    `CAUSE_ADMIN_OVERRIDE` exists with no caller yet. A non-numeric actor
- *    renders verbatim; a numeric one (an admin id, the day a caller exists)
- *    is pseudonymized rather than leaked, the same rule `AdminAuditController`
- *    applies to its own actor column.
+ *  - `actor` is documented ("'system' or an admin user id. Never a learner.").
+ *    `override()` below is the first call site to ever pass the calling
+ *    admin's own id rather than the literal string 'system'. A non-numeric
+ *    actor renders verbatim; a numeric one is pseudonymized rather than
+ *    leaked, the same rule `AdminAuditController` applies to its own actor
+ *    column.
  */
 class AdminBillingController extends Controller
 {
-    public function __construct(private readonly Pseudonymizer $pseudonymizer) {}
+    public function __construct(
+        private readonly Pseudonymizer $pseudonymizer,
+        private readonly EntitlementMachine $machine,
+    ) {}
 
     /** A hard cap, not a "page 1 of N" pagination UI — mirrors AdminAuditController's
      *  and FlagAuditController's own recent-activity-review scope discipline. */
@@ -71,10 +84,86 @@ class AdminBillingController extends Controller
     }
 
     /**
-     * 'system' (every current call site) renders verbatim. A numeric string —
-     * an admin user id, per the migration's own documented intent, once
-     * `CAUSE_ADMIN_OVERRIDE` gets a real caller — is pseudonymized like any
-     * other admin identity, never leaked as a raw integer.
+     * ADMIN OVERRIDE — a support admin manually correcting a learner's billing
+     * state (a missed webhook, a goodwill refund, a manual grant). Scoped
+     * narrowly to the two fields a support action actually needs: `state` and
+     * `tier`. Nothing here lets an admin fabricate `provider`/
+     * `provider_subscription_id` (that would forge a real payment
+     * relationship) or backdate `current_period_end`/`grace_until`.
+     *
+     * REQUIRES AN EXISTING ENTITLEMENT ROW. A learner with none has never
+     * started a trial or been billed — provisioning that row is the
+     * (separate, unbuilt) checkout flow's job, not this action's.
+     */
+    public function override(Request $request, int $userId): JsonResponse
+    {
+        $reason = trim((string) $request->input('reason', ''));
+        if (mb_strlen($reason) < 10) {
+            return response()->json(['error' => 'reason must be at least 10 characters'], 422);
+        }
+
+        $changes = [];
+
+        if ($request->has('state')) {
+            $state = EntitlementState::tryFrom((string) $request->input('state'));
+            if (! $state) {
+                return response()->json([
+                    'error' => 'state must be one of: '.implode(', ', array_column(EntitlementState::cases(), 'value')),
+                ], 422);
+            }
+            $changes['state'] = $state;
+        }
+
+        if ($request->has('tier')) {
+            $tier = EntitlementTier::tryFrom((string) $request->input('tier'));
+            if (! $tier) {
+                return response()->json([
+                    'error' => 'tier must be one of: '.implode(', ', array_column(EntitlementTier::cases(), 'value')),
+                ], 422);
+            }
+            $changes['tier'] = $tier;
+        }
+
+        if ($changes === []) {
+            return response()->json(['error' => 'at least one of state or tier is required'], 422);
+        }
+
+        $entitlement = Entitlement::where('user_id', $userId)->first();
+        if (! $entitlement) {
+            return response()->json(['error' => 'no entitlement row for this learner — nothing to override'], 404);
+        }
+
+        $nowMs = (int) round(microtime(true) * 1000);
+        $result = $this->machine->apply(
+            $entitlement,
+            $changes,
+            EntitlementMachine::CAUSE_ADMIN_OVERRIDE,
+            $nowMs,
+            null,
+            (string) $request->user()->id,
+            $reason,
+        );
+
+        if (! $result->wasApplied()) {
+            return response()->json([
+                'error' => 'version conflict — the entitlement changed underneath you. Re-read and retry.',
+            ], 409);
+        }
+
+        $fresh = $entitlement->fresh();
+
+        return response()->json([
+            'applied' => true,
+            'state' => $fresh->state->value,
+            'tier' => $fresh->tier->value,
+        ]);
+    }
+
+    /**
+     * 'system' (every non-override call site) renders verbatim. A numeric
+     * string — an admin user id, written by `override()` above — is
+     * pseudonymized like any other admin identity, never leaked as a raw
+     * integer.
      */
     private function renderActor(string $actor): string
     {

@@ -119,8 +119,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/audit', [AdminAuditController::class, 'index']);
 
         // BUILD-PLAN M7's own named deliverable, never built until now: "admin
-        // billing surface." Read-only — see AdminBillingController's own header.
+        // billing surface." See AdminBillingController's own header.
         Route::get('/billing', [AdminBillingController::class, 'index']);
+        // The one write route on this surface — `EntitlementMachine::CAUSE_ADMIN_OVERRIDE`
+        // existed with no caller until now (v3-D147). Registered as a nested
+        // path so `POST /api/admin/billing` (no id) still 405s, unchanged.
+        Route::post('/billing/{userId}/override', [AdminBillingController::class, 'override']);
 
         // System Health (step 24). #167: a failed probe renders `unknown`,
         // never 0 — the console must distinguish "healthy" from "blind".
