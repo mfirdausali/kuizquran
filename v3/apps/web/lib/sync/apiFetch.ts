@@ -38,11 +38,30 @@
 // THE EXEMPT ROUTE: POST /api/auth/anonymous is never routed through the
 // interceptor. A 401 from the mint endpoint triggering a mint IS the loop,
 // directly.
+//
+// v3-D153: POST /api/auth/login carries the SAME shape of problem, found
+// while wiring lib/account/auth.ts#loginAccount. It sits OUTSIDE
+// `auth:sanctum` — no token is required to call it at all — and its OWN 401
+// (AuthController::login()) means "wrong email or password", never "the
+// bearer token this device happens to be carrying is dead." Routing it
+// through the generic interceptor made a wrong password indistinguishable
+// from a revoked device token: the device's live token was cleared and a
+// re-mint was attempted for a failure that had nothing to do with it, and
+// the caller saw a mint-related error instead of the real "invalid
+// credentials" answer. NO_REMINT_PATHS is exactly ANONYMOUS_PATH's own
+// exemption, generalized to any endpoint whose 401 is a domain-specific
+// denial rather than a token-liveness signal.
 
 import { clearToken, getToken, hasLiveToken, setToken } from "./token.ts";
 
 /** The mint endpoint. Exempt from the interceptor by construction — see above. */
 export const ANONYMOUS_PATH = "/api/auth/anonymous";
+
+/** Public, unauthenticated endpoints whose own 401 is a domain-specific
+ *  denial, never a signal that the CALLER'S attached bearer token is dead —
+ *  see v3-D153 above. Adding a path here is a reviewable act, same
+ *  discipline as check-boundaries.mjs's own allowlists. */
+const NO_REMINT_PATHS = new Set<string>(["/api/auth/login"]);
 
 /** BRAKE 3's window. After a failed mint, refuse to mint again for this long. */
 export const MINT_COOLDOWN_MS = 60_000;
@@ -170,6 +189,8 @@ export async function apiFetch(
   const response = await fetch(`${apiBase()}${path}`, { ...init, headers });
 
   if (response.status !== 401) return response;
+  // v3-D153: this endpoint's 401 is not a token-liveness signal — see above.
+  if (NO_REMINT_PATHS.has(path)) return response;
 
   // BRAKE 1: a retry that itself 401s does not mint again. Give up for this
   // cycle and surface a degraded state — the session is untouched.

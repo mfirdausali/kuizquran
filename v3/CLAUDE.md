@@ -53,9 +53,64 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2432 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2455 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 344 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1187 apps/web. (v3-D152, 2026-08-29)
+             # + 420 engine + 61 fold-runner + 1210 apps/web. (v3-D153, 2026-08-29)
+             # NOTE (v3-D153, 2026-08-29): the learner account flow —
+             # `AuthController` (register/login/logout/me),
+             # `PasswordResetController` and `EmailVerificationController` —
+             # has existed, routed and fully server-tested since build-plan
+             # step 13 with ZERO frontend callers anywhere: `grep -rln
+             # "auth/register\|auth/login\|auth/logout\|forgot-password\|
+             # email/verify" apps/web/lib apps/web/app apps/web/components`
+             # returned nothing. CLAUDE.md's own corruption-risk ordering
+             # names this exactly: "AUTH- closes before any PAY- task... an
+             # RM500 lifetime buyer who forgets their password loses
+             # everything" — and PAY- work (PaywallGate, TrialAttribution)
+             # is already under active construction (v3-D147..D151). Fixed:
+             # new `lib/account/auth.ts` (mirrors `lib/admin/session.ts`'s
+             # login/logout shape) + `components/settings/AccountAuthPanel.tsx`
+             # (checking / anonymous-with-create-or-sign-in / named-with-
+             # verify-and-sign-out), wired into `/settings` as a new "YOUR
+             # ACCOUNT" card. A second, real defect surfaced while writing
+             # the RED test for login: `AuthController::login()`'s 401 (a
+             # public, unauthenticated route) was being caught by
+             # `apiFetch`'s B8 401-interceptor, silently clearing a live
+             # device token and attempting a re-mint on a WRONG-PASSWORD
+             # response — the exact "a 401 from X triggering a remint IS the
+             # loop" shape `ANONYMOUS_PATH`'s own exemption already named.
+             # Fixed by generalizing it: `apiFetch.ts` gained
+             # `NO_REMINT_PATHS` (currently `{"/api/auth/login"}`). RED
+             # confirmed at three independent points (auth.ts moved aside,
+             # the NO_REMINT_PATHS check reverted, AccountAuthPanel.tsx moved
+             # aside), each restored byte-identically. `TZ=UTC make test`:
+             # 2455 passing (was 2432, +23 — exactly this run's new tests:
+             # 14 + 8 + 1; apps/web 1210, was 1187; no other suite moved).
+             # `check-test-floor.mjs`: OK, 2455 >= floor 1899 (+556 margin,
+             # unmoved). `TZ=UTC make build`: exit 0, 27 routes (unchanged —
+             # renders inside the existing `/settings` page). `npm run
+             # gates`: all green (boundaries 280 files, up from 276 —
+             # exactly the four new apps/web files; fonts degraded-but-non-
+             # blocking, pre-existing; corpus-glyphs 206 codepoints,
+             # unchanged). `npx tsc --noEmit`: clean. No `v1/**`/`v2/**`
+             # edit (stray `v2/tsconfig.tsbuildinfo` reverted first, same
+             # discipline as every prior entry). No Arabic codepoint (every
+             # new/changed file swept over every Arabic block plus both
+             # Presentation Forms blocks, plus a `\u06xx`/`fromCharCode`
+             # sweep — zero matches; every new line addresses an email
+             # string, a boolean, an HTTP path, or English prose, never
+             # corpus text). NOT addressed: the reset-password CONFIRMATION
+             # screen (a new public route consuming the emailed token —
+             # `requestPasswordReset`, the send-link half, is wired, but
+             # nothing yet lets a learner complete a reset; the more urgent
+             # half of the very risk this fix's own motivating rule names,
+             # left for a near-future run); `EmailVerificationController
+             # ::verify()`'s signed-link route still has no in-app landing
+             # page; `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+             # (v3-D88..D94/D144/D145); `TrialAttribution` (v3-D148);
+             # `PaywallGate` as a whole class (v3-D151); multi-surah
+             # enrollment; the 7-night window; PAY-1's Stripe fixtures;
+             # surah 67's scene beats. See DECISIONS.md v3-D153.
              # NOTE (v3-D152, 2026-08-29): `lib/workbench/sign.ts
              # #describeCertification()` — v3-D22's own claim rule, "the ONE
              # function built to answer 'may this UI say a scholar verified

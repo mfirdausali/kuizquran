@@ -10676,3 +10676,146 @@ nights); PAY-1's Stripe fixtures; surah 67's scene beats. A `/workbench`
 human a11y/visual pass on the new sentence's placement is not part of this
 fix's scope.
 
+
+## 2026-08-29 (nightly) — v3-D153: the learner account flow (register/login/logout/verify/reset-request) had zero frontend callers — the exact `AUTH-` gap CLAUDE.md's own corruption-risk ordering names
+
+A fresh sweep (an Explore agent, instructed to avoid every already-named
+deferred item — `rhymeClassOf`, `EntitlementMachine::merge`,
+`TrialAttribution`, `PaywallGate`, multi-surah enrollment, the 7-night
+window, PAY-1, surah 67's scene beats) found: `AuthController`
+(register/login/logout/me), `PasswordResetController`
+(sendResetLink/reset) and `EmailVerificationController` (verify/resend)
+have all existed, routed and fully server-tested since build-plan step 13
+(`AnonymousAndAdoptionTest`, `PasswordResetTest`, `EmailVerificationTest`)
+— with **zero** frontend callers anywhere:
+
+```
+$ grep -rln "auth/register\|auth/login\|auth/logout\|forgot-password\|reset-password\|email/verify\|verification-notification" apps/web/lib apps/web/app apps/web/components
+(no output)
+```
+
+`/settings` — this build's own M7 account surface — hosted only
+`AnchorHourPanel`/`AccountExportPanel`/`AccountDeletionPanel`; no email or
+password field anywhere. `components/home/DeviceReset.tsx`'s own comment
+confirmed the product was anonymous-only by construction ("This build has
+no account adoption and no server-side identity to restore from"). A prior
+sweep (v3-D144/D145) had checked `v3/api/app/Http/Controllers` and read
+`AuthController` as wired because `POST /auth/anonymous` — the mint
+endpoint — genuinely is; it missed that `register`/`login`/`logout`/`me`
+and both password/email endpoints on the SAME controller were dead. Same
+"half the controller is wired, half is dead" shape as v3-D151 (PaywallGate)
+and v3-D148 (`billing_events.user_id`).
+
+**Why this one, and why now.** CLAUDE.md's own "ordering that will corrupt
+data if violated" list states this exactly: *"AUTH- closes before any PAY-
+task. No password reset today; an RM500 lifetime buyer who forgets their
+password loses everything."* The PAY- work that rule is supposed to
+precede — `PaywallGate`, `TrialAttribution` — is already under active
+construction (v3-D147 through D151). Leaving `AUTH-` at zero frontend
+callers while `PAY-` work lands is the exact ordering violation the rule
+exists to prevent, even though no single commit crossed a hard gate.
+
+**Scope, deliberate.** This run wires register (adopt-in-place), login
+(adopt a different account's token, mirroring `lib/admin/session.ts
+#adminLogin`'s already-established `setAuthenticatedIdentity` pattern),
+logout (revoke server-side then clear locally), resend-verification-email,
+and request-password-reset (the "forgot password" email dispatch). It does
+**not** build the reset-password CONFIRMATION screen that consumes the
+emailed token — that needs a new public route reachable from an email
+client rather than from inside the authenticated app shell, and is real,
+separable follow-on work, named below.
+
+**New:** `lib/account/auth.ts` (mirrors `lib/admin/session.ts`'s
+login/logout shape and `lib/account/api.ts`'s never-throws discipline — an
+identity screen must not throw into a render) + `components/settings
+/AccountAuthPanel.tsx` (three states: checking / anonymous-with-
+create-or-sign-in-forms-and-an-inline-forgot-password / named-with-verify-
+and-sign-out), wired into `/settings` as a new "YOUR ACCOUNT" card, first
+in the page (identity precedes the anchor-hour/export/delete cards below
+it).
+
+**A second, real defect surfaced while writing the RED test for
+`loginAccount`, not anticipated going in.** `AuthController::login()`
+returns 401 for wrong credentials on a route that sits OUTSIDE
+`auth:sanctum` — no token is required to call it at all. Routing it
+through `apiFetch`'s existing B8 401-interceptor (DEFECTS.md#B8: any 401
+clears the current token and re-mints an anonymous identity) made a wrong
+password indistinguishable from a revoked device token: a learner's live,
+perfectly good token was silently cleared and a re-mint attempted for a
+failure that had nothing to do with it, and the caller saw a mint-related
+error (`"sync auth unavailable (still-401)"`) instead of "invalid
+credentials." This is the exact class of problem `ANONYMOUS_PATH`'s own
+existing exemption already names ("A 401 from the mint endpoint triggering
+a mint IS the loop, directly") — `/api/auth/login`'s 401 is a
+domain-specific denial, never a token-liveness signal, and needed the same
+treatment. Fixed by generalizing the exemption: a new `NO_REMINT_PATHS` set
+in `lib/sync/apiFetch.ts` (currently `{"/api/auth/login"}`, a reviewable
+allowlist matching `check-boundaries.mjs`'s own discipline) is checked
+before the 401 handler fires. `AdminAuthController::login()` never had this
+problem because it deliberately returns 403 for bad credentials, not 401 —
+a difference worth knowing but not worth retrofitting onto the learner
+controller, since 401 is the semantically correct status for "unauthorized"
+and the fix belongs in the shared interceptor, not in a route-specific
+status-code change.
+
+**Verified.**
+
+RED confirmed at three independent points, each by moving only the new/
+changed source aside (tests kept) and restoring byte-identically after:
+
+- `lib/account/auth.ts` moved aside → `lib/account/auth.test.ts`'s whole
+  suite failed on module resolution (`Failed to load url ./auth`).
+- The `NO_REMINT_PATHS` check reverted in `apiFetch.ts` → the new
+  `v3-D153` case in `lib/sync/auth.test.ts` failed exactly as predicted:
+  `SyncAuthError: sync auth unavailable (still-401)` — the interceptor's
+  own `isRetry` throw, proving the mint dance fired on a login 401 exactly
+  as reasoned above.
+- `components/settings/AccountAuthPanel.tsx` moved aside →
+  `test/settings-account-auth.test.tsx`'s whole suite failed on module
+  resolution.
+
+The component suite drives real DOM interactions through real mocked HTTP
+round trips (register → re-check-session → named view renders; a second
+device's sign-in → a DIFFERENT email renders; a denied login → the
+server's own `"invalid credentials"` string renders verbatim and the
+anonymous form is not replaced; forgot-password → the server's uniform
+"if that email has an account…" confirmation; sign-out → posts to
+`/api/auth/logout` and returns to the anonymous view) — the same
+`fireEvent`/`waitFor` proof-of-wiring pattern `admin-gate.test.tsx`
+established for the sibling admin flow.
+
+`TZ=UTC make test`: **2455 passing** (was 2432, +23 — exactly this run's
+new tests: 14 in `lib/account/auth.test.ts`, 8 in
+`test/settings-account-auth.test.tsx`, 1 in `lib/sync/auth.test.ts`; no
+other suite moved: 255 v2 vitest, 47 v2/api, 344 v3/api, 118
+corpus-compiler, 420 engine, 61 fold-runner, apps/web 1210 — was 1187).
+`check-test-floor.mjs`: OK, 2455 >= floor 1899 (+556 margin, unmoved).
+`TZ=UTC make build`: exit 0, 27 routes (unchanged — no new route, renders
+inside the existing `/settings` page). `npm run gates`: all green (fonts
+degraded-but-non-blocking, pre-existing; boundaries 280 files, up from
+276 — exactly the four new apps/web files; corpus-glyphs 206 codepoints,
+unchanged). `npx tsc --noEmit`: clean. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff reverted first, same discipline
+as every prior entry — `git status --porcelain -- v1 v2` empty immediately
+before commit). No Arabic codepoint (every new/changed file swept
+programmatically over the Arabic, Arabic Supplement, Arabic Extended-A and
+both Presentation Forms Unicode blocks, plus a `\u06xx`/`fromCharCode`
+sweep — zero matches; every new line addresses an email string, a boolean,
+an HTTP path, or English prose, never corpus text).
+
+**NOT addressed, named so a future run doesn't re-discover it as new:**
+the reset-password CONFIRMATION screen (a new public route consuming the
+emailed `token`+`email`, calling `POST /api/reset-password` and adopting
+the returned token) — `requestPasswordReset` (the send-link half) is wired,
+but nothing yet lets a learner actually complete a reset; this is real,
+separable, and the more urgent half of the "RM500 buyer forgets their
+password" risk CLAUDE.md's own rule names, left for a near-future run
+rather than widening tonight's scope further. `EmailVerificationController
+::verify()`'s own signed-link route is still only reachable via the emailed
+URL directly (no in-app landing/redirect page renders its result) — a
+smaller, separate gap. `rhymeClassOf()` (v3-D136); `EntitlementMachine
+::merge()` (v3-D88..D94/D144/D145); `App\Billing\TrialAttribution`
+(v3-D148); `PaywallGate` as a whole class (v3-D151); multi-surah
+enrollment; the operational mailer/7-night window (still needs a live
+host/SMTP/seven real nights); PAY-1's Stripe fixtures; surah 67's scene
+beats — all unchanged.

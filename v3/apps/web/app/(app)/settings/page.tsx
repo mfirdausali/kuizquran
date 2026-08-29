@@ -12,6 +12,7 @@
 // IndexedDB and calls no API itself, so it stays server-rendered while the
 // two panels that genuinely need client state hydrate underneath it.
 
+import { AccountAuthPanel } from "@/components/settings/AccountAuthPanel";
 import { AccountExportPanel } from "@/components/settings/AccountExportPanel";
 import { AccountDeletionPanel } from "@/components/settings/AccountDeletionPanel";
 import { AnchorHourPanel } from "@/components/settings/AnchorHourPanel";
@@ -23,9 +24,19 @@ export default function SettingsPage() {
         <header className="page-head">
           <h1>Account &amp; data</h1>
           <p className="caption">
-            Your daily anchor, what is recorded, and deleting your account.
+            Signing in, your daily anchor, what is recorded, and deleting your
+            account.
           </p>
         </header>
+
+        <section className="card" aria-labelledby="account-h">
+          <div className="card-header">
+            <h2 id="account-h" style={{ margin: 0, fontSize: 12, fontWeight: 600 }}>
+              YOUR ACCOUNT
+            </h2>
+          </div>
+          <AccountAuthPanel />
+        </section>
 
         <section className="card" aria-labelledby="anchor-h">
           <div className="card-header">

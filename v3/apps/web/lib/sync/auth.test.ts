@@ -356,6 +356,43 @@ describe("the three brakes — a permanently-401ing server cannot spin forever",
   });
 });
 
+describe("v3-D153 — /api/auth/login's OWN 401 is a credential denial, never a dead-token signal", () => {
+  // Found while wiring lib/account/auth.ts#loginAccount (DEFECTS.md#AUTH-,
+  // zero frontend callers until now). `AuthController::login()` returns 401
+  // for wrong credentials on a route that sits OUTSIDE `auth:sanctum` — it
+  // needs no token at all. Routing it through the generic interceptor made a
+  // wrong password look identical to a dead device token: clearToken() fired,
+  // a re-mint was attempted, and the caller saw a mint-related error instead
+  // of "invalid credentials". Mirrors ANONYMOUS_PATH's own reasoning (a 401
+  // from the mint endpoint triggering a mint IS the loop) for the sibling
+  // case: a credential check whose 401 triggers a re-mint silently discards
+  // the real answer.
+  it("does not clear the token or attempt a mint on a 401 from /api/auth/login", async () => {
+    setToken("still-good-token");
+    let mintAttempts = 0;
+    vi.stubGlobal("fetch", async (url: string) => {
+      const path = String(url);
+      if (path.includes("/api/auth/anonymous")) {
+        mintAttempts += 1;
+        return new Response(JSON.stringify({ token: "should-never-be-minted" }), { status: 201 });
+      }
+      if (path.includes("/api/auth/login")) {
+        return new Response(JSON.stringify({ error: "invalid credentials" }), { status: 401 });
+      }
+      throw new Error(`unexpected request: ${path}`);
+    });
+
+    const response = await apiFetch("/api/auth/login", { method: "POST" });
+
+    expect(response.status).toBe(401);
+    expect(mintAttempts).toBe(0);
+    // The device's own token — unrelated to the login attempt's outcome —
+    // must survive a failed login untouched.
+    expect(getToken()).toBe("still-good-token");
+    expect(hasLiveToken()).toBe(true);
+  });
+});
+
 describe("a non-401 response is returned untouched", () => {
   it("does not mint on a 500", async () => {
     setToken("good");
