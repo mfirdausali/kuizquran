@@ -24,10 +24,20 @@
 
 import { apiFetch } from "@/lib/sync/apiFetch.ts";
 import { buildWorklist, type FrontierResponse, type FrontierWorklist } from "./frontier.ts";
+import { describeCertification, type CertificationClaim } from "./sign.ts";
 
 export type FrontierLoad =
   | { state: "loading" }
-  | { state: "ready"; worklist: FrontierWorklist }
+  | {
+      state: "ready";
+      worklist: FrontierWorklist;
+      /** v3-D22's claim rule, decided once here from the SAME response the
+       *  worklist was built from — never re-derived by a component. See
+       *  `sign.ts#describeCertification`'s own header for why this must be
+       *  the one place any surface may ask "may this UI say a scholar
+       *  verified this." */
+      certification: CertificationClaim;
+    }
   /** The API could not be reached or did not answer with a usable body. The
    *  worklist is NOT included — a broken load has no rows to show, and
    *  supplying an empty one would be indistinguishable from a real empty. */
@@ -69,5 +79,11 @@ export async function loadFrontier(surah: number): Promise<FrontierLoad> {
     return { state: "unavailable", reason: "the API's answer carried no frontier" };
   }
 
-  return { state: "ready", worklist: buildWorklist(body as FrontierResponse) };
+  const parsed = body as FrontierResponse;
+  const worklist = buildWorklist(parsed);
+  // `verifications` is optional on the wire (an older cache, a truncated
+  // body) — absence degrades to the safe non-claim via an empty row set,
+  // never a throw and never a silently assumed claim.
+  const certification = describeCertification(parsed.verifications ?? [], worklist.allGreen);
+  return { state: "ready", worklist, certification };
 }

@@ -40,8 +40,14 @@ import { FrontierNavigator } from "@/components/workbench/FrontierNavigator";
 import { ExplainTrace } from "@/components/workbench/ExplainTrace";
 import { loadFrontier } from "@/lib/workbench/verifications";
 import { resetApiFetchForTests } from "@/lib/sync/apiFetch";
+import { describeCertification } from "@/lib/workbench/sign";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+
+// v3-D22's claim rule, reused across the chip-only tests below that don't
+// care about certification themselves — they just need a valid claim to
+// satisfy the (required, no-default) `certification` field on a ready load.
+const NO_HUMAN_CLAIM = describeCertification([], false);
 const corpus = JSON.parse(
   readFileSync(resolve(HERE, "../../../packages/engine/test/fixtures/12.json"), "utf8"),
 ) as Corpus;
@@ -83,7 +89,11 @@ describe("FrontierNavigator — three states, never two", () => {
   it("a TRUE empty says the API returned nothing — a different sentence from unavailable", () => {
     render(
       <FrontierNavigator
-        load={{ state: "ready", worklist: buildWorklist({ frontier: {} }) }}
+        load={{
+          state: "ready",
+          worklist: buildWorklist({ frontier: {} }),
+          certification: NO_HUMAN_CLAIM,
+        }}
         selectedAyah={null}
         onSelect={noop}
       />,
@@ -107,7 +117,7 @@ describe("FrontierNavigator — chips are never colour alone (§15)", () => {
   it("every row carries the status as a WORD, not only a coloured dot", () => {
     render(
       <FrontierNavigator
-        load={{ state: "ready", worklist }}
+        load={{ state: "ready", worklist, certification: NO_HUMAN_CLAIM }}
         selectedAyah={null}
         onSelect={() => {}}
       />,
@@ -125,7 +135,7 @@ describe("FrontierNavigator — chips are never colour alone (§15)", () => {
   it("the coloured dot is aria-hidden — a screen reader is not told about a colour", () => {
     const { container } = render(
       <FrontierNavigator
-        load={{ state: "ready", worklist }}
+        load={{ state: "ready", worklist, certification: NO_HUMAN_CLAIM }}
         selectedAyah={null}
         onSelect={() => {}}
       />,
@@ -138,7 +148,7 @@ describe("FrontierNavigator — chips are never colour alone (§15)", () => {
   it("the row's accessible name carries all three facts a sighted user gets", () => {
     render(
       <FrontierNavigator
-        load={{ state: "ready", worklist }}
+        load={{ state: "ready", worklist, certification: NO_HUMAN_CLAIM }}
         selectedAyah={null}
         onSelect={() => {}}
       />,
@@ -153,7 +163,7 @@ describe("FrontierNavigator — chips are never colour alone (§15)", () => {
   it("marks the selected row with aria-current", () => {
     render(
       <FrontierNavigator
-        load={{ state: "ready", worklist }}
+        load={{ state: "ready", worklist, certification: NO_HUMAN_CLAIM }}
         selectedAyah={2}
         onSelect={() => {}}
       />,
@@ -170,7 +180,7 @@ describe("FrontierNavigator — chips are never colour alone (§15)", () => {
     const chosen: number[] = [];
     render(
       <FrontierNavigator
-        load={{ state: "ready", worklist }}
+        load={{ state: "ready", worklist, certification: NO_HUMAN_CLAIM }}
         selectedAyah={null}
         onSelect={(a) => chosen.push(a)}
       />,
@@ -180,6 +190,94 @@ describe("FrontierNavigator — chips are never colour alone (§15)", () => {
     // the list order is deliberately not the ayah order.
     within(screen.getAllByRole("listitem")[0]!).getByRole("button").click();
     expect(chosen).toEqual([2]);
+  });
+});
+
+describe("FrontierNavigator — the scholar-certification claim is on screen (v3-D22)", () => {
+  // `describeCertification` (lib/workbench/sign.ts) is unit-tested in
+  // workbench-sign.test.ts. What THAT suite cannot prove is that its answer
+  // ever reaches a screen — before this fix it had zero callers anywhere in
+  // apps/web. These tests prove the WIRING: the navigator renders exactly
+  // what the claim function decided, never a sentence it assembles itself.
+  const worklist = buildWorklist({ frontier: { "1": { qari: "verified", admin: "verified" } } });
+
+  it("renders the honest non-claim when no human qari has signed", () => {
+    render(
+      <FrontierNavigator
+        load={{ state: "ready", worklist, certification: NO_HUMAN_CLAIM }}
+        selectedAyah={null}
+        onSelect={() => {}}
+      />,
+    );
+    const claim = screen.getByTestId("certification-claim");
+    expect(claim.textContent).toContain("No human scholar has certified this surah");
+    // The v3-D22 rule itself: this state must never license the words
+    // "scholar"/"certified" as an affirmative claim.
+    expect(NO_HUMAN_CLAIM.mayClaimScholarVerification).toBe(false);
+  });
+
+  it("renders the scholar claim once a human qari row exists and the frontier is green", () => {
+    const humanGreen = describeCertification(
+      [
+        {
+          id: 1,
+          surah: 12,
+          ayah: 1,
+          tier: "qari",
+          contentHash: "abc",
+          hashSpecVersion: 1,
+          reviewerKind: "human",
+          verifiedBy: "qari@example.test",
+          note: null,
+          createdAt: 1000,
+        },
+      ],
+      true,
+    );
+    render(
+      <FrontierNavigator
+        load={{ state: "ready", worklist, certification: humanGreen }}
+        selectedAyah={null}
+        onSelect={() => {}}
+      />,
+    );
+    const claim = screen.getByTestId("certification-claim");
+    expect(claim.textContent).toContain("Reviewed by a human qari");
+    expect(humanGreen.mayClaimScholarVerification).toBe(true);
+  });
+
+  it("never shows the scholar claim for an AI-only row, no matter how green the frontier is", () => {
+    // The exact false-positive v3-D22 exists to prevent: an AI batch run
+    // recording `reviewerKind: "ai"` must not be read as a scholar's
+    // signature just because the frontier is 100% hash-current.
+    const aiOnlyGreen = describeCertification(
+      [
+        {
+          id: 2,
+          surah: 12,
+          ayah: 1,
+          tier: "qari",
+          contentHash: "abc",
+          hashSpecVersion: 1,
+          reviewerKind: "ai",
+          verifiedBy: null,
+          note: null,
+          createdAt: 1000,
+        },
+      ],
+      true,
+    );
+    render(
+      <FrontierNavigator
+        load={{ state: "ready", worklist, certification: aiOnlyGreen }}
+        selectedAyah={null}
+        onSelect={() => {}}
+      />,
+    );
+    const claim = screen.getByTestId("certification-claim");
+    expect(claim.textContent).not.toContain("Reviewed by a human qari");
+    expect(claim.textContent).toContain("AI-reviewed");
+    expect(aiOnlyGreen.mayClaimScholarVerification).toBe(false);
   });
 });
 
@@ -280,6 +378,62 @@ describe("loadFrontier — failure is a STATE, never an exception", () => {
     if (load.state === "ready") {
       expect(load.worklist.rows[0]!.chip).toBe("stale");
       expect(load.worklist.allGreen).toBe(false);
+    }
+  });
+
+  it("computes the certification claim from the `verifications` the controller sent", async () => {
+    // Before this fix, `describeCertification` had zero callers anywhere —
+    // the controller's `verifications` field (present since step 15) was
+    // fetched and discarded by every reader. This proves loadFrontier now
+    // carries it through, not merely that the pure function works in
+    // isolation (workbench-sign.test.ts already covers that).
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          frontier: { "1": { qari: "verified", admin: "verified" } },
+          verifications: [
+            {
+              id: 5,
+              surah: 12,
+              ayah: 1,
+              tier: "qari",
+              contentHash: "abc",
+              hashSpecVersion: 1,
+              reviewerKind: "human",
+              verifiedBy: "qari@example.test",
+              note: null,
+              createdAt: 1000,
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    ) as unknown as typeof fetch;
+
+    const load = await loadFrontier(12);
+    expect(load.state).toBe("ready");
+    if (load.state === "ready") {
+      expect(load.certification.mayClaimScholarVerification).toBe(true);
+      expect(load.certification.sentence).toContain("human qari");
+    }
+  });
+
+  it("never claims scholar verification when the controller sent no `verifications` at all", async () => {
+    // A response missing the field entirely (an older cache, a truncated
+    // body) must degrade to the safe non-claim, never throw and never
+    // silently default toward a claim.
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({ frontier: { "1": { qari: "verified", admin: "verified" } } }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    ) as unknown as typeof fetch;
+
+    const load = await loadFrontier(12);
+    expect(load.state).toBe("ready");
+    if (load.state === "ready") {
+      expect(load.certification.mayClaimScholarVerification).toBe(false);
+      expect(load.certification.sentence).toContain("No human scholar");
     }
   });
 

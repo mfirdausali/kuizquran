@@ -51,13 +51,20 @@
 // UI say a scholar verified this."
 
 import { apiFetch } from "@/lib/sync/apiFetch.ts";
-import { buildWorklist, type ChipState, type FrontierResponse } from "./frontier.ts";
+import {
+  buildWorklist,
+  type ChipState,
+  type FrontierResponse,
+  type ReviewerKind,
+  type Tier,
+  type VerificationRow,
+} from "./frontier.ts";
 
-/** v3-D13's two tiers. qari = text+glosses+beats; admin = distractors+specs. */
-export type Tier = "qari" | "admin";
-
-/** v3-D22's vocabulary. No default, anywhere, ever. */
-export type ReviewerKind = "ai" | "human";
+// `Tier`, `ReviewerKind` and `VerificationRow` now live in `frontier.ts` —
+// the wire contract they belong to — and are re-exported here so every
+// existing importer of this module (QariMode.tsx, this file's own test)
+// keeps working unchanged.
+export type { ReviewerKind, Tier, VerificationRow };
 
 /** What a caller supplies to sign. NOTE THE ABSENCE of a content hash — see
  *  the header. The server computes it at commit; there is nothing to send. */
@@ -70,20 +77,6 @@ export interface SignRequest {
   /** The chip the SCREEN was showing when the reviewer decided. Used only to
    *  detect that the content moved between render and commit — never sent. */
   chipAtRender: ChipState;
-}
-
-/** One stored verification row, as `VerificationsController::toWire` sends it. */
-export interface VerificationRow {
-  id: number;
-  surah: number;
-  ayah: number;
-  tier: Tier;
-  contentHash: string;
-  hashSpecVersion: number;
-  reviewerKind: ReviewerKind;
-  verifiedBy: string | null;
-  note: string | null;
-  createdAt: number;
 }
 
 export type SignResult =

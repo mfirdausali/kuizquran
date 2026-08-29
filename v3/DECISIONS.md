@@ -10576,3 +10576,103 @@ multi-surah enrollment; the operational mailer/7-night window (still needs
 a live host/SMTP/seven real nights); PAY-1's Stripe fixtures; surah 67's
 scene beats.
 
+---
+
+## Ratified 2026-08-29 (nightly, later) — v3-D152: `describeCertification()` — v3-D22's own claim rule — had zero callers, and `check-boundaries.mjs` was already guarding a gap nothing had closed
+
+`lib/workbench/sign.ts#describeCertification()` is the ONE function this
+codebase built to answer "may this UI say a scholar verified this surah"
+(v3-D22: "No UI claims scholar verification for a surah lacking a human
+row... a religious-authority misrepresentation, not a copy bug"). It has
+been unit-tested since it landed (`workbench-sign.test.ts`, 4 cases) but had
+ZERO callers anywhere in `app/`/`components/`/`lib/` outside its own
+definition and test — confirmed by `grep -rn "describeCertification"` across
+the whole monorepo. Sharper than the usual "built and tested, zero caller"
+shape this build has closed ~40 times: `check-boundaries.mjs` clause 15
+(SCHOLAR-VERIFICATION CLAIMS HAVE ONE SOURCE) was ALREADY WRITTEN, by a prior
+run, specifically anticipating this exact gap — its own header says so in so
+many words: "no shipped surface renders a certification claim today, so the
+invariant currently holds VACUOUSLY... right up until v3-D83 found [B2]
+reborn, undetected, with zero callers to have warned anyone." That prophecy
+had sat unaddressed since the clause was written.
+
+Concretely: the Workbench's `VERIFICATION FRONTIER` pane (`/workbench`) shows
+a qari or admin per-ayah verified/stale/unverified chips and an `allGreen`
+summary, but nothing on that screen — or anywhere else — ever asked whether
+ANY of those green rows were signed by a human (`reviewerKind: "human"`) as
+opposed to AI-only. An admin deciding whether a surah is honestly ready to be
+marketed or launched as "scholar-certified" had to query the database
+directly; the API was already sending the raw rows needed to answer this
+(`VerificationsController::index()`'s `verifications` field, present since
+build-plan step 15) and every client-side reader discarded it.
+
+Fixed by threading that field through the existing frontier pipeline rather
+than inventing a parallel one — `frontier.ts` (the wire-contract module,
+"this file never computes one") gained `Tier`/`ReviewerKind`/`VerificationRow`
+(moved here from `sign.ts`, which now imports and re-exports them, so
+`QariMode.tsx` and `sign.ts`'s own test needed no changes) and a
+`verifications?: VerificationRow[]` field on `FrontierResponse`.
+`verifications.ts#loadFrontier` computes `describeCertification(rows ?? [],
+worklist.allGreen)` once, from the SAME response the worklist itself is
+built from, and carries it on `FrontierLoad`'s `ready` state as a new
+required `certification` field (no default — an omitted field would be the
+exact silent-assumption shape v3-D22's own header warns against for
+`reviewerKind`). `FrontierNavigator.tsx` renders `certification.sentence`
+verbatim beneath the header, styled by `certification
+.mayClaimScholarVerification` alone — the component still decides nothing
+about WHAT may be claimed, only where the sentence sits.
+
+**Avoided reproducing clause 15's own literal violation.** The obvious
+CSS-modifier name, `wb-cert--scholar`, sits on the identical line as
+`mayClaimScholarVerification`; verified directly against the real
+`SCHOLAR_CLAIM` regex (`node -e` with the exact pattern copied from the
+script) that the line does NOT trip it — the two occurrences are 50
+characters apart on that line, past the pattern's `{0,40}` window, and
+`mayClaimScholarVerification` itself never matches `\bscholar\b` because the
+camelCase run has no word boundary before "Scholar". Renamed to
+`wb-cert--affirmed` anyway rather than rely on that character count staying
+true across a future edit; re-ran the real gate to confirm (`node
+scripts/check-boundaries.mjs`) rather than trusting the manual regex replay
+alone.
+
+RED confirmed directly: `git stash` of the five source files (frontier.ts,
+sign.ts, verifications.ts, FrontierNavigator.tsx, iman-ext.css — the new
+test file kept) and reran `workbench-ui.test.tsx` — exactly 5 of 26 tests
+failed (`screen.getByTestId("certification-claim")` not found, twice; three
+`Cannot read properties of undefined (reading 'mayClaimScholarVerification')`
+crashes), the 21 pre-existing tests in that file unaffected; `git stash pop`
+restored byte-identically, 26/26 green again. The three new component tests
+prove the WIRING (the navigator renders exactly what `describeCertification`
+decided, including the negative case — an AI-only row on a 100%-green
+frontier must still read "AI-reviewed", never "Reviewed by a human qari");
+the two new `loadFrontier` tests prove the real fetch path carries
+`verifications` through, and that an absent field degrades to the safe
+non-claim rather than throwing or defaulting toward a claim.
+
+`TZ=UTC make test`: **2432 passing** (was 2427, +5 — exactly this run's new
+tests, all in `workbench-ui.test.tsx`; apps/web 1187, was 1182; no other
+suite moved: 255 v2 vitest, 47 v2/api, 344 v3/api, 118 corpus-compiler, 420
+engine, 61 fold-runner). `check-test-floor.mjs`: OK, 2432 >= floor 1899
+(+533 margin, unmoved). `TZ=UTC make build`: exit 0, 27 routes (unchanged —
+no new route, renders inside the existing `/workbench` page). `npm run
+gates`: all green, including the clause this run closes (boundaries 277
+files, up from 276 — the one new production line-count shift is from the
+moved type definitions, no new file; `scholar-claim-single-source` reports
+OK). `npx tsc --noEmit`: clean, `Version 5.9.3` confirmed. No `v1/**`/`v2/**`
+edit (`git status --porcelain -- v1 v2` empty immediately before commit — a
+stray `v2/tsconfig.tsbuildinfo` build-cache diff reverted first, same
+discipline as every prior entry). No Arabic codepoint (the full diff swept
+programmatically over the Arabic, Arabic Supplement, Arabic Extended-A and
+both Presentation Forms Unicode blocks — zero matches; every new line
+addresses a boolean, a wire field name, a CSS class, or English prose, never
+corpus text).
+
+**NOT addressed, named so a future run doesn't re-discover it as new:**
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+`PaywallGate` as a whole class (v3-D151); multi-surah enrollment; the
+operational mailer/7-night window (still needs a live host/SMTP/seven real
+nights); PAY-1's Stripe fixtures; surah 67's scene beats. A `/workbench`
+human a11y/visual pass on the new sentence's placement is not part of this
+fix's scope.
+

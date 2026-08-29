@@ -51,6 +51,33 @@
 // is more urgent than an ayah nobody has looked at yet — but it is not more
 // TRUSTWORTHY, so the chip is still not green.
 
+/** v3-D13's two tiers. qari = text+glosses+beats; admin = distractors+specs.
+ *  Lives here, not in sign.ts, because it is part of the WIRE contract this
+ *  module owns — `sign.ts` imports it, never the other way round. */
+export type Tier = "qari" | "admin";
+
+/** v3-D22's vocabulary. No default, anywhere, ever — see sign.ts's header
+ *  for why a defaulted `reviewerKind` is the mechanism by which a false
+ *  "scholar verified this" claim would become possible. */
+export type ReviewerKind = "ai" | "human";
+
+/** One stored verification row, as `VerificationsController::toWire` sends
+ *  it — the SAME shape the `frontier` field above is reduced from, carried
+ *  raw so a caller (`sign.ts#describeCertification`) can ask a question the
+ *  reduced chip cannot answer: was any of this signed by a human. */
+export interface VerificationRow {
+  id: number;
+  surah: number;
+  ayah: number;
+  tier: Tier;
+  contentHash: string;
+  hashSpecVersion: number;
+  reviewerKind: ReviewerKind;
+  verifiedBy: string | null;
+  note: string | null;
+  createdAt: number;
+}
+
 /** Exactly the statuses `VerificationsController::index` emits per tier.
  *  A value outside this set is treated as unknown → unverified. */
 export type TierStatus = "verified" | "stale" | "unverified";
@@ -66,6 +93,10 @@ export interface FrontierWire {
 
 export interface FrontierResponse {
   frontier?: FrontierWire;
+  /** The raw rows behind the reduced `frontier` map above — present on the
+   *  real controller response since step 15, but carried through here only
+   *  as of v3-D152 (it was fetched and discarded by every prior reader). */
+  verifications?: VerificationRow[];
 }
 
 export interface FrontierRow {

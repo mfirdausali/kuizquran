@@ -132,7 +132,7 @@ export function FrontierNavigator({
     );
   }
 
-  const { worklist } = load;
+  const { worklist, certification } = load;
 
   return (
     <section className="card" aria-labelledby="frontier-h">
@@ -142,6 +142,18 @@ export function FrontierNavigator({
         </h2>
         <span>{worklist.allGreen ? "all green" : "work outstanding"}</span>
       </div>
+
+      {/* v3-D22's claim rule, printed verbatim from `describeCertification` —
+          this component decides nothing about WHETHER the words "scholar" or
+          "certified" may appear, only where the sentence sits on the page. */}
+      <p
+        data-testid="certification-claim"
+        className={
+          certification.mayClaimScholarVerification ? "wb-cert wb-cert--affirmed" : "wb-cert"
+        }
+      >
+        {certification.sentence}
+      </p>
 
       {worklist.rows.length === 0 ? (
         // A TRUE empty — the API answered, and answered with nothing. Said

@@ -53,9 +53,65 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2427 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2432 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 344 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1182 apps/web. (v3-D151, 2026-08-29)
+             # + 420 engine + 61 fold-runner + 1187 apps/web. (v3-D152, 2026-08-29)
+             # NOTE (v3-D152, 2026-08-29): `lib/workbench/sign.ts
+             # #describeCertification()` — v3-D22's own claim rule, "the ONE
+             # function built to answer 'may this UI say a scholar verified
+             # this'" — had zero callers anywhere, unit-tested since it
+             # landed but never wired into the `/workbench` frontier pane
+             # that is its one natural home. Sharper than this build's usual
+             # zero-caller shape: `check-boundaries.mjs` clause 15 already
+             # existed, written by a prior run specifically anticipating
+             # this gap, and its own header said so: "no shipped surface
+             # renders a certification claim today, so the invariant
+             # currently holds VACUOUSLY." An admin looking at the
+             # `VERIFICATION FRONTIER` pane, even 100% green, had no
+             # on-screen way to tell whether any row was ever signed by a
+             # human qari versus AI-only — the API already sent the raw
+             # `verifications` rows needed to answer that (step 15), and
+             # every client reader discarded them. Fixed by moving
+             # `Tier`/`ReviewerKind`/`VerificationRow` into `frontier.ts`
+             # (the wire-contract module, re-exported from `sign.ts` for
+             # `QariMode.tsx`'s existing import), adding `verifications?:
+             # VerificationRow[]` to `FrontierResponse`, and having
+             # `loadFrontier` compute `describeCertification(rows ?? [],
+             # worklist.allGreen)` once and carry it as a new required
+             # `certification` field on `FrontierLoad`'s ready state.
+             # `FrontierNavigator.tsx` prints `.sentence` verbatim beneath
+             # the header — the component still decides nothing about WHAT
+             # may be claimed. Deliberately renamed the CSS modifier from
+             # the obvious `wb-cert--scholar` to `wb-cert--affirmed` after
+             # confirming (both by replaying clause 15's own regex and by
+             # re-running the real gate) that the obvious name would NOT
+             # have tripped it on this line, but a future edit easily could.
+             # RED confirmed directly: `git stash` of the five source files
+             # (test kept) reran `workbench-ui.test.tsx` — exactly 5 of 26
+             # failed (`getByTestId` misses, `Cannot read properties of
+             # undefined` crashes), 21 unaffected; restored byte-identically,
+             # 26/26 green. `TZ=UTC make test`: 2432 passing (was 2427, +5 —
+             # exactly this run's new tests; apps/web 1187, was 1182; no
+             # other suite moved). `check-test-floor.mjs`: OK, 2432 >= floor
+             # 1899 (+533 margin, unmoved). `TZ=UTC make build`: exit 0, 27
+             # routes (unchanged — renders inside the existing `/workbench`
+             # page). `npm run gates`: all green, including the clause this
+             # run closes (boundaries 277 files, up from 276; fonts
+             # degraded-but-non-blocking, pre-existing; corpus-glyphs 206
+             # codepoints, unchanged). `npx tsc --noEmit`: clean. No
+             # `v1/**`/`v2/**` edit (stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff reverted first, same discipline as every
+             # prior entry). No Arabic codepoint (the full diff swept
+             # programmatically over every Arabic block plus both
+             # Presentation Forms blocks — zero matches; every new line
+             # addresses a boolean, a wire field name, a CSS class, or
+             # English prose, never corpus text). NOT addressed:
+             # `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+             # (v3-D88..D94/D144/D145); `TrialAttribution` (v3-D148);
+             # `PaywallGate` as a whole class (v3-D151); multi-surah
+             # enrollment; the 7-night window (still needs a live
+             # host/SMTP/seven real nights); PAY-1's Stripe fixtures; surah
+             # 67's scene beats. See DECISIONS.md v3-D152.
              # NOTE (v3-D151, 2026-08-29): v3-D07, verbatim: "a limited free
              # trial (one surah, OR 14 days)". `PaywallGate::permitsIssuance()`
              # (PHP) and its client mirror `lib/entitlement/gate.ts` had only
