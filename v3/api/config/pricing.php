@@ -72,6 +72,14 @@ return [
      * cache degrades locked content to review-only; it NEVER locks a learner out
      * of content they already own because their network failed. See
      * `EntitlementCache` on the web side.
+     *
+     * This value has NO Laravel-side reader — the TTL is enforced entirely
+     * client-side (`apps/web/lib/entitlement/cache.ts#OFFLINE_TTL_MS`, a
+     * separately-declared mirror; nothing crosses the wire for it, since the
+     * server has no reason to know how long a client trusts its own cache).
+     * `apps/web/lib/entitlement/cache-config-agreement.test.ts` reads this
+     * file's raw text and asserts the two numbers agree, so a change here
+     * without a matching change there fails loudly instead of silently.
      */
     'offline_ttl_days' => 7,
 ];

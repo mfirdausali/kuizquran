@@ -19,7 +19,12 @@
 
 import type { EntitlementSnapshot } from "./types";
 
-/** Mirrors `config/pricing.php`'s `offline_ttl_days`. */
+/**
+ * Mirrors `config/pricing.php`'s `offline_ttl_days`. The two are declared
+ * independently (no Next→Laravel config-sharing path exists in this
+ * codebase) — `cache-config-agreement.test.ts` is what actually proves they
+ * agree, not this comment.
+ */
 export const OFFLINE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export type CacheFreshness = "fresh" | "stale" | "absent";

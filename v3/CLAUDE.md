@@ -53,9 +53,54 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2418 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2419 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 341 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1176 apps/web. (v3-D149, 2026-08-28)
+             # + 420 engine + 61 fold-runner + 1177 apps/web. (v3-D150, 2026-08-29)
+             # NOTE (v3-D150, 2026-08-29): `config('pricing.offline_ttl_days')`
+             # had zero Laravel-side readers (confirmed again this run) while
+             # `apps/web/lib/entitlement/cache.ts#OFFLINE_TTL_MS` independently
+             # hardcoded the identical value — v3-D149's own "not addressed"
+             # list named this exactly. Unlike most of this build's config/
+             # zero-caller gaps, the fix is NOT a live wire: the TTL is a pure
+             # client-side cache-staleness policy with no server-side use
+             # (`GET /api/entitlement` correctly carries no TTL field), so
+             # inventing an HTTP config-fetch path for one integer would be
+             # the exact speculative new pattern v3-D149 declined to build.
+             # Fixed on the v3-D137 `MacroFacts` mirror-agreement template
+             # instead: new `apps/web/lib/entitlement/cache-config-agreement
+             # .test.ts` reads `api/config/pricing.php`'s raw text (the same
+             # raw-file-scan technique `PricingConstantsTest
+             # ::test_no_price_literal_exists_outside_the_pricing_config`
+             # already uses, here run in reverse — a vitest test reading PHP
+             # source) and asserts `OFFLINE_TTL_MS === parsedDays * 24 * 60 *
+             # 60 * 1000`. Both docblocks now point at the real guard instead
+             # of merely claiming agreement in prose. RED confirmed both
+             # directions independently, each reverted byte-identically:
+             # mutating `offline_ttl_days` 7→14 failed the new test exactly
+             # (`- 1209600000 / + 604800000`); separately, mutating
+             # `OFFLINE_TTL_MS` to 3 days failed it again on the same
+             # assertion with the new numbers (`- 604800000 / + 259200000`).
+             # `TZ=UTC make test`: 2419 passing (was 2418, +1 — exactly this
+             # run's new test; apps/web alone 1177, was 1176). `check-test-
+             # floor.mjs`: OK, 2419 >= floor 1899 (+520 margin, unmoved).
+             # `TZ=UTC make build`: exit 0, 27 routes (unchanged — no route/UI
+             # touched). `npm run gates`: all green (fonts degraded-but-non-
+             # blocking, pre-existing; boundaries 276 files, up from 275 —
+             # exactly the one new test file; corpus-glyphs 206 codepoints,
+             # unchanged). No `v1/**`/`v2/**` edit (stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted first, same
+             # discipline as every prior entry). No Arabic codepoint (all
+             # three changed/new files swept over the Arabic, Arabic
+             # Supplement, Arabic Extended-A and both Presentation Forms
+             # blocks — zero matches; every new line addresses a day count, a
+             # millisecond constant, a file path, or PHP/TS prose, never
+             # corpus text). NOT addressed: this run's sweep did not extend
+             # beyond the one item v3-D149 already named —`rhymeClassOf()`
+             # (v3-D136); `EntitlementMachine::merge()`
+             # (v3-D88..D94/D144/D145); `TrialAttribution` (v3-D148);
+             # multi-surah enrollment; the 7-night window itself (still needs
+             # a live host/SMTP/seven real nights); PAY-1's Stripe fixtures;
+             # surah 67's scene beats. See DECISIONS.md v3-D150.
              # NOTE (v3-D149, 2026-08-28): `config('nightly.sample_size')`
              # ("How many learners the fold check samples per night") was
              # written, documented, and never read by anything —

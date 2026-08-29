@@ -10392,3 +10392,77 @@ separately rather than folded into this fix. `rhymeClassOf()` (v3-D136);
 operational mailer/7-night window itself (the sample-size knob now works,
 but the window still needs a live host, live SMTP and seven real elapsed
 nights); PAY-1's Stripe fixtures; surah 67's scene beats.
+
+## Ratified 2026-08-29 (nightly) — v3-D150: closed v3-D149's own named gap — `offline_ttl_days` and `OFFLINE_TTL_MS` had no agreement guard between them
+
+v3-D149's own "not addressed" list named this exactly: `config('pricing
+.offline_ttl_days')` (`api/config/pricing.php`) has zero Laravel-side
+readers — confirmed again this run (`grep -rn "offline_ttl_days"
+api/app api/routes` returns nothing) — while `apps/web/lib/entitlement
+/cache.ts#OFFLINE_TTL_MS` independently hardcodes the same number
+(`7 * 24 * 60 * 60 * 1000`). Unlike the other config-key gaps this build has
+closed (`nightly.sample_size` v3-D149, `pricing.offline_ttl_days`'s own
+sibling), this one is NOT a "wire it up to a real caller" fix: the value
+genuinely has no reason to cross the wire — it is a pure CLIENT-SIDE
+staleness policy (how long a device trusts its own cached entitlement
+snapshot while offline), and `GET /api/entitlement`
+(`EntitlementController::show`) correctly carries no TTL field, since the
+server has no use for a client's local cache-trust window. Inventing an
+HTTP config-fetch path for one integer would be exactly the kind of
+speculative new pattern v3-D149 declined to build ("no established
+Next→Laravel config-sharing pattern... left for a future run").
+
+So the honest fix is the same shape as v3-D137's `MacroFacts` mirror-
+agreement gap (two independently-declared values/types that must never
+drift, closed with a guard rather than a live wire), applied to a runtime
+number instead of a compile-time type: new
+`apps/web/lib/entitlement/cache-config-agreement.test.ts` reads
+`api/config/pricing.php`'s raw text (the same raw-file-scan technique
+`PricingConstantsTest::test_no_price_literal_exists_outside_the_pricing
+_config` already uses to check PHP source from a PHPUnit test, here run in
+reverse — a vitest test reading PHP source) and asserts
+`OFFLINE_TTL_MS === parsedDays * 24 * 60 * 60 * 1000`. Both docblocks
+(`cache.ts`'s and `pricing.php`'s) now point at the real guard instead of
+merely claiming agreement in prose — `cache.ts`'s previous comment
+("Mirrors `config/pricing.php`'s `offline_ttl_days`") was itself an
+unverified claim of exactly the kind this build has repeatedly found false
+elsewhere (`GlossDraftsController` v3-D125/D145, `NightlyWindowLedger`
+readability, `components/macro/facts.ts` v3-D136/D137) — here it happened
+to be true, but nothing was checking.
+
+RED confirmed both directions, independently, each reverted byte-
+identically before the next: mutating `api/config/pricing.php`'s
+`offline_ttl_days` from `7` to `14` failed the new test exactly
+(`- 1209600000 / + 604800000`); separately, reverting that and mutating
+`cache.ts`'s `OFFLINE_TTL_MS` to `3 * 24 * 60 * 60 * 1000` failed it again,
+on the same assertion, with the new numbers (`- 604800000 / + 259200000`).
+`git diff` empty after each revert; both files confirmed unmodified before
+implementing the real fix (the two docblock updates only).
+
+`TZ=UTC make test`: **2419 passing** (was 2418, +1 — exactly this run's one
+new test; no other suite moved — `apps/web` alone: 1177, was 1176).
+`check-test-floor.mjs` (inlined in `make test`): OK, 2419 >= floor 1899
+(+520 margin, unmoved). `TZ=UTC make build`: exit 0, 27 routes (unchanged —
+no route or UI touched, a config/lib-only fix). `npm run gates`: all green
+(locked-css OK; fonts 2/6 degraded-but-non-blocking, pre-existing;
+boundaries 276 files, up from 275 — exactly the one new test file;
+corpus-morphology and corpus-glyphs OK, 206 codepoints unchanged). No
+`v1/**`/`v2/**` edit (`git status --porcelain -- v1 v2` empty immediately
+before commit — a stray `v2/tsconfig.tsbuildinfo` build-cache diff from
+running the suite was reverted first, same discipline as every prior
+entry). No Arabic codepoint (all three changed/new files swept
+programmatically over the Arabic, Arabic Supplement, Arabic Extended-A and
+both Presentation Forms Unicode blocks — zero matches; every new line
+addresses a day count, a millisecond constant, a file path, or PHP/TS prose,
+never corpus text).
+
+**NOT addressed, named so a future run doesn't re-discover it as new:**
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+multi-surah enrollment; the operational mailer/7-night window itself (still
+needs a live host, live SMTP and seven real elapsed nights); PAY-1's
+Stripe fixtures; surah 67's scene beats. This run's own sweep did not
+extend beyond the one item v3-D149 already named — a fresh zero-caller/
+zero-reader sweep across `api/app`, `apps/web/lib`, and
+`packages/*/src` for a NEW instance of this bug class is reasonable work
+for a future run.
