@@ -24,6 +24,14 @@ const allow = (reason: string): EntitlementDecision => ({ permitted: true, code:
 const deny = (code: string, reason: string): EntitlementDecision => ({ permitted: false, code, reason });
 
 /**
+ * Mirrors `config/pricing.php`'s `trial.days`. Declared independently (no
+ * Next→Laravel config-sharing path exists in this codebase, same as
+ * `cache.ts#OFFLINE_TTL_MS`) — `trial-config-agreement.test.ts` is what
+ * actually proves the two agree, not this comment.
+ */
+export const TRIAL_DAYS_MS = 14 * 24 * 60 * 60 * 1000;
+
+/**
  * May a session be ISSUED for this surah?
  *
  * @param ownedSurahs surahs this device has already unlocked/downloaded. An
@@ -57,6 +65,16 @@ export function permitsIssuance(
   }
 
   if (snapshot.state === "trial") {
+    // ---- v3-D07's OTHER HALF: "one surah, OR 14 days" ----
+    // Mirrors `PaywallGate::permitsIssuance()`'s own day check. A trial that
+    // has genuinely started (`trialStartedAt` is stamped once a surah is
+    // actually chosen) also ends once TRIAL_DAYS_MS have elapsed, even for its
+    // own trial surah. An unstarted trial (`trialStartedAt === null`) has no
+    // clock to compare against.
+    if (snapshot.trialStartedAt !== null && now - snapshot.trialStartedAt >= TRIAL_DAYS_MS) {
+      return deny("trial_expired", "the 14-day trial window has elapsed (v3-D07)");
+    }
+
     if (snapshot.trialSurah === null || snapshot.trialSurah === surah) {
       return allow("trial surah");
     }

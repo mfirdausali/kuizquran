@@ -25,6 +25,12 @@ export interface EntitlementSnapshot {
   readonly region: Region;
   /** Edge case #121/#122: the surah that consumed the trial, if any. */
   readonly trialSurah: number | null;
+  /**
+   * Epoch ms. When `TrialAttribution::apply()` first stamped the trial (i.e.
+   * when the learner actually chose a surah) — null if the trial has not
+   * started yet. v3-D07's "OR 14 days" half needs this to compare against.
+   */
+  readonly trialStartedAt: number | null;
   /** Epoch ms. When this snapshot was written locally. */
   readonly cachedAt: number;
 }

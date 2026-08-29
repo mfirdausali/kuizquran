@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 import { OFFLINE_TTL_MS, freshness } from "../lib/entitlement/cache";
-import { permitsIssuance, permitsReview } from "../lib/entitlement/gate";
+import { TRIAL_DAYS_MS, permitsIssuance, permitsReview } from "../lib/entitlement/gate";
 import type { EntitlementSnapshot } from "../lib/entitlement/types";
 
 const NOW = 1_700_000_000_000;
@@ -17,6 +17,7 @@ function snap(over: Partial<EntitlementSnapshot> = {}): EntitlementSnapshot {
     tier: "monthly",
     region: "MY",
     trialSurah: null,
+    trialStartedAt: null,
     cachedAt: NOW,
     ...over,
   };
@@ -59,6 +60,44 @@ describe("issuance", () => {
     const denied = permitsIssuance(s, 103, [12], NOW);
     expect(denied.permitted).toBe(false);
     expect(denied.code).toBe("trial_surah_exhausted");
+  });
+
+  // v3-D07's OTHER HALF: "a limited free trial (one surah, OR 14 days)". Only
+  // the surah half was ever checked here — this mirrors
+  // PaywallBoundaryTest.php's server-side day-limit coverage.
+  //
+  // NOTE: `cachedAt` must track `now` in each call — a snapshot fetched long
+  // ago goes STALE at the 7-day OFFLINE_TTL_MS mark, and a stale-but-owned
+  // trial surah short-circuits to "allow" via the cache-staleness branch
+  // before the trial-expiry check ever runs. See the pre-existing "a lapsed
+  // learner is denied identically at day 1 and at year 10" test above for the
+  // same gotcha on a different branch.
+  it("denies even the trial surah once the day limit elapses", () => {
+    const justUnder = NOW + TRIAL_DAYS_MS - 1;
+    const stillOpen = permitsIssuance(
+      snap({ state: "trial", trialSurah: 12, trialStartedAt: NOW, cachedAt: justUnder }),
+      12,
+      [12],
+      justUnder,
+    );
+    expect(stillOpen.permitted).toBe(true);
+
+    const justOver = NOW + TRIAL_DAYS_MS;
+    const expired = permitsIssuance(
+      snap({ state: "trial", trialSurah: 12, trialStartedAt: NOW, cachedAt: justOver }),
+      12,
+      [12],
+      justOver,
+    );
+    expect(expired.permitted).toBe(false);
+    expect(expired.code).toBe("trial_expired");
+  });
+
+  it("an unstarted trial (trialStartedAt null) has no day limit to violate", () => {
+    const farFuture = NOW + 365 * 24 * 60 * 60 * 1000;
+    // cachedAt tracks `now` — see the note on the test above.
+    const s = snap({ state: "trial", trialSurah: null, trialStartedAt: null, cachedAt: farFuture });
+    expect(permitsIssuance(s, 12, [12], farFuture).permitted).toBe(true);
   });
 
   it("denies NEW content to a lapsed learner, indefinitely", () => {

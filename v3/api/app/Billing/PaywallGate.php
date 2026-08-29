@@ -57,7 +57,26 @@ class PaywallGate
         }
 
         if ($state === EntitlementState::Trial) {
-            // The trial surah itself is always open.
+            // ---- v3-D07's OTHER HALF: "one surah, OR 14 days" ----
+            // Only the surah half was checked here until this fix. A trial that
+            // has genuinely STARTED (`trial_started_at` is stamped once, by
+            // `TrialAttribution::apply()`, the moment a surah is actually chosen)
+            // also ends once `config('pricing.trial.days')` have elapsed, even
+            // for its own trial surah. A trial that has NOT started
+            // (`trial_started_at === null`) has no clock to compare against —
+            // the `trial_surah === null` branch below already keeps every surah
+            // open in that case, regardless of `$now`.
+            if ($entitlement->trial_started_at !== null) {
+                $limitMs = (int) config('pricing.trial.days') * 24 * 60 * 60 * 1000;
+                if ($now - $entitlement->trial_started_at >= $limitMs) {
+                    return PaywallDecision::deny(
+                        'trial_expired',
+                        sprintf('the %d-day trial window has elapsed (v3-D07)', config('pricing.trial.days')),
+                    );
+                }
+            }
+
+            // The trial surah itself is always open (within the day window).
             if ($entitlement->trial_surah === null || $entitlement->trial_surah === $surah) {
                 return PaywallDecision::allow('trial surah');
             }

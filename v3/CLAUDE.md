@@ -53,9 +53,55 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2419 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 341 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1177 apps/web. (v3-D150, 2026-08-29)
+make test    # 2427 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 344 v3/api + 118 corpus-compiler
+             # + 420 engine + 61 fold-runner + 1182 apps/web. (v3-D151, 2026-08-29)
+             # NOTE (v3-D151, 2026-08-29): v3-D07, verbatim: "a limited free
+             # trial (one surah, OR 14 days)". `PaywallGate::permitsIssuance()`
+             # (PHP) and its client mirror `lib/entitlement/gate.ts` had only
+             # ever checked the SURAH half — `trial_started_at` (written since
+             # 2026-08-10 by `TrialAttribution::apply()`) had zero readers
+             # anywhere, and `GET /api/entitlement` never even put it on the
+             # wire. Concretely: once M7's checkout ships, a real trial learner
+             # 200 days in would be treated identically to one 2 minutes in —
+             # only choosing a SECOND surah ever ended their trial. Fixed both
+             # sides: `PaywallGate`'s Trial branch now denies (code
+             # `trial_expired`) once `now - trial_started_at >=
+             # config('pricing.trial.days') * 86400000`, even for the trial
+             # surah itself; an unstarted trial (`trial_started_at === null`)
+             # has no clock to violate. `EntitlementController::show()` now
+             # carries `trialStartedAt`; the client mirror gained the
+             # identical check against a new `TRIAL_DAYS_MS` constant, kept in
+             # agreement with `config/pricing.php` by a new
+             # `trial-config-agreement.test.ts` (the same raw-PHP-scan pattern
+             # v3-D150 established for `OFFLINE_TTL_MS`). Caught while writing
+             # the client test: `permitsIssuance`'s offline-cache staleness
+             # check (7-day `OFFLINE_TTL_MS`) runs BEFORE the trial branch, so
+             # a test that advanced only `now` (not `cachedAt`) past the
+             # 14-day mark went stale-but-owned first and passed vacuously —
+             # fixed by advancing `cachedAt` alongside `now`, matching this
+             # file's own pre-existing "denied identically at day 1 and year
+             # 10" convention. RED confirmed at every layer (PHP, controller,
+             # TS gate), each reverted byte-identically. `TZ=UTC make test`:
+             # 2427 passing (was 2419, +8 — exactly this run's new tests: 3
+             # PHPUnit + 5 vitest; no other suite moved). `check-test-floor
+             # .mjs`: OK, 2427 >= floor 1899 (+528 margin, unmoved). `TZ=UTC
+             # make build`: exit 0, 27 routes (unchanged). `npx tsc --noEmit`:
+             # clean. No `v1/**`/`v2/**` edit. No Arabic codepoint (full diff
+             # + the one new file swept over every Arabic block plus both
+             # Presentation Forms blocks — zero matches; every new line
+             # addresses a day count, a millisecond constant, a config key, or
+             # PHP/TS prose, never corpus text). NOT addressed:
+             # `PaywallGate` as a WHOLE class still has zero production
+             # callers — this fixes what it COMPUTES, not whether anything
+             # calls it; wiring it into session assembly needs Firdaus's
+             # still-open call on review-vs-new-content in one mixed queue
+             # (v3-D88, unresolved). `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+             # `TrialAttribution` (v3-D148); multi-surah enrollment; the
+             # 7-night window (still needs a live host/SMTP/seven real
+             # nights); PAY-1's Stripe fixtures; surah 67's scene beats. See
+             # DECISIONS.md v3-D151.
              # NOTE (v3-D150, 2026-08-29): `config('pricing.offline_ttl_days')`
              # had zero Laravel-side readers (confirmed again this run) while
              # `apps/web/lib/entitlement/cache.ts#OFFLINE_TTL_MS` independently

@@ -88,12 +88,14 @@ export async function fetchEntitlementSnapshot(now: number): Promise<Entitlement
   const b = body as Record<string, unknown>;
   if (!isEntitlementState(b.state) || !isEntitlementTier(b.tier) || !isRegion(b.region)) return null;
   if (b.trialSurah !== null && typeof b.trialSurah !== "number") return null;
+  if (b.trialStartedAt !== null && typeof b.trialStartedAt !== "number") return null;
 
   return {
     state: b.state,
     tier: b.tier,
     region: b.region,
     trialSurah: (b.trialSurah as number | null) ?? null,
+    trialStartedAt: (b.trialStartedAt as number | null) ?? null,
     cachedAt: now,
   };
 }

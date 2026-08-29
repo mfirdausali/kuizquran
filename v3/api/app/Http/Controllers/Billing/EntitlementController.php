@@ -43,6 +43,7 @@ class EntitlementController extends Controller
                 'tier' => 'none',
                 'region' => 'INTL',
                 'trialSurah' => null,
+                'trialStartedAt' => null,
             ]);
         }
 
@@ -51,6 +52,7 @@ class EntitlementController extends Controller
             'tier' => $entitlement->tier->value,
             'region' => $entitlement->region,
             'trialSurah' => $entitlement->trial_surah,
+            'trialStartedAt' => $entitlement->trial_started_at,
         ]);
     }
 }

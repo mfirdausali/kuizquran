@@ -116,6 +116,7 @@ export interface BillingSnapshotRecord {
   tier: string;
   region: string;
   trialSurah: number | null;
+  trialStartedAt: number | null;
   cachedAt: number;
 }
 

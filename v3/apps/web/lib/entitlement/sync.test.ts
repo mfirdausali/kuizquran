@@ -39,7 +39,7 @@ function respond(status: number, body: unknown) {
 describe("fetchEntitlementSnapshot", () => {
   it("builds a snapshot from a well-formed 200, stamped with the caller's now", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
-      respond(200, { state: "active", tier: "lifetime", region: "MY", trialSurah: 67 }),
+      respond(200, { state: "active", tier: "lifetime", region: "MY", trialSurah: 67, trialStartedAt: 1_699_000_000_000 }),
     );
 
     const snapshot = await fetchEntitlementSnapshot(NOW);
@@ -49,13 +49,32 @@ describe("fetchEntitlementSnapshot", () => {
       tier: "lifetime",
       region: "MY",
       trialSurah: 67,
+      trialStartedAt: 1_699_000_000_000,
       cachedAt: NOW,
     });
   });
 
+  it("a null trialStartedAt round-trips as null (trial not yet started)", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      respond(200, { state: "trial", tier: "none", region: "INTL", trialSurah: null, trialStartedAt: null }),
+    );
+
+    const snapshot = await fetchEntitlementSnapshot(NOW);
+
+    expect(snapshot?.trialStartedAt).toBeNull();
+  });
+
+  it("a non-numeric, non-null trialStartedAt degrades to null — never trusts a malformed field", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      respond(200, { state: "trial", tier: "none", region: "INTL", trialSurah: null, trialStartedAt: "soon" }),
+    );
+
+    await expect(fetchEntitlementSnapshot(NOW)).resolves.toBeNull();
+  });
+
   it("a null trialSurah round-trips as null, not undefined or 0", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
-      respond(200, { state: "trial", tier: "none", region: "INTL", trialSurah: null }),
+      respond(200, { state: "trial", tier: "none", region: "INTL", trialSurah: null, trialStartedAt: null }),
     );
 
     const snapshot = await fetchEntitlementSnapshot(NOW);
@@ -105,7 +124,7 @@ describe("readEntitlementSnapshot / refreshEntitlementSnapshot", () => {
 
   it("a successful refresh persists the snapshot, readable back verbatim", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
-      respond(200, { state: "grace", tier: "monthly", region: "MY", trialSurah: 12 }),
+      respond(200, { state: "grace", tier: "monthly", region: "MY", trialSurah: 12, trialStartedAt: 1_699_000_000_000 }),
     );
 
     const written = await refreshEntitlementSnapshot(NOW);
@@ -117,13 +136,14 @@ describe("readEntitlementSnapshot / refreshEntitlementSnapshot", () => {
       tier: "monthly",
       region: "MY",
       trialSurah: 12,
+      trialStartedAt: 1_699_000_000_000,
       cachedAt: NOW,
     });
   });
 
   it("a failed refresh leaves a prior good cache untouched", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
-      respond(200, { state: "active", tier: "lifetime", region: "MY", trialSurah: null }),
+      respond(200, { state: "active", tier: "lifetime", region: "MY", trialSurah: null, trialStartedAt: null }),
     );
     await refreshEntitlementSnapshot(NOW);
 
@@ -136,7 +156,7 @@ describe("readEntitlementSnapshot / refreshEntitlementSnapshot", () => {
 
   it("is stored under the module's own meta key, not a second spelling", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
-      respond(200, { state: "trial", tier: "none", region: "INTL", trialSurah: null }),
+      respond(200, { state: "trial", tier: "none", region: "INTL", trialSurah: null, trialStartedAt: null }),
     );
     await refreshEntitlementSnapshot(NOW);
 

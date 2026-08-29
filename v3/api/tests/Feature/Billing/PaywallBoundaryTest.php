@@ -203,6 +203,57 @@ class PaywallBoundaryTest extends TestCase
         $this->assertStringContainsString('#106', $denied->reason, 'the degenerate case is named, so it surfaces honestly');
     }
 
+    // ═══════ v3-D07's OTHER HALF — trial ends at 14 days, not just one surah ═══
+
+    /**
+     * v3-D07, verbatim: "A limited free trial (one surah, OR 14 days)". Only the
+     * surah half was ever checked by `permitsIssuance()` — this covers the day
+     * half, which had zero test coverage anywhere before this.
+     */
+    public function test_trial_denies_even_the_trial_surah_once_the_day_limit_elapses(): void
+    {
+        $user = User::factory()->create();
+        $start = 1_700_000_000_000;
+        $ent = Entitlement::create([
+            'user_id' => $user->id,
+            'state' => EntitlementState::Trial->value,
+            'tier' => EntitlementTier::None->value,
+            'region' => 'MY',
+            'trial_surah' => 12,
+            'trial_started_at' => $start,
+        ]);
+
+        $limitMs = (int) config('pricing.trial.days') * 24 * 60 * 60 * 1000;
+
+        $stillOpen = $this->gate()->permitsIssuance($ent, 12, [12], $start + $limitMs - 1);
+        $this->assertTrue($stillOpen->permitted, 'one millisecond inside the window, the trial surah is still open');
+
+        $expired = $this->gate()->permitsIssuance($ent, 12, [12], $start + $limitMs);
+        $this->assertFalse($expired->permitted, 'v3-D07: the trial ends at the day limit even for its own surah');
+        $this->assertSame('trial_expired', $expired->code);
+    }
+
+    /**
+     * A trial that has not actually STARTED (no surah chosen yet —
+     * `trial_started_at` is only stamped by `TrialAttribution::apply()`) has no
+     * clock to compare against. `trial_surah === null` already keeps every
+     * surah open regardless of `$now`; the day check must not invent an expiry
+     * for a trial that never began.
+     */
+    public function test_an_unstarted_trial_has_no_day_limit_to_violate(): void
+    {
+        $user = User::factory()->create();
+        $ent = Entitlement::create([
+            'user_id' => $user->id,
+            'state' => EntitlementState::Trial->value,
+            'tier' => EntitlementTier::None->value,
+            'region' => 'MY',
+        ]);
+
+        $farFuture = 1_700_000_000_000 + (365 * 24 * 60 * 60 * 1000);
+        $this->assertTrue($this->gate()->permitsIssuance($ent, 12, [12], $farFuture)->permitted);
+    }
+
     // ═══════════════ v3-D16 / v3-D54 — review is never gated ═══════════════════
 
     /**

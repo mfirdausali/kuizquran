@@ -52,6 +52,7 @@ class EntitlementControllerTest extends TestCase
             'tier' => 'none',
             'region' => 'INTL',
             'trialSurah' => null,
+            'trialStartedAt' => null,
         ]);
     }
 
@@ -64,6 +65,7 @@ class EntitlementControllerTest extends TestCase
             'tier' => EntitlementTier::Lifetime->value,
             'region' => 'MY',
             'trial_surah' => 67,
+            'trial_started_at' => 1_700_000_000_000,
         ]);
         Sanctum::actingAs($user);
 
@@ -74,7 +76,31 @@ class EntitlementControllerTest extends TestCase
             'tier' => 'lifetime',
             'region' => 'MY',
             'trialSurah' => 67,
+            'trialStartedAt' => 1_700_000_000_000,
         ]);
+    }
+
+    /**
+     * v3-D07's OTHER HALF (see PaywallBoundaryTest): the client cannot enforce
+     * the 14-day trial window without a clock to compare against.
+     * `trialStartedAt` is the field that carries it — before this fix the
+     * controller never put it on the wire at all, so `lib/entitlement/gate.ts`
+     * had no way to ever implement its own side of the same rule.
+     */
+    public function test_trial_started_at_is_null_until_a_surah_is_actually_chosen(): void
+    {
+        $user = User::factory()->create();
+        Entitlement::create([
+            'user_id' => $user->id,
+            'state' => EntitlementState::Trial->value,
+            'tier' => EntitlementTier::None->value,
+            'region' => 'MY',
+        ]);
+        Sanctum::actingAs($user);
+
+        $response = $this->getJson('/api/entitlement');
+
+        $response->assertOk()->assertJsonPath('trialStartedAt', null);
     }
 
     public function test_lapsed_review_only_is_reported_honestly_not_papered_over(): void

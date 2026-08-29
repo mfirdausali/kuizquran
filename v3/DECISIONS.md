@@ -10466,3 +10466,113 @@ extend beyond the one item v3-D149 already named — a fresh zero-caller/
 zero-reader sweep across `api/app`, `apps/web/lib`, and
 `packages/*/src` for a NEW instance of this bug class is reasonable work
 for a future run.
+
+## Ratified 2026-08-29 (nightly, later) — v3-D151: `PaywallGate::permitsIssuance()` implemented only HALF of v3-D07's ratified trial rule — the surah limit, never the 14-day limit
+
+v3-D07, verbatim: "A limited free trial (**one surah, or 14 days**), then
+payment is required to continue." `PaywallGate::permitsIssuance()` (and its
+client-side mirror, `lib/entitlement/gate.ts`) has checked the surah half
+since 2026-08-10 (`trial_surah === $surah`) and has NEVER checked the day
+half. `trial_started_at` (`entitlements` migration, populated by
+`TrialAttribution::apply()` the moment a learner actually chooses a surah,
+and carried through `EntitlementMachine::merge()`'s min-of-two rule on
+account adoption) had **zero readers anywhere** — `grep -rn
+"trial_started_at" api/app` before this fix returned only the three write
+sites, never a comparison against `$now`. No test anywhere (`api/tests`,
+`apps/web/test`, `apps/web/lib`) referenced `trial_started_at`/
+`trialStartedAt` for enforcement — `PaywallBoundaryTest.php`'s own existing
+cases never seeded it. `GET /api/entitlement`
+(`EntitlementController::show`) never put the field on the wire at all, so
+the client-side mirror could not have implemented this even if someone had
+tried — there was no clock for it to compare against.
+
+Consequence, concretely: once M7's checkout flow exists and a learner has a
+real `Trial`-state `Entitlement` row, a learner who started their trial
+surah 200 days ago is treated identically to one who started it 2 minutes
+ago — the only thing that ever ends their trial is picking a SECOND surah.
+Half of the product's one paywall rule was silently dead code. (Today,
+before checkout exists, every real learner has no `Entitlement` row at all,
+so `permitsIssuance()`'s `no entitlement row yet` branch allows everything
+regardless — this fix does not change that pre-existing, separately-scoped
+gap; see "not addressed" below.)
+
+**Fixed, both the source of truth and its declared mirror:**
+
+- `PaywallGate.php`'s `Trial` branch now checks, before the surah check:
+  if `trial_started_at !== null` and `$now - trial_started_at >=
+  config('pricing.trial.days') * 86400000`, deny with a new code
+  `trial_expired` — this now denies **even the trial surah itself**, since
+  v3-D07's rule is an OR, not "whichever comes first only for a NEW
+  surah." An unstarted trial (`trial_started_at === null`, no surah chosen
+  yet) has no clock to violate — the pre-existing `trial_surah === null`
+  branch already keeps every surah open in that case.
+- `EntitlementController::show()` now includes `trialStartedAt` in both
+  response branches (`null` for no-row, `$entitlement->trial_started_at`
+  otherwise) — the missing wire that made the client-side fix possible at
+  all.
+- `lib/entitlement/gate.ts#permitsIssuance` gained the identical check,
+  against a new `TRIAL_DAYS_MS` constant (`14 * 24 * 60 * 60 * 1000`),
+  mirroring `cache.ts#OFFLINE_TTL_MS`'s existing "independently-declared,
+  agreement-tested" pattern (v3-D149/D150) rather than inventing a
+  Next→Laravel config-fetch path for one integer. New
+  `lib/entitlement/trial-config-agreement.test.ts` reads
+  `api/config/pricing.php`'s raw text and asserts `TRIAL_DAYS_MS ===
+  parsedDays * 24 * 60 * 60 * 1000`, the same raw-file-scan technique
+  `cache-config-agreement.test.ts` already established.
+- `lib/entitlement/types.ts#EntitlementSnapshot` and
+  `lib/idb/schema.ts#BillingSnapshotRecord` (the structural IDB mirror of
+  the same shape, kept in sync by convention per that file's own header)
+  both gained `trialStartedAt: number | null`; `sync.ts#fetchEntitlement
+  Snapshot` validates and threads it through with the same
+  never-throws/never-trusts-a-malformed-field discipline `trialSurah`
+  already has.
+
+**Client-side gotcha caught while writing the test, named so a future run
+doesn't rediscover it:** `permitsIssuance`'s offline-cache staleness check
+(`OFFLINE_TTL_MS`, 7 days) runs BEFORE the trial-state branch, and treats a
+stale-but-already-`ownedSurahs`-listed surah as allowed. Since
+`TRIAL_DAYS_MS` (14 days) is larger than `OFFLINE_TTL_MS` (7 days), a naive
+test that advanced only `now` while leaving `cachedAt` fixed at the
+original time made the snapshot go STALE at 7 days and short-circuit to
+"allow — already owned" before the 14-day trial-expiry branch ever ran,
+producing a false pass. Fixed by advancing `cachedAt` alongside `now` in
+each call, matching the pre-existing "denied identically at day 1 and at
+year 10" test's own established convention for the same reason.
+
+RED confirmed at every layer, each reverted byte-identically after: PHP
+(`PaywallGate.php`'s new branch alone reverted via `git stash`) failed
+exactly the new `trial_expired` assertion, 7 other `PaywallBoundaryTest`
+cases unaffected; `EntitlementController.php`'s two new fields reverted
+failed both new/updated `EntitlementControllerTest` assertions with the
+exact missing-key diff; `gate.ts`'s new branch alone reverted failed
+exactly the new `entitlement.test.ts` case, 12 other cases in that file
+unaffected.
+
+`TZ=UTC make test`: **2427 passing** (was 2419, +8 — exactly this run's new
+tests: 2 PHPUnit in `PaywallBoundaryTest` + 1 in `EntitlementControllerTest`
++ 2 in `entitlement.test.ts` + 1 in `trial-config-agreement.test.ts` + 2 in
+`sync.test.ts`; no other suite moved — `v3/api` 344 was 341, `apps/web`
+1182 was 1177). `check-test-floor.mjs`: OK, 2427 >= floor 1899 (+528
+margin, unmoved). `TZ=UTC make build`: exit 0, 27 routes (unchanged — no
+route or UI touched). `npx tsc --noEmit` (via `typecheck-v3`): clean. No
+`v1/**`/`v2/**` edit (`git status --porcelain -- v1 v2` empty immediately
+before commit — a stray `v2/tsconfig.tsbuildinfo` build-cache diff from
+running the suite was reverted first, same discipline as every prior
+entry). No Arabic codepoint (the full diff plus the one new file swept
+programmatically over the Arabic, Arabic Supplement, Arabic Extended-A and
+both Presentation Forms Unicode blocks — zero matches; every new line
+addresses a day count, a millisecond constant, a config key, or PHP/TS
+prose, never corpus text).
+
+**NOT addressed, named so a future run doesn't re-discover it as new:**
+`PaywallGate` as a WHOLE class still has zero production callers — this
+fix corrects what the class computes, it does not wire it into session
+assembly or a corpus-delivery route, both of which remain deliberately
+unbuilt pending Firdaus's still-open call on how review and new-content
+issuance interact in a single mixed session queue (v3-D88, unresolved by
+this fix). `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+multi-surah enrollment; the operational mailer/7-night window (still needs
+a live host/SMTP/seven real nights); PAY-1's Stripe fixtures; surah 67's
+scene beats.
+

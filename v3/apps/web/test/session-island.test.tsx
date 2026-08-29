@@ -158,7 +158,7 @@ function installFetch(entitlementStatus = 200): Call[] {
           return new Response("server error", { status: entitlementStatus });
         }
         return new Response(
-          JSON.stringify({ state: "trial", tier: "none", region: "INTL", trialSurah: null }),
+          JSON.stringify({ state: "trial", tier: "none", region: "INTL", trialSurah: null, trialStartedAt: null }),
           { status: 200, headers: { "content-type": "application/json" } },
         );
       }
