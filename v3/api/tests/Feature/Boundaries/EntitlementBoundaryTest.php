@@ -33,6 +33,12 @@ class EntitlementBoundaryTest extends TestCase
         'app/Http/Controllers/Billing/EntitlementController.php',
         'app/Http/Controllers/Admin/AdminBillingController.php',
         'app/Console/Commands/ReconcileEntitlementsCommand.php',
+        // v3-D157: the PDPA "right to access" export reflects a learner's own
+        // entitlement/transition rows back to THEM — a read-only compliance
+        // surface, not an issuance/ingestion decision. Edge case #124 (the
+        // log is truth) is about the ingestion path never being gated by
+        // entitlement, which this file does not do.
+        'app/Http/Controllers/AccountController.php',
     ];
 
     /**

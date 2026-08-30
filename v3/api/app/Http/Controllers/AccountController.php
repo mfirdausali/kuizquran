@@ -3,6 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Models\AccountDeletionRequest;
+use App\Models\BillingEvent;
+use App\Models\Entitlement;
+use App\Models\EntitlementTransition;
 use App\Models\Event;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -30,10 +33,29 @@ class AccountController extends Controller
      * PDPA "right to access" — the learner's own data, nothing else. Scoped
      * to `$request->user()->id` throughout; there is no id parameter to
      * mistake for someone else's account.
+     *
+     * v3-D157: `PurgeDueAccountsCommand`'s own docblock names exactly what a
+     * purge touches for this same user — "Cascades: events, entitlements,
+     * entitlement_transitions... Nulls: billing_events.user_id" — but this
+     * export stopped at `events` alone, for over 30 nightly runs, even
+     * though `entitlements`/`entitlement_transitions`/`billing_events` are
+     * every bit as much this learner's own data (a real `user_id` FK on
+     * each) as their event log is. The DELETE half of this same PDPA
+     * feature already treats all four tables as "this user's data"; the
+     * EXPORT half silently did not. `App\Models\Entitlement`'s own docblock
+     * warns any reader reaching for it to stop and consider
+     * `EntitlementBoundaryTest` (edge case #124: the log is truth,
+     * enforcement lives at issuance/corpus only) — that guard is about
+     * ISSUANCE/INGESTION never reading entitlement to decide what a learner
+     * gets, not about a read-only compliance export reflecting it back to
+     * its own owner, so this file was added to that allowlist deliberately,
+     * as a reviewed act, not worked around.
      */
     public function export(Request $request): JsonResponse
     {
         $user = $request->user();
+
+        $entitlement = Entitlement::where('user_id', $user->id)->first();
 
         return response()->json([
             'exportedAt' => now()->toIso8601String(),
@@ -52,11 +74,33 @@ class AccountController extends Controller
             // PDPA export that quietly stops being complete; an excludelist
             // fails loud (a new PII-shaped column shows up in the export
             // immediately, for a human to notice and decide about) rather
-            // than failing silent.
+            // than failing silent. The same exclusion discipline applies to
+            // every table below.
             'events' => Event::where('user_id', $user->id)
                 ->orderBy('id')
                 ->get()
                 ->map(fn (Event $e) => collect($e->toArray())->except(['id', 'user_id'])->all())
+                ->values(),
+            // The DERIVED current state — null for a learner who has never
+            // started a trial or been billed, never a fabricated "none" row.
+            'entitlement' => $entitlement
+                ? collect($entitlement->toArray())->except(['id', 'user_id'])->all()
+                : null,
+            // The append-only history of every state change this learner's
+            // entitlement has ever gone through.
+            'entitlementTransitions' => EntitlementTransition::where('user_id', $user->id)
+                ->orderBy('id')
+                ->get()
+                ->map(fn (EntitlementTransition $t) => collect($t->toArray())->except(['id', 'user_id'])->all())
+                ->values(),
+            // The raw webhook journal for events attributed to this learner.
+            // `user_id` is nullable on this table (an event that could not be
+            // attributed to anyone) — the `where` scope naturally excludes
+            // those rows, which is correct: they are nobody's data to export.
+            'billingEvents' => BillingEvent::where('user_id', $user->id)
+                ->orderBy('id')
+                ->get()
+                ->map(fn (BillingEvent $b) => collect($b->toArray())->except(['id', 'user_id'])->all())
                 ->values(),
         ]);
     }

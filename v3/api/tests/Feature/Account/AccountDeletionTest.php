@@ -5,6 +5,9 @@ namespace Tests\Feature\Account;
 use App\Console\Commands\PurgeDueAccountsCommand;
 use App\Models\AccountDeletionRequest;
 use App\Models\AdminRole;
+use App\Models\BillingEvent;
+use App\Models\Entitlement;
+use App\Models\EntitlementTransition;
 use App\Models\Event;
 use App\Models\PurgeLedgerEntry;
 use App\Models\User;
@@ -65,6 +68,111 @@ class AccountDeletionTest extends TestCase
         $body = json_encode($response->json());
         $this->assertStringNotContainsString('other@example.com', $body);
         $this->assertStringNotContainsString('9', collect($response->json('events'))->pluck('ayah')->implode(','));
+    }
+
+    /**
+     * v3-D157: `PurgeDueAccountsCommand`'s own docblock lists exactly what a
+     * purge touches for a deleted user — "Cascades: events, entitlements,
+     * entitlement_transitions... Nulls: billing_events.user_id" — but
+     * `AccountController::export()`'s "right to access" half stopped at
+     * `events`. All three of `entitlements`/`entitlement_transitions`/
+     * `billing_events` carry a real `user_id` and are the user's own billing
+     * history in the exact same sense `events` is their own learning
+     * history; the DELETE half already treats them that way; the EXPORT half
+     * silently did not. Same isolation discipline as the sibling test above
+     * — a second user's rows must never leak into the caller's export.
+     */
+    public function test_export_includes_the_callers_own_billing_and_entitlement_history(): void
+    {
+        $me = User::factory()->create(['email' => 'me@example.com']);
+        $other = User::factory()->create(['email' => 'other@example.com']);
+
+        Entitlement::create([
+            'user_id' => $me->id,
+            'state' => 'trial',
+            'tier' => 'lifetime',
+            'region' => 'MY',
+            'trial_surah' => 12,
+            'trial_surah_source' => 'chosen',
+            'trial_started_at' => 1_700_000_000_000,
+        ]);
+        Entitlement::create([
+            'user_id' => $other->id,
+            'state' => 'active',
+            'tier' => 'monthly',
+        ]);
+
+        EntitlementTransition::create([
+            'user_id' => $me->id,
+            'from_state' => 'trial',
+            'to_state' => 'active',
+            'cause' => 'webhook',
+            'provider_event_id' => 'evt_transition_me',
+            'actor' => 'system',
+            'at' => 1_700_000_100_000,
+        ]);
+        EntitlementTransition::create([
+            'user_id' => $other->id,
+            'from_state' => 'trial',
+            'to_state' => 'lapsed_review_only',
+            'cause' => 'webhook',
+            'provider_event_id' => 'evt_transition_other',
+            'actor' => 'system',
+            'at' => 1_700_000_200_000,
+        ]);
+
+        BillingEvent::create([
+            'user_id' => $me->id,
+            'provider' => 'stripe',
+            'provider_event_id' => 'evt_billing_me',
+            'type' => 'checkout.session.completed',
+            'payload' => ['id' => 'evt_billing_me'],
+            'provider_created_at' => 1_700_000_050_000,
+            'received_at' => 1_700_000_050_100,
+            'outcome' => 'applied',
+        ]);
+        BillingEvent::create([
+            'user_id' => $other->id,
+            'provider' => 'stripe',
+            'provider_event_id' => 'evt_billing_other',
+            'type' => 'checkout.session.completed',
+            'payload' => ['id' => 'evt_billing_other'],
+            'provider_created_at' => 1_700_000_060_000,
+            'received_at' => 1_700_000_060_100,
+            'outcome' => 'applied',
+        ]);
+
+        Sanctum::actingAs($me);
+        $response = $this->getJson('/api/account/export')->assertOk();
+
+        $this->assertSame('trial', $response->json('entitlement.state'));
+        $this->assertSame('lifetime', $response->json('entitlement.tier'));
+        $this->assertSame(12, $response->json('entitlement.trial_surah'));
+
+        $this->assertCount(1, $response->json('entitlementTransitions'));
+        $this->assertSame('evt_transition_me', $response->json('entitlementTransitions.0.provider_event_id'));
+
+        $this->assertCount(1, $response->json('billingEvents'));
+        $this->assertSame('evt_billing_me', $response->json('billingEvents.0.provider_event_id'));
+
+        $body = json_encode($response->json());
+        $this->assertStringNotContainsString('evt_transition_other', $body);
+        $this->assertStringNotContainsString('evt_billing_other', $body);
+    }
+
+    /** No billing history yet — a learner who never started a trial gets an
+     *  honest empty/null shape, never an omitted key (the same "fails loud,
+     *  never silent" discipline `events` already gets). */
+    public function test_export_reports_no_billing_history_when_none_exists(): void
+    {
+        $user = User::factory()->create();
+        Sanctum::actingAs($user);
+
+        $response = $this->getJson('/api/account/export')->assertOk();
+
+        $this->assertNull($response->json('entitlement'));
+        $this->assertSame([], $response->json('entitlementTransitions'));
+        $this->assertSame([], $response->json('billingEvents'));
     }
 
     // ────────────────────────── request deletion ────────────────────────────

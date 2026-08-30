@@ -110,6 +110,58 @@ describe("AccountExportPanel", () => {
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("Could not prepare your export");
   });
+
+  /** v3-D157: `AccountController::export()` gained
+   *  `entitlement`/`entitlementTransitions`/`billingEvents` beyond
+   *  `account`/`events` — this proves the downloaded FILE carries them
+   *  verbatim, not merely that `fetchAccountExport`'s return value does.
+   *  The panel serializes `result.data` directly (`JSON.stringify`, no
+   *  field-by-field re-assembly), so this is the one place a future
+   *  refactor toward an explicit allowlist would be caught.
+   *
+   *  jsdom's `Blob` has no `.text()`/`.arrayBuffer()` (confirmed directly:
+   *  `new (require("jsdom").JSDOM)().window.Blob.prototype.text` is
+   *  `undefined`), so this captures the exact bytes the component hands to
+   *  `new Blob(...)` at construction time instead of reading them back off
+   *  a constructed Blob — a direct check of what the download would
+   *  contain, not a round-trip through an API jsdom doesn't implement. */
+  it("the downloaded file includes billing/entitlement history, not just events", async () => {
+    queue.push({
+      status: 200,
+      body: {
+        ...EXPORT_BODY,
+        entitlement: { state: "trial", tier: "lifetime" },
+        entitlementTransitions: [
+          { from_state: "trial", to_state: "active", provider_event_id: "evt_transition_1" },
+        ],
+        billingEvents: [{ provider: "stripe", provider_event_id: "evt_billing_1" }],
+      },
+    });
+    const RealBlob = globalThis.Blob;
+    let capturedText: string | null = null;
+    vi.stubGlobal(
+      "Blob",
+      vi.fn((parts: BlobPart[], options?: BlobPropertyBag) => {
+        capturedText = (parts as string[]).join("");
+        return new RealBlob(parts, options);
+      }),
+    );
+    const createObjectURL = vi.fn(() => "blob:mock-url");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL });
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+    render(<AccountExportPanel />);
+    fireEvent.click(screen.getByRole("button", { name: /download my data/i }));
+
+    await waitFor(() => expect(clickSpy).toHaveBeenCalledTimes(1));
+    expect(capturedText).not.toBeNull();
+    expect(capturedText).toContain("evt_transition_1");
+    expect(capturedText).toContain("evt_billing_1");
+    expect(capturedText).toContain("lifetime");
+
+    clickSpy.mockRestore();
+  });
 });
 
 describe("AccountDeletionPanel — the three-state status read", () => {

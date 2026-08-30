@@ -11130,3 +11130,142 @@ ruled out as already-settled, not new gaps:
 unfixed drift risk, already recorded at v3-D127, not rediscovered as new
 here) and `packages/engine/src/placement.ts`'s binary-search onboarding
 (a documented design choice per v3-D111/D113/D123, not a wiring fix).
+
+## 2026-08-30 (nightly, later still) — v3-D157: the PDPA "right to access" export stopped at `events` — `entitlements`/`entitlement_transitions`/`billing_events` are the same learner's own data and the DELETE half already treats them that way
+
+Re-derived state from `git log` and `v3/HANDOVER.md` per NIGHTLY.md's rule
+before touching anything. Steps 1-26 and 29 remain DONE; 27/28 remain
+human-content-gated; PAY-1/step 30's remaining pieces remain calendar/
+infra-gated — so this run continued the v3-D82-onward practice of sweeping
+for the next agent-doable, non-deferred gap, avoiding every item already
+named across the prior ~75 nightly entries (`rhymeClassOf()`,
+`EntitlementMachine::merge()`, `TrialAttribution`, `PaywallGate`/
+`permitsIssuance`/`permitsReview`, multi-surah enrollment, the mailer/
+7-night window, PAY-1 fixtures, surah 67 scene beats, `TEST-FLOOR`,
+`severity.ts`'s taxonomy drift, `placement.ts`).
+
+**Found:** `AccountController::export()` (`GET /api/account/export`, the PDPA
+"right to access" half of build-plan step 23/M7's account-lifecycle work)
+returned exactly `account` + `events` — nothing else — since the controller
+was written. `PurgeDueAccountsCommand`'s own docblock, describing the
+**delete** half of the exact same feature, names precisely what a purge
+touches for a departing user: *"Cascades: events, entitlements,
+entitlement_transitions... Nulls: billing_events.user_id."* All three of
+`entitlements`/`entitlement_transitions`/`billing_events` carry a real
+`user_id` FK (`cascadeOnDelete` ×2, `nullOnDelete` ×1, per their own
+migrations) and are unambiguously this learner's own billing history in the
+same sense their event log is their own learning history — the DELETE path
+has always treated them that way; the EXPORT path silently did not.
+Confirmed via `grep -n "entitlement\|billing" api/tests/Feature/Account/
+AccountDeletionTest.php` against the pre-fix file: nothing. Same "the DELETE
+half of a PDPA feature is more complete than the EXPORT half" shape as this
+build's other audit-table gaps (`admin_audit` v3-D129,
+`entitlement_transitions`'s own admin-viewer gap v3-D141, `billing_events`
+v3-D148), here inside the account's OWN self-service export rather than an
+admin panel.
+
+**Fixed.** `AccountController::export()` gained `entitlement` (the current
+row, `null` for a learner who never started a trial or was billed — never a
+fabricated empty object), `entitlementTransitions` and `billingEvents` (both
+append-only histories, oldest first), each `Model::where('user_id',
+$user->id)` scoped and passed through the same `except(['id', 'user_id'])`
+exclusion discipline `events` already uses — an allowlist would silently
+stop being complete the moment a new PII-shaped column is added; this
+excludelist fails loud instead. `EntitlementBoundaryTest::ALLOWLIST` gained
+`AccountController.php` (it now reads `Entitlement`/`EntitlementTransition`
+directly): reviewed and accepted, because edge case #124's guard is about
+ISSUANCE/INGESTION never reading entitlement to decide what a learner gets,
+and a read-only compliance export reflecting a user's own rows back to them
+is neither. `lib/account/api.ts`'s `AccountExport` type gained the matching
+three fields; the frontend `AccountExportPanel` needed NO change at all — it
+already serializes `result.data` verbatim via `JSON.stringify`, so the new
+fields reach the downloaded file for free, and that "no field-by-field
+re-assembly" property is exactly what the new frontend test pins.
+
+**A genuine adjacent gate catch, not a defect in the fix:** adding
+`entitlement`/`entitlementTransitions` as property names to
+`lib/account/api.ts` tripped `check-boundaries.mjs`'s entitlement-enforcement
+clause (edge case #124's "reads entitlement outside the allowlist" check,
+which greps for the bare identifier token, not usage context). Resolved the
+same way v3-D147 resolved an equivalent false-positive: reviewed the file
+against the clause's actual intent (a NEW enforcement point, not a
+reflection of the user's own data) and added `lib/account/api.ts` to
+`ENTITLEMENT_ALLOWLIST` with a comment naming why, mirroring the backend
+boundary test's own v3-D157 comment — this file contains no gating logic and
+calls neither `permitsIssuance` nor `permitsReview`.
+
+**Verified.**
+
+RED confirmed directly, `git stash` of just the two source files
+(`AccountController.php`, `lib/account/api.ts` — the type-only frontend
+change has no runtime behavior to fail, so its own correctness is checked by
+`tsc`, not vitest), tests kept:
+
+- Backend: both new `AccountDeletionTest` cases failed exactly as predicted
+  against the unmodified controller —
+  `test_export_includes_the_callers_own_billing_and_entitlement_history` on
+  `Failed asserting that null is identical to 'trial'`;
+  `test_export_reports_no_billing_history_when_none_exists` on `Failed
+  asserting that null is identical to Array &0 []` (the two NEW fields were
+  simply absent from the response, so `null` is what `json()` returns for a
+  never-set key). The two pre-existing cases in the same file were
+  unaffected.
+- `git stash pop` restored both files byte-identically; 16/16
+  `AccountDeletionTest` cases green again, and the two new vitest cases
+  (`api.test.ts`, `settings-ui.test.tsx`) were unaffected by the stash either
+  way, confirming they test the CLIENT'S pass-through behavior against a
+  mocked server response, not the real backend fix.
+
+One authoring correction made along the way, on the frontend test itself
+rather than the fix: the first draft of the new `settings-ui.test.tsx` case
+tried to read the downloaded content back via `capturedBlob.text()` — jsdom's
+`Blob` has no `.text()`/`.arrayBuffer()` (confirmed directly:
+`new (require("jsdom").JSDOM)().window.Blob.prototype.text` is `undefined`
+in this repo's jsdom version), so the test failed on
+`capturedBlob.text is not a function` — an environment gap in the TEST, not
+a defect in `AccountExportPanel` or the fix. Rewritten to capture the exact
+string handed to `new Blob([...])` at construction time (stubbing the global
+`Blob` constructor itself, still backed by the real `Blob` for the
+`URL.createObjectURL` call) rather than reading it back through an
+unsupported API — a more direct assertion of what the download would
+contain, not a weaker one.
+
+`TZ=UTC make test`: **2491 passing** (was 2487, +4 — exactly this run's new
+tests: 2 PHPUnit + 1 in `api.test.ts` + 1 in `settings-ui.test.tsx`; v3/api
+349, was 347; apps/web 1241, was 1239; no other suite moved: 255 v2 vitest,
+47 v2/api, 118 corpus-compiler, 420 engine, 61 fold-runner).
+`check-test-floor.mjs`: OK, 2491 >= floor 1899 (+592 margin, unmoved).
+`TZ=UTC make build`: exit 0, 29 routes (unchanged — no new route, this is a
+controller + type change). `npm run gates`: all green (fonts
+degraded-but-non-blocking, pre-existing; boundaries 291 files, unchanged
+count — no new file, edits only; corpus-morphology and corpus-glyphs
+unchanged). `npx tsc --noEmit`: clean. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2` empty
+immediately before commit). No Arabic codepoint (the full diff swept
+programmatically over the Arabic, Arabic Supplement, Arabic Extended-A and
+both Presentation Forms Unicode blocks, plus a `\u06xx`/`\u08xx`-escape and
+`fromCharCode` sweep — zero matches; every new line addresses a user id, a
+provider event id, a state/tier by closed-set string, or a timestamp, never
+corpus content). `LAUNCH-CHECKLIST.md`'s gate 19 verification commands
+(stale at "14 passed"/"25 passed" since v3-D80) corrected to the new counts
+(16/32).
+
+**Also found, and reconciled non-destructively, the same stale-local-ref
+shape several prior entries have hit (v3-D100, D102, D103, D117, D126, D143,
+D144, D155, D156 among them):** this session's checkout ended up on a
+detached `HEAD` at this exact commit. `git fetch origin main` confirmed
+`origin/main` was already at the same commit — nothing was at risk — fixed
+with `git branch -f main HEAD && git checkout main`, a fast-forward in
+disguise, not a reset.
+
+**NOT addressed, named so a future run doesn't re-discover it as new:**
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+`PaywallGate` as a whole class / `permitsIssuance`/`permitsReview` (v3-D88,
+v3-D151 — still a genuine open product-design question, not a wiring gap);
+multi-surah enrollment; the operational mailer/7-night window (still needs a
+live host/SMTP/seven real nights); PAY-1's Stripe fixtures; surah 67's scene
+beats; `worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (a design choice, v3-D111/D113/D123) —
+all unchanged.

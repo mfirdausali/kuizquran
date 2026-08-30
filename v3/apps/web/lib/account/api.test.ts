@@ -65,6 +65,9 @@ describe("fetchAccountExport", () => {
         exportedAt: "2026-08-12T00:00:00+00:00",
         account: { id: 1, email: null, name: null, isAnonymous: true, createdAt: null, emailVerifiedAt: null },
         events: [{ surah: 12, ayah: 1 }],
+        entitlement: null,
+        entitlementTransitions: [],
+        billingEvents: [],
       },
     });
     const result = await fetchAccountExport();
@@ -72,6 +75,35 @@ describe("fetchAccountExport", () => {
     if (result.state !== "ready") throw new Error("unreachable");
     expect(result.data.events).toHaveLength(1);
     expect(recorded).toEqual([{ url: "/api/account/export", method: "GET", body: undefined }]);
+  });
+
+  /** v3-D157: `AccountController::export()` gained three fields
+   *  (`entitlement`/`entitlementTransitions`/`billingEvents`) beyond
+   *  `account`/`events` — this pins that the client surfaces them
+   *  unmodified rather than silently narrowing the payload down to the two
+   *  fields the old shape check named. */
+  it("surfaces entitlement/entitlementTransitions/billingEvents unmodified", async () => {
+    queue.push({
+      status: 200,
+      body: {
+        exportedAt: "2026-08-12T00:00:00+00:00",
+        account: { id: 1, email: null, name: null, isAnonymous: true, createdAt: null, emailVerifiedAt: null },
+        events: [],
+        entitlement: { state: "trial", tier: "lifetime" },
+        entitlementTransitions: [{ from_state: "trial", to_state: "active", provider_event_id: "evt_1" }],
+        billingEvents: [{ provider: "stripe", provider_event_id: "evt_billing_1" }],
+      },
+    });
+    const result = await fetchAccountExport();
+    expect(result.state).toBe("ready");
+    if (result.state !== "ready") throw new Error("unreachable");
+    expect(result.data.entitlement).toEqual({ state: "trial", tier: "lifetime" });
+    expect(result.data.entitlementTransitions).toEqual([
+      { from_state: "trial", to_state: "active", provider_event_id: "evt_1" },
+    ]);
+    expect(result.data.billingEvents).toEqual([
+      { provider: "stripe", provider_event_id: "evt_billing_1" },
+    ]);
   });
 
   it("a non-2xx becomes a typed failure, never a throw", async () => {

@@ -478,8 +478,8 @@ the strip → red.
 frontend now exists too.
 
 ```bash
-cd v3/api && TZ=UTC php artisan test --filter=AccountDeletionTest   # 14 passed
-cd v3/apps/web && npx vitest run lib/account/api.test.ts test/settings-ui.test.tsx  # 25 passed
+cd v3/api && TZ=UTC php artisan test --filter=AccountDeletionTest   # 16 passed (v3-D157: +2, the export's billing/entitlement history)
+cd v3/apps/web && npx vitest run lib/account/api.test.ts test/settings-ui.test.tsx  # 32 passed (v3-D157: +2)
 ```
 
 `GET/POST /api/account/deletion`, `POST /api/account/deletion/restore`,

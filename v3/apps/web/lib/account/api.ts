@@ -24,6 +24,14 @@ import { apiFetch } from "@/lib/sync/apiFetch.ts";
  *  rather than silently dropping out of a PDPA export). */
 export type ExportedEvent = Record<string, unknown>;
 
+/** Same exclusion discipline as `ExportedEvent`, applied to the three
+ *  billing/entitlement tables `AccountController::export()` gained at
+ *  v3-D157 — `entitlements`/`entitlement_transitions`/`billing_events` are
+ *  every bit as much this learner's own data as their event log. */
+export type ExportedEntitlement = Record<string, unknown>;
+export type ExportedEntitlementTransition = Record<string, unknown>;
+export type ExportedBillingEvent = Record<string, unknown>;
+
 export interface AccountExport {
   exportedAt: string;
   account: {
@@ -35,6 +43,10 @@ export interface AccountExport {
     emailVerifiedAt: string | null;
   };
   events: ExportedEvent[];
+  /** null for a learner who has never started a trial or been billed. */
+  entitlement: ExportedEntitlement | null;
+  entitlementTransitions: ExportedEntitlementTransition[];
+  billingEvents: ExportedBillingEvent[];
 }
 
 export type ExportResult =

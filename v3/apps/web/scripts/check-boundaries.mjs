@@ -304,8 +304,19 @@ const ENTITLEMENT_TOKENS = /\bEntitlement|\bentitlement|\bPaywall|\bentitled\b/;
 // (as a route/enforcement point) and the checkout surface stay OUT of this
 // allowlist until that decision lands and each actually GATES on entitlement,
 // per this clause's own rule.
+//
+// ADDED (v3-D157): `lib/account/api.ts` is the client side of the PDPA
+// "right to access" export (`AccountController::export()`), which now
+// reflects a learner's OWN `entitlement`/`entitlementTransitions` rows back
+// to them alongside their event log — the exact same "read-only compliance
+// surface, not an issuance/ingestion decision" reasoning
+// `EntitlementBoundaryTest::ALLOWLIST`'s own v3-D157 comment already applies
+// on the backend. This file only types and passes through whatever the
+// server returns; it contains no gating logic and calls no
+// `permitsIssuance`/`permitsReview`.
 const ENTITLEMENT_ALLOWLIST = new Set([
   "components/session/SessionIsland.tsx",
+  "lib/account/api.ts",
   "lib/entitlement/cache.ts",
   "lib/entitlement/gate.ts",
   "lib/entitlement/sync.ts",
