@@ -8,6 +8,7 @@ import { resetApiFetchForTests } from "@/lib/sync/apiFetch";
 import { getIdentity, getToken, hasLiveToken, resetTokenForTests, setToken } from "@/lib/sync/token";
 import {
   checkAccountSession,
+  confirmPasswordReset,
   loginAccount,
   logoutAccount,
   registerAccount,
@@ -180,6 +181,77 @@ describe("loginAccount", () => {
     const outcome = await loginAccount("ghost@example.com", "wrong");
 
     expect(outcome).toEqual({ ok: false, error: "invalid credentials" });
+    expect(getToken()).toBe("prior-token");
+  });
+});
+
+describe("confirmPasswordReset", () => {
+  const realFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    resetApiFetchForTests();
+    resetTokenForTests();
+  });
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    vi.restoreAllMocks();
+  });
+
+  it("posts token/email/password/password_confirmation to /api/reset-password through the single egress", async () => {
+    const seen: Array<{ url: string; body: unknown }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      seen.push({ url: String(input), body: init?.body ? JSON.parse(String(init.body)) : null });
+      return jsonResponse({ ok: true, token: "fresh-post-reset-token" });
+    }) as unknown as typeof fetch;
+
+    await confirmPasswordReset({
+      token: "the-emailed-reset-token",
+      email: "learner@example.com",
+      password: "new-password-123",
+      passwordConfirmation: "new-password-123",
+    });
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.url).toContain("/api/reset-password");
+    expect(seen[0]!.body).toEqual({
+      token: "the-emailed-reset-token",
+      email: "learner@example.com",
+      password: "new-password-123",
+      password_confirmation: "new-password-123",
+    });
+  });
+
+  it("on success, ADOPTS the fresh post-reset token — completing a reset signs this device in", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse({ ok: true, token: "fresh-post-reset-token" }),
+    ) as unknown as typeof fetch;
+
+    const outcome = await confirmPasswordReset({
+      token: "the-emailed-reset-token",
+      email: "learner@example.com",
+      password: "new-password-123",
+      passwordConfirmation: "new-password-123",
+    });
+
+    expect(outcome).toEqual({ ok: true });
+    expect(getToken()).toBe("fresh-post-reset-token");
+    expect(getIdentity()).toBe("fresh-post-reset-token");
+  });
+
+  it("on an invalid/expired token (422), echoes the server's own error, never invents one, and leaves the token slot untouched", async () => {
+    setToken("prior-token", "prior-token");
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse({ error: "This password reset token is invalid." }, 422),
+    ) as unknown as typeof fetch;
+
+    const outcome = await confirmPasswordReset({
+      token: "stale-token",
+      email: "learner@example.com",
+      password: "new-password-123",
+      passwordConfirmation: "new-password-123",
+    });
+
+    expect(outcome).toEqual({ ok: false, error: "This password reset token is invalid." });
     expect(getToken()).toBe("prior-token");
   });
 });

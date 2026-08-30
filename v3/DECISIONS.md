@@ -10819,3 +10819,73 @@ smaller, separate gap. `rhymeClassOf()` (v3-D136); `EntitlementMachine
 enrollment; the operational mailer/7-night window (still needs a live
 host/SMTP/seven real nights); PAY-1's Stripe fixtures; surah 67's scene
 beats — all unchanged.
+
+---
+
+## 2026-08-30 (nightly) — v3-D154: the reset-password CONFIRMATION screen — v3-D153's own named "more urgent half" of the AUTH- gap — did not exist
+
+`PasswordResetController::reset()` (`POST /api/reset-password`) has existed
+and been server-tested since build-plan step 13. v3-D153 wired the SEND-LINK
+half (`requestPasswordReset`, inside `AccountAuthPanel`'s inline
+forgot-password form) but explicitly deferred the confirmation screen that
+consumes the emailed `token`+`email` pair, naming it "the more urgent half
+of the RM500-buyer-forgets-their-password risk CLAUDE.md's own rule names."
+Confirmed still true this run: `grep -rln "reset-password" apps/web/lib
+apps/web/app apps/web/components` returned nothing besides `auth.ts`'s own
+docblock reference to the gap.
+
+**Fixed, end to end.** `lib/account/resetLink.ts#parseResetLinkParams`
+parses the `?token=&email=` query contract — the exact shape
+`v3/api/app/Providers/AppServiceProvider.php`'s `ResetPassword::createUrlUsing`
+closure builds into the emailed link — degrading a missing/malformed pair to
+`null` rather than a throw (edge case #78's convention, same as
+`lib/drill/handoff.ts`/`lib/practice/handoff.ts`). `confirmPasswordReset()`
+(new, in `lib/account/auth.ts`) posts to `/api/reset-password` and, on
+success, ADOPTS the fresh post-reset bearer token via
+`setAuthenticatedIdentity` — the identical mechanism `loginAccount` already
+uses — so completing a reset signs this device into the account (and,
+per `PasswordResetController::reset()`'s own comment, recovers a B8-wedged
+device: every pre-reset token is revoked server-side). New
+`components/account/ResetPasswordForm.tsx` checks the two password fields
+match CLIENT-SIDE before ever spending the one-time reset token on a request
+that would fail anyway. New top-level `app/reset-password/page.tsx`,
+deliberately OUTSIDE every route group — mirrors `app/attribution/page.tsx`'s
+own reasoning: a learner following an emailed link has no tab bar and is not
+"inside the app" in the sense `(app)` assumes.
+
+**Verified.**
+
+RED confirmed directly: all three new/changed test files were run against
+the tree before their source existed —
+`lib/account/auth.test.ts`'s three new `confirmPasswordReset` cases failed
+on `confirmPasswordReset is not a function`; `lib/account/resetLink.test.ts`
+and `test/reset-password-form.test.tsx` both failed on module-resolution
+errors (`Failed to load url ./resetLink`, `Failed to resolve import
+".../ResetPasswordForm"`). Implemented after, 12/12 new tests green.
+
+`TZ=UTC make test`: **2467 passing** (was 2455, +12 — exactly this run's new
+tests: 3 in `auth.test.ts` + 5 in `resetLink.test.ts` + 4 in
+`reset-password-form.test.tsx`; no other suite moved: 255 v2 vitest, 47
+v2/api, 344 v3/api, 118 corpus-compiler, 420 engine, 61 fold-runner, apps/web
+1222 — was 1210). `check-test-floor.mjs`: OK, 2467 >= floor 1899 (+568
+margin, unmoved). `TZ=UTC make build`: exit 0, 28 routes (was 27 —
+`/reset-password` is new). `npm run gates`: all green (fonts
+degraded-but-non-blocking, pre-existing; boundaries 285 files, up from 280 —
+exactly the four new apps/web files; corpus-glyphs 206 codepoints,
+unchanged). `npx tsc --noEmit`: clean. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff reverted first, same discipline as
+every prior entry — `git status --porcelain -- v1 v2` empty immediately
+before commit). No Arabic codepoint (every new/changed file swept
+programmatically over the Arabic, Arabic Supplement, Arabic Extended-A and
+both Presentation Forms Unicode blocks, plus a `\u06xx`/`fromCharCode` sweep
+— zero matches; every new line addresses an email string, a password field,
+a boolean, an HTTP path, or English prose, never corpus text).
+
+**NOT addressed, named so a future run doesn't re-discover it as new:**
+`EmailVerificationController::verify()`'s own signed-link route still has no
+in-app landing page — a smaller, separate gap named at v3-D153.
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+`PaywallGate` as a whole class (v3-D151); multi-surah enrollment; the
+operational mailer/7-night window (still needs a live host/SMTP/seven real
+nights); PAY-1's Stripe fixtures; surah 67's scene beats — all unchanged.

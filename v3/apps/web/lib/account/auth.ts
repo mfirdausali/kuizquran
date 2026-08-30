@@ -28,11 +28,12 @@
 // setAuthenticatedIdentity — the exact mechanism
 // lib/admin/session.ts#adminLogin already uses for the same reason.
 //
-// SCOPE, DELIBERATE: this run wires register/login/logout/resend-
-// verification/request-password-reset. It does NOT build the reset-password
-// CONFIRMATION screen that consumes the emailed link/token — that needs a
-// new public route reachable from an email client (not from inside the
-// authenticated app shell) and is real, separable follow-on work.
+// SCOPE, DELIBERATE (v3-D153): that run wired register/login/logout/resend-
+// verification/request-password-reset, but not the reset-password
+// CONFIRMATION screen that consumes the emailed link/token. `confirmPasswordReset`
+// below closes that — see `lib/account/resetLink.ts` (the query-string
+// contract) and `components/account/ResetPasswordForm.tsx` (the new public
+// `/reset-password` route it powers).
 
 import { apiFetch, setAuthenticatedIdentity } from "@/lib/sync/apiFetch.ts";
 import { clearToken } from "@/lib/sync/token.ts";
@@ -223,5 +224,66 @@ export async function requestPasswordReset(email: string): Promise<AuthOutcome> 
   if (!response.ok) {
     return { ok: false, error: (await readErrorBody(response)) ?? `the API answered ${response.status}` };
   }
+  return { ok: true };
+}
+
+/** The fields `ResetPasswordForm` collects to confirm a reset. */
+export interface ResetPasswordParams {
+  token: string;
+  email: string;
+  password: string;
+  passwordConfirmation: string;
+}
+
+/**
+ * `POST /api/reset-password`. Consumes the token+email pair the emailed link
+ * carries (`lib/account/resetLink.ts#parseResetLinkParams` reads the same
+ * shape `PasswordResetController::reset()`'s own request validation expects).
+ *
+ * On success the server revokes every existing bearer token and mints a
+ * fresh one (`PasswordResetController::reset()`'s own comment: this is
+ * DEFECTS.md#B8's exact recovery — a reset proves control of the mailbox, so
+ * every wedged device recovers here too). The fresh token is ADOPTED via
+ * `setAuthenticatedIdentity`, the same mechanism `loginAccount` above uses —
+ * completing a reset signs THIS device into the account. Never throws.
+ */
+export async function confirmPasswordReset(params: ResetPasswordParams): Promise<AuthOutcome> {
+  let response: Response;
+  try {
+    response = await apiFetch("/api/reset-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token: params.token,
+        email: params.email,
+        password: params.password,
+        password_confirmation: params.passwordConfirmation,
+      }),
+    });
+  } catch (err) {
+    return { ok: false, error: requestFailed(err).reason };
+  }
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+
+  if (!response.ok) {
+    const serverError =
+      body !== null && typeof body === "object" && typeof (body as Record<string, unknown>).error === "string"
+        ? ((body as Record<string, unknown>).error as string)
+        : `the API answered ${response.status}`;
+    return { ok: false, error: serverError };
+  }
+
+  const token = body !== null && typeof body === "object" ? (body as Record<string, unknown>).token : undefined;
+  if (typeof token !== "string" || token === "") {
+    return { ok: false, error: "the server's answer carried no token" };
+  }
+
+  await setAuthenticatedIdentity(token);
   return { ok: true };
 }

@@ -53,9 +53,67 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2455 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2467 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 344 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1210 apps/web. (v3-D153, 2026-08-29)
+             # + 420 engine + 61 fold-runner + 1222 apps/web. (v3-D154, 2026-08-30)
+             # NOTE (v3-D154, 2026-08-30): the reset-password CONFIRMATION
+             # screen — v3-D153's own "NOT addressed" list named this exactly
+             # as "the more urgent half of the RM500-buyer-forgets-their-
+             # password risk" — did not exist. `PasswordResetController::reset()`
+             # (`POST /api/reset-password`) and `requestPasswordReset()` (the
+             # send-link half, wired into `AccountAuthPanel` at v3-D153) were
+             # both real, but nothing let a learner who clicked the emailed
+             # link actually finish: `grep -rln "reset-password" apps/web/lib
+             # apps/web/app apps/web/components` (excluding `auth.ts`'s own
+             # not-yet-built reference) returned nothing. Fixed: new
+             # `lib/account/resetLink.ts#parseResetLinkParams` (the
+             # `?token=&email=` query contract `AppServiceProvider.php`'s
+             # `ResetPassword::createUrlUsing` closure actually emits, ported
+             # 1:1 from that closure's own string template) +
+             # `confirmPasswordReset()` in `lib/account/auth.ts` (posts to
+             # `/api/reset-password`, adopts the fresh post-reset token via
+             # `setAuthenticatedIdentity` exactly like `loginAccount` — a
+             # completed reset signs this device in) +
+             # `components/account/ResetPasswordForm.tsx` (checks password-
+             # confirmation match CLIENT-SIDE before ever spending the
+             # one-time reset token on a doomed request) + a new top-level
+             # `app/reset-password/page.tsx`, outside every route group like
+             # `/attribution` — reachable from an email client, not from
+             # inside the authenticated `(app)` shell. RED confirmed
+             # directly: all three new/changed test files were run against
+             # the tree before their source existed and failed on
+             # `confirmPasswordReset is not a function` / module-resolution
+             # errors; implemented after, 12/12 new tests green (3 in
+             # `auth.test.ts` + 5 in `resetLink.test.ts` + 4 in
+             # `reset-password-form.test.tsx`). `TZ=UTC make test`: 2467
+             # passing (was 2455, +12 — exactly this run's new tests; apps/web
+             # 1222, was 1210; no other suite moved). `check-test-floor.mjs`:
+             # OK, 2467 >= floor 1899 (+568 margin, unmoved). `TZ=UTC make
+             # build`: exit 0, 28 routes (was 27 — `/reset-password` is new).
+             # `npm run gates`: all green (fonts degraded-but-non-blocking,
+             # pre-existing; boundaries 285 files, up from 280 — exactly the
+             # four new apps/web files; corpus-glyphs 206 codepoints,
+             # unchanged). `npx tsc --noEmit`: clean. No `v1/**`/`v2/**` edit
+             # (a stray `v2/tsconfig.tsbuildinfo` build-cache diff reverted
+             # first, same discipline as every prior entry — `git status
+             # --porcelain -- v1 v2` empty immediately before commit). No
+             # Arabic codepoint (every new/changed file swept programmatically
+             # over the Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms Unicode blocks, plus a `\u06xx`/
+             # `fromCharCode` sweep — zero matches; every new line addresses
+             # an email string, a password field, a boolean, an HTTP path, or
+             # English prose, never corpus text).
+             #
+             # NOT addressed, named so a future run doesn't re-discover it as
+             # new: `EmailVerificationController::verify()`'s own signed-link
+             # route still has no in-app landing page — a smaller, separate
+             # gap named at v3-D153. `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+             # `App\Billing\TrialAttribution` (v3-D148); `PaywallGate` as a
+             # whole class (v3-D151); multi-surah enrollment; the operational
+             # mailer/7-night window (still needs a live host/SMTP/seven real
+             # nights); PAY-1's Stripe fixtures; surah 67's scene beats — all
+             # unchanged.
              # NOTE (v3-D153, 2026-08-29): the learner account flow —
              # `AuthController` (register/login/logout/me),
              # `PasswordResetController` and `EmailVerificationController` —
