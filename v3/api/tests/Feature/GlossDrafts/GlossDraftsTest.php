@@ -203,4 +203,79 @@ class GlossDraftsTest extends TestCase
             ->assertJsonPath('shipping', false)
             ->assertJsonPath('excludedFromHashV1', true);
     }
+
+    // ---- THE REVIEW HISTORY IS READABLE BACK, NOT JUST WRITTEN ----
+    //
+    // `gloss_draft_reviews` is the migration's own named APPEND-ONLY audit
+    // trail for `gloss_drafts` ("this is how it got there"), and `review()`
+    // has written a row to it on every transition since this controller
+    // shipped — but nothing ever read one back. A rejection note (the one
+    // piece of information an author needs to act on) was durably recorded
+    // and then permanently invisible from every screen a human looks at.
+
+    public function test_a_rejection_note_is_readable_back_through_the_index(): void
+    {
+        $headers = $this->adminHeaders();
+        $created = $this->withHeaders($headers)->postJson('/api/admin/gloss-drafts', [
+            'surah' => 12, 'ayah' => 9, 'position' => 1,
+            'lang' => 'ms', 'text' => 'first attempt', 'authorKind' => 'human',
+        ])->assertStatus(201);
+        $id = $created->json('draft.id');
+
+        $this->withHeaders($headers)->postJson("/api/admin/gloss-drafts/{$id}/review", [
+            'toStatus' => 'reviewed', 'actorKind' => 'human', 'note' => 'checked against Basmeih',
+        ])->assertOk();
+
+        $this->withHeaders($headers)->postJson("/api/admin/gloss-drafts/{$id}/review", [
+            'toStatus' => 'draft', 'actorKind' => 'human', 'note' => 'wrong register — too formal',
+        ])->assertOk();
+
+        $index = $this->withHeaders($headers)
+            ->getJson('/api/admin/gloss-drafts?surah=12&lang=ms')
+            ->assertOk();
+
+        $row = collect($index->json('drafts'))->firstWhere('id', $id);
+        $this->assertNotNull($row, 'the drafted row must appear in the worklist');
+        $this->assertIsArray($row['reviews'] ?? null, 'the wire row must carry its review history');
+        $this->assertCount(2, $row['reviews']);
+
+        // Chronological order, oldest first — the order the transitions
+        // actually happened in, not id-reversed or unordered.
+        $this->assertSame('reviewed', $row['reviews'][0]['toStatus']);
+        $this->assertSame('checked against Basmeih', $row['reviews'][0]['note']);
+        $this->assertSame('first attempt', $row['reviews'][0]['textAtReview']);
+        $this->assertSame('draft', $row['reviews'][1]['toStatus']);
+        $this->assertSame('wrong register — too formal', $row['reviews'][1]['note']);
+    }
+
+    public function test_editing_after_review_records_the_auto_un_review_note_in_history(): void
+    {
+        $headers = $this->adminHeaders();
+        $created = $this->withHeaders($headers)->postJson('/api/admin/gloss-drafts', [
+            'surah' => 12, 'ayah' => 10, 'position' => 1,
+            'lang' => 'ms', 'text' => 'approved text', 'authorKind' => 'human',
+        ])->assertStatus(201);
+        $id = $created->json('draft.id');
+
+        $this->withHeaders($headers)->postJson("/api/admin/gloss-drafts/{$id}/review", [
+            'toStatus' => 'reviewed', 'actorKind' => 'human',
+        ])->assertOk();
+
+        $this->withHeaders($headers)->postJson('/api/admin/gloss-drafts', [
+            'surah' => 12, 'ayah' => 10, 'position' => 1,
+            'lang' => 'ms', 'text' => 'DIFFERENT text', 'authorKind' => 'human',
+        ])->assertOk();
+
+        $index = $this->withHeaders($headers)
+            ->getJson('/api/admin/gloss-drafts?surah=12&lang=ms')
+            ->assertOk();
+
+        $row = collect($index->json('drafts'))->firstWhere('id', $id);
+        $this->assertCount(2, $row['reviews']);
+        $this->assertSame(
+            'text edited after review — approval was for different bytes',
+            $row['reviews'][1]['note'],
+        );
+        $this->assertSame('DIFFERENT text', $row['reviews'][1]['textAtReview']);
+    }
 }

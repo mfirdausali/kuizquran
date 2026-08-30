@@ -101,6 +101,69 @@ describe("GlossDraftsPanel — three read states, never two", () => {
   });
 });
 
+describe("GlossDraftsPanel — the review history is readable, not just current state", () => {
+  beforeEach(() => resetApiFetchForTests());
+  afterEach(() => vi.restoreAllMocks());
+
+  it("renders each row's review-history note, not only the current reviewedBy", async () => {
+    const rowWithHistory = {
+      ...REVIEWED_ROW,
+      status: "draft",
+      reviewedBy: null,
+      reviews: [
+        {
+          fromStatus: "draft",
+          toStatus: "reviewed",
+          textAtReview: "first draft text",
+          actorKind: "human",
+          actor: "reviewer@example.com",
+          note: "checked against Basmeih",
+          createdAt: 1_700_000_100_000,
+        },
+        {
+          fromStatus: "reviewed",
+          toStatus: "draft",
+          textAtReview: "first draft text",
+          actorKind: "human",
+          actor: "reviewer@example.com",
+          note: "wrong register — too formal",
+          createdAt: 1_700_000_200_000,
+        },
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          ...emptyWorklist(),
+          counts: { draft: 1, reviewed: 0, merged: 0, unauthored: 0 },
+          drafts: [rowWithHistory],
+        }),
+      ),
+    );
+    render(<GlossDraftsPanel />);
+    await waitFor(() => expect(screen.getByText("first draft text")).toBeTruthy());
+    expect(screen.getByText(/wrong register — too formal/)).toBeTruthy();
+    expect(screen.getByText(/checked against Basmeih/)).toBeTruthy();
+  });
+
+  it("a row with no review history yet renders no history list", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          ...emptyWorklist(),
+          counts: { draft: 1, reviewed: 0, merged: 0, unauthored: 0 },
+          drafts: [{ ...DRAFT_ROW, reviews: [] }],
+        }),
+      ),
+    );
+    render(<GlossDraftsPanel />);
+    await waitFor(() => expect(screen.getByText("first draft text")).toBeTruthy());
+    expect(screen.queryByText(/checked against Basmeih/)).toBeNull();
+  });
+});
+
 describe("GlossDraftsPanel — never offers the merge action", () => {
   beforeEach(() => resetApiFetchForTests());
   afterEach(() => vi.restoreAllMocks());

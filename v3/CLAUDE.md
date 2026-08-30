@@ -53,9 +53,61 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2482 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 345 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1236 apps/web. (v3-D155, 2026-08-30)
+make test    # 2487 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 347 v3/api + 118 corpus-compiler
+             # + 420 engine + 61 fold-runner + 1239 apps/web. (v3-D156, 2026-08-30)
+             # NOTE (v3-D156, 2026-08-30): `gloss_draft_reviews` — the MS gloss
+             # workflow's own APPEND-ONLY review history, declared via
+             # `GlossDraft::reviews()` since the table's migration landed —
+             # had zero readers anywhere: `grep -rn "->reviews(\|::reviews("
+             # api/app api/routes api/tests` returned nothing. `review()`/
+             # `store()`'s auto-un-review branch both write a real
+             # `GlossDraftReview` row on every transition, including a
+             # reviewer's rejection NOTE — the one thing an author needs to
+             # act on — but `toWire()` had no `reviews` field, so that note
+             # was durably recorded and then permanently invisible from the
+             # one screen (`GlossDraftsPanel.tsx`) a human looks at. Same
+             # "written, populated, zero read surface" shape closed six times
+             # before (`admin_audit` v3-D129, `flag_ramp_audit` v3-D130,
+             # `entitlement_transitions` v3-D141, `purge_ledger` v3-D142,
+             # `billing_events` v3-D148) — found one layer under v3-D145's own
+             # general gloss-drafts wiring pass. Fixed: `toWire()` gained a
+             # chronological `reviews` array (queried via the already-declared
+             # relation, `$r->reviews()->orderBy('id')->get()`); the frontend
+             # (`glossDrafts.ts`, `GlossDraftsPanel.tsx`) gained a matching
+             # optional `reviews?` field and a "History" column rendering each
+             # transition + note, empty only when genuinely no history exists
+             # yet. RED confirmed at both layers, independently reverted and
+             # reproduced, then restored byte-identically: backend (2 new
+             # `GlossDraftsTest` cases against the unmodified controller
+             # failed on a missing `reviews` key), frontend (`git stash` of
+             # the three source files reproduced the identical failure on the
+             # positive "renders the rejection note" case). `TZ=UTC make
+             # test`: 2487 passing (was 2482, +5 — exactly this run's new
+             # tests: 2 PHPUnit + 1 + 2 vitest; v3/api 347, was 345; apps/web
+             # 1239, was 1236; no other suite moved). `check-test-floor.mjs`:
+             # OK, 2487 >= floor 1899 (+588 margin, unmoved). `TZ=UTC make
+             # build`: exit 0, 29 routes (unchanged — no new route). `npm run
+             # gates`: all green (boundaries 291 files, unchanged count — no
+             # new file, three existing files edited; fonts degraded-but-non-
+             # blocking, pre-existing; corpus-glyphs 206 codepoints,
+             # unchanged). `npx tsc --noEmit`: clean. No `v1/**`/`v2/**` edit
+             # (stray `v2/tsconfig.tsbuildinfo` reverted first, same
+             # discipline as every prior entry). No Arabic codepoint (every
+             # changed file swept over every Arabic block plus both
+             # Presentation Forms blocks, plus a `\u06xx`/`fromCharCode`
+             # sweep — zero matches; every new line addresses a status, an
+             # actor identifier, a note string, or a timestamp, never gloss
+             # content — test fixture notes are plain English placeholders,
+             # matching this file's own established convention). NOT
+             # addressed: `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+             # `App\Billing\TrialAttribution` (v3-D148); `PaywallGate` as a
+             # whole class / `permitsIssuance`/`permitsReview` (v3-D88,
+             # v3-D151 — a genuine open product-design question, not a wiring
+             # gap); multi-surah enrollment; the operational mailer/7-night
+             # window; PAY-1's Stripe fixtures; surah 67's scene beats — all
+             # unchanged. See DECISIONS.md v3-D156.
              # NOTE (v3-D155, 2026-08-30): `EmailVerificationController::verify()`'s
              # own signed-link route — v3-D153's own "NOT addressed" list named
              # this exactly, and v3-D154 (the reset-password confirmation

@@ -11000,3 +11000,133 @@ prior entries already establish as correct here.
 `PaywallGate` as a whole class (v3-D151); multi-surah enrollment; the
 operational mailer/7-night window (still needs a live host/SMTP/seven real
 nights); PAY-1's Stripe fixtures; surah 67's scene beats — all unchanged.
+
+## 2026-08-30 (nightly, later still) — v3-D156: `gloss_draft_reviews` — the MS gloss workflow's own append-only review history — had zero readers
+
+Re-derived state from `git log` and `v3/HANDOVER.md` per NIGHTLY.md's rule
+before touching anything: HEAD was a detached commit 25 ahead of the locally
+cached `main` (the same stale-ref shape v3-D155 already reconciled once
+tonight — `git fetch origin main` confirmed `origin/main` was already at
+that exact commit, `eaeff66`, so nothing was at risk; fixed with the same
+non-destructive `git branch -f main HEAD && git checkout main`). Steps 1-26
+and 29 remain DONE; 27/28 remain human-content-gated; PAY-1/step 30's
+remaining pieces remain calendar/infra-gated — so this run continued the
+v3-D82-onward practice of sweeping for the next agent-doable, non-deferred
+zero-caller gap, via a fresh Explore agent instructed to avoid every item
+already named across the last ~70 nightly entries (`rhymeClassOf()`,
+`EntitlementMachine::merge()`, `TrialAttribution`, `PaywallGate`/
+`permitsIssuance` — deliberately a stop-and-report product-design question,
+not guessed at here either — multi-surah enrollment, the mailer/7-night
+window, PAY-1 fixtures, surah 67 scene beats, and tonight's own earlier
+`EmailVerificationController::verify()` landing-page fix).
+
+**Found:** `api/database/migrations/2026_08_11_130000_create_gloss_drafts_table.php`
+creates two tables. Its own comment states the design precisely —
+`gloss_drafts.reviewed_by`/`note` is "the **current** state";
+`gloss_draft_reviews` is "**APPEND-ONLY review history**... this is **how it
+got there**." `GlossDraft::reviews()` (a declared `HasMany`) has existed
+since that migration landed. Nothing ever called it:
+
+```
+$ grep -rn "->reviews(\|::reviews(" api/app api/routes api/tests --include="*.php"
+(no output — the relation method itself had zero callers)
+$ grep -rln "GlossDraftReview" apps/web --include="*.ts" --include="*.tsx"
+(no output)
+```
+
+`GlossDraftsController::review()` and `store()`'s auto-un-review branch both
+write a real `GlossDraftReview` row on every transition — including the
+reviewer's rejection `note` (`review()`'s own caller-supplied `note`) and the
+auto-un-review's own fixed explanation ("text edited after review — approval
+was for different bytes") — but `toWire()` had no `reviews` field at all, so
+that note was durably recorded and then permanently unreadable from the one
+screen (`GlossDraftsPanel.tsx`) a human ever looks at. Same "written,
+populated, zero read surface" shape this build has closed six times before
+for other audit tables (`admin_audit` v3-D129, `flag_ramp_audit` v3-D130,
+`entitlement_transitions` v3-D141, `purge_ledger` v3-D142, `billing_events`
+v3-D148) — found one layer under v3-D145's own general gloss-drafts wiring
+pass, the same "swept the main surface, missed the adjacent audit table"
+shape v3-D148 found one layer under v3-D141/D147.
+
+**Why this one, and why real:** BUILD-PLAN's M9 Malay-authoring project
+(~11,300 glosses) is the one product this workflow tool exists to serve. A
+reviewer rejecting a draft, or an author's edit auto-un-reviewing one, writes
+an explanatory reason the system captures and then throws away from every
+screen — the author has to ask out-of-band. The workflow TOOL itself (as
+opposed to the Malay CONTENT it will eventually hold) needs no ratification
+— v3-D145 already drew that exact distinction for this same controller.
+
+**Fixed, small and mechanical, matching the established template:**
+`GlossDraftsController::toWire()` gained a `reviews` array — each row's
+`GlossDraftReview`s, queried via the already-declared relation
+(`$r->reviews()->orderBy('id')->get()`, chronological, oldest first — no new
+eager-load plumbing needed across the three call sites, since a fresh
+per-row query is simple and this is a low-traffic, non-shipping admin
+surface) — carrying `fromStatus`/`toStatus`/`textAtReview`/`actorKind`/
+`actor`/`note`/`createdAt`. `apps/web/lib/admin/glossDrafts.ts` gained
+`GlossDraftReviewRow` and an optional `reviews?` field on `GlossDraftRow`
+(optional, never fabricated, in case an older server response lacks it).
+`GlossDraftsPanel.tsx` gained a "History" column: a `<details>` per row
+listing each transition and its note, rendering nothing when a row has no
+history yet (never a fabricated empty state).
+
+**Verified.**
+
+RED confirmed at both layers, independently:
+
+- Backend: two new `GlossDraftsTest` cases run against the UNCHANGED
+  controller failed exactly as predicted —
+  `test_a_rejection_note_is_readable_back_through_the_index` on `the wire
+  row must carry its review history` (`Failed asserting that null is of
+  type array`), `test_editing_after_review_records_the_auto_un_review_note_in_history`
+  on `Undefined array key "reviews"`. Implemented after, both green;
+  re-reverted (`git stash` of `GlossDraftsController.php` alone, test kept)
+  reproduced the identical two failures a second time, confirming the RED
+  is the wiring and not a fixture ordering fluke; restored byte-identically,
+  12/12 green.
+- Frontend: `git stash` of the three source files (`GlossDraftsController.php`
+  reverted server-side too, so the fixture's own `reviews` field came back
+  absent end to end) — `test/gloss-drafts-panel.test.tsx`'s new
+  "renders each row's review-history note" case failed exactly on
+  `screen.getByText(/wrong register/)` finding nothing; the sibling "no
+  history yet" case passed vacuously (a genuinely empty list renders nothing
+  either way, so it was not by itself proof of wiring — the positive case is
+  the load-bearing one). Restored byte-identically, 10/10 green in that file.
+
+`TZ=UTC make test`: **2487 passing** (was 2482, +5 — exactly this run's new
+tests: 2 PHPUnit + 1 in `glossDrafts.test.ts` + 2 in
+`gloss-drafts-panel.test.tsx`; v3/api 347, was 345; apps/web 1239, was 1236;
+no other suite moved: 255 v2 vitest, 47 v2/api, 118 corpus-compiler, 420
+engine, 61 fold-runner). `check-test-floor.mjs`: OK, 2487 >= floor 1899
+(+588 margin, unmoved). `TZ=UTC make build`: exit 0, 29 routes (unchanged —
+renders inside the existing `/settings/gloss-drafts` page, no new route).
+`npm run gates`: all green (fonts degraded-but-non-blocking, pre-existing;
+boundaries 291 files, unchanged count — no new file, only edits to three
+existing ones; corpus-glyphs 206 codepoints, corpus-morphology unchanged).
+`npx tsc --noEmit`: clean. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff reverted first, same discipline
+as every prior entry — `git status --porcelain -- v1 v2` empty immediately
+before commit). No Arabic codepoint (every changed file swept
+programmatically over the Arabic, Arabic Supplement, Arabic Extended-A and
+both Presentation Forms Unicode blocks, plus a `\u06xx`/`fromCharCode`
+sweep — zero matches; every new line addresses a status by closed-set
+string, an actor email/identifier, a note string, or a timestamp, never
+gloss content — the test fixtures' `note` values are plain English
+placeholders ("wrong register — too formal", "checked against Basmeih"),
+matching this file's own established convention of never writing real or
+fake Malay prose).
+
+**NOT addressed, named so a future run doesn't re-discover it as new:**
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+`PaywallGate` as a whole class / `permitsIssuance`/`permitsReview` (v3-D88,
+v3-D151 — still a genuine open product-design question, not a wiring gap);
+multi-surah enrollment; the operational mailer/7-night window (still needs a
+live host/SMTP/seven real nights); PAY-1's Stripe fixtures; surah 67's scene
+beats — all unchanged. Two other candidates this run's sweep examined and
+ruled out as already-settled, not new gaps:
+`worker/fold-runner/src/severity.ts`'s zero-caller taxonomy functions
+(PHP independently reimplements the same taxonomy — a real, deliberately
+unfixed drift risk, already recorded at v3-D127, not rediscovered as new
+here) and `packages/engine/src/placement.ts`'s binary-search onboarding
+(a documented design choice per v3-D111/D113/D123, not a wiring fix).

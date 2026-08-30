@@ -43,6 +43,22 @@ import { apiFetch } from "@/lib/sync/apiFetch.ts";
 export type GlossDraftStatus = "draft" | "reviewed" | "merged";
 export type GlossDraftAuthorKind = "ai" | "human";
 
+/**
+ * One row of `gloss_draft_reviews` — the migration's own APPEND-ONLY
+ * "how it got there" transition history, as opposed to `GlossDraftRow`'s
+ * current-state fields. Chronological, oldest first, as the controller's
+ * `toWire()` emits it.
+ */
+export interface GlossDraftReviewRow {
+  fromStatus: GlossDraftStatus;
+  toStatus: GlossDraftStatus;
+  textAtReview: string | null;
+  actorKind: GlossDraftAuthorKind;
+  actor: string | null;
+  note: string | null;
+  createdAt: number;
+}
+
 export interface GlossDraftRow {
   id: number;
   surah: number;
@@ -58,6 +74,8 @@ export interface GlossDraftRow {
   note: string | null;
   createdAt: number;
   updatedAt: number;
+  /** Absent only if the server predates this field — never fabricated. */
+  reviews?: GlossDraftReviewRow[];
 }
 
 export interface GlossDraftCounts {

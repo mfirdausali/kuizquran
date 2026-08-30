@@ -292,6 +292,14 @@ class GlossDraftsController extends Controller
         return response()->json(['draft' => $this->toWire($row->fresh())]);
     }
 
+    /**
+     * The wire row, including its APPEND-ONLY review history
+     * (`gloss_draft_reviews`, the migration's own "how it got there" table).
+     * Every transition `review()`/`store()`'s auto-un-review branch write —
+     * in particular a rejection's explanatory `note` — is otherwise durably
+     * recorded and permanently unreadable from any screen a human looks at.
+     * Chronological, oldest first — the order the transitions happened in.
+     */
     private function toWire(GlossDraft $r): array
     {
         return [
@@ -309,6 +317,18 @@ class GlossDraftsController extends Controller
             'note' => $r->note,
             'createdAt' => $r->created_at,
             'updatedAt' => $r->updated_at,
+            'reviews' => $r->reviews()->orderBy('id')->get()
+                ->map(fn (GlossDraftReview $rev) => [
+                    'fromStatus' => $rev->from_status,
+                    'toStatus' => $rev->to_status,
+                    'textAtReview' => $rev->text_at_review,
+                    'actorKind' => $rev->actor_kind,
+                    'actor' => $rev->actor,
+                    'note' => $rev->note,
+                    'createdAt' => $rev->created_at,
+                ])
+                ->values()
+                ->all(),
         ];
     }
 }

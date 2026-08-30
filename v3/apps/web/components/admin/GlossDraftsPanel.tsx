@@ -176,6 +176,7 @@ export function GlossDraftsPanel() {
                   <th scope="col">Status</th>
                   <th scope="col">Text</th>
                   <th scope="col">Reviewed by</th>
+                  <th scope="col">History</th>
                   <th scope="col">Action</th>
                 </tr>
               </thead>
@@ -187,6 +188,23 @@ export function GlossDraftsPanel() {
                     <td>{row.status}</td>
                     <td>{row.text ?? <em>(unauthored)</em>}</td>
                     <td>{row.reviewedBy ?? "—"}</td>
+                    <td>
+                      {row.reviews && row.reviews.length > 0 ? (
+                        <details>
+                          <summary>
+                            {row.reviews.length} review{row.reviews.length === 1 ? "" : "s"}
+                          </summary>
+                          <ul>
+                            {row.reviews.map((rev, i) => (
+                              <li key={i}>
+                                {rev.fromStatus} → {rev.toStatus} by {rev.actor ?? "—"}
+                                {rev.note ? `: ${rev.note}` : ""}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      ) : null}
+                    </td>
                     <td>
                       {row.status === "draft" ? (
                         <button

@@ -108,6 +108,51 @@ describe("loadGlossDrafts — failure is a STATE, never an exception", () => {
     }
   });
 
+  it("carries a row's review history through verbatim — the append-only audit trail, not just current state", async () => {
+    const row = {
+      ...DRAFT_ROW,
+      status: "draft",
+      reviews: [
+        {
+          fromStatus: "draft",
+          toStatus: "reviewed",
+          textAtReview: "first draft text",
+          actorKind: "human",
+          actor: "reviewer@example.com",
+          note: "checked against Basmeih",
+          createdAt: 1_700_000_100_000,
+        },
+        {
+          fromStatus: "reviewed",
+          toStatus: "draft",
+          textAtReview: "first draft text",
+          actorKind: "human",
+          actor: "reviewer@example.com",
+          note: "wrong register — too formal",
+          createdAt: 1_700_000_200_000,
+        },
+      ],
+    };
+    queue.push({
+      status: 200,
+      body: {
+        surah: 12,
+        lang: "ms",
+        shipping: false,
+        excludedFromHashV1: true,
+        counts: { draft: 1, reviewed: 0, merged: 0, unauthored: 0 },
+        drafts: [row],
+      },
+    });
+
+    const load = await loadGlossDrafts(12, "ms");
+    expect(load.state).toBe("ready");
+    if (load.state === "ready") {
+      expect(load.drafts[0]!.reviews).toHaveLength(2);
+      expect(load.drafts[0]!.reviews?.[1]?.note).toBe("wrong register — too formal");
+    }
+  });
+
   it("a network throw becomes `unavailable`, not a rejected promise", async () => {
     vi.stubGlobal(
       "fetch",
