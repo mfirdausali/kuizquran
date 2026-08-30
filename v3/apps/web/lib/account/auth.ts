@@ -34,9 +34,18 @@
 // below closes that — see `lib/account/resetLink.ts` (the query-string
 // contract) and `components/account/ResetPasswordForm.tsx` (the new public
 // `/reset-password` route it powers).
+//
+// SCOPE, DELIBERATE (v3-D154): that run named `EmailVerificationController
+// ::verify()`'s own signed-link route as still having no in-app landing
+// page — a smaller, separate gap alongside the password-reset one it did
+// close. `confirmEmailVerification` below closes that — see
+// `lib/account/verifyLink.ts` (the query-string contract) and
+// `components/account/VerifyEmailScreen.tsx` (the new public
+// `/verify-email` route it powers).
 
 import { apiFetch, setAuthenticatedIdentity } from "@/lib/sync/apiFetch.ts";
 import { clearToken } from "@/lib/sync/token.ts";
+import type { VerifyLinkParams } from "./verifyLink.ts";
 
 export interface AccountIdentity {
   email: string | null;
@@ -286,4 +295,55 @@ export async function confirmPasswordReset(params: ResetPasswordParams): Promise
 
   await setAuthenticatedIdentity(token);
   return { ok: true };
+}
+
+/** `confirmEmailVerification`'s outcome — `alreadyVerified` mirrors
+ *  `EmailVerificationController`'s own response field, present only when
+ *  `ok` is true. */
+export interface EmailVerificationOutcome extends AuthOutcome {
+  alreadyVerified?: boolean;
+}
+
+/**
+ * `GET /api/email/verify/{id}/{hash}?expires=&signature=`. Unlike every
+ * other call in this module, this route sits behind BOTH `signed` (the four
+ * link params must reproduce the exact signature the notification was
+ * minted with) AND `auth:sanctum` — per `EmailVerificationController`'s own
+ * docblock and `EmailVerificationTest::test_link_cannot_verify_a_different_users_email`,
+ * the CURRENTLY authenticated device must be the SAME user the link names.
+ * Opening the link on a different, unauthenticated, or brand-new anonymous
+ * device fails honestly with a 403 (or a 401 that `apiFetch`'s own
+ * interceptor re-mints an anonymous identity for, which then ALSO 403s,
+ * exactly as it should) — that is the route's own by-design enforcement,
+ * not a case for this function to paper over. Never throws.
+ */
+export async function confirmEmailVerification(link: VerifyLinkParams): Promise<EmailVerificationOutcome> {
+  const query = new URLSearchParams({ expires: link.expires, signature: link.signature }).toString();
+  let response: Response;
+  try {
+    response = await apiFetch(
+      `/api/email/verify/${encodeURIComponent(link.id)}/${encodeURIComponent(link.hash)}?${query}`,
+    );
+  } catch (err) {
+    return { ok: false, error: requestFailed(err).reason };
+  }
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+
+  if (!response.ok) {
+    const serverError =
+      body !== null && typeof body === "object" && typeof (body as Record<string, unknown>).error === "string"
+        ? ((body as Record<string, unknown>).error as string)
+        : `the API answered ${response.status}`;
+    return { ok: false, error: serverError };
+  }
+
+  const alreadyVerified =
+    body !== null && typeof body === "object" && (body as Record<string, unknown>).alreadyVerified === true;
+  return { ok: true, alreadyVerified };
 }

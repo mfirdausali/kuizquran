@@ -10889,3 +10889,114 @@ in-app landing page — a smaller, separate gap named at v3-D153.
 `PaywallGate` as a whole class (v3-D151); multi-surah enrollment; the
 operational mailer/7-night window (still needs a live host/SMTP/seven real
 nights); PAY-1's Stripe fixtures; surah 67's scene beats — all unchanged.
+
+## 2026-08-30 (nightly, later) — v3-D155: `EmailVerificationController::verify()`'s signed-link route had no in-app landing page — v3-D153's and v3-D154's own shared "not addressed" item
+
+`AuthController`/`PasswordResetController`/`EmailVerificationController` have
+existed and been server-tested since build-plan step 13. v3-D153 wired the
+frontend account flow; v3-D154 (this same night's earlier sibling run) closed
+the password-reset confirmation screen and named this exact gap in its own
+"NOT addressed" list. Confirmed still true this run: `grep -rln "email/verify"
+apps/web/lib apps/web/app apps/web/components` (excluding `auth.ts`'s own
+docblock references to the gap) returned nothing.
+
+**A second, deeper defect than the reset-password one.** Left at Laravel's
+default, `VerifyEmail`'s notification link points at the BACKEND'S OWN
+`email/verify/{id}/{hash}` route directly (`URL::temporarySignedRoute`
+inside the notification's own `verificationUrl()`). That route sits behind
+BOTH `signed` AND `auth:sanctum` — per `EmailVerificationController`'s own
+docblock and `EmailVerificationTest::test_link_cannot_verify_a_different_users_email`,
+the CURRENTLY authenticated device must be the SAME user the link names. A
+bare click from an email client carries no `Authorization` header at all, so
+even before reaching the "no frontend page" gap, a learner following the
+real emailed link today would 401 on Laravel's own JSON error page. Unlike
+the reset-password flow (`POST /api/reset-password` needs no auth — the
+token+email pair alone is the proof), fixing this needed the frontend link
+itself to carry enough to reconstruct the exact SIGNED backend call, not
+just a bare token.
+
+**Fixed, end to end.** `AppServiceProvider`'s new `VerifyEmail::createUrlUsing`
+closure builds the same backend signed URL Laravel's default would have
+(`URL::temporarySignedRoute('verification.verify', ...)`), then extracts its
+`expires`/`signature` query params and re-emits a frontend URL carrying all
+four pieces: `{frontend}/verify-email?id=&hash=&expires=&signature=`.
+`lib/account/verifyLink.ts#parseVerifyLinkParams` reads that shape back
+(missing/malformed → `null`, never a throw — edge case #78, the same
+convention `resetLink.ts` established). `confirmEmailVerification()` (new,
+in `lib/account/auth.ts`) GETs
+`/api/email/verify/{id}/{hash}?expires=&signature=` through `apiFetch` — so
+THIS device's own Bearer token is attached, reconstructing the exact signed
+call the notification was minted for. The route's device-binding is left
+INTACT, not relaxed: opening the link on a different, signed-out, or
+brand-new anonymous device still fails honestly with a 403 (or a 401 that
+`apiFetch`'s own interceptor re-mints an anonymous identity for, which then
+ALSO 403s) — `VerifyEmailScreen.tsx`'s new `components/account/` component
+names that possibility in its own failed-state copy rather than presenting
+it as a generic error. Unlike `ResetPasswordForm`, there is no form: the
+link itself is the credential, so verification fires automatically on
+mount, the same "no user input needed" shape `AccountAuthPanel`'s own mount
+effect already uses for `checkAccountSession`. New top-level
+`app/verify-email/page.tsx`, deliberately OUTSIDE every route group —
+mirrors `/reset-password`'s and `/attribution`'s own reasoning.
+
+**Verified.**
+
+RED confirmed at both layers, independently:
+
+- Backend: `AppServiceProvider.php`'s closure reverted via `git stash`
+  (keeping the new test) — the new
+  `test_the_real_notification_links_to_the_frontend_and_its_params_verify_for_real`
+  case failed exactly as predicted, on the REAL, unfaked notification's own
+  `toMail()->actionUrl` still starting with the bare API host
+  (`http://localhost:8000/api/email/verify/...`) rather than the frontend —
+  proving the RED was the wiring, not a hand-built URL standing in for the
+  real one. The five pre-existing `EmailVerificationTest` cases (which build
+  their own test URLs via `URL::temporarySignedRoute` directly, never
+  through the notification) were unaffected, confirming the closure is
+  additive. Restored byte-identically, 6/6 green.
+- Frontend: the four new/changed source files (`auth.ts`,
+  `verifyLink.ts`, `VerifyEmailScreen.tsx`, `app/verify-email/page.tsx`)
+  moved aside, tests kept — all 3 new `confirmEmailVerification` cases in
+  `auth.test.ts` failed on `confirmEmailVerification is not a function`;
+  `verifyLink.test.ts` and `verify-email-screen.test.tsx` both failed on
+  module-resolution errors. Restored byte-identically, 31/31 green (20 in
+  `auth.test.ts` — 17 pre-existing + 3 new — plus 7 in `verifyLink.test.ts`
+  plus 4 in `verify-email-screen.test.tsx`).
+
+`TZ=UTC make test`: **2482 passing** (was 2467, +15 — exactly this run's new
+tests: 1 PHPUnit + 14 vitest; apps/web 1236, was 1222; v3/api 345, was 344;
+no other suite moved: 255 v2 vitest, 47 v2/api, 118 corpus-compiler, 420
+engine, 61 fold-runner). `check-test-floor.mjs`: OK, 2482 >= floor 1899
+(+583 margin, unmoved). `TZ=UTC make build`: exit 0, 29 routes (was 28 —
+`/verify-email` is new, dynamic like `/reset-password`). `npm run gates`:
+all green (fonts degraded-but-non-blocking, pre-existing; boundaries 291
+files, up from 285 — the five new apps/web files; corpus-glyphs 206
+codepoints, unchanged; corpus-morphology unchanged). `npx tsc --noEmit`:
+clean, `Version 5.9.3` confirmed. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff reverted first, same discipline
+as every prior entry — `git status --porcelain -- v1 v2` empty immediately
+before commit). No Arabic codepoint (every new/changed file swept
+programmatically over the Arabic, Arabic Supplement, Arabic Extended-A and
+both Presentation Forms Unicode blocks, plus a `\u06xx`/`fromCharCode`
+sweep — zero matches; every new line addresses an id, a hash, an expiry
+timestamp, a signature, a boolean, an HTTP path, or English prose, never
+corpus text).
+
+**Also found, and worth naming precisely rather than leaving implicit:**
+this session started with a detached `HEAD` 25 commits ahead of the locally
+cached `main`/`origin/main` refs — the same "stale local ref" shape a dozen
+prior nightly entries have hit (v3-D100, D102, D103, D117, D126, D143, D144
+among them). `git fetch origin main` confirmed `origin/main` was ALREADY at
+the detached HEAD's commit (`88f62b8`, v3-D154) — every one of those 25
+commits was already pushed and live; nothing was actually at risk. Fixed
+the local checkout with `git branch -f main HEAD && git checkout main`
+(non-destructive — `main` was a pure ancestor of `HEAD`, so this is a
+fast-forward in disguise), which is the reconciliation this file's own
+prior entries already establish as correct here.
+
+**NOT addressed, named so a future run doesn't re-discover it as new:**
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+`PaywallGate` as a whole class (v3-D151); multi-surah enrollment; the
+operational mailer/7-night window (still needs a live host/SMTP/seven real
+nights); PAY-1's Stripe fixtures; surah 67's scene beats — all unchanged.

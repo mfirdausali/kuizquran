@@ -90,4 +90,51 @@ class EmailVerificationTest extends TestCase
 
         Notification::assertNothingSent();
     }
+
+    /**
+     * DECISIONS.md v3-D154's own "not addressed" list: the signed link this
+     * notification carries pointed at the BACKEND'S OWN route directly, which
+     * sits behind `signed` AND `auth:sanctum` — a bare click from an email
+     * client (no Bearer header) would 401 before a learner saw anything.
+     * `AppServiceProvider`'s `VerifyEmail::createUrlUsing` closure now routes
+     * through the frontend instead. Proves the real, UNFAKED notification
+     * (not a hand-built URL) carries a frontend link whose four query
+     * params reconstruct into the exact signed backend call that actually
+     * verifies the email — the end-to-end property, not just that a closure
+     * runs.
+     */
+    public function test_the_real_notification_links_to_the_frontend_and_its_params_verify_for_real(): void
+    {
+        config(['app.frontend_url' => 'https://learn.example.test']);
+
+        $user = User::factory()->unverified()->create();
+        $token = $user->createToken('device')->plainTextToken;
+
+        $notification = new VerifyEmail;
+        $mail = $notification->toMail($user);
+        $actionUrl = $mail->actionUrl;
+
+        $this->assertStringStartsWith('https://learn.example.test/verify-email?', $actionUrl);
+
+        $query = [];
+        parse_str((string) parse_url($actionUrl, PHP_URL_QUERY), $query);
+        $this->assertSame((string) $user->id, $query['id'] ?? null);
+        $this->assertSame(sha1($user->email), $query['hash'] ?? null);
+        $this->assertNotEmpty($query['expires'] ?? null);
+        $this->assertNotEmpty($query['signature'] ?? null);
+
+        // The exact reconstruction `lib/account/auth.ts#confirmEmailVerification`
+        // performs client-side from the parsed link params.
+        $backendUrl = "/api/email/verify/{$query['id']}/{$query['hash']}"
+            .'?expires='.$query['expires'].'&signature='.$query['signature'];
+
+        $this->assertFalse($user->fresh()->hasVerifiedEmail());
+
+        $this->withHeaders(['Authorization' => 'Bearer '.$token])
+            ->get($backendUrl)
+            ->assertOk()
+            ->assertJson(['ok' => true, 'alreadyVerified' => false]);
+
+        $this->assertTrue($user->fresh()->hasVerifiedEmail());
+    }
 }

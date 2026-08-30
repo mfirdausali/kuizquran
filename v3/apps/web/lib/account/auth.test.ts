@@ -8,6 +8,7 @@ import { resetApiFetchForTests } from "@/lib/sync/apiFetch";
 import { getIdentity, getToken, hasLiveToken, resetTokenForTests, setToken } from "@/lib/sync/token";
 import {
   checkAccountSession,
+  confirmEmailVerification,
   confirmPasswordReset,
   loginAccount,
   logoutAccount,
@@ -347,5 +348,71 @@ describe("requestPasswordReset", () => {
     expect(outcome).toEqual({ ok: true });
     expect(seen[0]!.url).toContain("/api/forgot-password");
     expect(seen[0]!.body).toEqual({ email: "learner@example.com" });
+  });
+});
+
+describe("confirmEmailVerification", () => {
+  const realFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    resetApiFetchForTests();
+    resetTokenForTests();
+    setToken("this-devices-token", "this-devices-token");
+  });
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    vi.restoreAllMocks();
+  });
+
+  it("GETs /api/email/verify/{id}/{hash}?expires=&signature=, carrying this device's Bearer token", async () => {
+    const seen: Array<{ url: string; headers: Record<string, string> }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      seen.push({ url: String(input), headers: Object.fromEntries(new Headers(init?.headers)) });
+      return jsonResponse({ ok: true, alreadyVerified: false });
+    }) as unknown as typeof fetch;
+
+    const outcome = await confirmEmailVerification({
+      id: "42",
+      hash: "the-emailed-hash",
+      expires: "1780000000",
+      signature: "the-emailed-signature",
+    });
+
+    expect(outcome).toEqual({ ok: true, alreadyVerified: false });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.url).toContain("/api/email/verify/42/the-emailed-hash");
+    expect(seen[0]!.url).toContain("expires=1780000000");
+    expect(seen[0]!.url).toContain("signature=the-emailed-signature");
+    expect(seen[0]!.headers.authorization).toBe("Bearer this-devices-token");
+  });
+
+  it("reports alreadyVerified when the server says so", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse({ ok: true, alreadyVerified: true }),
+    ) as unknown as typeof fetch;
+
+    const outcome = await confirmEmailVerification({
+      id: "42",
+      hash: "the-emailed-hash",
+      expires: "1780000000",
+      signature: "the-emailed-signature",
+    });
+
+    expect(outcome).toEqual({ ok: true, alreadyVerified: true });
+  });
+
+  it("on a 403 (a signature/device mismatch), echoes the server's own error, never invents one", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse({ error: "Invalid signature." }, 403),
+    ) as unknown as typeof fetch;
+
+    const outcome = await confirmEmailVerification({
+      id: "42",
+      hash: "the-emailed-hash",
+      expires: "1780000000",
+      signature: "tampered",
+    });
+
+    expect(outcome).toEqual({ ok: false, error: "Invalid signature." });
   });
 });

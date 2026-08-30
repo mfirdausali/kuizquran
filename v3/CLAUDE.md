@@ -53,9 +53,87 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2467 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 344 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1222 apps/web. (v3-D154, 2026-08-30)
+make test    # 2482 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 345 v3/api + 118 corpus-compiler
+             # + 420 engine + 61 fold-runner + 1236 apps/web. (v3-D155, 2026-08-30)
+             # NOTE (v3-D155, 2026-08-30): `EmailVerificationController::verify()`'s
+             # own signed-link route — v3-D153's own "NOT addressed" list named
+             # this exactly, and v3-D154 (the reset-password confirmation
+             # screen, this same night's earlier sibling gap) re-named it again
+             # — had no in-app landing page. Left at Laravel's default, the
+             # notification's link pointed at the BACKEND'S OWN
+             # `email/verify/{id}/{hash}` route directly — a route that sits
+             # behind BOTH `signed` AND `auth:sanctum`
+             # (`EmailVerificationController`'s own docblock), so a bare click
+             # from an email client, carrying no Bearer header, would 401
+             # before a learner saw anything. `grep -rln "email/verify"
+             # apps/web/lib apps/web/app apps/web/components` (excluding
+             # `auth.ts`'s own docblock references to the gap) returned
+             # nothing. Fixed: `AppServiceProvider`'s new
+             # `VerifyEmail::createUrlUsing` closure routes the link through
+             # the frontend instead, carrying the same four pieces
+             # (`id`, `hash`, `expires`, `signature`) `URL::temporarySignedRoute`
+             # would have put on the backend URL — read back by
+             # `lib/account/verifyLink.ts#parseVerifyLinkParams` (the
+             # `?id=&hash=&expires=&signature=` query contract, degrading a
+             # missing/malformed set to `null` rather than a throw, edge case
+             # #78, same convention as `resetLink.ts`) — plus
+             # `confirmEmailVerification()` in `lib/account/auth.ts` (GETs
+             # `/api/email/verify/{id}/{hash}?expires=&signature=` through
+             # `apiFetch`, so THIS device's own Bearer token is attached —
+             # the route is deliberately device-bound: the currently
+             # authenticated device must be the SAME user the link names,
+             # per `EmailVerificationTest::test_link_cannot_verify_a_different_users_email`,
+             # which this fix does not relax) + `components/account
+             # /VerifyEmailScreen.tsx` (fires automatically on mount — unlike
+             # `ResetPasswordForm`, the link itself is the credential, no form
+             # to submit — with four states: verifying / verified /
+             # already-verified / failed, the last naming the device-mismatch
+             # possibility honestly rather than as a generic error) + a new
+             # top-level `app/verify-email/page.tsx`, outside every route
+             # group like `/reset-password` and `/attribution` — reachable
+             # from an email client, not from inside the authenticated `(app)`
+             # shell. RED confirmed at both layers: the backend
+             # (`AppServiceProvider.php`'s closure reverted via `git stash`)
+             # failed exactly the new `EmailVerificationTest` case (the real,
+             # unfaked notification's action URL still pointed at the bare
+             # API host, not the frontend); the frontend (the four new/
+             # changed source files moved aside, tests kept) failed all 3 new
+             # `confirmEmailVerification` cases in `auth.test.ts` on
+             # `confirmEmailVerification is not a function` and both new test
+             # files (`verifyLink.test.ts`, `verify-email-screen.test.tsx`) on
+             # module-resolution errors; every file restored byte-identically,
+             # 31/31 green (20 in `auth.test.ts` — 17 pre-existing + 3 new —
+             # plus 7 in `verifyLink.test.ts` plus 4 in
+             # `verify-email-screen.test.tsx`) and `EmailVerificationTest`
+             # 6/6 (was 5/5). `TZ=UTC make test`: 2482 passing (was 2467,
+             # +15 — exactly this run's new tests: 1 PHPUnit + 14 vitest — 3
+             # + 7 + 4; apps/web 1236, was 1222; v3/api 345, was 344; no
+             # other suite moved). `check-test-floor.mjs`: OK, 2482 >= floor
+             # 1899 (+583 margin, unmoved). `TZ=UTC make build`: exit 0, 29
+             # routes (was 28 — `/verify-email` is new, dynamic like
+             # `/reset-password`). `npm run gates`: all green (fonts
+             # degraded-but-non-blocking, pre-existing; boundaries 291 files,
+             # up from 285 — the five new apps/web files; corpus-glyphs 206
+             # codepoints, unchanged). `npx tsc --noEmit`: clean, `Version
+             # 5.9.3` confirmed. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted first, same
+             # discipline as every prior entry — `git status --porcelain --
+             # v1 v2` empty immediately before commit). No Arabic codepoint
+             # (every new/changed file swept programmatically over the
+             # Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms Unicode blocks, plus a `\u06xx`/
+             # `fromCharCode` sweep — zero matches; every new line addresses
+             # an id, a hash, an expiry timestamp, a signature, a boolean, an
+             # HTTP path, or English prose, never corpus text).
+             #
+             # NOT addressed, named so a future run doesn't re-discover it as
+             # new: `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+             # (v3-D88..D94/D144/D145); `App\Billing\TrialAttribution`
+             # (v3-D148); `PaywallGate` as a whole class (v3-D151);
+             # multi-surah enrollment; the operational mailer/7-night window
+             # (still needs a live host/SMTP/seven real nights); PAY-1's
+             # Stripe fixtures; surah 67's scene beats — all unchanged.
              # NOTE (v3-D154, 2026-08-30): the reset-password CONFIRMATION
              # screen — v3-D153's own "NOT addressed" list named this exactly
              # as "the more urgent half of the RM500-buyer-forgets-their-
