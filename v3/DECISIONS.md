@@ -11411,3 +11411,145 @@ wiring gap); multi-surah enrollment; the operational mailer/7-night window
 surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy
 drift (v3-D127); `packages/engine/src/placement.ts` (a design choice,
 v3-D111/D113/D123) — all unchanged.
+
+---
+
+### v3-D159 — `lib/sync/digest.ts#digestsMatch()` had zero callers; `merge.ts` re-derived its exact comparison inline; `digest.ts` itself had no test file of its own
+
+**Ratified 2026-08-31 (nightly).**
+
+A fresh sweep for this build's recurring "mechanism built and tested, zero
+production caller" bug class (v3-D82 through v3-D158, ~55 instances) started,
+per NIGHTLY.md's rule, by dispatching an Explore agent across `v3/api/app`
+and `apps/web/lib`/`components`. Its top finding — `billing_events`'
+admin viewer missing — turned out to be a false positive caused by the
+session's own stale git state (see the process note below), not a real gap;
+verified and ruled out before any duplicate work was attempted.
+
+A manual follow-up sweep, scripted (every `export function`/`export async
+function` in `apps/web/lib`, cross-referenced by file-count across
+`app`/`components`/`lib`/`test`), turned up mostly false positives — a
+function used only within its own defining module, or already-known
+deferred items (`describeCertification`, `regionFromCountry`, `rowAtomKey`,
+`useWriterStatus`, `GlossDraftsController`). One genuine, small instance
+survived: `lib/sync/digest.ts#digestsMatch(a, b)` — the exported, documented
+function whose own one-line docblock states exactly what it is for
+("Whether two events carry the same wire payload") — was never called by
+anything. `lib/sync/merge.ts`'s own `#50` divergence check (`mergeFromServer`,
+the function that closes DEFECTS.md#B5 and implements edge case #50's "skip
+only on payload-digest match") did `eventDigest(existing) === eventDigest(row)`
+directly, re-deriving the identical two-call comparison `digestsMatch` exists
+to express. The same "a tested, documented helper exists, the one call site
+that needs it re-derives it inline instead" shape as v3-D83
+(`gradeClassToWire`, the S2/S3 rung ternary) and v3-D113 (`lastActiveDayMs`,
+the make-up-merge day derivation) — smaller in consequence here (both
+expressions are computed from the exact same `eventDigest` function, so there
+is no behavioral drift today), but the same structural risk: nothing stops a
+future edit to `digestsMatch`'s comparison rule (e.g. tolerating a benign
+field difference) from silently NOT reaching `merge.ts`, since `merge.ts`
+never calls it.
+
+**A second, sharper gap surfaced while writing the fix's test:**
+`lib/sync/digest.ts` — despite being the shared spine `eventDigest` (and
+therefore the whole `#50` divergence mechanism) depends on, and despite its
+own docblock naming TWO load-bearing obligations explicitly ("1. ABSENT ===
+NULL === UNDEFINED... 2. KEY ORDER IS IRRELEVANT") — had **no test file of
+its own**. `find apps/web/lib/sync -iname "*.test.*"` listed
+`outbox.test.ts`, `merge.test.ts`, `auth.test.ts`, `pull.test.ts`, never
+`digest.test.ts`. Both obligations were only ever exercised INCIDENTALLY,
+through `merge.test.ts`'s realistic two-device event fixtures — which happen
+to touch the digest on every insert/skip/divergence assertion, but were built
+to prove B5's ordering property, not to pin `canonicalJson`'s own null-
+collapse or key-order-irrelevance rules directly. A regression in either
+obligation (say, an accidental switch from a recursive to a one-level-only
+key sort — the exact upgrade `canonicalJson`'s own docblock says it needed
+over a naive implementation, because `specSnapshot` is unbounded-shape) could
+plausibly survive `merge.test.ts`'s fixtures if the specific nested case
+never happened to appear in them, and nothing would catch it directly.
+
+**Fixed:**
+
+- New `lib/sync/digest.test.ts` (12 tests): `canonicalJson`'s two obligations,
+  each proven directly and separately from the recursive/nested case
+  (`{a:{x:1,y:null}}` digests as `{a:{x:1}}`) and the array case (null/
+  undefined collapse to the same in-array sentinel, but array POSITION is
+  never dropped — order is meaning, `[1,2,3]` and `[3,2,1]` digest
+  differently, matching the module's own "arrays kept in order" contract);
+  `eventDigest`'s own contract (a pending row and its synced self digest
+  identically, since `syncedAt` never participates); `digestsMatch`'s
+  equality/inequality behavior and its agreement with a direct `eventDigest`
+  comparison (proving it is not a second, independently-drifting
+  implementation).
+- `lib/sync/merge.ts:236` now calls `digestsMatch(existing, row)` instead of
+  the inline `eventDigest(existing) === eventDigest(row)`. The individual
+  digest strings a few lines below (`localDigest`/`serverDigest` on the
+  `Divergence` record) are UNCHANGED — those need the actual digest strings,
+  not just the boolean, so `eventDigest` stays imported and used there.
+
+**Verified.** Mutation-verified directly: `digestsMatch` temporarily forced
+to `return true;` unconditionally was run against the pre-existing (untouched)
+`merge.test.ts` suite — exactly 2 of 23 tests failed
+(`test/sync/#50 — merge sees an existing id > ...`, both on the divergence-
+record assertions: `expected [] to have a length of 1 but got +0`), the other
+21 unaffected. Reverted byte-identically (`git diff lib/sync/digest.ts`
+empty), reran: 35/35 green (23 merge + 12 new digest). This proves the wiring
+is real — a broken `digestsMatch` now actually breaks the divergence path
+`merge.ts` depends on, rather than the fix being a renamed no-op.
+
+`TZ=UTC make test`: **2506 passing** (was 2494, +12 — exactly this run's new
+tests; apps/web 1256, was 1244; no other suite moved: 255 v2 vitest, 47
+v2/api, 349 v3/api, 118 corpus-compiler, 420 engine, 61 fold-runner).
+`check-test-floor.mjs`: OK, 2506 >= floor 1899 (+607 margin, unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 29 routes
+(unchanged — no route or UI touched, this is a sync-layer-internal fix). No
+`v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the suite was reverted before committing — `git status
+--porcelain -- v1 v2` empty immediately before commit). No Arabic codepoint
+(the new test file and the `merge.ts` diff swept programmatically over the
+Arabic, Arabic Supplement, Arabic Extended-A and both Presentation Forms
+Unicode blocks, plus a `\u06xx`/`fromCharCode` sweep — zero matches; every
+string in the new file is a plain-object fixture key/value, a fixture
+coordinate (surah 12 ayah 1, the same coordinate `merge.test.ts`'s own `ev()`
+helper defaults to), or English prose, never corpus text).
+
+**A process note, recorded because it cost real time early this run, though
+far less than it could have.** The session started on a completely
+uninitialized checkout — no `node_modules`/`vendor` anywhere, `make setup`
+had evidently never been run in this container — with `HEAD` briefly
+detached at the real tip (`471c785`, v3-D158) while the locally cached
+`origin/main` ref was stale at `1a9c055` (v3-D130, ~28 commits behind). A
+plain `git checkout main` at that point switched onto the STALE local branch
+rather than the real tip — the exact "detached HEAD, stale local `main`"
+trap v3-D77 Finding 0 first named and v3-D91/D127/D138 each independently
+re-hit since, but here triggered BY the recovery action itself rather than
+by the starting state. Caught quickly: `git fetch origin main` followed by
+`git merge --ff-only origin/main` recovered the real tip cleanly (a
+fast-forward merge carries zero risk of losing work, unlike a reset). But an
+Explore agent already dispatched to sweep for the next zero-caller mechanism,
+working against the pre-fetch (stale) tree, reported `billing_events`'
+admin viewer as a missing zero-caller mechanism — it was already built and
+shipped at v3-D148 (`Admin\BillingEventsController`,
+`lib/admin/billingEvents.ts`, `BillingEventsPanel`), just absent from the
+stale tree the agent's sandbox saw. Verified directly against the corrected
+tree (`ls api/app/Http/Controllers/Admin/BillingEventsController.php` and
+`lib/admin/billingEvents.ts`, both present; `git show --stat 3f56485`
+confirming the full original commit) before trusting the finding or
+attempting any duplicate work — per NIGHTLY.md's own rule to re-derive from
+the repo rather than trust a prior claim, human or agent. Caught in minutes
+here, unlike the "several hours of reconciliation" v3-D77's original finding
+cost; recorded so a future run recognizes the same shape faster still, and so
+`billing_events` is not re-investigated as a live gap.
+
+**NOT addressed, named so a future run doesn't re-discover it as new:**
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+`PaywallGate` as a whole class / `permitsIssuance`/`permitsReview` (v3-D88,
+v3-D151 — still a genuine open product-design question, not a wiring gap);
+multi-surah enrollment; the operational mailer/7-night window (still needs a
+live host/SMTP/seven real nights); PAY-1's Stripe fixtures; surah 67's scene
+beats; `worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127, a real
+cross-runtime duplication, deliberately not restructured); `packages/engine/
+src/placement.ts` (a design choice, v3-D111/D113/D123); the "late-arrival
+refold" half of v3-D32 (this build has no automatic refold-on-ingest pipeline
+at all yet — real, separate, larger scope, re-confirmed still open this run,
+not attempted) — all unchanged.

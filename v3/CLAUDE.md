@@ -53,9 +53,112 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2494 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2506 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 349 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1244 apps/web. (v3-D158, 2026-08-31)
+             # + 420 engine + 61 fold-runner + 1256 apps/web. (v3-D159, 2026-08-31)
+             # NOTE (v3-D159, 2026-08-31): `lib/sync/digest.ts#digestsMatch()`
+             # — the exported, documented function built to answer "whether
+             # two events carry the same wire payload" (edge case #50) — had
+             # zero callers anywhere: `merge.ts`'s own #50 comparison
+             # (`mergeFromServer`'s skip-on-idempotent-replay check) called
+             # `eventDigest(existing) === eventDigest(row)` directly instead,
+             # re-deriving the identical comparison inline rather than using
+             # the dedicated function built for exactly this question — the
+             # same "tested/documented helper exists, the one call site that
+             # needs it re-derives it inline" shape as v3-D83
+             # (`gradeClassToWire`) and v3-D113 (`lastActiveDayMs`), found by
+             # a function-export sweep of `apps/web/lib` after the usual
+             # "mechanism built and tested, zero production caller" sweep
+             # came back clean everywhere else checked this run (an Explore
+             # agent's earlier pass this run had flagged `billing_events` as
+             # zero-caller too, but that was a stale-checkout false positive
+             # — v3-D148 already built and shipped its admin viewer; see the
+             # process note below). A SECOND, sharper gap surfaced alongside
+             # it: `digest.ts` — despite being the shared spine `eventDigest`
+             # depends on and the one module whose own docblock states two
+             # load-bearing obligations by name ("ABSENT === NULL ===
+             # UNDEFINED"; "KEY ORDER IS IRRELEVANT") — had **no test file of
+             # its own** (`find apps/web/lib/sync -iname "*.test.*"` listed
+             # `outbox.test.ts`/`merge.test.ts`/`auth.test.ts`/`pull.test.ts`,
+             # never `digest.test.ts`); both obligations were only ever
+             # exercised INCIDENTALLY through `merge.test.ts`'s realistic
+             # event fixtures, never pinned directly. Fixed: new
+             # `lib/sync/digest.test.ts` (12 tests) proves both obligations
+             # directly (including the recursive/nested case and the array
+             # case, where null/undefined collapse to the same sentinel but
+             # POSITION is never dropped — arrays are meaning-bearing order,
+             # never sorted) plus `digestsMatch`'s own equality/inequality
+             # behavior and its agreement with a direct `eventDigest`
+             # comparison; `merge.ts:236` now calls `digestsMatch(existing,
+             # row)` instead of the inline double `eventDigest(...)` call
+             # (the individual digest strings are still computed separately
+             # a few lines below, for the `Divergence` record itself, which
+             # needs the actual digest strings, not just the boolean).
+             # Mutation-verified directly: `digestsMatch` temporarily forced
+             # to always return `true` failed exactly 2 of
+             # `merge.test.ts`'s 23 pre-existing divergence-detection
+             # cases (`expected [] to have a length of 1 but got +0`, both on
+             # the #50 divergence-record assertions) — proving the wiring is
+             # real, not merely a renamed no-op; reverted byte-identically
+             # (`git diff lib/sync/digest.ts` empty), 35/35 green again (23
+             # merge + 12 new digest). `TZ=UTC make test`: 2506 passing (was
+             # 2494, +12 — exactly this run's new tests; apps/web 1256, was
+             # 1244; no other suite moved: 255 v2 vitest, 47 v2/api, 349
+             # v3/api, 118 corpus-compiler, 420 engine, 61 fold-runner).
+             # `check-test-floor.mjs`: OK, 2506 >= floor 1899 (+607 margin,
+             # unmoved, same discipline as every prior entry). `TZ=UTC make
+             # build`: exit 0, 29 routes (unchanged — no route/UI touched,
+             # this is a sync-layer-internal fix). No `v1/**`/`v2/**` edit (a
+             # stray `v2/tsconfig.tsbuildinfo` build-cache diff produced by
+             # running the suite was reverted before committing, same
+             # discipline as every prior entry — `git status --porcelain --
+             # v1 v2` empty immediately before commit). No Arabic codepoint
+             # (the new test file and the merge.ts diff swept programmatically
+             # over the Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms Unicode blocks — zero matches; every string
+             # in the new file is a plain-object fixture key/value, a fixture
+             # coordinate (surah 12 ayah 1, matching this file's own
+             # established convention), or English prose, never corpus text).
+             #
+             # A process note, recorded because it cost real time early this
+             # run: the session started on a completely uninitialized
+             # checkout (no `node_modules`/`vendor` anywhere — `make setup`
+             # had never been run in this container) with `HEAD` briefly
+             # landing on a stale cached `main` ref one `git checkout main`
+             # away from the real tip — the exact "detached HEAD, stale
+             # local `main`" shape v3-D77 Finding 0 named and v3-D91/D127/D138
+             # each re-hit since. `git fetch origin main` followed by `git
+             # merge --ff-only origin/main` recovered the real tip (`471c785`,
+             # v3-D158) cleanly, with zero risk of losing work (a fast-forward
+             # merge, not a reset) — but an Explore agent dispatched to sweep
+             # for the next zero-caller mechanism BEFORE that fetch reported
+             # `billing_events`' admin viewer as missing, which was already
+             # built and shipped at v3-D148. Verified directly against the
+             # corrected tree (`ls api/app/Http/Controllers/Admin/
+             # BillingEventsController.php` and `lib/admin/billingEvents.ts`
+             # both present) before trusting the agent's finding, per
+             # NIGHTLY.md's own rule to re-derive from the repo rather than
+             # any prior claim — caught before any duplicate work was
+             # attempted, unlike the "hours of reconciliation" v3-D77's
+             # original finding cost.
+             #
+             # NOT addressed, named so a future run doesn't re-discover it as
+             # new: `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+             # (v3-D88..D94/D144/D145); `App\Billing\TrialAttribution`
+             # (v3-D148); `PaywallGate` as a whole class /
+             # `permitsIssuance`/`permitsReview` (v3-D88, v3-D151 — still a
+             # genuine open product-design question, not a wiring gap);
+             # multi-surah enrollment; the operational mailer/7-night window
+             # (still needs a live host/SMTP/seven real nights); PAY-1's
+             # Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127, a real cross-runtime duplication but deliberately
+             # not restructured — see that entry); `packages/engine/src/
+             # placement.ts` (a design choice, v3-D111/D113/D123); the
+             # "late-arrival refold" half of v3-D32 (this build has no
+             # automatic refold-on-ingest pipeline at all yet — real,
+             # separate, larger scope, re-confirmed still open this run) —
+             # all unchanged. See DECISIONS.md v3-D159.
              # NOTE (v3-D158, 2026-08-31): `PricingConstantsTest.php` and
              # `test/pricing.test.ts` — the CI pricing clause BUILD-PLAN.md's
              # own gate list names — each assert their OWN file's price

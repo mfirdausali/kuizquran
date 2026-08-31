@@ -50,7 +50,7 @@ import type { IDBPObjectStore } from "idb";
 import type { DrillEvent } from "@engine/types.ts";
 import { openDb } from "@/lib/idb/db";
 import type { Iq3Schema, LocalEventRow } from "@/lib/idb/schema";
-import { eventDigest } from "./digest.ts";
+import { digestsMatch, eventDigest } from "./digest.ts";
 
 /** The two stores the merge writes, as typed by `idb` inside a readwrite
  *  transaction over both. Named only so `mergePage` can be split out of
@@ -232,8 +232,12 @@ async function mergePage(
       continue;
     }
 
-    // #50: skip ONLY on payload-digest match.
-    if (eventDigest(existing) === eventDigest(row)) {
+    // #50: skip ONLY on payload-digest match. `digestsMatch` is the
+    // documented function built to answer exactly this question — call it
+    // rather than re-deriving the comparison inline, so there is one place
+    // "same wire payload" is decided (the individual digests are still
+    // needed below, for the Divergence record itself).
+    if (digestsMatch(existing, row)) {
       // Idempotent re-merge. If the local row is still pending, mark it
       // synced opportunistically — the server demonstrably has it.
       if (existing.syncedAt == null) await store.put({ ...existing, syncedAt: ctx.now });
