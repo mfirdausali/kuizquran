@@ -35,9 +35,11 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { render, waitFor, cleanup } from "@testing-library/react";
 import { act } from "@testing-library/react";
 import { IDBFactory } from "fake-indexeddb";
+import { append } from "@/lib/idb/append";
 import { resetDbForTests } from "@/lib/idb/db";
 import { writeLock } from "@/lib/idb/writeLock";
 import { resetApiFetchForTests } from "@/lib/sync/apiFetch";
+import { resetSyncSummaryForTests, syncSummary } from "@/lib/sync/summary";
 import { resetTokenForTests, setToken } from "@/lib/sync/token";
 import { SyncTrigger } from "@/components/shell/SyncTrigger";
 
@@ -73,6 +75,7 @@ beforeEach(() => {
   resetDbForTests();
   writeLock.forceForTests({ role: "writer" });
   resetApiFetchForTests();
+  resetSyncSummaryForTests();
   resetTokenForTests();
   setToken("test-token");
   vi.spyOn(window.navigator, "onLine", "get").mockReturnValue(true);
@@ -135,6 +138,36 @@ describe("re-fires on reconnect and refocus (the v2 useBackgroundSync precedent)
       window.dispatchEvent(new Event("focus"));
     });
     await waitFor(() => expect(calls.length).toBeGreaterThan(before));
+  });
+});
+
+describe("v3-D161 — every completed cycle reports to lib/sync/summary.ts", () => {
+  it("carries a real #110 oversize quarantine into syncSummary, so SyncStatus can escalate it", async () => {
+    installFetch();
+    // A genuinely oversize row — over EVENT_BYTE_MAX (8KB) — the same way a
+    // real device could produce one (`specSnapshot` is the only unbounded
+    // field on the wire). No Arabic anywhere: padding is a plain ASCII
+    // filler string, addressed by fixture coordinates like every other test
+    // in this file.
+    await append(
+      {
+        type: "tap",
+        ts: 1_700_000_000_000,
+        surah: 112,
+        ayah: 1,
+        rung: "S1",
+        id: "oversize-1",
+        specSnapshot: { pad: "x".repeat(20_000) },
+      },
+      { now: 1_700_000_000_000, tz: "UTC" },
+    );
+
+    expect(syncSummary.current).toEqual({ cannotSync: 0, divergences: 0 });
+
+    render(<SyncTrigger />);
+
+    await waitFor(() => expect(syncSummary.current.cannotSync).toBeGreaterThan(0));
+    expect(syncSummary.current).toEqual({ cannotSync: 1, divergences: 0 });
   });
 });
 

@@ -11658,3 +11658,144 @@ v3-D32 (no automatic refold-on-ingest pipeline exists yet — real, separate,
 larger scope); `AccountDeletionRequest::isDue()` (v3-D146, a zero-caller
 convenience method deliberately left alone — re-confirmed this run, not a
 gap) — all unchanged.
+
+---
+
+### v3-D161 — `SyncStatus.tsx`'s own #110/#50 escalation props were unit-tested since step 21 and never fed a real value; `SyncTrigger.tsx` computed both counts every cycle and threw them away
+
+**Ratified 2026-08-31 (nightly).**
+
+Continuing the recurring "mechanism built and tested, zero production
+caller" sweep (v3-D82 through v3-D160). An Explore agent's fresh pass,
+directed away from every already-closed instance and the handful of named
+genuine non-gaps (`rhymeClassOf`, `EntitlementMachine::merge`,
+`PaywallGate`, `TrialAttribution`, multi-surah enrollment, the mailer/
+7-night window, PAY-1, surah 67's scene beats, the fold-runner severity
+taxonomy, `placement.ts`, late-arrival refold, `AccountDeletionRequest
+::isDue()`), found this one in the sync layer's own escalation UI.
+
+`SyncStatus.tsx` (`apps/web/components/shell/SyncStatus.tsx`) has offered
+`cannotSync`/`divergences` props since build-plan step 21, documented in
+its own header as existing specifically for edge case #110 (a
+permanently-quarantined oversize event) and edge case #50 (a payload
+divergence on pull) — "distinct counts, deliberately, because 'waiting'
+and 'cannot' are different facts and must not share a number." Both are
+unit-tested directly (`test/sync-status.test.tsx` renders
+`<SyncStatus cannotSync={1} />` / `<SyncStatus divergences={2} />`) and
+both defaulted to the literal `0`.
+
+The real numbers are computed on every single sync cycle:
+`lib/sync/sync.ts#syncCycle`'s `CycleResult.quarantined`/`.divergences`,
+fed by `outbox.ts#selectPending` (which quarantines any row over
+`EVENT_BYTE_MAX` — 8KB — while continuing to scan past it, per #110's own
+"never let it block the batch behind it") and `merge.ts#mergeFromServer`
+(which raises a `Divergence` for #50's payload-mismatch case). But
+`SyncTrigger.tsx` — the ONE place a real cycle is ever run
+(`components/shell/SyncTrigger.tsx`, mounted once in `app/(app)/layout
+.tsx`) — collapsed the whole `CycleResult` to a single boolean
+(`degraded = Boolean(result.push?.degraded || result.pull?.degraded)`)
+and never read `result.quarantined`/`result.divergences` at all; and
+`home/page.tsx`, the one place `<SyncStatus/>` is ever rendered, mounts it
+with zero props (`grep -rn "cannotSync=\|divergences=" apps/web/app
+apps/web/components apps/web/lib` returned nothing outside the test
+file). Concretely: a learner whose device produced an oversize event (a
+pathologically large `specSnapshot` is the only unbounded field on the
+wire), or whose pull hit a genuine #50 digest divergence, saw exactly the
+same quiet "N waiting to sync" caption an ordinary offline learner sees —
+forever, since a quarantined row's own header states it "STAYS pending
+forever" — with no way to learn that this specific event will never sync
+on its own. The component built purpose-specifically to say "this one
+will never sync, here's why" never said it, because the two facts it
+needed were computed one layer up and dropped on the floor.
+
+**Fixed** with a new module, not a prop threaded down from `home/page
+.tsx`: that page is a Server Component (deliberately — RSC data still
+streams; see that file's own header) and cannot hold the live client
+state a running sync cycle produces. `lib/sync/summary.ts#syncSummary` is
+a module-level singleton with the same `.current`/`.subscribe()` shape
+`lib/idb/writeLock.ts`'s `WriteLock` already established for exactly this
+"two components, no direct import between them" problem
+(`useWriterStatus()` is the existing precedent this mirrors).
+`SyncTrigger` calls `syncSummary.report(result)` once per completed cycle
+— a synchronous, side-effect-free write to a module value, so #103's
+"never blocks, never triggers a second network call" contract is
+unchanged. `SyncStatus` reads it via a new `useSyncSummary()` hook and
+falls back to the live value only when its own props are `undefined`
+(`cannotSync ?? live.cannotSync`, not a default-parameter `= 0`), so every
+existing isolated-rendering test that hands it a literal is unaffected
+and an explicit prop still wins over the live value. Neither component
+imports the other — `SyncTrigger`'s own header is right that "no session,
+drill or grading path may... read its state, because it has none to
+read"; this is a dedicated side-channel for the one user-facing purpose
+#103/#50/#110 already named, not an exception to that rule.
+`syncSummary.report()` OVERWRITES rather than accumulates on every call —
+`selectPending` re-scans and re-reports every still-quarantined row on
+every cycle, so a later cycle with fewer quarantined rows must drop the
+old count, never add to it — and is a no-op for subscribers when the
+reported counts are unchanged (no spurious re-render on an identical
+value).
+
+**Verified.** RED confirmed directly: `git stash` of the two component
+source files only (`SyncStatus.tsx`, `SyncTrigger.tsx` — the new
+`lib/sync/summary.ts` module and every new test kept) and rerunning
+`test/sync-trigger.test.tsx` + `test/sync-status.test.tsx` failed exactly
+the two new wiring-proof cases — a real cycle over a genuinely oversize
+appended event (padded via `specSnapshot: { pad: "x".repeat(20_000) }`,
+well over `EVENT_BYTE_MAX`, no Arabic anywhere — a plain ASCII filler
+string) never reached `syncSummary.current`; a bare `<SyncStatus />` mount
+never painted the live count fed via `syncSummary.report(...)` — while
+the other 16 cases in those two files were unaffected; restored
+byte-identically (`git diff` empty), reran: 24/24 green (9 new: 6 in the
+new `lib/sync/summary.test.ts`, proving the store primitive's
+overwrite-not-accumulate and no-op-on-unchanged-value properties directly
+in isolation; 1 in `sync-trigger.test.tsx`, the wiring proof; 2 in
+`sync-status.test.tsx`, the live-default-and-explicit-override proof).
+The two new component-level tests deliberately scope their DOM queries to
+`within(container)` rather than the ambient `screen` — this test file has
+no `afterEach(cleanup)` and accumulates every prior test's render in
+`document.body`, so an ambient query risks a false "found multiple
+elements" or a false match against a different test's leftover text; each
+new test also uses counts no other test in the file happens to render, on
+top of the container scoping, so a collision cannot silently pass.
+
+`TZ=UTC make test`: 2516 passing (was 2507, +9 — exactly this run's new
+tests; apps/web 1266, was 1257; no other suite moved: 255 v2 vitest, 47
+v2/api, 349 v3/api, 118 corpus-compiler, 420 engine, 61 fold-runner).
+`check-test-floor.mjs`: OK, 2516 >= floor 1899 (+617 margin, unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 29 routes
+(unchanged — no route/UI surface added; both edited files are existing
+background/status components already mounted in the shipped app). `npm
+run gates`: all green (fonts degraded-but-non-blocking, pre-existing;
+boundaries 294 files, up from 293 — exactly the one new production file,
+`lib/sync/summary.ts`; corpus-morphology and corpus-glyphs unchanged).
+`npx tsc --noEmit`: clean. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite
+was reverted before committing, same discipline as every prior entry —
+`git status --porcelain -- v1 v2` empty immediately before commit). No
+Arabic codepoint (every new/changed file swept programmatically over the
+Arabic, Arabic Supplement, Arabic Extended-A and both Presentation Forms
+Unicode blocks, plus a `\u06xx`/`\u08xx`-escape and `fromCharCode` sweep —
+zero matches; the one oversize test fixture pads with a plain ASCII
+filler string, never Arabic, and every fixture coordinate is a plain
+surah/ayah integer matching this file's own established convention).
+
+**NOT addressed**, named so a future run doesn't re-discover it as new:
+`lib/sync/token.ts#isTokenDead()` has the identical zero-caller shape one
+layer over — no UI distinguishes "sync is stuck because the device's
+token died and hasn't recovered yet" from ordinary pending/offline, and
+is partially subsumed by `sync.ts`'s own `degraded: "auth"` reason, which
+`SyncTrigger` still discards; fixing it properly would be the more
+complete follow-up to this entry, not a separate new finding.
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+`PaywallGate` as a whole class / `permitsIssuance`/`permitsReview`
+(v3-D88, v3-D151 — still a genuine open product-design question, not a
+wiring gap); multi-surah enrollment; the operational mailer/7-night
+window (still needs a live host/SMTP/seven real nights); PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy drift (v3-D127, deliberately not restructured);
+`packages/engine/src/placement.ts` (a design choice, v3-D111/D113/D123);
+the late-arrival refold half of v3-D32 (no automatic refold-on-ingest
+pipeline exists yet — real, separate, larger scope);
+`AccountDeletionRequest::isDue()` (v3-D146, a zero-caller convenience
+method deliberately left alone) — all unchanged.

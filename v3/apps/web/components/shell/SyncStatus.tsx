@@ -23,20 +23,35 @@
 // human: a QUARANTINED event that can never sync (#110) and a #50 payload
 // DIVERGENCE. Those are distinct counts, deliberately, because "waiting" and
 // "cannot" are different facts and must not share a number.
+//
+// `cannotSync`/`divergences` default to the LIVE counts `lib/sync/summary.ts`
+// receives from every completed `SyncTrigger` cycle (v3-D161) — until this
+// wiring landed, the props existed and were unit-tested, but every real
+// mount (`home/page.tsx` renders `<SyncStatus />` bare) fell through to the
+// literal `0` default forever, so the escalation branch below could never
+// paint outside a test. An explicit prop still wins, so the existing
+// isolated-rendering tests are unaffected.
 
 import { useCallback } from "react";
 import { useLogState } from "@/lib/idb/useLogState";
 import { countPending } from "@/lib/sync/outbox";
+import { useSyncSummary } from "@/lib/sync/summary";
 
 export interface SyncStatusProps {
   /** Events that can never sync (#110 oversize). Surfaced as a DISTINCT count
-   *  beside the pending one — "waiting" and "cannot" are different facts. */
+   *  beside the pending one — "waiting" and "cannot" are different facts.
+   *  Defaults to the live count from `lib/sync/summary.ts` when omitted. */
   cannotSync?: number;
-  /** #50 payload divergences observed on the pull. */
+  /** #50 payload divergences observed on the pull. Defaults to the live
+   *  count from `lib/sync/summary.ts` when omitted. */
   divergences?: number;
 }
 
-export function SyncStatus({ cannotSync = 0, divergences = 0 }: SyncStatusProps) {
+export function SyncStatus({ cannotSync, divergences }: SyncStatusProps) {
+  const live = useSyncSummary();
+  const effectiveCannotSync = cannotSync ?? live.cannotSync;
+  const effectiveDivergences = divergences ?? live.divergences;
+
   // Stable identity: an inline arrow would be a new function every render and
   // the effect would re-run forever.
   const selector = useCallback(() => countPending(), []);
@@ -50,11 +65,11 @@ export function SyncStatus({ cannotSync = 0, divergences = 0 }: SyncStatusProps)
   // The escalations are independent of the pending count's own state: a
   // divergence is worth saying even while the count is still loading.
   const escalation =
-    cannotSync > 0 || divergences > 0 ? (
+    effectiveCannotSync > 0 || effectiveDivergences > 0 ? (
       <span className="caption" role="status">
-        {cannotSync > 0 ? `${cannotSync} cannot sync` : null}
-        {cannotSync > 0 && divergences > 0 ? " · " : null}
-        {divergences > 0 ? `${divergences} need review` : null}
+        {effectiveCannotSync > 0 ? `${effectiveCannotSync} cannot sync` : null}
+        {effectiveCannotSync > 0 && effectiveDivergences > 0 ? " · " : null}
+        {effectiveDivergences > 0 ? `${effectiveDivergences} need review` : null}
       </span>
     ) : null;
 

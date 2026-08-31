@@ -19,11 +19,12 @@
 //      spying on the network: a passive indicator makes no requests at all.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { IDBFactory } from "fake-indexeddb";
 import { append } from "@/lib/idb/append";
 import { openDb, resetDbForTests } from "@/lib/idb/db";
 import { writeLock } from "@/lib/idb/writeLock";
+import { resetSyncSummaryForTests, syncSummary } from "@/lib/sync/summary";
 import { SyncStatus } from "@/components/shell/SyncStatus";
 
 const CTX = { now: 1_700_000_000_000, tz: "UTC" };
@@ -32,6 +33,7 @@ beforeEach(async () => {
   globalThis.indexedDB = new IDBFactory();
   resetDbForTests();
   writeLock.forceForTests({ role: "writer" });
+  resetSyncSummaryForTests();
   vi.unstubAllGlobals();
 });
 
@@ -82,6 +84,41 @@ describe("the three states the count can be in", () => {
     await appendEvents(1);
     render(<SyncStatus divergences={2} />);
     await waitFor(() => expect(screen.getByText(/2 need review/i)).toBeTruthy());
+  });
+});
+
+describe("v3-D161 — a REAL mount (no props) escalates from the live SyncTrigger summary", () => {
+  // This file's other tests never unmount between cases, so a query must be
+  // SCOPED to this test's own render (not the ambient `screen`, which would
+  // also see every earlier test's leftover DOM) and use counts no other test
+  // in this file happens to render, or a collision would be a false
+  // negative rather than proof of anything.
+  it("renders the cannot-sync count from lib/sync/summary.ts when unprompted by a prop", async () => {
+    await appendEvents(6);
+    // This is exactly how a real `<SyncStatus />` is mounted from
+    // `home/page.tsx` — no props at all. Before v3-D161 this could never
+    // paint an escalation outside a test that hand-fed a literal.
+    syncSummary.report({
+      quarantined: [
+        { id: "oversize-1", bytes: 9_000 },
+        { id: "oversize-2", bytes: 9_500 },
+        { id: "oversize-3", bytes: 10_000 },
+      ],
+      divergences: [],
+    });
+    const { container } = render(<SyncStatus />);
+    const scoped = within(container);
+    await waitFor(() => expect(scoped.getByText(/6 waiting to sync/i)).toBeTruthy());
+    expect(scoped.getByText(/3 cannot sync/i)).toBeTruthy();
+  });
+
+  it("an explicit prop still overrides the live summary", async () => {
+    await appendEvents(5);
+    syncSummary.report({ quarantined: [{ id: "oversize-1", bytes: 9_000 }], divergences: [] });
+    const { container } = render(<SyncStatus cannotSync={0} />);
+    const scoped = within(container);
+    await waitFor(() => expect(scoped.getByText(/5 waiting to sync/i)).toBeTruthy());
+    expect(scoped.queryByText(/cannot sync/i)).toBeNull();
   });
 });
 

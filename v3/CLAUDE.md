@@ -53,9 +53,128 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2507 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2516 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 349 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1257 apps/web. (v3-D160, 2026-08-31)
+             # + 420 engine + 61 fold-runner + 1266 apps/web. (v3-D161, 2026-08-31)
+             # NOTE (v3-D161, 2026-08-31): `SyncStatus.tsx`'s own two
+             # escalation props — `cannotSync` (#110, a permanently
+             # quarantined oversize event) and `divergences` (#50, a payload
+             # divergence found on pull) — have existed, been unit-tested,
+             # and defaulted to `0` since build-plan step 21. Both counts are
+             # computed for real on every single sync cycle
+             # (`lib/sync/sync.ts#syncCycle`'s `CycleResult.quarantined`/
+             # `.divergences`, fed by `outbox.ts#selectPending` and
+             # `merge.ts#mergeFromServer`), but `SyncTrigger.tsx` — the ONE
+             # place a real cycle ever runs — collapsed the whole result to
+             # a single `degraded` boolean and discarded both arrays
+             # entirely, and `home/page.tsx` mounts `<SyncStatus />` with no
+             # props at all. So the escalation branch SyncStatus's own header
+             # was built specifically to show ("'waiting' and 'cannot' are
+             # different facts and must not share a number") could never
+             # paint outside a test that hand-fed it a literal — a learner
+             # whose device produced an oversize event, or whose pull hit a
+             # genuine #50 divergence, saw the identical quiet "N waiting to
+             # sync" caption an ordinary offline learner sees, forever, with
+             # no way to learn that specific event will never sync. Found by
+             # an Explore agent's fresh sweep for this build's recurring
+             # "mechanism built and tested, zero production caller" class
+             # (v3-D82 onward), directed away from ~30 already-closed
+             # instances and the handful of named genuine non-gaps
+             # (`rhymeClassOf`, `EntitlementMachine::merge`, `PaywallGate`,
+             # etc.) so it would not re-report one of those.
+             #
+             # Fixed with a new module, not a prop-threading change through
+             # a server component (`home/page.tsx` is a Server Component and
+             # cannot hold live client state to pass down): `lib/sync/
+             # summary.ts#syncSummary`, a module-level singleton with the
+             # same `.current`/`.subscribe()` shape `lib/idb/writeLock.ts`'s
+             # `WriteLock` already established for exactly this
+             # cross-component-without-cross-importing problem.
+             # `SyncTrigger` calls `syncSummary.report(result)` once per
+             # completed cycle (a synchronous, side-effect-free write —
+             # #103's "never blocks" contract is unchanged, this adds no
+             # network call); `SyncStatus` reads it via a new
+             # `useSyncSummary()` hook and falls back to the live value only
+             # when its own `cannotSync`/`divergences` PROPS are omitted
+             # (`??`, not a default-parameter `= 0`), so every existing test
+             # that hands it a literal for isolated rendering is unaffected
+             # and an explicit prop still wins. Neither component imports
+             # the other, matching `SyncTrigger`'s own header ("no session,
+             # drill or grading path may... read its state, because it has
+             # none to read") — this is a dedicated side-channel for the one
+             # user-facing purpose #103/#50/#110 already named, not an
+             # exception to that rule.
+             #
+             # RED confirmed directly: `git stash` of the two component
+             # files only (`SyncStatus.tsx`, `SyncTrigger.tsx` — the new
+             # `lib/sync/summary.ts` module and all new tests kept) and
+             # rerunning `test/sync-trigger.test.tsx` + `test/sync-status
+             # .test.tsx` failed exactly the two new wiring-proof cases (a
+             # real cycle over a genuinely oversize appended event — padded
+             # via `specSnapshot`, over `EVENT_BYTE_MAX`, no Arabic anywhere
+             # — never reached `syncSummary`; a bare `<SyncStatus />` mount
+             # never painted the live count), 16 other cases in those two
+             # files unaffected; restored byte-identically (`git diff`
+             # empty), reran: 24/24 green (9 new: 6 in the new
+             # `lib/sync/summary.test.ts` for the store primitive itself, 1
+             # in `sync-trigger.test.tsx`, 2 in `sync-status.test.tsx`). The
+             # store-level tests also pin the load-bearing "overwrite, never
+             # accumulate" property directly (`outbox.ts#selectPending`
+             # re-scans and re-reports every still-quarantined row on every
+             # cycle, so a LATER cycle with fewer quarantined rows must
+             # drop the old count, never add to it) and that an unchanged
+             # report is a no-op for subscribers (no re-render on an
+             # identical value).
+             #
+             # `TZ=UTC make test`: 2516 passing (was 2507, +9 — exactly this
+             # run's new tests; apps/web 1266, was 1257; no other suite
+             # moved: 255 v2 vitest, 47 v2/api, 349 v3/api, 118
+             # corpus-compiler, 420 engine, 61 fold-runner).
+             # `check-test-floor.mjs`: OK, 2516 >= floor 1899 (+617 margin,
+             # unmoved, same discipline as every prior entry). `TZ=UTC make
+             # build`: exit 0, 29 routes (unchanged — no route/UI surface
+             # added; both edited files are existing background/status
+             # components already mounted). `npm run gates`: all green
+             # (fonts degraded-but-non-blocking, pre-existing; boundaries
+             # 294 files, up from 293 — exactly the one new production file,
+             # `lib/sync/summary.ts`; corpus-morphology and corpus-glyphs
+             # unchanged). `npx tsc --noEmit`: clean. No `v1/**`/`v2/**` edit
+             # (a stray `v2/tsconfig.tsbuildinfo` build-cache diff produced
+             # by running the suite was reverted before committing, same
+             # discipline as every prior entry — `git status --porcelain --
+             # v1 v2` empty immediately before commit). No Arabic codepoint
+             # (every new/changed file swept programmatically over the
+             # Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms Unicode blocks, plus a `\u06xx`/`\u08xx`-
+             # escape and `fromCharCode` sweep — zero matches; the one
+             # oversize test fixture pads with a plain ASCII filler string,
+             # never Arabic, and every fixture coordinate is a plain surah/
+             # ayah integer matching this file's own established
+             # convention).
+             #
+             # NOT addressed, named so a future run doesn't re-discover it
+             # as new: `lib/sync/token.ts#isTokenDead()` has the identical
+             # zero-caller shape one layer over — no UI distinguishes "sync
+             # is stuck because the device's token died and hasn't recovered
+             # yet" from ordinary pending/offline, and is partially subsumed
+             # by `sync.ts`'s own `degraded: "auth"` reason, which
+             # `SyncTrigger` also still discards; `rhymeClassOf()`
+             # (v3-D136); `EntitlementMachine::merge()`
+             # (v3-D88..D94/D144/D145); `App\Billing\TrialAttribution`
+             # (v3-D148); `PaywallGate` as a whole class /
+             # `permitsIssuance`/`permitsReview` (v3-D88, v3-D151 — still a
+             # genuine open product-design question, not a wiring gap);
+             # multi-surah enrollment; the operational mailer/7-night window
+             # (still needs a live host/SMTP/seven real nights); PAY-1's
+             # Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127, deliberately not restructured);
+             # `packages/engine/src/placement.ts` (a design choice,
+             # v3-D111/D113/D123); the late-arrival refold half of v3-D32
+             # (no automatic refold-on-ingest pipeline exists yet — real,
+             # separate, larger scope); `AccountDeletionRequest::isDue()`
+             # (v3-D146, a zero-caller convenience method deliberately left
+             # alone) — all unchanged. See DECISIONS.md v3-D161.
              # NOTE (v3-D160, 2026-08-31): `GlossDraftReview.text_at_review` —
              # the field the model's own docblock says exists for exactly the
              # B3 reason ("snapshots the bytes a reviewer actually approved...
