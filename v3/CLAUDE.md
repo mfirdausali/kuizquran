@@ -53,9 +53,84 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2487 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 347 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1239 apps/web. (v3-D156, 2026-08-30)
+make test    # 2494 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 349 v3/api + 118 corpus-compiler
+             # + 420 engine + 61 fold-runner + 1244 apps/web. (v3-D158, 2026-08-31)
+             # NOTE (v3-D158, 2026-08-31): `PricingConstantsTest.php` and
+             # `test/pricing.test.ts` — the CI pricing clause BUILD-PLAN.md's
+             # own gate list names — each assert their OWN file's price
+             # amounts against the same hardcoded v3-D07 prose string, but
+             # neither reads the other file, unlike the identical mirror-drift
+             # shape v3-D149/D150 already guarded for `offline_ttl_days`/
+             # `OFFLINE_TTL_MS` and `trial.days`/`TRIAL_DAYS_MS` via a
+             # dedicated `*-config-agreement.test.ts`. The actual money
+             # amounts — `config/pricing.php`'s `MY`/`INTL` `monthly`/
+             # `lifetime`/`currency`/`rails`, the numbers Stripe will actually
+             # charge — never got the same guard, confirmed via `grep -rln
+             # "PRICING_CONFIG_PATH\|config/pricing.php" apps/web`: only the
+             # two OTHER agreement tests and the two files themselves, no
+             # third guard covering price amounts. `config/pricing.php`'s own
+             # docblock names the intended web-side enforcement,
+             # `check-pricing.mjs` — that script does not exist anywhere in
+             # the tree; the real mechanism (`check-boundaries.mjs` clause 10)
+             # only stops a SECOND price literal appearing outside
+             # `lib/pricing.ts`, it never compares `lib/pricing.ts`'s values
+             # against `config/pricing.php`'s. Concretely: a future edit to
+             # the real charged amount in `config/pricing.php` that is not
+             # mirrored into `lib/pricing.ts`'s DISPLAY amount would leave
+             # both existing suites green — each independently matches its
+             # own hardcoded copy of the v3-D07 text — while a learner sees
+             # one price on the landing/billing screen and is charged
+             # another, a direct billing-trust bug, strictly worse in
+             # consequence than the two amounts already guarded. Fixed:
+             # `apps/web/lib/pricing-config-agreement.test.ts` (new, colocated
+             # with `pricing.ts` matching the two precedent files' own
+             # placement in `lib/entitlement/`), which reads
+             # `config/pricing.php`'s raw text via regex (same technique
+             # `PricingConstantsTest::
+             # test_no_price_literal_exists_outside_the_pricing_config`
+             # already uses) and asserts `PRICING.MY`/`PRICING.INTL`'s
+             # `currency`/`monthly`/`lifetime` and both regions'
+             # `monthlyRails`/`lifetimeRails` all match the parsed PHP source
+             # exactly. No production code path changed — this is a guard
+             # test only, the same shape as v3-D150. RED confirmed twice,
+             # directly: mutating `config/pricing.php`'s `MY.monthly` from
+             # 2000 to 2500 failed the new test exactly (`expected 2000 to be
+             # 2500`); separately, mutating `MY.lifetime`'s rails to drop
+             # `grabpay` failed the rails case exactly (`+ "grabpay"` in the
+             # diff). Both reverted byte-identically (`git status --porcelain
+             # config/pricing.php` empty before committing) and reran green,
+             # 3/3. `TZ=UTC make test`: 2494 passing (was 2491, +3 — exactly
+             # this run's new tests; apps/web 1244, was 1241; no other suite
+             # moved: 255 v2 vitest, 47 v2/api, 349 v3/api, 118
+             # corpus-compiler, 420 engine, 61 fold-runner).
+             # `check-test-floor.mjs`: OK, 2494 >= floor 1899 (+595 margin,
+             # unmoved). `TZ=UTC make build`: exit 0, 29 routes (unchanged —
+             # no new route, this is a test-only file). `npm run gates`: all
+             # green (fonts degraded-but-non-blocking, pre-existing;
+             # boundaries 292 files, up from 291 — exactly the one new file;
+             # corpus-morphology and corpus-glyphs unchanged). `npx tsc
+             # --noEmit`: clean (this run's first draft tripped
+             # `noUncheckedIndexedAccess` on five separate regex
+             # capture-group accesses — fixed with explicit `=== undefined`
+             # narrowing and a type-predicate filter, never a non-null
+             # assertion). No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted first, same
+             # discipline as every prior entry — `git status --porcelain --
+             # v1 v2` empty immediately before commit). No Arabic codepoint
+             # (the new file swept programmatically over the Arabic, Arabic
+             # Supplement, Arabic Extended-A and both Presentation Forms
+             # Unicode blocks, plus a `\u06xx`/`fromCharCode` sweep — zero
+             # matches; every line addresses a minor-unit integer, a
+             # currency/rail by closed-set string, or a file path, never
+             # corpus text). NOT addressed: `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+             # `App\Billing\TrialAttribution` (v3-D148); `PaywallGate` as a
+             # whole class / `permitsIssuance`/`permitsReview` (v3-D88,
+             # v3-D151 — a genuine open product-design question, not a wiring
+             # gap); multi-surah enrollment; the operational mailer/7-night
+             # window; PAY-1's Stripe fixtures; surah 67's scene beats — all
+             # unchanged. See DECISIONS.md v3-D158.
              # NOTE (v3-D156, 2026-08-30): `gloss_draft_reviews` — the MS gloss
              # workflow's own APPEND-ONLY review history, declared via
              # `GlossDraft::reviews()` since the table's migration landed —

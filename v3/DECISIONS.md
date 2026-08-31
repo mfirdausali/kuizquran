@@ -11269,3 +11269,145 @@ live host/SMTP/seven real nights); PAY-1's Stripe fixtures; surah 67's scene
 beats; `worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
 `packages/engine/src/placement.ts` (a design choice, v3-D111/D113/D123) —
 all unchanged.
+
+## 2026-08-31 (nightly) — v3-D158: the price amounts themselves had no PHP↔TS agreement guard — the two existing pricing tests each match their own hardcoded copy of v3-D07, never each other
+
+Re-derived state from `git log` and `v3/HANDOVER.md` per NIGHTLY.md's rule
+before touching anything. This session started on a detached `HEAD` 0
+commits behind `origin/main` (both at `cc16050`, v3-D157) — the same
+stale-local-ref shape several prior entries have hit (v3-D100, D102, D103,
+D117, D126, D143, D144, D155, D156, D157 among them); reconciled
+non-destructively with `git branch -f main HEAD && git checkout main`.
+Steps 1-26 and 29 remain DONE; 27/28 remain human-content-gated; PAY-1/step
+30's remaining pieces remain calendar/infra-gated — so this run continued
+the v3-D82-onward practice of sweeping for the next agent-doable,
+non-deferred gap, via a fresh Explore agent instructed to avoid every item
+already named across the prior ~80 nightly entries (`rhymeClassOf()`,
+`EntitlementMachine::merge()`, `TrialAttribution`, `PaywallGate`/
+`permitsIssuance`/`permitsReview`, multi-surah enrollment, the mailer/
+7-night window, PAY-1 fixtures, surah 67 scene beats, `TEST-FLOOR`,
+`severity.ts`'s taxonomy drift, `placement.ts`).
+
+**Found:** `api/config/pricing.php` (the ONE place prices are written,
+server-side — its own docblock calls this out explicitly) and
+`apps/web/lib/pricing.ts` (its client-side mirror) both declare the same
+v3-D07 amounts independently, with no shared import path between the two
+languages. `PricingConstantsTest.php` and `test/pricing.test.ts` each assert
+their own file's numbers against the identical hardcoded v3-D07 prose
+string — but neither test reads the other file, so the two suites cannot
+by construction catch the two files drifting apart. This is the exact
+mirror-drift shape v3-D149/D150 already fixed twice in this same config
+file, for two OTHER keys (`nightly.sample_size`, `offline_ttl_days`) via a
+dedicated `*-config-agreement.test.ts` — but the real money amounts, the
+number Stripe will actually charge, never got the same guard, and
+v3-D150's own "not addressed" closing note didn't name it either.
+
+Confirmed via `grep -rln "PRICING_CONFIG_PATH\|config/pricing.php"
+apps/web --include=*.ts`: only the two existing `*-config-agreement.test.ts`
+files (covering `offline_ttl_days` and `trial.days`) and the two pricing
+files themselves — no third file cross-checks price amounts. `config
+/pricing.php`'s own docblock names the intended web-side enforcement
+mechanism by filename — `check-pricing.mjs` — and that script does not
+exist anywhere in the tree (`grep -rn "check-pricing" . --include=*.mjs`
+returns nothing); the real mechanism, `check-boundaries.mjs` clause 10,
+only stops a SECOND price literal appearing outside `lib/pricing.ts` — it
+never compares `lib/pricing.ts`'s values against `config/pricing.php`'s.
+
+**Why this is real:** a future change to `config/pricing.php`'s `MY`/`INTL`
+`monthly`/`lifetime`/`currency` (the amounts Stripe's checkout will actually
+charge, once M7 ships) that is not mirrored into `lib/pricing.ts` (what the
+landing page and the billing settings screen DISPLAY) would leave both
+existing test suites green — each independently re-checks only its own
+hardcoded copy of the same v3-D07 string — while a learner sees one price
+and is charged another. This is a direct billing-trust bug, and a strictly
+worse consequence than the two keys already guarded (`offline_ttl_days` is
+a cache-staleness bound; `trial.days` gates issuance timing) — this one is
+the literal money amount a real person pays.
+
+**Fixed, small and test-only, exact precedent from v3-D150:** new
+`apps/web/lib/pricing-config-agreement.test.ts`, colocated with
+`pricing.ts` in `lib/` — matching where the two precedent agreement tests
+sit relative to THEIR target files (`lib/entitlement/cache.ts`/`gate.ts`).
+It reads `config/pricing.php`'s raw text (the same raw-file-scan technique
+`PricingConstantsTest::test_no_price_literal_exists_outside_the_pricing_config`
+already uses to scan PHP source from a test) and asserts every
+`PRICING[region]` field — `currency`, `monthly`, `lifetime`,
+`monthlyRails`, `lifetimeRails`, for both `MY` and `INTL` — against the
+parsed PHP source. No production code path changes; this is a guard test
+only, same shape as v3-D150.
+
+`rails` needed a different parsing approach than the flat `currency`/
+`monthly`/`lifetime` values: it is the one top-level key whose value nests
+a per-region object (`'MY' => [...]`, `'INTL' => [...]`) inside another
+`[...]`, so a single bracket-matching regex can't safely bound one
+region's rails without ALSO matching the top-level `'MY'`/`'INTL'` PRICE
+blocks that appear earlier in the same file under the same literal key
+names. Resolved by isolating the whole `rails` section first (a regex
+anchored on the literal comment that follows it in the file, `// v3-D07:`,
+which appears nowhere else immediately after a `],`), then splitting that
+section's text on the literal `'INTL'` marker — each half then contains
+exactly one flat, non-nested `'monthly'`/`'lifetime'` array, safely parsed
+by a simple regex with no bracket-nesting ambiguity.
+
+**Verified.**
+
+RED confirmed twice, directly, each independently reverted byte-identically:
+
+- Mutating `config/pricing.php`'s `MY.monthly` from `2000` to `2500` failed
+  the new currency/monthly/lifetime case exactly:
+  `AssertionError: expected 2000 to be 2500`. `git status --porcelain
+  config/pricing.php` confirmed a clean revert before the next mutation.
+- Separately, mutating `MY.lifetime`'s rails from `['card', 'fpx',
+  'grabpay']` to `['card', 'fpx']` (dropping GrabPay) failed the rails case
+  exactly, the diff naming the missing element: `+ "grabpay"`. Reverted
+  byte-identically; `git status --porcelain config/pricing.php` empty
+  again, 3/3 green.
+
+This run's first draft of the new test failed `npx tsc --noEmit` on five
+separate `noUncheckedIndexedAccess` errors — this repo's tsconfig flags a
+regex match's captured group (`match[1]`) as `string | undefined` even
+after checking the match array itself is non-null, since an individual
+capturing group can independently be absent. Fixed by narrowing explicitly
+(`const x = match?.[1]; if (x === undefined) throw ...`) and, for the one
+array-producing helper, a type-predicate `.filter((s): s is string => s
+!== undefined)` — never a non-null assertion (`!`), matching this
+codebase's own established discipline against silently trusting a value
+the type checker can't prove.
+
+`TZ=UTC make test`: **2494 passing** (was 2491, +3 — exactly this run's
+new tests; apps/web 1244, was 1241; no other suite moved: 255 v2 vitest,
+47 v2/api, 349 v3/api, 118 corpus-compiler, 420 engine, 61 fold-runner).
+`check-test-floor.mjs`: OK, 2494 >= floor 1899 (+595 margin, unmoved).
+`TZ=UTC make build`: exit 0, 29 routes (unchanged — no new route, this is
+a test-only file, no production source touched). `npm run gates`: all
+green (fonts degraded-but-non-blocking, pre-existing; boundaries 292
+files, up from 291 — exactly the one new file; corpus-morphology and
+corpus-glyphs unchanged). `npx tsc --noEmit`: clean. No `v1/**`/`v2/**`
+edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff reverted before
+committing, same discipline as every prior entry — `git status --porcelain
+-- v1 v2` empty immediately before commit). No Arabic codepoint (the new
+file swept programmatically over the Arabic, Arabic Supplement, Arabic
+Extended-A and both Presentation Forms Unicode blocks, plus a
+`\u06xx`/`fromCharCode` sweep — zero matches; every line addresses a
+minor-unit integer, a currency/rail by closed-set string, or a file path,
+never corpus content).
+
+**Also found, and worth naming precisely rather than silently absorbing:**
+`v3/CLAUDE.md`'s running comment had no entry for v3-D157 (the PDPA export
+fix, commit `cc16050`) at all — its header line and the top of the comment
+block were still at v3-D156's `2487`/`1239` counts, one commit stale. Not
+this run's gap to backfill retroactively (that record lives in
+DECISIONS.md's own v3-D157 entry, which IS complete), but the header line
+and the newest NOTE this run adds now correctly reflect the CURRENT total
+(2494, not 2491) rather than compounding the staleness.
+
+**NOT addressed, named so a future run doesn't re-discover it as new:**
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+`PaywallGate` as a whole class / `permitsIssuance`/`permitsReview`
+(v3-D88, v3-D151 — still a genuine open product-design question, not a
+wiring gap); multi-surah enrollment; the operational mailer/7-night window
+(still needs a live host/SMTP/seven real nights); PAY-1's Stripe fixtures;
+surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy
+drift (v3-D127); `packages/engine/src/placement.ts` (a design choice,
+v3-D111/D113/D123) — all unchanged.
