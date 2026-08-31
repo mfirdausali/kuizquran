@@ -11553,3 +11553,108 @@ src/placement.ts` (a design choice, v3-D111/D113/D123); the "late-arrival
 refold" half of v3-D32 (this build has no automatic refold-on-ingest pipeline
 at all yet — real, separate, larger scope, re-confirmed still open this run,
 not attempted) — all unchanged.
+
+---
+
+### v3-D160 — `GlossDraftReview.text_at_review` was captured on every transition and shipped to the wire, but the one screen built to show review history never rendered it
+
+**Ratified 2026-08-31 (nightly).**
+
+Continuing the same recurring "mechanism built and tested, zero production
+caller" sweep (v3-D82 through v3-D159), this run deliberately targeted the
+LEAST-reviewed code in the tree: the last ~15 commits, since each of those
+commits was itself "the fix" for a prior gap and none has yet had its own
+new surface swept by a follow-up run. Two Explore agents ran in this shape:
+the first proposed `AccountDeletionRequest::isDue()`, already found and
+deliberately left alone at v3-D146 ("`PurgeDueAccountsCommand` already does
+the equivalent check at the query level, so nothing is misleading about
+it") — rejected as a re-discovery, not a new finding. The second, focused
+on the newest commits' own untested surfaces, found this entry's subject.
+
+`GlossDraftReview` (`api/app/Models/GlossDraftReview.php`) is the append-only
+transition-history table v3-D156 wired a read surface for one night
+earlier, closing the "review history is written, never read" gap for gloss
+drafts. Its own docblock names `text_at_review`'s whole purpose in B3's own
+terms: "snapshots the bytes a reviewer actually approved... an approval
+that does not name what was approved silently survives an edit that
+invalidated it." The field is genuinely written on every transition —
+`GlossDraftsController::review()` (line 284, `'text_at_review' => $row->text`,
+the bytes as approved) and `store()`'s auto-un-review branch (line 205, the
+transition triggered by editing a previously-reviewed row) both create a
+real `GlossDraftReview` row — and it reaches the wire: `toWire()` (line 324)
+emits it as `textAtReview`, and `lib/admin/glossDrafts.ts#GlossDraftReviewRow`
+types it client-side. But `GlossDraftsPanel.tsx`'s History column — the
+exact UI v3-D156 built to surface this history — printed only
+`fromStatus`/`toStatus`/`actor`/`note` for each entry; `textAtReview` had
+no reader anywhere (`grep -rn "textAtReview" apps/web api` returns only the
+defining type, the wire-emission line, and test-fixture assertions that it
+*arrives* — never a render).
+
+Concretely: a reviewer approves a gloss draft's wording, an admin later
+edits the draft's text (correctly triggering the auto-un-review), and the
+History column shows that an edit happened — via the note
+"text edited after review — approval was for different bytes" — but never
+what the ORIGINALLY approved bytes actually were. The one field built
+specifically so an admin could answer "what did the reviewer actually sign
+off on, and does today's text still match it" was invisible from the one
+screen that exists to answer that question — the identical shape v3-D156
+itself closed for the surrounding review history one night earlier, one
+field deeper.
+
+**Fixed:** `GlossDraftsPanel.tsx`'s history `<li>` now also renders
+`rev.textAtReview` (labelled `approved text: "..."`) whenever it is
+non-null, alongside the existing transition/actor/note line. No
+server-side change — this was a display-only gap, the wire and the model
+were already correct.
+
+**Verified.** RED confirmed directly: `git stash` of `GlossDraftsPanel.tsx`
+alone (the new test kept) reran `test/gloss-drafts-panel.test.tsx` — exactly
+the new case failed (`current draft text needs recheck`, the row's CURRENT
+text, rendered; `originally approved wording before the edit`, an EARLIER
+review's approved bytes now different from the row's current text, did
+not), the other 10 cases in the file unaffected; restored byte-identically
+(`git diff` empty), reran: 11/11 green. The new test deliberately gives the
+row a current `text` that differs from every review's `textAtReview`, so
+the assertion cannot pass vacuously by reading the Text column instead of
+the history — the pre-existing v3-D156 test ("renders each row's
+review-history note") could not have caught this gap, because its fixture's
+`textAtReview` values happened to equal the row's own current `text`, so
+its `screen.getByText("first draft text")` assertion was satisfied by the
+Text column alone regardless of whether the history rendered
+`textAtReview` at all.
+
+`TZ=UTC make test`: 2507 passing (was 2506, +1 — exactly this run's new
+test; apps/web 1257, was 1256; no other suite moved: 255 v2 vitest, 47
+v2/api, 349 v3/api, 118 corpus-compiler, 420 engine, 61 fold-runner).
+`check-test-floor.mjs`: OK, 2507 >= floor 1899 (+608 margin, unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 29 routes
+(unchanged — no new route/UI surface, this edits inside an existing
+component on the existing `/settings/gloss-drafts` route). `npm run gates`:
+all green (fonts degraded-but-non-blocking, pre-existing; boundaries 293
+files, unchanged count — no new production file, one existing file edited;
+corpus-morphology and corpus-glyphs unchanged). `npx tsc --noEmit`: clean.
+No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the suite was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2` empty
+immediately before commit). No Arabic codepoint (the full diff — both the
+component and the test file — swept programmatically over the Arabic,
+Arabic Supplement, Arabic Extended-A and both Presentation Forms Unicode
+blocks, plus a `\u06xx`/`\u08xx`-escape and `fromCharCode` sweep — zero
+matches; every new string is workflow-review prose an admin might type in
+production, or a plain English test-fixture placeholder, never gloss or
+corpus content).
+
+**NOT addressed**, named so a future run doesn't re-discover it as new:
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+`PaywallGate` as a whole class / `permitsIssuance`/`permitsReview` (v3-D88,
+v3-D151 — still a genuine open product-design question, not a wiring gap);
+multi-surah enrollment; the operational mailer/7-night window (still needs
+a live host/SMTP/seven real nights); PAY-1's Stripe fixtures; surah 67's
+scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy drift
+(v3-D127, deliberately not restructured); `packages/engine/src/placement.ts`
+(a design choice, v3-D111/D113/D123); the late-arrival refold half of
+v3-D32 (no automatic refold-on-ingest pipeline exists yet — real, separate,
+larger scope); `AccountDeletionRequest::isDue()` (v3-D146, a zero-caller
+convenience method deliberately left alone — re-confirmed this run, not a
+gap) — all unchanged.

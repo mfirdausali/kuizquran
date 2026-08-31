@@ -147,6 +147,55 @@ describe("GlossDraftsPanel — the review history is readable, not just current 
     expect(screen.getByText(/checked against Basmeih/)).toBeTruthy();
   });
 
+  it("shows what text a review actually approved, distinct from the row's current (possibly since-edited) text", async () => {
+    // GlossDraftReview's own docblock: `text_at_review` "snapshots the bytes a
+    // reviewer actually approved... an approval that does not name what was
+    // approved silently survives an edit that invalidated it." If the panel
+    // only ever shows the row's CURRENT text, that guarantee is worthless —
+    // this proves the historical approved bytes are readable even once the
+    // row has since been edited away from them.
+    const editedAfterReview = {
+      ...DRAFT_ROW,
+      id: 7,
+      status: "draft",
+      text: "current draft text needs recheck",
+      reviewedBy: null,
+      reviews: [
+        {
+          fromStatus: "draft",
+          toStatus: "reviewed",
+          textAtReview: "originally approved wording before the edit",
+          actorKind: "human",
+          actor: "reviewer@example.com",
+          note: "checked against Basmeih",
+          createdAt: 1_700_000_100_000,
+        },
+        {
+          fromStatus: "reviewed",
+          toStatus: "draft",
+          textAtReview: "current draft text needs recheck",
+          actorKind: "human",
+          actor: null,
+          note: "text edited after review — approval was for different bytes",
+          createdAt: 1_700_000_200_000,
+        },
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          ...emptyWorklist(),
+          counts: { draft: 1, reviewed: 0, merged: 0, unauthored: 0 },
+          drafts: [editedAfterReview],
+        }),
+      ),
+    );
+    render(<GlossDraftsPanel />);
+    await waitFor(() => expect(screen.getByText("current draft text needs recheck")).toBeTruthy());
+    expect(screen.getByText(/originally approved wording before the edit/)).toBeTruthy();
+  });
+
   it("a row with no review history yet renders no history list", async () => {
     vi.stubGlobal(
       "fetch",

@@ -199,6 +199,13 @@ export function GlossDraftsPanel() {
                               <li key={i}>
                                 {rev.fromStatus} → {rev.toStatus} by {rev.actor ?? "—"}
                                 {rev.note ? `: ${rev.note}` : ""}
+                                {rev.textAtReview !== null ? (
+                                  <>
+                                    {" "}
+                                    <br />
+                                    <span className="caption">approved text: &quot;{rev.textAtReview}&quot;</span>
+                                  </>
+                                ) : null}
                               </li>
                             ))}
                           </ul>
