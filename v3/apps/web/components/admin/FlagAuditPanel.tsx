@@ -106,20 +106,35 @@ export function FlagAuditPanel() {
                   <th scope="col">Action</th>
                   <th scope="col">Actor</th>
                   <th scope="col">Reason</th>
+                  <th scope="col">Retention ack</th>
+                  <th scope="col">No dark pattern ack</th>
+                  <th scope="col">Typed name</th>
                 </tr>
               </thead>
               <tbody>
-                {load.entries.map((e, i) => (
-                  <tr key={`${e.at}-${i}`}>
-                    <td>{new Date(e.at).toISOString()}</td>
-                    <td>
-                      <code className="ltr-island">{e.flagKey}</code>
-                    </td>
-                    <td>{e.action}</td>
-                    <td>{e.actor ? <code className="ltr-island">{e.actor}</code> : "system"}</td>
-                    <td>{e.reason ?? "—"}</td>
-                  </tr>
-                ))}
+                {load.entries.map((e, i) => {
+                  // The enable-hard ceremony's two acknowledgements and typed
+                  // name only exist for an "enable" row — `FlagService::kill`/
+                  // `acknowledgeKill` never collect them, and the migration's
+                  // own defaults (`false`/`false`/`null`) are not a person's
+                  // real "no": rendering them as "—" (never a fabricated "no")
+                  // matches this table's own actor/reason discipline.
+                  const hadCeremony = e.action === "enable";
+                  return (
+                    <tr key={`${e.at}-${i}`}>
+                      <td>{new Date(e.at).toISOString()}</td>
+                      <td>
+                        <code className="ltr-island">{e.flagKey}</code>
+                      </td>
+                      <td>{e.action}</td>
+                      <td>{e.actor ? <code className="ltr-island">{e.actor}</code> : "system"}</td>
+                      <td>{e.reason ?? "—"}</td>
+                      <td>{hadCeremony ? (e.acknowledgesRetentionRisk ? "yes" : "no") : "—"}</td>
+                      <td>{hadCeremony ? (e.acknowledgesNoDarkPattern ? "yes" : "no") : "—"}</td>
+                      <td>{e.typedFlagName ?? "—"}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </>

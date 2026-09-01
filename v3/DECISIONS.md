@@ -12168,3 +12168,98 @@ surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy
 drift (v3-D127); `packages/engine/src/placement.ts` (v3-D111/D113/D123);
 the late-arrival refold half of v3-D32; `AccountDeletionRequest::isDue()`
 (v3-D146); `lib/i18n/dictionaries.ts#isLocale()`.
+
+### v3-D165 — `FlagAuditPanel.tsx` rendered `reason` only; the ceremony's other three fields were fetched and discarded (2026-09-01)
+
+v3-D164's own "NOT addressed" list named this exactly: `FlagAuditPanel.tsx`
+(`lib/admin/flagAudit.ts#FlagAuditEntry`, sent in full by
+`FlagAuditController::index()`) fetched and type-validated all four of the
+enable-hard ceremony's inputs — `reason`, `acknowledgesRetentionRisk`,
+`acknowledgesNoDarkPattern`, `typedFlagName` — but the panel's table
+rendered only `reason`. The component's own header comment claimed "EVERY
+FIELD IS RENDERED VERBATIM," which was false for the three fields
+`FlagController::store()`'s ceremony validation actually gates an "enable"
+row's existence on: a reason of at least 20 characters, both
+acknowledgement booleans `true`, and `typed_flag_name` matching the flag
+key exactly (`>=20-char reason + two ethics booleans + verbatim flag name,
+server-enforced`, BUILD-PLAN's own ethics-gate line). An operator reviewing
+"who ramped this flag back on, and did they actually go through the
+ceremony" could see the reason text but had no way to confirm the two
+safety acknowledgements or the typed confirmation were ever made — the
+exact verification the ceremony's own docblock says it exists to make
+possible after the fact ("STORED, not merely validated — 'we checked at
+the time' is unverifiable after the fact").
+
+Same bug class, same night's sibling finding as v3-D164
+(`BillingEventsPanel.tsx` dropping `processedAt`/`providerCreatedAt`) — a
+fetched-and-typed field with zero render call site, one layer under the
+"mechanism built, zero production caller" shape this build has closed
+~40 times since v3-D82. Scoped to the one item v3-D164 named for this
+panel; `BillingEventsPanel.tsx`'s own gap is untouched, left for a future
+run exactly as v3-D164 left it.
+
+**Fixed, display-only, no server or wire change:** three new table columns
+— "Retention ack", "No dark pattern ack", "Typed name". `flag_ramp_audit`'s
+two boolean columns default `false` and `typed_flag_name` is `null` for
+every action OTHER than `enable` (`FlagService::kill()`/`acknowledgeKill()`
+never touch the ceremony fields — only `ramp()` does, and only on success);
+rendering that default `false` as a literal "no" would misread as a
+person's real answer to a ceremony that was never presented for a kill/ack/
+auto-waive row. All three cells fall back to `"—"` whenever `action !==
+"enable"` — never a fabricated "no" — matching this same table's own
+existing `"system"` fallback for a null actor and `AuditLogPanel`'s v3-D164
+`"—"` convention for `ip`/`requestId` exactly. For a genuine `enable` row
+the two booleans render the literal words `"yes"`/`"no"` and the typed name
+renders verbatim (never re-derived from the flag key column beside it,
+even though the two happen to match once the ceremony's own validation has
+already enforced that they do).
+
+**Verified:**
+- RED confirmed directly: `git stash` of `FlagAuditPanel.tsx` alone (the
+  new test kept, the rest of the file's five pre-existing tests
+  untouched) and re-running `flag-audit-panel.test.tsx` failed exactly the
+  new ceremony-fields case (`Unable to find an element with the text:
+  yes`), the 5 pre-existing cases in the file unaffected; restored
+  byte-identically (`git diff` empty), reran: 6/6 green.
+- The test's own negative assertion on the `auto_waive` row
+  (`within(autoWaiveRow).queryByText("yes")` is `null`, and at least one
+  `"—"` is present) proves the fallback is real and gated on `action`, not
+  merely that the `enable` row happens to render `"yes"` somewhere on the
+  page.
+- `TZ=UTC make test`: 2530 passing (was 2529, +1 — exactly this run's one
+  net-new test; apps/web 1278, was 1277; no other suite moved: 255 v2
+  vitest, 47 v2/api, 351 v3/api, 118 corpus-compiler, 420 engine, 61
+  fold-runner). `check-test-floor.mjs`: OK, 2530 >= floor 1899 (+631
+  margin, unmoved, same discipline as every prior entry).
+- `TZ=UTC make build`: exit 0, 29 routes (unchanged — no new route; this
+  edits inside an existing component on the existing `/settings/flags`
+  route).
+- `npm run gates`: all green (boundaries 295 files, unchanged count — no
+  new production file, two existing files edited — `FlagAuditPanel.tsx`
+  and its test; fonts degraded-but-non-blocking, pre-existing;
+  corpus-morphology and corpus-glyphs unchanged by this diff).
+- `npx tsc --noEmit`: clean.
+- No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache
+  diff produced by running the suite was reverted before committing, same
+  discipline as every prior entry — `git status --porcelain -- v1 v2`
+  empty immediately before commit).
+- No Arabic codepoint (the full diff swept programmatically, in Python,
+  over the Arabic (U+0600–06FF), Arabic Supplement (U+0750–077F), Arabic
+  Extended-A (U+08A0–08FF) and both Presentation Forms blocks
+  (U+FB50–FDFF, U+FE70–FEFF), plus a `\u06xx`/`\u08xx`-escape and
+  `fromCharCode` sweep — zero matches; every new string is a wire field
+  label, a fixed English column header, or the literal words
+  `"yes"`/`"no"`/`"—"`, never corpus text).
+
+**NOT addressed**, named so a future run doesn't re-discover it as new:
+`BillingEventsPanel.tsx`'s `processedAt`/`providerCreatedAt` gap (v3-D164's
+other named sibling finding) is unchanged. Also unchanged, all as before:
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151); multi-surah enrollment; the operational
+mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123); the late-arrival
+refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146);
+`lib/i18n/dictionaries.ts#isLocale()`.

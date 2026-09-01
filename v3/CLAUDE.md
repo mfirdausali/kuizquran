@@ -53,9 +53,80 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2529 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2530 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 351 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1277 apps/web. (v3-D164, 2026-09-01)
+             # + 420 engine + 61 fold-runner + 1278 apps/web. (v3-D165, 2026-09-01)
+             # NOTE (v3-D165, 2026-09-01): `FlagAuditPanel.tsx` — v3-D164's own
+             # "NOT addressed" list named this exactly — fetched all four of
+             # the enable-hard ceremony's inputs (`lib/admin/flagAudit.ts
+             # #FlagAuditEntry`: `reason`, `acknowledgesRetentionRisk`,
+             # `acknowledgesNoDarkPattern`, `typedFlagName`, all sent by
+             # `FlagAuditController::index()`) but rendered only `reason` —
+             # the same "fetched and discarded" shape v3-D164 fixed for
+             # `BillingEventsPanel.tsx`'s `processedAt`/`providerCreatedAt`,
+             # here one surface over. The panel's own header claimed "EVERY
+             # FIELD IS RENDERED VERBATIM" — false for the two safety
+             # checkboxes and the typed-name confirmation, the three fields
+             # `FlagController::store()`'s ceremony validation actually
+             # requires (`>=20-char reason` *and* both booleans `true` *and*
+             # `typed_flag_name` matching the flag key exactly) before an
+             # "enable" row can exist at all — an operator reviewing "who
+             # ramped this flag back on" could see the reason but not
+             # whether the two ethics acknowledgements or the typed
+             # confirmation were ever genuinely made. Fixed, display-only,
+             # no server change: three new columns ("Retention ack", "No
+             # dark pattern ack", "Typed name"). `flag_ramp_audit`'s two
+             # boolean columns default `false` and `typed_flag_name` is
+             # `null` for every OTHER action (`kill`/`ack`/`auto_waive` —
+             # `FlagService::kill()`/`acknowledgeKill()` never touch the
+             # ceremony fields at all) — rendering `false` there as a literal
+             # "no" would read as a person's real answer to a ceremony that
+             # was never presented, so all three cells fall back to "—"
+             # (never a fabricated "no") whenever `action !== "enable"`,
+             # matching this table's own existing "system" (never a blank
+             # cell) and `AuditLogPanel`'s v3-D164 "—" convention for
+             # `ip`/`requestId` exactly. RED confirmed directly: `git stash`
+             # of `FlagAuditPanel.tsx` alone (the new test kept) reran
+             # `flag-audit-panel.test.tsx` — exactly the new ceremony-fields
+             # case failed (`Unable to find an element with the text: yes`),
+             # the 5 pre-existing cases in the file unaffected; restored
+             # byte-identically (`git diff` empty), reran: 6/6 green. The
+             # test's own auto_waive-row assertion (`queryByText("yes")` is
+             # `null`) proves the "—" fallback is real, not merely that the
+             # enable row happens to render "yes" somewhere on the page.
+             # `TZ=UTC make test`: 2530 passing (was 2529, +1 — exactly this
+             # run's one net-new test; apps/web 1278, was 1277; no other
+             # suite moved: 255 v2 vitest, 47 v2/api, 351 v3/api, 118
+             # corpus-compiler, 420 engine, 61 fold-runner). `check-test-
+             # floor.mjs`: OK, 2530 >= floor 1899 (+631 margin, unmoved,
+             # same discipline as every prior entry). `TZ=UTC make build`:
+             # exit 0, 29 routes (unchanged — no new route; this edits
+             # inside an existing `/settings/flags` component). `npm run
+             # gates`: all green (boundaries 295 files, unchanged count —
+             # no new production file, two existing files edited; fonts
+             # degraded-but-non-blocking, pre-existing). `npx tsc --noEmit`:
+             # clean. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff produced by
+             # running the suite was reverted before committing, same
+             # discipline as every prior entry — `git status --porcelain --
+             # v1 v2` empty immediately before commit). No Arabic codepoint
+             # (the full diff swept over every Arabic block plus both
+             # Presentation Forms blocks, plus a `\u06xx`/`\u08xx`-escape
+             # and `fromCharCode` sweep — zero matches; every new string is
+             # a wire field label or the literal words "yes"/"no"/"—", never
+             # corpus text). NOT addressed, named so a future run doesn't
+             # re-discover it as new: this run's own scope was scoped to the
+             # single item v3-D164 named for `FlagAuditPanel.tsx` alone —
+             # the sync layer's own zero-caller sweep (v3-D88 onward) and
+             # every other item on v3-D164's own longer "NOT addressed" list
+             # (`rhymeClassOf()`, `EntitlementMachine::merge()`,
+             # `App\Billing\TrialAttribution`, `PaywallGate`, multi-surah
+             # enrollment, the operational mailer/7-night window, PAY-1's
+             # Stripe fixtures, surah 67's scene beats,
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift,
+             # `packages/engine/src/placement.ts`, the late-arrival refold
+             # half of v3-D32, `AccountDeletionRequest::isDue()`) are
+             # unchanged. See DECISIONS.md v3-D165.
              # NOTE (v3-D164, 2026-09-01): `admin_audit.ip`/`.request_id` were
              # stamped by all four writers (`AdminRevealController::reveal`,
              # `AdminUsersController::exportCsv`,
