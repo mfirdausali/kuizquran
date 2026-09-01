@@ -39,6 +39,14 @@
 // supplies not one byte of its own; it only reads position numbers,
 // language codes, and free EN/MS prose the admin types into the gloss
 // field (never Arabic).
+//
+// WHO MADE EACH CORRECTION (v3-D163). `Override::editor()` existed since
+// this table shipped; the list above showed WHAT changed and never WHO
+// changed it — every row was indistinguishable from any other admin's.
+// `editorEmail` is resolved server-side off `editorId`
+// (`OverridesController::toWire()`) and rendered here, `"—"` when unknown
+// (a pre-this-fix synced row, or a since-deleted editor account) — never a
+// guess, matching `AyahVerification.verifiedBy`'s own display convention.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CorpusWord } from "@engine/types.ts";
@@ -312,7 +320,9 @@ export function OverrideEditor({ surah, ayah, words, surahWords }: OverrideEdito
         <ul className="stack stack--tight" data-testid="override-list">
           {rows.map((o) => (
             <li key={o.id ?? `${o.field}-${o.createdAt}`}>
-              <span className="caption">{summarize(o)}</span>{" "}
+              <span className="caption">
+                {summarize(o)} — by {o.editorEmail ?? "—"}
+              </span>{" "}
               {isActiveDisable(o) ? (
                 <button type="button" className="btn" onClick={() => onReEnable(o)}>
                   Re-enable

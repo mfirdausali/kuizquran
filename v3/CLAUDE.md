@@ -53,9 +53,58 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2523 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 349 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1273 apps/web. (v3-D162, 2026-09-01)
+make test    # 2526 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 350 v3/api + 118 corpus-compiler
+             # + 420 engine + 61 fold-runner + 1275 apps/web. (v3-D163, 2026-09-01)
+             # NOTE (v3-D163, 2026-09-01): `App\Models\Override::editor()` — a
+             # `BelongsTo<User>` relation, existing since the override layer
+             # shipped (v2-D21/D55), its own docblock naming its purpose ("for
+             # the editor's audit list") — had zero callers anywhere, not even
+             # a test (`grep -rn "->editor\b" app tests` returned nothing
+             # beyond the declaration). `OverridesController::toWire()` sent
+             # only the raw `editor_id` integer as `editorId`, and
+             # `OverrideEditor.tsx` (the one screen that lists an ayah's
+             # override history, wired at v3-D125) never rendered it — an
+             # admin correcting a gloss today and reopening the same ayah's
+             # history tomorrow could not tell whether they, another admin,
+             # or a qari made a given row. Fixed on the exact convention
+             # `AyahVerification.verified_by` already set for "who did this"
+             # display: `toWire()` gains `editorEmail` (`$r->editor?->email`,
+             # `index()` eager-loading `with('editor')`, `store()` setting
+             # the relation directly from `$request->user()`), the wire type
+             # (`overrides.ts#QuestionOverride`) gains a matching
+             # `editorEmail?: string | null`, and `OverrideEditor.tsx`
+             # renders `{summarize(o)} — by {o.editorEmail ?? "—"}` — `"—"`
+             # for a pre-fix row or a deleted editor account, never a guess.
+             # RED confirmed directly: `git stash` of the three source files
+             # only (both test files, including the new cases, kept) failed
+             # exactly the new cases — backend 1, frontend 2 — 8 and 12 other
+             # cases respectively unaffected; restored byte-identically,
+             # 9/9 + 14/14 green. `TZ=UTC make test`: 2526 passing (was 2523,
+             # +3 — exactly this run's new tests: 1 + 2; v3/api 350, was 349;
+             # apps/web 1275, was 1273; no other suite moved). `check-test-
+             # floor.mjs`: OK, 2526 >= floor 1899 (+627 margin, unmoved).
+             # `TZ=UTC make build`: exit 0, 29 routes (unchanged — no new
+             # route; edits inside an existing `/workbench` component). `npm
+             # run gates`: all green (boundaries 295 files, unchanged count —
+             # no new production file, three existing files edited; fonts
+             # degraded-but-non-blocking, pre-existing). `npx tsc --noEmit`:
+             # clean. No `v1/**`/`v2/**` edit (stray `v2/tsconfig.tsbuildinfo`
+             # reverted before committing, same discipline as every prior
+             # entry). No Arabic codepoint (full diff swept over every Arabic
+             # block plus both Presentation Forms blocks, plus a
+             # `\u06xx`/`\u08xx`-escape and `fromCharCode` sweep — zero
+             # matches; every new string is a fixed English label or a
+             # synthetic placeholder email, never corpus text). NOT
+             # addressed: the same `<li>` never renders a row's own `note`
+             # field either — a smaller, separate, adjacent gap left alone;
+             # `lib/pricing.ts#regionFromCountry()` — also found unit-tested
+             # with zero production callers this run, but only because the
+             # checkout flow that would call it doesn't exist yet, the
+             # identical blocked-on-live-Stripe scope as `TrialAttribution`,
+             # not an independent gap; `lib/i18n/dictionaries.ts#isLocale()`
+             # — confirmed a deliberate pre-launch scaffold seam, not a gap.
+             # See DECISIONS.md v3-D163.
              # NOTE (v3-D162, 2026-09-01): `lib/sync/token.ts#isTokenDead()` —
              # v3-D161's own "NOT addressed" list named this exactly as "the
              # more complete follow-up to this entry, not a separate new

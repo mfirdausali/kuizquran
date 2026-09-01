@@ -11933,3 +11933,143 @@ method deliberately left alone) — all unchanged. With this,
 token-liveness addition); the sync layer's own zero-caller sweep (v3-D88,
 D89, D90, D93, D94, D161, D162) is, as far as this run could find, now
 exhausted.
+
+---
+
+### v3-D163 — `Override::editor()` had zero callers anywhere since the override layer shipped; the one screen that lists overrides could not say who made a correction
+
+**Ratified 2026-09-01 (nightly).**
+
+The sync layer's own zero-caller sweep closed at v3-D162 ("the sync layer's
+own zero-caller sweep... is, as far as this run could find, exhausted"), and
+this run's own re-check of `worker/fold-runner/src` and
+`packages/corpus-compiler/src` (both named as re-check candidates) found
+every exported symbol in both trees with a real internal caller inside its
+own pipeline — nothing new there since v3-D127/D145. This run's sweep moved
+to `v3/api/app`'s models and `apps/web`'s non-sync `lib/**`, per NIGHTLY's
+own list of unswept candidates.
+
+`App\Models\Override::editor()` (`BelongsTo<User>`) has existed since the
+override layer shipped (v2-D21/D55, carried into v3 at build-plan step 15) —
+its own docblock even names its purpose ("for the editor's audit list") —
+with zero callers anywhere: `grep -rn "->editor\b" app tests` (excluding the
+relation's own declaration) returned nothing, and no test exercised it
+either, a stronger absence than this build's usual "unit-tested, zero
+production caller" shape. `OverridesController::toWire()` sent only the raw
+`editor_id` integer as `editorId`, and `packages/engine/src/overrides.ts`'s
+`QuestionOverride` wire type carried that same raw id through to the client
+— but `OverrideEditor.tsx` (wired at v3-D125, the one screen that lists an
+ayah's override history for an admin/qari sitting at `/workbench`) never
+rendered `editorId` at all. Concretely: an admin correcting a gloss today,
+then opening the same ayah's history tomorrow, sees `gloss (en) @1: "at the
+time"` and cannot tell whether they made that correction, another admin
+did, or a qari did — every row in the list is attributionally identical.
+This is the exact "written, populated, zero read surface" shape closed
+repeatedly before (`admin_audit` v3-D129, `flag_ramp_audit` v3-D130,
+`entitlement_transitions` v3-D141, `gloss_draft_reviews` v3-D156,
+`GlossDraftReview.text_at_review` v3-D160) — one layer under the SAME
+override-editor screen v3-D125/D126/D129-131/D132 has already been the
+subject of five prior nights of incremental wiring.
+
+**Why nothing caught it:** `OverridesTest.php`'s own
+`test_editor_id_is_always_the_authenticated_admin_never_the_body` asserts
+against the DATABASE column (`editor_id`) directly — proving the write is
+correct — and never inspects the read response for anything beyond what
+`test_an_admin_can_write_a_gloss_override` already checks
+(`override.createdAt`). `workbench-override-editor.test.tsx`'s own
+pre-existing list-rendering tests assert on `summarize()`'s field-specific
+text (`/"when"/`, `/2 replacements/`, `/group @1/`) and never on who made
+the row — so a test suite that is otherwise thorough about this exact
+component never had a reason to notice the identity was missing.
+
+**Fixed**, following the established convention `AyahVerification.verified_by`
+already set for "who did this" display on the workbench (a plain email
+string, not an id an admin has to resolve by hand) — but RESOLVED at read
+time rather than stored redundantly, since `overrides` rows are append-only
+(a correction is a new row, DEFECTS.md#B4) and there is no stale-snapshot
+risk in reading the editor's CURRENT email off the relation the model
+already declares:
+
+- `OverridesController::index()` now eager-loads `with('editor')` (avoiding
+  an N+1 the moment an admin opens a busy ayah's history), and `store()`
+  sets the relation directly from `$request->user()` (the editor IS the
+  authenticated admin — no reason to fire a redundant query on a row that
+  was just created). `toWire()` gains `'editorEmail' => $r->editor?->email`
+  — `null`, never a guess, when the editor account no longer exists.
+- `packages/engine/src/overrides.ts#QuestionOverride` gains
+  `editorEmail?: string | null`, documented as display-only (`applyOverrides`
+  itself never reads it — the wire type is shared by both the resolution
+  logic and the admin display, and only the display half needed the field).
+- `OverrideEditor.tsx`'s history `<li>` now renders `{summarize(o)} — by
+  {o.editorEmail ?? "—"}` — `"—"` for a row synced before this fix (or a
+  since-deleted editor account), never a fabricated identity.
+
+**Verified.** RED confirmed directly: `git stash` of the three source files
+only (`OverridesController.php`, `overrides.ts`, `OverrideEditor.tsx` — both
+test files, including the new cases, kept) and rerunning `OverridesTest.php`
++ `workbench-override-editor.test.tsx` failed exactly the two new cases in
+each — backend: `the wire response names the editor by email not just id`
+(`Failed asserting that null is identical to 'admin@example.com'`); frontend:
+the two new list-rendering cases (`names which admin made each correction`
+and `degrades to an honest placeholder when no editor email is known`) — 8
+other backend cases and 12 other frontend cases in those files unaffected;
+restored byte-identically (`git diff` empty for all three), reran: 9/9
+backend + 14/14 frontend green.
+
+The frontend fixture for the "degrades honestly" case deliberately sets
+`editorEmail: null` (not merely omits the field) to prove the render path
+handles an explicit null from a legacy or account-deleted row, not only a
+field that happens to be absent from a hand-built test fixture — a fixture
+that only ever OMITTED the field could pass by accident if a first draft had
+used `o.editorEmail || "—"` with some other falsy-coercion bug masked by the
+same `undefined` both cases would produce identically.
+
+`TZ=UTC make test`: 2526 passing (was 2523, +3 — exactly this run's new
+tests: 1 in `OverridesTest.php`, 2 in `workbench-override-editor.test.tsx`;
+v3/api 350, was 349; apps/web 1275, was 1273; no other suite moved: 255 v2
+vitest, 47 v2/api, 118 corpus-compiler, 420 engine, 61 fold-runner).
+`check-test-floor.mjs`: OK, 2526 >= floor 1899 (+627 margin, unmoved, same
+discipline as every prior entry — `v3/TEST-FLOOR` untouched). `TZ=UTC make
+build`: exit 0, 29 routes (unchanged — no route/UI surface added; this edits
+inside an existing component on the existing `/workbench` route). `npm run
+gates`: all green (fonts degraded-but-non-blocking, pre-existing and
+unrelated; boundaries 295 files — unchanged count, matching v3-D162's own
+last-recorded value exactly, since this run edited three existing files and
+added zero new ones; corpus-morphology and corpus-glyphs unchanged). `npx
+tsc --noEmit`: clean. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite was
+reverted before committing, same discipline as every prior entry — `git
+status --porcelain -- v1 v2` empty immediately before commit). No Arabic
+codepoint (the full diff swept programmatically over the Arabic, Arabic
+Supplement, Arabic Extended-A and both Presentation Forms Unicode blocks,
+plus a `\u06xx`/`\u08xx`-escape and `fromCharCode` sweep — zero matches;
+every new string is a fixed English label ("— by"), a plain fixture email
+("admin@example.com", "qari@example.com" — synthetic placeholders, never a
+real address), or a boolean/null, never corpus text).
+
+**NOT addressed**, named so a future run doesn't re-discover it as new:
+while investigating this screen, the same `<li>` was found to never render
+a row's own `note` field either (typed into every submit form, never
+displayed in the history list) — a smaller, separate, adjacent gap this run
+deliberately left alone rather than folding into the same fix; also
+unchanged: `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148) — and, one
+layer over it, `lib/pricing.ts#regionFromCountry()`, which this run also
+found unit-tested with zero production callers, but only because the
+checkout flow that would provision the first `Entitlement` row (the one
+real caller a "set the account's default region" feature needs) does not
+exist yet — the identical blocked-on-live-Stripe scope as `TrialAttribution`,
+not an independent wiring gap; `PaywallGate` as a whole class /
+`permitsIssuance`/`permitsReview` (v3-D88, v3-D151 — still a genuine open
+product-design question, not a wiring gap); multi-surah enrollment; the
+operational mailer/7-night window (still needs a live host/SMTP/seven real
+nights); PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127, deliberately
+not restructured); `packages/engine/src/placement.ts` (a design choice,
+v3-D111/D113/D123); the late-arrival refold half of v3-D32 (no automatic
+refold-on-ingest pipeline exists yet — real, separate, larger scope);
+`AccountDeletionRequest::isDue()` (v3-D146, a zero-caller convenience method
+deliberately left alone); `lib/i18n/dictionaries.ts#isLocale()` — a scaffold
+seam this run confirmed is deliberately unwired ahead of need (its own
+docblock: "v3-D15 ships Malay AFTER launch... this file is the seam, put in
+now while there is exactly one locale") — all unchanged.

@@ -89,6 +89,49 @@ describe("OverrideEditor — lists existing overrides for the ayah", () => {
     expect(screen.getByText(/"when"/)).toBeTruthy();
     expect(screen.queryByText(/different ayah/)).toBeNull();
   });
+
+  // `Override::editor()` has existed since the override layer shipped;
+  // `editorId` reached this wire type but nothing ever resolved it to
+  // anything a human reading this list could tell apart from another
+  // admin's row. `editorEmail` is the resolved half (OverridesController).
+  it("names which admin made each correction, by email", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse({
+        overrides: [
+          {
+            id: 1, surah: 12, ayah: 4, position: 1, questionType: "s1", field: "gloss",
+            payload: { lang: "en", text: "when" }, editorId: 3, editorEmail: "qari@example.com",
+            note: null, createdAt: 1_700_000_000_000,
+          },
+        ],
+      }),
+    ) as unknown as typeof fetch;
+
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} />);
+    await waitFor(() => expect(screen.getByTestId("override-list")).toBeTruthy());
+    expect(screen.getByText(/qari@example\.com/)).toBeTruthy();
+  });
+
+  // A row synced before `editorEmail` existed (or whose editor account was
+  // later removed) must degrade honestly, never crash and never claim an
+  // identity it does not have.
+  it("degrades to an honest placeholder when no editor email is known", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse({
+        overrides: [
+          {
+            id: 2, surah: 12, ayah: 4, position: 1, questionType: "s1", field: "gloss",
+            payload: { lang: "en", text: "when" }, editorId: 3, editorEmail: null,
+            note: null, createdAt: 1_700_000_000_000,
+          },
+        ],
+      }),
+    ) as unknown as typeof fetch;
+
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} />);
+    await waitFor(() => expect(screen.getByTestId("override-list")).toBeTruthy());
+    expect(screen.getByText(/— by —/)).toBeTruthy();
+  });
 });
 
 describe("OverrideEditor — submitting a gloss correction", () => {

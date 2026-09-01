@@ -30,7 +30,11 @@ class OverridesController extends Controller
     public function index(Request $request): JsonResponse
     {
         $surah = (int) $request->query('surah', 12);
-        $rows = Override::where('surah', $surah)->orderBy('created_at')->orderBy('id')->get();
+        // `with('editor')` — `toWire()` resolves the editor's email off this
+        // relation; without eager-loading, every row would fire its own
+        // `editor()` query (N+1) the moment an admin opens a busy ayah's
+        // override history.
+        $rows = Override::where('surah', $surah)->with('editor')->orderBy('created_at')->orderBy('id')->get();
 
         return response()->json(['overrides' => $rows->map(fn (Override $r) => $this->toWire($r))]);
     }
@@ -61,6 +65,11 @@ class OverridesController extends Controller
             'created_at' => (int) round(microtime(true) * 1000),
         ]);
 
+        // We already have the editor in hand (it IS $request->user()) — set
+        // the relation directly rather than firing a redundant `editor()`
+        // query `toWire()` would otherwise trigger on a freshly created row.
+        $row->setRelation('editor', $request->user());
+
         // DEFECTS.md#B3's live-wiring gap, closed: the moment an override
         // lands, its surah's tiered hash table is recomputed and
         // re-ingested — never a human hand-running corpus:ingest-hashes
@@ -83,6 +92,17 @@ class OverridesController extends Controller
             'field' => $r->field,
             'payload' => $r->payload,
             'editorId' => $r->editor_id,
+            // `Override::editor()` has existed since this table shipped
+            // (v2-D21/D55) with no reader anywhere — `editorId` alone is not
+            // something an admin reading `OverrideEditor.tsx`'s history list
+            // can tell apart from another admin's row. Resolved here rather
+            // than stored (unlike `AyahVerification.verified_by`, which
+            // stores the email directly): an override row is corrected by a
+            // NEW row, never edited, so there is no stale-snapshot risk in
+            // reading the editor's CURRENT email off the relation. `null`
+            // when the editor account no longer exists — a append-only row
+            // is never re-attributed to fill the gap.
+            'editorEmail' => $r->editor?->email,
             'note' => $r->note,
             'createdAt' => $r->created_at,
         ];

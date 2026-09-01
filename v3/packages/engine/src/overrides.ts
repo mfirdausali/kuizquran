@@ -44,6 +44,10 @@ export interface QuestionOverride {
   field: OverrideField;
   payload: unknown;
   editorId?: number | null;
+  /** The editor's email, resolved server-side off `editorId` — `null` when
+   *  the editor account no longer exists. Display-only; `applyOverrides`
+   *  itself never reads this. */
+  editorEmail?: string | null;
   note?: string | null;
   createdAt: number;
 }

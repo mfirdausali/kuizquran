@@ -121,6 +121,29 @@ class OverridesTest extends TestCase
         $this->assertDatabaseMissing('overrides', ['editor_id' => $someoneElse->id]);
     }
 
+    /**
+     * `Override::editor()` (a `BelongsTo<User>`) has existed since the
+     * override layer shipped — the model's own docblock even calls it out
+     * ("for the editor's audit list") — but `toWire()` sent only the raw
+     * `editorId` integer, and nothing resolved it to anything a human can
+     * read. `OverrideEditor.tsx`'s own list (wired at v3-D125) is the one
+     * screen that shows override history to an admin; it never named who
+     * made a correction. This is the wire half of that gap.
+     */
+    public function test_the_wire_response_names_the_editor_by_email_not_just_id(): void
+    {
+        $headers = $this->adminHeaders();
+        $response = $this->postJson('/api/overrides', [
+            'surah' => 12, 'ayah' => 4, 'position' => 1, 'questionType' => 'S1',
+            'field' => 'gloss', 'payload' => ['lang' => 'en', 'text' => 'when'],
+        ], $headers)->assertCreated();
+
+        $this->assertSame('admin@example.com', $response->json('override.editorEmail'));
+
+        $indexResponse = $this->getJson('/api/overrides?surah=12')->assertOk();
+        $this->assertSame('admin@example.com', $indexResponse->json('overrides.0.editorEmail'));
+    }
+
     public function test_rows_are_append_only_a_correction_is_a_new_row(): void
     {
         $headers = $this->adminHeaders();
