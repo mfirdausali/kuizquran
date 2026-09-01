@@ -13,6 +13,9 @@
 // EVERY FIELD IS RENDERED VERBATIM. The actor and subject are the server's
 // own pseudonyms; this component neither re-derives nor re-formats an
 // identity, the same rule `lib/admin/reveal.ts`'s consumers already follow.
+// `ip`/`requestId` (v3-D164) render the same way — a null `requestId` (no
+// `X-Request-Id` header on the original request) prints "—", never a blank
+// cell that could be misread as a missing/broken value.
 //
 // EGRESS: through `lib/admin/audit.ts`, which itself goes through
 // `apiFetch` only (check-boundaries.mjs clause 6).
@@ -105,6 +108,8 @@ export function AuditLogPanel() {
                   <th scope="col">Action</th>
                   <th scope="col">Subject</th>
                   <th scope="col">Reason</th>
+                  <th scope="col">IP</th>
+                  <th scope="col">Request</th>
                 </tr>
               </thead>
               <tbody>
@@ -122,6 +127,8 @@ export function AuditLogPanel() {
                       <div className="caption">{e.reasonCode}</div>
                       {e.reasonText}
                     </td>
+                    <td>{e.ip ? <code className="ltr-island">{e.ip}</code> : "—"}</td>
+                    <td>{e.requestId ? <code className="ltr-island">{e.requestId}</code> : "—"}</td>
                   </tr>
                 ))}
               </tbody>

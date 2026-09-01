@@ -53,9 +53,51 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2526 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 350 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1275 apps/web. (v3-D163, 2026-09-01)
+make test    # 2529 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 351 v3/api + 118 corpus-compiler
+             # + 420 engine + 61 fold-runner + 1277 apps/web. (v3-D164, 2026-09-01)
+             # NOTE (v3-D164, 2026-09-01): `admin_audit.ip`/`.request_id` were
+             # stamped by all four writers (`AdminRevealController::reveal`,
+             # `AdminUsersController::exportCsv`,
+             # `SystemHealthController::rebuildAtomCache`,
+             # `StripeSettingsController::test`) but `AdminAuditController
+             # ::index()`'s wire map dropped both before the response left the
+             # server — `AuditLogPanel.tsx`'s own "EVERY FIELD IS RENDERED
+             # VERBATIM" header claim was false for the one detail that ties an
+             # audit row to a concrete HTTP request. Fixed: the controller's
+             # map gains `ip`/`requestId`; `lib/admin/audit.ts#AuditEntry` +
+             # its validator require both; `AuditLogPanel.tsx` gains two
+             # columns, each falling back to the existing "—" placeholder.
+             # Neither is pseudonymized (an admin's own IP, not learner PII).
+             # RED confirmed at both layers, each via `git stash` of the
+             # source alone, tests kept: backend failed exactly the new
+             # `test_ip_and_request_id_reach_the_wire` case (`Undefined array
+             # key "ip"`), 5 others unaffected; frontend failed exactly 2 of
+             # 14 vitest cases (the new missing-fields-become-unavailable
+             # case, and the existing READY case updated to expect a second
+             # "—" placeholder), 12 unaffected; both restored byte-identically
+             # and reran green. `TZ=UTC make test`: 2529 passing (was 2526,
+             # +3 — exactly this run's new tests: 1 + 2; v3/api 351, was 350;
+             # apps/web 1277, was 1275; no other suite moved). `check-test-
+             # floor.mjs`: OK, 2529 >= floor 1899 (+630 margin, unmoved).
+             # `TZ=UTC make build`: exit 0, 29 routes (unchanged — edits
+             # inside an existing `/settings/audit` component). `npm run
+             # gates`: all green (boundaries 294 files, unchanged count — two
+             # existing files edited, no new production file; fonts
+             # degraded-but-non-blocking, pre-existing). `npx tsc --noEmit`:
+             # clean. No `v1/**`/`v2/**` edit (stray `v2/tsconfig.tsbuildinfo`
+             # reverted before committing, same discipline as every prior
+             # entry). No Arabic codepoint (full diff swept over every Arabic
+             # block plus both Presentation Forms blocks, plus a
+             # `\u06xx`/`\u08xx`-escape and `fromCharCode` sweep — zero
+             # matches; every new string is a wire field name or a synthetic
+             # IP/request-id test fixture, never corpus text). NOT addressed:
+             # `FlagAuditPanel.tsx` fetches all four kill-ceremony inputs but
+             # renders only `reason` — the two safety checkboxes and the
+             # typed-name confirmation are fetched and discarded, same shape,
+             # separate scope; `BillingEventsPanel.tsx` similarly drops
+             # `processedAt`/`providerCreatedAt`. Both real, both left for a
+             # future run. See DECISIONS.md v3-D164.
              # NOTE (v3-D163, 2026-09-01): `App\Models\Override::editor()` — a
              # `BelongsTo<User>` relation, existing since the override layer
              # shipped (v2-D21/D55), its own docblock naming its purpose ("for

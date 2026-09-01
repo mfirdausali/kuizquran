@@ -24,6 +24,8 @@ const revealEntry = {
   reasonCode: "support_ticket",
   reasonText: "investigating ticket 4821 about a missing session",
   at: 1_700_000_005_000,
+  ip: "203.0.113.7",
+  requestId: "req-abc123",
 };
 
 const csvEntry = {
@@ -33,6 +35,8 @@ const csvEntry = {
   reasonCode: "support_ticket",
   reasonText: "bulk pseudonymous export of the users table",
   at: 1_700_000_000_000,
+  ip: "203.0.113.9",
+  requestId: null,
 };
 
 describe("AuditLogPanel — three states, never two", () => {
@@ -69,9 +73,16 @@ describe("AuditLogPanel — three states, never two", () => {
     expect(screen.getByText("export_users_csv")).toBeTruthy();
     expect(screen.getAllByText("u_1a2b3c4d5e6f").length).toBeGreaterThan(0);
 
-    // The subject-less CSV export renders an em-dash placeholder, never a
-    // blank cell that could be misread as a missing/broken value.
-    expect(screen.getByText("—")).toBeTruthy();
+    // The subject-less CSV export renders an em-dash placeholder for BOTH its
+    // missing subject and its missing requestId — never a blank cell that
+    // could be misread as a missing/broken value.
+    expect(screen.getAllByText("—").length).toBe(2);
+
+    // ip/requestId (v3-D164) — both entries' real values render, and the
+    // requestId-less csvEntry falls back to the same em-dash, not a blank.
+    expect(screen.getByText("203.0.113.7")).toBeTruthy();
+    expect(screen.getByText("203.0.113.9")).toBeTruthy();
+    expect(screen.getByText("req-abc123")).toBeTruthy();
   });
 
   it("a genuinely empty log says so, and never fabricates a subject-less zero state", async () => {

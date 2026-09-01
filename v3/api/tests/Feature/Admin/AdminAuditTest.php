@@ -108,6 +108,48 @@ class AdminAuditTest extends TestCase
     }
 
     /**
+     * The forensic fields every writer stamps (`ip` always, `request_id` when
+     * the caller sent `X-Request-Id`) must reach the wire — an operator
+     * corroborating "who did this, from where" against a server access log
+     * needs both, and until this fix the controller's map silently dropped
+     * them (v3-D164).
+     */
+    public function test_ip_and_request_id_reach_the_wire(): void
+    {
+        $admin = $this->admin();
+        AdminAudit::create([
+            'actor_admin_id' => $admin->id,
+            'action' => 'reveal_identity',
+            'subject_pseudonym' => 'u_aaaaaaaaaaaa',
+            'reason_code' => 'support_ticket',
+            'reason_text' => 'about learner A',
+            'at' => 1_700_000_000_000,
+            'ip' => '203.0.113.7',
+            'request_id' => 'req-abc123',
+        ]);
+        // A writer that never received an X-Request-Id header (SystemHealthController's
+        // rebuild action) leaves it null — the wire must carry that faithfully,
+        // never a fabricated placeholder.
+        AdminAudit::create([
+            'actor_admin_id' => $admin->id,
+            'action' => 'rebuild_atom_cache',
+            'subject_pseudonym' => null,
+            'reason_code' => 'support_ticket',
+            'reason_text' => 're-derive atom cache from the event log',
+            'at' => 1_700_000_001_000,
+            'ip' => '203.0.113.9',
+            'request_id' => null,
+        ]);
+
+        $entries = $this->getJson('/api/admin/audit')->assertOk()->json('entries');
+
+        $this->assertSame('203.0.113.9', $entries[0]['ip']);
+        $this->assertNull($entries[0]['requestId']);
+        $this->assertSame('203.0.113.7', $entries[1]['ip']);
+        $this->assertSame('req-abc123', $entries[1]['requestId']);
+    }
+
+    /**
      * The `subject` filter — an operator investigating one pseudonym (e.g. the
      * one they just revealed) should be able to see every audit row that
      * names it, without scrolling the whole table.

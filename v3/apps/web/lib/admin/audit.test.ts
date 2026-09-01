@@ -52,6 +52,8 @@ describe("loadAudit — failure is a STATE, never an exception", () => {
               reasonCode: "support_ticket",
               reasonText: "investigating ticket 4821",
               at: 1_700_000_005_000,
+              ip: "203.0.113.7",
+              requestId: "req-abc123",
             },
             {
               actor: "u_1a2b3c4d5e6f",
@@ -60,6 +62,8 @@ describe("loadAudit — failure is a STATE, never an exception", () => {
               reasonCode: "support_ticket",
               reasonText: "bulk pseudonymous export",
               at: 1_700_000_000_000,
+              ip: "203.0.113.9",
+              requestId: null,
             },
           ],
           limit: 200,
@@ -77,6 +81,60 @@ describe("loadAudit — failure is a STATE, never an exception", () => {
       expect(load.entries[1]!.subjectPseudonym).toBeNull();
       expect(load.limit).toBe(200);
     }
+  });
+
+  it("carries `ip`/`requestId` through, including a genuinely null requestId", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          entries: [
+            {
+              actor: "u_1a2b3c4d5e6f",
+              action: "rebuild_atom_cache",
+              subjectPseudonym: null,
+              reasonCode: "support_ticket",
+              reasonText: "re-derive atom cache from the event log",
+              at: 1_700_000_001_000,
+              ip: "203.0.113.9",
+              requestId: null,
+            },
+          ],
+          limit: 200,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    ) as unknown as typeof fetch;
+
+    const load = await loadAudit();
+    expect(load.state).toBe("ready");
+    if (load.state === "ready") {
+      expect(load.entries[0]!.ip).toBe("203.0.113.9");
+      expect(load.entries[0]!.requestId).toBeNull();
+    }
+  });
+
+  it("a response missing `ip`/`requestId` becomes `unavailable`, never a fabricated null", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          entries: [
+            {
+              actor: "u_1a2b3c4d5e6f",
+              action: "reveal_identity",
+              subjectPseudonym: null,
+              reasonCode: "support_ticket",
+              reasonText: "missing the new fields",
+              at: 1_700_000_000_000,
+            },
+          ],
+          limit: 200,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    ) as unknown as typeof fetch;
+
+    const load = await loadAudit();
+    expect(load.state).toBe("unavailable");
   });
 
   it("a network throw becomes `unavailable`, not a rejected promise", async () => {

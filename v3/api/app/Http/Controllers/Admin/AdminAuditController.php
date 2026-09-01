@@ -31,6 +31,16 @@ use Illuminate\Http\Request;
  * the same HMAC `Pseudonymizer` every other admin surface uses is applied on
  * the way out, so an admin is exactly as pseudonymous to their peers as a
  * learner is.
+ *
+ * `ip`/`request_id` ARE ON THE WIRE (v3-D164). All four writers stamp `ip` on
+ * every row (three of four also stamp `request_id`), but until this fix the
+ * map below silently dropped both before the response left the server — the
+ * forensic detail an operator would need to corroborate "who did this, from
+ * where" against a server access log never reached `AuditLogPanel.tsx`, which
+ * had nothing to render even in principle. Neither is PII on the scale
+ * `subject_pseudonym`'s own migration comment guards against (an admin's own
+ * IP, not a learner's identity), so both pass through unpseudonymized, same
+ * as `action`/`reasonCode`/`reasonText`.
  */
 class AdminAuditController extends Controller
 {
@@ -60,6 +70,8 @@ class AdminAuditController extends Controller
                 'reasonCode' => $row->reason_code,
                 'reasonText' => $row->reason_text,
                 'at' => $row->at,
+                'ip' => $row->ip,
+                'requestId' => $row->request_id,
             ])->values(),
             'limit' => self::MAX_ENTRIES,
         ]);

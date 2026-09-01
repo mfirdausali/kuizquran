@@ -12073,3 +12073,98 @@ deliberately left alone); `lib/i18n/dictionaries.ts#isLocale()` — a scaffold
 seam this run confirmed is deliberately unwired ahead of need (its own
 docblock: "v3-D15 ships Malay AFTER launch... this file is the seam, put in
 now while there is exactly one locale") — all unchanged.
+
+### v3-D164 — `admin_audit.ip`/`.request_id` reach the wire (2026-09-01)
+
+A fresh Explore sweep for this build's recurring "mechanism built, populated,
+and rendered EXCEPT for one of its own fields" class (v3-D160..D163) found
+`admin_audit`'s forensic pair: all four writers
+(`AdminRevealController::reveal`, `AdminUsersController::exportCsv`,
+`SystemHealthController::rebuildAtomCache`, `StripeSettingsController::test`)
+stamp `ip` on every row (three of four also stamp `request_id`, from the
+`X-Request-Id` header), but `AdminAuditController::index()`'s wire-shaping
+`map()` selected `actor`/`action`/`subjectPseudonym`/`reasonCode`/
+`reasonText`/`at` only — both forensic columns were computed, stored, and
+then silently dropped before the response ever left the server.
+`AuditLogPanel.tsx`'s own header claims "EVERY FIELD IS RENDERED VERBATIM" —
+false, the same shape as `BillingEventsPanel.tsx`'s and
+`FlagAuditPanel.tsx`'s identical claim on a different subset of their own
+wire fields (also found this run, on the SAME sweep, left for a future run —
+see below). Concretely: an operator trying to corroborate "who revealed
+identity X, from where" against a server access log had no IP to cross-
+reference and no request id to grep a log line by — the append-only
+guarantee `AdminAudit::booted()` enforces was reviewable in name only for
+the one detail that ties a row to a concrete HTTP request.
+
+Fixed narrowly, the smallest of the three candidates this sweep found (the
+other two — `FlagAuditPanel.tsx` dropping 3 of 4 kill-ceremony safety
+fields, `BillingEventsPanel.tsx` dropping `processedAt`/`providerCreatedAt`
+— are real, same-shape, and deliberately left for a future run rather than
+folded into one large diff): `AdminAuditController::index()`'s map gains
+`'ip' => $row->ip` and `'requestId' => $row->request_id`; `lib/admin/
+audit.ts#AuditEntry` gains matching `ip: string | null` and `requestId:
+string | null` fields, with `isAuditEntry()`'s validator extended to require
+both are present (string or null) — a response missing either now reads
+`unavailable`, never a silently-narrower `ready`; `AuditLogPanel.tsx` gains
+two table columns, each falling back to the same "—" placeholder the
+existing Subject column already uses for a genuinely absent value, never a
+blank cell. Neither field is pseudonymized — an admin's own IP is not the
+learner-identity PII `subject_pseudonym`'s own migration comment guards
+against, and it passes through unpseudonymized on the same footing as
+`action`/`reasonCode`/`reasonText`.
+
+RED confirmed at both layers, each by `git stash` of the source file(s)
+alone with every test kept: backend (`AdminAuditController.php` reverted) —
+the new `test_ip_and_request_id_reach_the_wire` failed on `Undefined array
+key "ip"`, the 5 pre-existing cases unaffected; restored byte-identically,
+6/6 green. Frontend (`audit.ts` + `AuditLogPanel.tsx` reverted together) —
+exactly 2 of 14 vitest cases failed (`lib/admin/audit.test.ts`'s new
+"a response missing `ip`/`requestId` becomes `unavailable`" case, since the
+old validator accepted a body lacking both fields as `ready`; and
+`audit-log-panel.test.tsx`'s existing READY case, updated this run to assert
+2 "—" placeholders instead of 1 now that the requestId-less `csvEntry`
+fixture needs one too), 12 others unaffected; restored byte-identically,
+14/14 green.
+
+`TZ=UTC make test`: 2529 passing (was 2526, +3 — exactly this run's new
+tests: 1 PHPUnit + 2 vitest — `audit.test.ts` 7→9, `audit-log-panel.test.tsx`
+unchanged at 5 since its new assertions extended an existing case rather
+than adding one; v3/api 351, was 350; apps/web 1277, was 1275; no other
+suite moved: 255 v2 vitest, 47 v2/api, 118 corpus-compiler, 420 engine, 61
+fold-runner). `check-test-floor.mjs`: OK, 2529 >= floor 1899 (+630 margin,
+unmoved, same discipline as every prior entry). `TZ=UTC make build`: exit 0,
+29 routes (unchanged — no new route, both edited production files are
+existing components on the existing `/settings/audit` route). `npm run
+gates`: all green (boundaries 294 files, unchanged count — no new
+production file, two existing files edited; fonts degraded-but-non-blocking,
+pre-existing; corpus-morphology and corpus-glyphs unchanged by this diff).
+`npx tsc --noEmit`: clean. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite was
+reverted before committing, same discipline as every prior entry —
+`git status --porcelain -- v1 v2` empty immediately before commit). No
+Arabic codepoint (the full diff swept programmatically over the Arabic,
+Arabic Supplement, Arabic Extended-A and both Presentation Forms Unicode
+blocks, plus a `\u06xx`/`\u08xx`-escape and `fromCharCode` sweep — zero
+matches; every new string is a wire field name, a synthetic IP/request-id
+test fixture, or English prose, never corpus text).
+
+**NOT addressed**, named so a future run doesn't re-discover them as new:
+`FlagAuditPanel.tsx` fetches and validates all four kill-ceremony inputs
+(`reason`, `acknowledgesRetentionRisk`, `acknowledgesNoDarkPattern`,
+`typedFlagName`) but its table renders only `reason` — the two safety
+checkboxes and the typed-name confirmation the ceremony exists to make
+reviewable are fetched and discarded, the identical shape as this entry, on
+a sibling panel; `BillingEventsPanel.tsx` similarly fetches
+`processedAt`/`providerCreatedAt` (the former explicitly named in its own
+docblock as "the one gap the journal exists to make visible") and renders
+neither. Both are real, both are the same bug class, both were deliberately
+left as separate future-run scope rather than combined into this diff.
+Also unchanged, all as before: `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148); `lib/pricing.ts#regionFromCountry()`
+(v3-D163); `PaywallGate` as a whole class (v3-D88, v3-D151); multi-surah
+enrollment; the operational mailer/7-night window; PAY-1's Stripe fixtures;
+surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy
+drift (v3-D127); `packages/engine/src/placement.ts` (v3-D111/D113/D123);
+the late-arrival refold half of v3-D32; `AccountDeletionRequest::isDue()`
+(v3-D146); `lib/i18n/dictionaries.ts#isLocale()`.

@@ -18,6 +18,11 @@
 // THE ACTOR IS ALREADY PSEUDONYMIZED BY THE SERVER. This module renders it
 // verbatim — it never re-derives or re-formats an identity, the same rule
 // `lib/admin/reveal.ts` follows for a revealed identity.
+//
+// `ip`/`requestId` reach the wire as of v3-D164 — every writer stamps `ip`,
+// and `requestId` is null whenever the original request carried no
+// `X-Request-Id` header (e.g. the atom-cache rebuild action). Neither is
+// pseudonymized (an admin's own IP, not a learner's identity).
 
 import { apiFetch } from "@/lib/sync/apiFetch.ts";
 
@@ -30,6 +35,8 @@ export interface AuditEntry {
   reasonText: string;
   /** Epoch milliseconds — the wire's own `at`, never re-derived. */
   at: number;
+  ip: string | null;
+  requestId: string | null;
 }
 
 export type AuditLoad =
@@ -49,7 +56,9 @@ function isAuditEntry(v: unknown): v is AuditEntry {
     (typeof e.subjectPseudonym === "string" || e.subjectPseudonym === null) &&
     typeof e.reasonCode === "string" &&
     typeof e.reasonText === "string" &&
-    typeof e.at === "number"
+    typeof e.at === "number" &&
+    (typeof e.ip === "string" || e.ip === null) &&
+    (typeof e.requestId === "string" || e.requestId === null)
   );
 }
 
