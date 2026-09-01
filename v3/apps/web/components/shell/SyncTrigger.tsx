@@ -29,11 +29,15 @@
 //
 // EVERY COMPLETED CYCLE REPORTS to `lib/sync/summary.ts` — the #110
 // quarantine / #50 divergence counts `SyncStatus.tsx` was built to escalate
-// and this file used to discard entirely (v3-D161). Reporting is the only
-// thing this component does with a cycle's result beyond deciding whether to
-// retry; nothing here reads the summary back, and nothing about #103's
-// "never blocks" contract changes — `report()` is a synchronous, side-
-// effect-free write to a module value, not a second network call.
+// and this file used to discard entirely (v3-D161), PLUS the token's live
+// `isTokenDead()` state (v3-D162) — a third fact `CycleResult` itself carries
+// no field for, so it is read directly from `token.ts` at the moment each
+// cycle finishes, the only point this file has a reliable "did this device's
+// bearer token just die" answer. Reporting is the only thing this component
+// does with a cycle's result beyond deciding whether to retry; nothing here
+// reads the summary back, and nothing about #103's "never blocks" contract
+// changes — `report()` is a synchronous, side-effect-free write to a module
+// value, not a second network call.
 //
 // BACKOFF, NOT A SPIN LOOP. `pushOutbox`/`pullFromServer` never throw into
 // `syncCycle` (every failure becomes a `degraded` field per-result) and
@@ -48,6 +52,7 @@
 import { useEffect, useRef } from "react";
 import { backoffMs, shouldAttemptSync, syncCycle } from "@/lib/sync/sync";
 import { syncSummary } from "@/lib/sync/summary";
+import { isTokenDead } from "@/lib/sync/token";
 
 export function SyncTrigger() {
   // Refs, not state: this component never re-renders itself (it always
@@ -83,7 +88,7 @@ export function SyncTrigger() {
       let degraded = false;
       try {
         const result = await syncCycle({ now: Date.now() });
-        syncSummary.report(result);
+        syncSummary.report(result, isTokenDead());
         degraded = Boolean(result.push?.degraded || result.pull?.degraded);
       } catch {
         // syncCycle is documented to never throw into its caller. Caught

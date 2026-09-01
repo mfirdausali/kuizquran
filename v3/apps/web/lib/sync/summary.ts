@@ -18,6 +18,20 @@
 // user-facing purpose #103/#50/#110 already named, not an exception to that
 // rule. Same "module-level singleton + subscribe" shape as
 // `lib/idb/writeLock.ts`'s `WriteLock` — deliberately reused, not reinvented.
+//
+// v3-D162 ADDS A THIRD FACT: `authDead`, from `token.ts#isTokenDead()`. That
+// function has answered "has a 401 been observed and not yet recovered from"
+// since B8 closed, unit-tested, with zero production callers — the same
+// zero-caller shape v3-D161 closed for `quarantined`/`divergences` one layer
+// over. `SyncTrigger` is still the only place a real cycle runs, so it is
+// still the only place that can observe the token's live state at the moment
+// a cycle finishes; `isTokenDead()` is read there, not derived from
+// `CycleResult` (which carries no token state), and reported alongside the
+// existing two counts. "Sync is stuck because this device's bearer token
+// died and a re-mint hasn't recovered it" is a DIFFERENT fact from ordinary
+// offline/pending — a dead token stops EVERY future cycle from doing
+// anything at all, not just this one — so it gets its own field, same
+// discipline as keeping `cannotSync` and `divergences` from sharing a number.
 
 import { useEffect, useState } from "react";
 import type { CycleResult } from "./sync.ts";
@@ -27,9 +41,13 @@ export interface SyncSummary {
   cannotSync: number;
   /** #50 payload divergences observed on the last pull. */
   divergences: number;
+  /** True once a 401 has been observed and not yet recovered from
+   *  (`token.ts#isTokenDead()`). Every future cycle is wedged until a
+   *  re-mint succeeds. */
+  authDead: boolean;
 }
 
-const ZERO: SyncSummary = { cannotSync: 0, divergences: 0 };
+const ZERO: SyncSummary = { cannotSync: 0, divergences: 0, authDead: false };
 
 class SyncSummaryStore {
   private value: SyncSummary = ZERO;
@@ -50,15 +68,23 @@ class SyncSummaryStore {
    * cycle's counts are the CURRENT state of the log, not a delta —
    * `outbox.ts#selectPending` re-scans and re-reports every still-quarantined
    * row on every call, and a divergence is only ever current-pull-scoped.
-   * Re-appending the identical counts is a no-op (no listener re-render for
-   * an unchanged value).
+   * `authDead` is likewise the CURRENT token state at the moment this cycle
+   * finished, never latched — a later cycle whose re-mint succeeded must
+   * report `false` again, not leave a stale `true` behind. Re-appending
+   * identical values is a no-op (no listener re-render for an unchanged
+   * value).
    */
-  report(result: Pick<CycleResult, "quarantined" | "divergences">): void {
+  report(result: Pick<CycleResult, "quarantined" | "divergences">, authDead: boolean): void {
     const next: SyncSummary = {
       cannotSync: result.quarantined.length,
       divergences: result.divergences.length,
+      authDead,
     };
-    if (next.cannotSync === this.value.cannotSync && next.divergences === this.value.divergences) {
+    if (
+      next.cannotSync === this.value.cannotSync &&
+      next.divergences === this.value.divergences &&
+      next.authDead === this.value.authDead
+    ) {
       return;
     }
     this.value = next;

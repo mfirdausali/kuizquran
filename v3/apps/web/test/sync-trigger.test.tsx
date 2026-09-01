@@ -162,12 +162,103 @@ describe("v3-D161 — every completed cycle reports to lib/sync/summary.ts", () 
       { now: 1_700_000_000_000, tz: "UTC" },
     );
 
-    expect(syncSummary.current).toEqual({ cannotSync: 0, divergences: 0 });
+    expect(syncSummary.current).toEqual({ cannotSync: 0, divergences: 0, authDead: false });
 
     render(<SyncTrigger />);
 
     await waitFor(() => expect(syncSummary.current.cannotSync).toBeGreaterThan(0));
-    expect(syncSummary.current).toEqual({ cannotSync: 1, divergences: 0 });
+    expect(syncSummary.current).toEqual({ cannotSync: 1, divergences: 0, authDead: false });
+  });
+});
+
+describe("v3-D162 — every completed cycle also reports isTokenDead() into syncSummary", () => {
+  it("carries a real, unrecovered 401 into syncSummary.authDead, so SyncStatus can escalate it", async () => {
+    // A genuine reproduction, not a stubbed flag: the pull's GET 401s, the
+    // interceptor clears the token and attempts a re-mint, and the mint
+    // endpoint ITSELF fails — so `clearToken()`'s dead marker is never
+    // cleared by a later `setToken()`. No outbox rows are appended, so the
+    // push phase never touches the network at all (an empty outbox breaks
+    // out of `pushOutbox`'s loop before any `apiFetch` call) — the pull is
+    // what observes the 401.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const path = String(url);
+        if (path === "/api/auth/anonymous" && init?.method === "POST") {
+          return new Response("server error", { status: 500 });
+        }
+        if (path.startsWith("/api/events") && (init?.method ?? "GET") === "GET") {
+          return new Response("unauthorized", { status: 401 });
+        }
+        return new Response("{}", { status: 200 });
+      }),
+    );
+
+    expect(syncSummary.current.authDead).toBe(false);
+
+    render(<SyncTrigger />);
+
+    await waitFor(() => expect(syncSummary.current.authDead).toBe(true));
+    expect(syncSummary.current).toEqual({ cannotSync: 0, divergences: 0, authDead: true });
+  });
+
+  it("clears authDead again once a LATER cycle's re-mint succeeds", async () => {
+    // `test-token` (beforeEach's live token) is modelled as already revoked
+    // server-side — every request bearing it, or bearing NO token at all
+    // (which is what a dead local token becomes, since `apiFetch` never
+    // attaches one once `hasLiveToken()` is false) gets a 401. Only a fresh,
+    // successfully-minted token is accepted — a genuine recovery, not a
+    // stubbed flag.
+    //
+    // Fake timers, deliberately: `apiFetch.ts`'s BRAKE 3 blocks a SECOND mint
+    // attempt for `MINT_COOLDOWN_MS` (60s, real wall-clock `Date.now()`)
+    // after the first failed one, so a manual "focus" dispatch moments after
+    // the first failure would still be inside the cooldown and prove
+    // nothing — the fix under test never gets a chance to run. Advancing
+    // fake time past the cooldown lets the component's OWN backoff-retry
+    // loop (already proven elsewhere in this file) carry a later cycle past
+    // it, with no cooldown-defeating shortcut in the test itself.
+    vi.useFakeTimers();
+    let mintShouldFail = true;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const path = String(url);
+        if (path === "/api/auth/anonymous" && init?.method === "POST") {
+          if (mintShouldFail) return new Response("server error", { status: 500 });
+          return new Response(JSON.stringify({ token: "fresh-token", isAnonymous: true }), {
+            status: 201,
+          });
+        }
+        if (path.startsWith("/api/events") && (init?.method ?? "GET") === "GET") {
+          const auth = new Headers(init?.headers).get("Authorization");
+          if (auth === "Bearer fresh-token") {
+            return new Response(JSON.stringify({ events: [], nextCursor: 0, hasMore: false }), {
+              status: 200,
+            });
+          }
+          return new Response("unauthorized", { status: 401 });
+        }
+        return new Response("{}", { status: 200 });
+      }),
+    );
+
+    // Mount: the pull 401s on the stale token, the mint also fails, so the
+    // token is left dead with nothing to recover it.
+    render(<SyncTrigger />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50);
+    });
+    expect(syncSummary.current.authDead).toBe(true);
+
+    // Let the mint succeed from here on, then run the clock well past the
+    // mint cooldown so the component's own retry loop gets a real attempt
+    // in past it.
+    mintShouldFail = false;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+    });
+    expect(syncSummary.current.authDead).toBe(false);
   });
 });
 

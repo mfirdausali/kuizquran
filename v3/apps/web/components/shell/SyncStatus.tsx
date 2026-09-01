@@ -31,6 +31,15 @@
 // literal `0` default forever, so the escalation branch below could never
 // paint outside a test. An explicit prop still wins, so the existing
 // isolated-rendering tests are unaffected.
+//
+// `authDead` (v3-D162) is a THIRD, distinct escalation, same reasoning as the
+// other two: "waiting to sync" and "this device's sign-in died and every
+// future cycle is wedged until it recovers" are different facts and must not
+// be conflated into the ordinary pending count or silently absorbed into
+// "cannot sync" (a dead token is not a #110 quarantine — it recovers on its
+// own once a re-mint succeeds, whereas a quarantined event never syncs at
+// all). Defaults to the live value from `lib/sync/summary.ts`, same
+// `?? ` — not a default-parameter — discipline as the other two props.
 
 import { useCallback } from "react";
 import { useLogState } from "@/lib/idb/useLogState";
@@ -45,12 +54,17 @@ export interface SyncStatusProps {
   /** #50 payload divergences observed on the pull. Defaults to the live
    *  count from `lib/sync/summary.ts` when omitted. */
   divergences?: number;
+  /** True once this device's bearer token has 401'd and not yet recovered
+   *  (`token.ts#isTokenDead()`). Defaults to the live value from
+   *  `lib/sync/summary.ts` when omitted. */
+  authDead?: boolean;
 }
 
-export function SyncStatus({ cannotSync, divergences }: SyncStatusProps) {
+export function SyncStatus({ cannotSync, divergences, authDead }: SyncStatusProps) {
   const live = useSyncSummary();
   const effectiveCannotSync = cannotSync ?? live.cannotSync;
   const effectiveDivergences = divergences ?? live.divergences;
+  const effectiveAuthDead = authDead ?? live.authDead;
 
   // Stable identity: an inline arrow would be a new function every render and
   // the effect would re-run forever.
@@ -63,13 +77,17 @@ export function SyncStatus({ cannotSync, divergences }: SyncStatusProps) {
   const state = useLogState<number>(selector, isEmpty, []);
 
   // The escalations are independent of the pending count's own state: a
-  // divergence is worth saying even while the count is still loading.
+  // divergence — or a dead token — is worth saying even while the count is
+  // still loading.
+  const facts = [
+    effectiveAuthDead ? "sync paused, reconnecting" : null,
+    effectiveCannotSync > 0 ? `${effectiveCannotSync} cannot sync` : null,
+    effectiveDivergences > 0 ? `${effectiveDivergences} need review` : null,
+  ].filter((f): f is string => f !== null);
   const escalation =
-    effectiveCannotSync > 0 || effectiveDivergences > 0 ? (
+    facts.length > 0 ? (
       <span className="caption" role="status">
-        {effectiveCannotSync > 0 ? `${effectiveCannotSync} cannot sync` : null}
-        {effectiveCannotSync > 0 && effectiveDivergences > 0 ? " · " : null}
-        {effectiveDivergences > 0 ? `${effectiveDivergences} need review` : null}
+        {facts.join(" · ")}
       </span>
     ) : null;
 

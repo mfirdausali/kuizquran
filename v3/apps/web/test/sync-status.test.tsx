@@ -85,6 +85,23 @@ describe("the three states the count can be in", () => {
     render(<SyncStatus divergences={2} />);
     await waitFor(() => expect(screen.getByText(/2 need review/i)).toBeTruthy());
   });
+
+  // v3-D162: a dead token is a THIRD, distinct fact — not folded into
+  // "cannot sync" (a quarantined event never syncs at all; a dead token
+  // recovers on its own once a re-mint succeeds) and not silently absorbed
+  // into the ordinary pending count.
+  it("distinguishes a dead token from both 'cannot sync' and 'waiting' — a third fact", async () => {
+    // Scoped to this render, not the ambient `screen`: this file never
+    // unmounts between tests, and an earlier case already renders its own
+    // "1 cannot sync" text into the accumulated DOM — the same discipline
+    // the v3-D161 live-summary tests below already use.
+    await appendEvents(4);
+    const { container } = render(<SyncStatus authDead={true} cannotSync={1} />);
+    const scoped = within(container);
+    await waitFor(() => expect(scoped.getByText(/4 waiting to sync/i)).toBeTruthy());
+    expect(scoped.getByText(/sync paused, reconnecting/i)).toBeTruthy();
+    expect(scoped.getByText(/1 cannot sync/i)).toBeTruthy();
+  });
 });
 
 describe("v3-D161 — a REAL mount (no props) escalates from the live SyncTrigger summary", () => {
@@ -98,14 +115,17 @@ describe("v3-D161 — a REAL mount (no props) escalates from the live SyncTrigge
     // This is exactly how a real `<SyncStatus />` is mounted from
     // `home/page.tsx` — no props at all. Before v3-D161 this could never
     // paint an escalation outside a test that hand-fed a literal.
-    syncSummary.report({
-      quarantined: [
-        { id: "oversize-1", bytes: 9_000 },
-        { id: "oversize-2", bytes: 9_500 },
-        { id: "oversize-3", bytes: 10_000 },
-      ],
-      divergences: [],
-    });
+    syncSummary.report(
+      {
+        quarantined: [
+          { id: "oversize-1", bytes: 9_000 },
+          { id: "oversize-2", bytes: 9_500 },
+          { id: "oversize-3", bytes: 10_000 },
+        ],
+        divergences: [],
+      },
+      false,
+    );
     const { container } = render(<SyncStatus />);
     const scoped = within(container);
     await waitFor(() => expect(scoped.getByText(/6 waiting to sync/i)).toBeTruthy());
@@ -114,11 +134,30 @@ describe("v3-D161 — a REAL mount (no props) escalates from the live SyncTrigge
 
   it("an explicit prop still overrides the live summary", async () => {
     await appendEvents(5);
-    syncSummary.report({ quarantined: [{ id: "oversize-1", bytes: 9_000 }], divergences: [] });
+    syncSummary.report({ quarantined: [{ id: "oversize-1", bytes: 9_000 }], divergences: [] }, false);
     const { container } = render(<SyncStatus cannotSync={0} />);
     const scoped = within(container);
     await waitFor(() => expect(scoped.getByText(/5 waiting to sync/i)).toBeTruthy());
     expect(scoped.queryByText(/cannot sync/i)).toBeNull();
+  });
+
+  // v3-D162's own live-summary counterpart to the two cases above.
+  it("renders the live authDead value from lib/sync/summary.ts when unprompted by a prop", async () => {
+    await appendEvents(1);
+    syncSummary.report({ quarantined: [], divergences: [] }, true);
+    const { container } = render(<SyncStatus />);
+    const scoped = within(container);
+    await waitFor(() => expect(scoped.getByText(/1 waiting to sync/i)).toBeTruthy());
+    expect(scoped.getByText(/sync paused, reconnecting/i)).toBeTruthy();
+  });
+
+  it("an explicit authDead prop still overrides the live summary", async () => {
+    await appendEvents(1);
+    syncSummary.report({ quarantined: [], divergences: [] }, true);
+    const { container } = render(<SyncStatus authDead={false} />);
+    const scoped = within(container);
+    await waitFor(() => expect(scoped.getByText(/1 waiting to sync/i)).toBeTruthy());
+    expect(scoped.queryByText(/sync paused/i)).toBeNull();
   });
 });
 

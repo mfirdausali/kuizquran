@@ -21,51 +21,78 @@ beforeEach(() => {
 });
 
 describe("starts at zero", () => {
-  it("current() is {cannotSync: 0, divergences: 0} before any report", () => {
-    expect(syncSummary.current).toEqual({ cannotSync: 0, divergences: 0 });
+  it("current() is {cannotSync: 0, divergences: 0, authDead: false} before any report", () => {
+    expect(syncSummary.current).toEqual({ cannotSync: 0, divergences: 0, authDead: false });
   });
 });
 
 describe("report() overwrites, never accumulates", () => {
   it("reflects exactly the last reported cycle's counts", () => {
-    syncSummary.report({
-      quarantined: [{ id: "a", bytes: 9_000 }],
-      divergences: [],
-    });
-    expect(syncSummary.current).toEqual({ cannotSync: 1, divergences: 0 });
+    syncSummary.report(
+      {
+        quarantined: [{ id: "a", bytes: 9_000 }],
+        divergences: [],
+      },
+      false,
+    );
+    expect(syncSummary.current).toEqual({ cannotSync: 1, divergences: 0, authDead: false });
 
     // A LATER cycle with fewer quarantined rows (the operator fixed it, or a
     // stale row finally aged past this device's log) must DROP the old
     // count, not add to it.
-    syncSummary.report({ quarantined: [], divergences: [] });
-    expect(syncSummary.current).toEqual({ cannotSync: 0, divergences: 0 });
+    syncSummary.report({ quarantined: [], divergences: [] }, false);
+    expect(syncSummary.current).toEqual({ cannotSync: 0, divergences: 0, authDead: false });
+  });
+
+  // v3-D162: `authDead` is likewise the CURRENT state, not a latch — a later
+  // cycle whose re-mint succeeded must be able to clear a previously-true
+  // value, the same "drop, never accumulate" property the two counts above
+  // already have.
+  it("reflects exactly the last reported cycle's authDead value, in both directions", () => {
+    syncSummary.report({ quarantined: [], divergences: [] }, true);
+    expect(syncSummary.current).toEqual({ cannotSync: 0, divergences: 0, authDead: true });
+
+    syncSummary.report({ quarantined: [], divergences: [] }, false);
+    expect(syncSummary.current).toEqual({ cannotSync: 0, divergences: 0, authDead: false });
   });
 });
 
 describe("subscribe()", () => {
   it("calls the listener immediately with the current value", () => {
-    syncSummary.report({ quarantined: [{ id: "a", bytes: 9_000 }], divergences: [] });
+    syncSummary.report({ quarantined: [{ id: "a", bytes: 9_000 }], divergences: [] }, false);
     const fn = vi.fn();
     syncSummary.subscribe(fn);
-    expect(fn).toHaveBeenCalledWith({ cannotSync: 1, divergences: 0 });
+    expect(fn).toHaveBeenCalledWith({ cannotSync: 1, divergences: 0, authDead: false });
   });
 
   it("notifies subscribers on a real change", () => {
     const fn = vi.fn();
     syncSummary.subscribe(fn);
     fn.mockClear();
-    syncSummary.report({ quarantined: [], divergences: [DIVERGENCE] });
-    expect(fn).toHaveBeenCalledWith({ cannotSync: 0, divergences: 1 });
+    syncSummary.report({ quarantined: [], divergences: [DIVERGENCE] }, false);
+    expect(fn).toHaveBeenCalledWith({ cannotSync: 0, divergences: 1, authDead: false });
+  });
+
+  // v3-D162: a change in ONLY authDead — the two counts unchanged — must
+  // still notify. A subscriber that only watched cannotSync/divergences for
+  // equality would silently swallow exactly this transition.
+  it("notifies subscribers when only authDead changes", () => {
+    syncSummary.report({ quarantined: [], divergences: [] }, false);
+    const fn = vi.fn();
+    syncSummary.subscribe(fn);
+    fn.mockClear();
+    syncSummary.report({ quarantined: [], divergences: [] }, true);
+    expect(fn).toHaveBeenCalledWith({ cannotSync: 0, divergences: 0, authDead: true });
   });
 
   it("does NOT notify subscribers when the reported counts are unchanged", () => {
-    syncSummary.report({ quarantined: [{ id: "a", bytes: 9_000 }], divergences: [] });
+    syncSummary.report({ quarantined: [{ id: "a", bytes: 9_000 }], divergences: [] }, false);
     const fn = vi.fn();
     syncSummary.subscribe(fn);
     fn.mockClear();
     // Identical counts, a different array instance — a real second cycle
     // scanning the same still-quarantined row produces exactly this shape.
-    syncSummary.report({ quarantined: [{ id: "a", bytes: 9_000 }], divergences: [] });
+    syncSummary.report({ quarantined: [{ id: "a", bytes: 9_000 }], divergences: [] }, false);
     expect(fn).not.toHaveBeenCalled();
   });
 
@@ -74,7 +101,7 @@ describe("subscribe()", () => {
     const unsubscribe = syncSummary.subscribe(fn);
     fn.mockClear();
     unsubscribe();
-    syncSummary.report({ quarantined: [{ id: "a", bytes: 9_000 }], divergences: [] });
+    syncSummary.report({ quarantined: [{ id: "a", bytes: 9_000 }], divergences: [] }, false);
     expect(fn).not.toHaveBeenCalled();
   });
 });

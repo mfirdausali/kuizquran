@@ -53,9 +53,101 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2516 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2523 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 349 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1266 apps/web. (v3-D161, 2026-08-31)
+             # + 420 engine + 61 fold-runner + 1273 apps/web. (v3-D162, 2026-09-01)
+             # NOTE (v3-D162, 2026-09-01): `lib/sync/token.ts#isTokenDead()` —
+             # v3-D161's own "NOT addressed" list named this exactly as "the
+             # more complete follow-up to this entry, not a separate new
+             # finding" — had answered "has a 401 been observed and not yet
+             # recovered from" since B8 closed, unit-tested, with zero
+             # production callers anywhere. `apiFetch.ts`'s 401 interceptor
+             # calls `clearToken()` (marking the token dead) then attempts a
+             # re-mint; if that mint ALSO fails (the endpoint down, or BRAKE
+             # 3's 60s cooldown blocking a second attempt), the token stays
+             # dead indefinitely with nothing on screen saying so — a learner
+             # in this state saw the identical quiet "N waiting to sync"
+             # caption an ordinary offline learner sees, with no way to learn
+             # that "wait for network" would never be enough on its own.
+             # Fixed on the exact template v3-D161 established one layer
+             # over: `lib/sync/summary.ts#SyncSummary` gains a third field,
+             # `authDead: boolean`; `SyncTrigger.tsx` reads `isTokenDead()`
+             # directly (not derivable from `CycleResult`, which carries no
+             # token-liveness field) at the moment each cycle finishes and
+             # reports it alongside the existing two counts;
+             # `SyncStatus.tsx` gains a matching optional `authDead?:
+             # boolean` prop, defaulting to the live value via `??` (an
+             # explicit `false` still wins over a live `true`). Unlike a
+             # #110 quarantine, a dead token recovers on its own once a
+             # later re-mint succeeds, so — like the other two fields —
+             # it is reported as the CURRENT state every cycle, never
+             # latched.
+             #
+             # RED confirmed directly: `git stash` of the three source files
+             # only (every test file, including the pre-existing v3-D161
+             # ones whose `toEqual` now expects a third key, kept) and
+             # rerunning `lib/sync/summary.test.ts` + `test/sync-status
+             # .test.tsx` + `test/sync-trigger.test.tsx` failed exactly 11 of
+             # 31 cases (the new authDead-only cases plus the pre-existing
+             # v3-D161 wiring assertion), 20 others unaffected; restored
+             # byte-identically (`git diff` empty), reran: 31/31 green. The
+             # `SyncTrigger` wiring test reproduces a REAL unrecovered 401
+             # (a mocked `/api/events` 401 plus a mocked `/api/auth
+             # /anonymous` 500, so the actual `clearToken()`/`mintAnonymous()`
+             # chain runs and genuinely fails), not a stubbed flag; its
+             # "clears again" companion needed one iteration — a first draft
+             # dispatched a manual `focus` event moments after the failure
+             # and expected immediate recovery, which failed on BRAKE 3's
+             # real 60-second mint cooldown rather than on the fix itself,
+             # fixed by switching to fake timers and letting the component's
+             # own already-proven backoff-retry loop carry a later cycle
+             # past the real cooldown.
+             #
+             # `TZ=UTC make test`: 2523 passing (was 2516, +7 — exactly this
+             # run's new tests: 2 + 3 + 2; apps/web 1273, was 1266; no other
+             # suite moved: 255 v2 vitest, 47 v2/api, 349 v3/api, 118
+             # corpus-compiler, 420 engine, 61 fold-runner).
+             # `check-test-floor.mjs`: OK, 2523 >= floor 1899 (+624 margin,
+             # unmoved, same discipline as every prior entry). `TZ=UTC make
+             # build`: exit 0, 29 routes (unchanged — no route/UI surface
+             # added; both edited components are existing background/status
+             # modules already mounted). `npm run gates`: all green (fonts
+             # degraded-but-non-blocking, pre-existing; boundaries 295
+             # files — no new production file, three existing files edited
+             # plus their three existing test files; corpus-morphology and
+             # corpus-glyphs unchanged by this diff). `npx tsc --noEmit`:
+             # clean. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff produced by
+             # running the suite was reverted before committing, same
+             # discipline as every prior entry — `git status --porcelain --
+             # v1 v2` empty immediately before commit). No Arabic codepoint
+             # (the full diff swept programmatically over the Arabic,
+             # Arabic Supplement, Arabic Extended-A and both Presentation
+             # Forms Unicode blocks, plus a `\u06xx`/`\u08xx`-escape and
+             # `fromCharCode` sweep — zero matches; every new string is a
+             # fixed English status phrase, a boolean, or a plain fixture
+             # token, never corpus text).
+             #
+             # NOT addressed, named so a future run doesn't re-discover it
+             # as new: `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+             # (v3-D88..D94/D144/D145); `App\Billing\TrialAttribution`
+             # (v3-D148); `PaywallGate` as a whole class /
+             # `permitsIssuance`/`permitsReview` (v3-D88, v3-D151 — still a
+             # genuine open product-design question, not a wiring gap);
+             # multi-surah enrollment; the operational mailer/7-night window
+             # (still needs a live host/SMTP/seven real nights); PAY-1's
+             # Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127, deliberately not restructured);
+             # `packages/engine/src/placement.ts` (a design choice,
+             # v3-D111/D113/D123); the late-arrival refold half of v3-D32
+             # (no automatic refold-on-ingest pipeline exists yet — real,
+             # separate, larger scope); `AccountDeletionRequest::isDue()`
+             # (v3-D146, a zero-caller convenience method deliberately left
+             # alone) — all unchanged. With this, the sync layer's own
+             # zero-caller sweep (v3-D88, D89, D90, D93, D94, D161, D162) is,
+             # as far as this run could find, exhausted. See DECISIONS.md
+             # v3-D162.
              # NOTE (v3-D161, 2026-08-31): `SyncStatus.tsx`'s own two
              # escalation props — `cannotSync` (#110, a permanently
              # quarantined oversize event) and `divergences` (#50, a payload
