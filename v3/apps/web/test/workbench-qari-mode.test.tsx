@@ -91,3 +91,69 @@ describe("QariMode — the qari-tier option is gated by the caller's own role", 
     expect(qariRadio.disabled).toBe(true);
   });
 });
+
+describe("QariMode — v3-D167: the signature history for this ayah is rendered, not just fetched", () => {
+  // `lib/workbench/verifications.ts` has fetched and typed every prior
+  // `VerificationRow` (tier, reviewerKind, verifiedBy, note, createdAt) for a
+  // surah since step 15, and v3-D152 wired the raw array through as far as
+  // `describeCertification` — but nothing ever rendered a SINGLE row. A
+  // reviewer opening an ayah could see today's chip and, after their OWN
+  // submission, the result of that one action — never who signed a PRIOR
+  // verification, when, or why (a rejection note).
+  const row = {
+    id: 5,
+    surah: 12,
+    ayah: 4,
+    tier: "qari" as const,
+    contentHash: "abc",
+    hashSpecVersion: 1,
+    reviewerKind: "human" as const,
+    verifiedBy: "reviewer@example.test",
+    note: "checked distractor 3, wrong root — resubmit",
+    createdAt: 1735689600000, // 2025-01-01T00:00:00.000Z
+  };
+
+  it("renders tier, reviewer kind, who signed, when, and their note", () => {
+    render(
+      <QariMode surah={12} ayah={4} chip="stale" onSigned={() => {}} history={[row]} />,
+    );
+    // Scoped to the ONE history row, not the whole page — the tier picker
+    // below it also carries the words "qari"/"human" in unrelated controls
+    // (e.g. the disabled-qari-tier caption), so a loose page-wide match would
+    // pass even if the history row itself rendered nothing.
+    const historyItem = screen.getByRole("listitem");
+    expect(historyItem.textContent).toContain("qari");
+    expect(historyItem.textContent).toContain("human");
+    expect(historyItem.textContent).toContain("reviewer@example.test");
+    expect(historyItem.textContent).toContain("2025-01-01T00:00:00.000Z");
+    expect(historyItem.textContent).toContain("checked distractor 3, wrong root — resubmit");
+  });
+
+  it("falls back to — for a null verifiedBy, never a fabricated value", () => {
+    render(
+      <QariMode
+        surah={12}
+        ayah={4}
+        chip="stale"
+        onSigned={() => {}}
+        history={[{ ...row, verifiedBy: null, note: null }]}
+      />,
+    );
+    expect(screen.getByText(/signed by\s+—/)).toBeTruthy();
+    expect(screen.queryByText(/reviewer@example\.test/)).toBeNull();
+    // A null note is dropped entirely — never rendered as a stray ": —".
+    expect(screen.queryByText(/: —/)).toBeNull();
+  });
+
+  it("says so honestly when there is no history yet for this ayah", () => {
+    render(<QariMode surah={12} ayah={4} chip="unverified" onSigned={() => {}} history={[]} />);
+    expect(screen.getByText(/no signatures yet/i)).toBeTruthy();
+  });
+
+  it("history is optional — omitting the prop renders the empty state, never a crash", () => {
+    expect(() =>
+      render(<QariMode surah={12} ayah={4} chip="unverified" onSigned={() => {}} />),
+    ).not.toThrow();
+    expect(screen.getByText(/no signatures yet/i)).toBeTruthy();
+  });
+});

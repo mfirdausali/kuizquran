@@ -43,7 +43,7 @@
 // changes what the SERVER accepts.
 
 import { useState } from "react";
-import type { ChipState } from "@/lib/workbench/frontier.ts";
+import type { ChipState, VerificationRow } from "@/lib/workbench/frontier.ts";
 import {
   signAyah,
   type ReviewerKind,
@@ -72,9 +72,14 @@ export interface QariModeProps {
   chip: ChipState | null;
   /** Called after a signature so the parent can re-read the worklist. */
   onSigned: () => void;
+  /** v3-D167: this ayah's own prior signatures (already scoped by the
+   *  caller — `WorkbenchIsland` filters `FrontierLoad`'s raw `verifications`
+   *  to `ayah` before passing them down). Optional and defaulted to `[]` so
+   *  every existing caller/test that predates this field is unaffected. */
+  history?: readonly VerificationRow[];
 }
 
-export function QariMode({ surah, ayah, chip, onSigned }: QariModeProps) {
+export function QariMode({ surah, ayah, chip, onSigned, history = [] }: QariModeProps) {
   // Deny by default (`useAdminRoles()`'s own contract) — an admin with no
   // resolvable identity gets the same posture as one with no roles at all.
   const roles = useAdminRoles();
@@ -136,6 +141,23 @@ export function QariMode({ surah, ayah, chip, onSigned }: QariModeProps) {
         <span className="ltr-island">
           {surah}:{ayah}
         </span>
+      </div>
+
+      <div className="wb-field">
+        <span className="caption">Signature history for this ayah</span>
+        {history.length === 0 ? (
+          <p className="caption">No signatures yet for this ayah.</p>
+        ) : (
+          <ul>
+            {history.map((row) => (
+              <li key={row.id}>
+                {row.tier} tier — {row.reviewerKind} review — signed by{" "}
+                {row.verifiedBy ?? "—"} — {new Date(row.createdAt).toISOString()}
+                {row.note ? `: ${row.note}` : ""}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       <fieldset className="wb-field">

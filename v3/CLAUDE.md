@@ -53,9 +53,94 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2532 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2539 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 351 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1280 apps/web. (v3-D166, 2026-09-02)
+             # + 420 engine + 61 fold-runner + 1287 apps/web. (v3-D167, 2026-09-02)
+             # NOTE (v3-D167, 2026-09-02): `/workbench`'s per-ayah verification
+             # history (`ayah_verifications.verified_by`/`.note`/`.created_at`,
+             # sent whole on `VerificationsController::index()`'s
+             # `verifications` field since step 15) was fetched and typed
+             # client-side (`lib/workbench/frontier.ts#VerificationRow`) and,
+             # since v3-D152, reduced to ONE aggregate boolean via
+             # `describeCertification()` — but no single row ever reached a
+             # screen. An admin/qari opening an ayah saw today's chip and, for
+             # a few seconds after their OWN submission, that one outcome —
+             # never who signed a PRIOR verification, when, or their review
+             # note. Same "written/fetched, zero read surface" shape closed
+             # six times before on other tables (admin_audit, flag_ramp_audit,
+             # entitlement_transitions, purge_ledger, gloss_draft_reviews,
+             # billing_events) — here on `ayah_verifications` itself, GATE-A's
+             # own launch-blocking table. Fixed, display-only, no server/wire
+             # change: `verifications.ts#FrontierLoad`'s `ready` state gains a
+             # `verifications: readonly VerificationRow[]` field (the same
+             # array `certification` is already computed from);
+             # `WorkbenchIsland.tsx` filters it to the open ayah and passes it
+             # to `QariMode.tsx` as a new optional `history` prop, rendered as
+             # a "Signature history for this ayah" list (tier, reviewer kind,
+             # `verifiedBy ?? "—"`, `new Date(createdAt).toISOString()`, the
+             # note when present) above the signing form. RED confirmed
+             # directly: `git stash` of the three source files (every test
+             # kept, plus nine pre-existing `FrontierNavigator`-only test
+             # literals in `workbench-ui.test.tsx` that needed a
+             # `verifications: []` field to satisfy the newly-required type)
+             # failed exactly the 7 new cases — 2 in `loadFrontier` (the raw
+             # array is carried through / defaults to `[]`), 1 real
+             # `WorkbenchIsland`-level wiring test (renders ayah 1's own
+             # reviewer, hides ayah 2's, re-scopes on an ayah change via the
+             # real Ayah number input, against the frozen 12.json fixture),
+             # and 4 in `QariMode` (renders all five fields; falls back to
+             # "—" for a null `verifiedBy` and drops a null note rather than a
+             # stray ": —"; says so honestly when history is empty; stays
+             # crash-free with the prop omitted) — the other 34 cases in those
+             # two files unaffected; restored byte-identically, all green.
+             # `TZ=UTC make test`: 2539 passing (was 2532, +7 — exactly this
+             # run's new tests; apps/web 1287, was 1280; no other suite
+             # moved). `check-test-floor.mjs`: OK, 2539 >= floor 1899 (+640
+             # margin, unmoved). `TZ=UTC make build`: exit 0, 29 routes
+             # (unchanged — edits inside the existing `/workbench` component
+             # tree). `npm run gates`: all green (boundaries 295 files,
+             # unchanged count — no new production file, three existing files
+             # edited plus their two existing test files; fonts
+             # degraded-but-non-blocking, pre-existing). `npx tsc --noEmit`:
+             # clean (making `verifications` REQUIRED, not optional, surfaced
+             # nine pre-existing `FrontierNavigator`-only literals that needed
+             # the field added — each is `FrontierNavigator`-scoped and never
+             # touches `verifications`, so `[]` is the correct value, not a
+             # workaround). No `v1/**`/`v2/**` edit (stray
+             # `v2/tsconfig.tsbuildinfo` reverted before committing, same
+             # discipline as every prior entry). No Arabic codepoint (full
+             # diff swept over every Arabic block plus both Presentation
+             # Forms blocks, plus a `\u06xx`/`\u08xx`-escape and
+             # `fromCharCode` sweep — zero matches; every new string is a wire
+             # field name, an ISO timestamp derived from a fixture integer, a
+             # fixture coordinate, or a synthetic placeholder email/note,
+             # never corpus text). PROCESS NOTE: this session hit the
+             # identical "stale local `main` ref" trap v3-D77/D91/D127/D138/
+             # D159 each named before — an early `git checkout main`, before
+             # any exploration, silently moved HEAD from the real tip
+             # (`b7535af`, v3-D166) onto a stale local `main` seven commits
+             # behind (`68bf199`, v3-D159). Caught via `git log -- v3/
+             # CLAUDE.md` disagreeing with this session's own earlier `git
+             # log -1` — before any commit was made. Recovered with `git
+             # stash` of the uncommitted fix, `git fetch origin main` + `git
+             # merge --ff-only origin/main` (zero risk to work in progress),
+             # `git stash pop`, then a full re-verification against the
+             # corrected tree before writing this note or committing — see
+             # DECISIONS.md v3-D167's own process note for the full account.
+             # NOT addressed: `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+             # `App\Billing\TrialAttribution` (v3-D148);
+             # `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate`
+             # as a whole class (v3-D88, v3-D151); multi-surah enrollment;
+             # the operational mailer/7-night window; PAY-1's Stripe
+             # fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`
+             # (v3-D111/D113/D123); the late-arrival refold half of v3-D32;
+             # `AccountDeletionRequest::isDue()` (v3-D146);
+             # `lib/i18n/dictionaries.ts#isLocale()`; `BillingEventsPanel.tsx`'s
+             # single-event detail view (v3-D166) — all unchanged. See
+             # DECISIONS.md v3-D167.
              # NOTE (v3-D166, 2026-09-02): `BillingEventsPanel.tsx` — named by
              # v3-D164's own "NOT addressed" list and repeated unchanged by
              # v3-D165's — fetched `providerCreatedAt`/`processedAt`

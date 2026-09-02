@@ -12356,3 +12356,158 @@ surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy
 drift (v3-D127); `packages/engine/src/placement.ts` (v3-D111/D113/D123);
 the late-arrival refold half of v3-D32; `AccountDeletionRequest::isDue()`
 (v3-D146); `lib/i18n/dictionaries.ts#isLocale()`.
+
+---
+
+## Ratified 2026-09-02 (nightly) — v3-D167: the workbench's own per-ayah verification history was fetched, typed, and reduced to an aggregate claim — never rendered as a single row anywhere
+
+**Ratified 2026-09-02 (nightly).**
+
+An Explore agent's sweep for this build's recurring "mechanism built and
+tested, zero production caller" class, briefed with the long exclusion list
+this file and CLAUDE.md's running comment already name (`rhymeClassOf`,
+`EntitlementMachine::merge`, `TrialAttribution`, `PaywallGate`,
+`regionFromCountry`, multi-surah enrollment, the mailer/7-night window,
+PAY-1, surah 67's scene beats, the fold-runner severity taxonomy,
+`placement.ts`, late-arrival refold, `AccountDeletionRequest::isDue()`,
+`isLocale()`, and `BillingEventsPanel`'s single-event detail view), found
+one new instance one layer under a table already partly wired.
+
+`VerificationsController::index()` (`api/app/Http/Controllers/
+VerificationsController.php`) has sent the FULL `ayah_verifications` history
+for a surah — id, tier, reviewerKind, `verifiedBy` (the signing admin's
+email), `note`, `createdAt` — on the `verifications` field of its response
+since build-plan step 15. `lib/workbench/frontier.ts#VerificationRow` has
+mirrored that shape since v3-D152, and v3-D152 wired the array as far as
+`sign.ts#describeCertification(verifications, allGreen)` — but that function
+reads only `.reviewerKind`/`.tier`/`.length`, to answer one aggregate
+question ("may this UI say a scholar verified this surah"). The raw rows
+themselves — WHO signed a given ayah, WHEN, and their review NOTE — reached
+`lib/workbench/verifications.ts#loadFrontier` and were discarded there;
+`FrontierLoad`'s `"ready"` state carried only `worklist` and `certification`,
+never the rows. `grep -rn "verifiedBy" apps/web` (excluding the type
+declaration) returned only two test fixtures that SET the field to satisfy
+the type, never an assertion that it appears anywhere on screen.
+
+Consequence: an admin/qari opening `/workbench` for an ayah could see
+today's chip (verified/stale/unverified) and, for a few seconds after
+clicking "Sign," the outcome of their OWN submission — and nothing else. No
+way to see who signed a PRIOR verification, when, or why a colleague
+rejected one (their typed note). This is the identical "written/fetched,
+zero read surface" shape already closed six times on OTHER tables
+(`admin_audit` v3-D129, `flag_ramp_audit` v3-D130, `entitlement_transitions`
+v3-D141, `purge_ledger` v3-D142, `gloss_draft_reviews` v3-D156,
+`billing_events` v3-D148/D166) — here found on `ayah_verifications`, the
+GATE-A launch-blocking table itself, one layer under a field (`verifications`)
+that already had ONE real reader.
+
+**Fixed, display-only, no server or wire change — the controller already
+sends every field this needs.**
+
+- `lib/workbench/verifications.ts#FrontierLoad`'s `"ready"` state gains a
+  required `verifications: readonly VerificationRow[]` field, populated from
+  the same `parsed.verifications ?? []` `certification` is already computed
+  from — one array, two consumers, never a second fetch or a re-derivation.
+- `components/workbench/WorkbenchIsland.tsx` computes `historyForAyah` by
+  filtering `load.verifications` to the currently open `ayah` (memoized) and
+  passes it to `QariMode` as a new `history` prop.
+- `components/workbench/QariMode.tsx` gains an optional `history` prop
+  (defaulted to `[]`, so every pre-existing caller/test is unaffected) and
+  renders it as a "Signature history for this ayah" list above the signing
+  form: tier, reviewer kind, `verifiedBy ?? "—"`, the row's `createdAt` as an
+  ISO-8601 string (`new Date(row.createdAt).toISOString()`, the same
+  convention `BillingEventsPanel.tsx` established at v3-D166), and the note
+  when present — never a fabricated placeholder for a genuinely-null field,
+  matching every prior panel's `"—"` convention. An ayah with no history yet
+  says so in words ("No signatures yet for this ayah.") rather than
+  rendering an empty list indistinguishable from "still loading."
+
+**Verified.** RED confirmed directly: `git stash` of the three source files
+alone (`QariMode.tsx`, `WorkbenchIsland.tsx`, `verifications.ts` — every new
+test kept, plus nine pre-existing `FrontierNavigator`-only test literals in
+`workbench-ui.test.tsx` that needed a `verifications: []` field added to
+satisfy the now-required type) failed exactly the 7 new cases — 2 in
+`workbench-ui.test.tsx`'s `loadFrontier` block (the raw array is carried
+through; it defaults to `[]` when the wire omits the field), 1 new
+`WorkbenchIsland`-level wiring test (renders ayah 1's own reviewer, hides
+ayah 2's, and re-scopes on an ayah change via the real Ayah number input —
+not a mock of the filter), and 4 in `workbench-qari-mode.test.tsx` (renders
+tier/reviewerKind/verifiedBy/timestamp/note; falls back to `"—"` for a null
+`verifiedBy` and drops a null note rather than rendering a stray `": —"`;
+says so honestly when history is empty; and stays crash-free with the prop
+omitted entirely) — the other 34 tests in those two files unaffected;
+restored byte-identically (`git diff` empty), reran: all green.
+
+The `WorkbenchIsland`-level test is the load-bearing one: it renders the
+real component tree (`FrontierNavigator` + `QariMode` + `OverrideEditor` +
+`ExplainTrace`, against the frozen `packages/engine/test/fixtures/12.json`
+corpus, the same fixture `workbench-ui.test.tsx` already uses elsewhere in
+the file) with a single mocked `fetch` carrying two ayat's worth of history,
+and proves the SCOPING is real — ayah 1's reviewer email appears, ayah 2's
+does not, and clicking to ayah 2 flips which one shows — not merely that
+`QariMode` can print whatever array it is handed.
+
+`TZ=UTC make test`: **2513 passing** (was 2506, +7 — exactly this run's new
+tests; apps/web 1263, was 1256; no other suite moved: 255 v2 vitest, 47
+v2/api, 349 v3/api, 118 corpus-compiler, 420 engine, 61 fold-runner).
+`check-test-floor.mjs`: OK, 2513 >= floor 1899 (+614 margin, unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 29 routes
+(unchanged — no new route; this edits inside the existing `/workbench`
+component tree). `npm run gates`: all green (boundaries 293 files, unchanged
+count — no new production file, three existing files edited plus their two
+existing test files; fonts degraded-but-non-blocking, pre-existing;
+corpus-morphology and corpus-glyphs unchanged by this diff). `npx tsc
+--noEmit`: clean (making `verifications` a REQUIRED field, not optional,
+surfaced nine pre-existing `FrontierNavigator`-only test literals across
+`workbench-ui.test.tsx` that needed the field added — each is a
+`FrontierNavigator`-scoped render that never touches `verifications` itself,
+so `[]` is the correct fixture value, not a workaround). No `v1/**`/`v2/**`
+edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff produced by running
+the suite was reverted before committing, same discipline as every prior
+entry — `git status --porcelain -- v1 v2` empty immediately before commit).
+No Arabic codepoint (the full diff swept programmatically over the Arabic,
+Arabic Supplement, Arabic Extended-A and both Presentation Forms Unicode
+blocks, plus a `\u06xx`/`\u08xx`-escape and `fromCharCode` sweep — zero
+matches; every new string is a wire field name, an ISO timestamp derived
+from a fixture integer, a fixture coordinate (surah 12, the same fixture
+`workbench-ui.test.tsx` already uses), or a synthetic English placeholder
+email/note, never corpus text).
+
+**NOT addressed, named so a future run doesn't re-discover it as new:** this
+run's scope was the one field (`verifications`) `loadFrontier` already had a
+real, tested reader for (`describeCertification`) — it did not extend to a
+broader audit of every field on every wire response. `rhymeClassOf()`
+(v3-D136); `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148); `lib/pricing.ts#regionFromCountry()`
+(v3-D163); `PaywallGate` as a whole class (v3-D88, v3-D151); multi-surah
+enrollment; the operational mailer/7-night window; PAY-1's Stripe fixtures;
+surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy
+drift (v3-D127); `packages/engine/src/placement.ts` (v3-D111/D113/D123);
+the late-arrival refold half of v3-D32; `AccountDeletionRequest::isDue()`
+(v3-D146); `lib/i18n/dictionaries.ts#isLocale()`; `BillingEventsPanel.tsx`'s
+single-event detail view (v3-D166) — all unchanged.
+
+**A process note.** This run's own session began with the identical "stale
+local `main` ref" trap v3-D77 Finding 0 first named and v3-D91/D127/D138/D159
+each independently re-hit since — but here self-inflicted mid-session rather
+than found at the start: an early `git checkout main`, issued before any
+exploration, silently moved HEAD from the real tip (detached at `b7535af`,
+matching `origin/main`) onto a stale local `main` seven commits behind (at
+`68bf199`, v3-D159) — the same commit `git log -- v3/CLAUDE.md` reported as
+CLAUDE.md's most recent change, which is what surfaced it: `git log -1`
+after the checkout, `git log --oneline -- v3/CLAUDE.md`, and a direct read of
+`v3/CLAUDE.md` all agreed the file stopped at v3-D159, six commits short of
+the `v3-D166` this run's own earlier `git log --oneline -5` (before the
+checkout) had already shown at `HEAD`. Recovered cleanly before committing
+anything — `git stash push` of the (as-yet-uncommitted) fix, `git fetch
+origin main` + `git merge --ff-only origin/main` (a fast-forward, zero risk
+to work in progress), then `git stash pop` — followed by a full re-run of
+`make test`/`make build`/`npm run gates` against the corrected tree before
+this entry was written, so nothing above is verified against the stale
+tree. Recorded so this trap's own recurring pattern in this project's
+history — five, now six, independent hits — gets one more data point:
+`git checkout main` is not a safe default action in this repo's workflow at
+session start; `git fetch origin main && git checkout origin/main` (a
+deliberately detached, always-current checkout) or an explicit `git merge
+--ff-only origin/main` immediately after any `checkout main` would each have
+avoided it.

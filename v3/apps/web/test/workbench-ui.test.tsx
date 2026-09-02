@@ -31,13 +31,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { Corpus } from "@engine/types.ts";
 import { resolveRef } from "@engine/corpusRef.ts";
 import { explain } from "@/lib/workbench/explain";
 import { buildWorklist } from "@/lib/workbench/frontier";
 import { FrontierNavigator } from "@/components/workbench/FrontierNavigator";
 import { ExplainTrace } from "@/components/workbench/ExplainTrace";
+import { WorkbenchIsland } from "@/components/workbench/WorkbenchIsland";
 import { loadFrontier } from "@/lib/workbench/verifications";
 import { resetApiFetchForTests } from "@/lib/sync/apiFetch";
 import { describeCertification } from "@/lib/workbench/sign";
@@ -93,6 +94,7 @@ describe("FrontierNavigator — three states, never two", () => {
           state: "ready",
           worklist: buildWorklist({ frontier: {} }),
           certification: NO_HUMAN_CLAIM,
+          verifications: [],
         }}
         selectedAyah={null}
         onSelect={noop}
@@ -117,7 +119,7 @@ describe("FrontierNavigator — chips are never colour alone (§15)", () => {
   it("every row carries the status as a WORD, not only a coloured dot", () => {
     render(
       <FrontierNavigator
-        load={{ state: "ready", worklist, certification: NO_HUMAN_CLAIM }}
+        load={{ state: "ready", worklist, certification: NO_HUMAN_CLAIM, verifications: [] }}
         selectedAyah={null}
         onSelect={() => {}}
       />,
@@ -135,7 +137,7 @@ describe("FrontierNavigator — chips are never colour alone (§15)", () => {
   it("the coloured dot is aria-hidden — a screen reader is not told about a colour", () => {
     const { container } = render(
       <FrontierNavigator
-        load={{ state: "ready", worklist, certification: NO_HUMAN_CLAIM }}
+        load={{ state: "ready", worklist, certification: NO_HUMAN_CLAIM, verifications: [] }}
         selectedAyah={null}
         onSelect={() => {}}
       />,
@@ -148,7 +150,7 @@ describe("FrontierNavigator — chips are never colour alone (§15)", () => {
   it("the row's accessible name carries all three facts a sighted user gets", () => {
     render(
       <FrontierNavigator
-        load={{ state: "ready", worklist, certification: NO_HUMAN_CLAIM }}
+        load={{ state: "ready", worklist, certification: NO_HUMAN_CLAIM, verifications: [] }}
         selectedAyah={null}
         onSelect={() => {}}
       />,
@@ -163,7 +165,7 @@ describe("FrontierNavigator — chips are never colour alone (§15)", () => {
   it("marks the selected row with aria-current", () => {
     render(
       <FrontierNavigator
-        load={{ state: "ready", worklist, certification: NO_HUMAN_CLAIM }}
+        load={{ state: "ready", worklist, certification: NO_HUMAN_CLAIM, verifications: [] }}
         selectedAyah={2}
         onSelect={() => {}}
       />,
@@ -180,7 +182,7 @@ describe("FrontierNavigator — chips are never colour alone (§15)", () => {
     const chosen: number[] = [];
     render(
       <FrontierNavigator
-        load={{ state: "ready", worklist, certification: NO_HUMAN_CLAIM }}
+        load={{ state: "ready", worklist, certification: NO_HUMAN_CLAIM, verifications: [] }}
         selectedAyah={null}
         onSelect={(a) => chosen.push(a)}
       />,
@@ -204,7 +206,7 @@ describe("FrontierNavigator — the scholar-certification claim is on screen (v3
   it("renders the honest non-claim when no human qari has signed", () => {
     render(
       <FrontierNavigator
-        load={{ state: "ready", worklist, certification: NO_HUMAN_CLAIM }}
+        load={{ state: "ready", worklist, certification: NO_HUMAN_CLAIM, verifications: [] }}
         selectedAyah={null}
         onSelect={() => {}}
       />,
@@ -236,7 +238,7 @@ describe("FrontierNavigator — the scholar-certification claim is on screen (v3
     );
     render(
       <FrontierNavigator
-        load={{ state: "ready", worklist, certification: humanGreen }}
+        load={{ state: "ready", worklist, certification: humanGreen, verifications: [] }}
         selectedAyah={null}
         onSelect={() => {}}
       />,
@@ -269,7 +271,7 @@ describe("FrontierNavigator — the scholar-certification claim is on screen (v3
     );
     render(
       <FrontierNavigator
-        load={{ state: "ready", worklist, certification: aiOnlyGreen }}
+        load={{ state: "ready", worklist, certification: aiOnlyGreen, verifications: [] }}
         selectedAyah={null}
         onSelect={() => {}}
       />,
@@ -485,6 +487,126 @@ describe("loadFrontier — failure is a STATE, never an exception", () => {
     const load = await loadFrontier(12);
     expect(load.state).toBe("unavailable");
     if (load.state === "unavailable") expect(load.reason).toContain("no frontier");
+  });
+
+  it("v3-D167: carries the raw `verifications` rows through on `ready`, not just the reduced certification", async () => {
+    // Before this fix, `loadFrontier`'s `ready` state reduced `verifications`
+    // down to `certification` (v3-D152) and threw the raw rows away — nothing
+    // downstream could ever answer "who signed this ayah, and when."
+    const rows = [
+      {
+        id: 5,
+        surah: 12,
+        ayah: 1,
+        tier: "qari",
+        contentHash: "abc",
+        hashSpecVersion: 1,
+        reviewerKind: "human",
+        verifiedBy: "qari@example.test",
+        note: "checked distractor 3",
+        createdAt: 1000,
+      },
+    ];
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          frontier: { "1": { qari: "verified", admin: "verified" } },
+          verifications: rows,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    ) as unknown as typeof fetch;
+
+    const load = await loadFrontier(12);
+    expect(load.state).toBe("ready");
+    if (load.state === "ready") {
+      expect(load.verifications).toEqual(rows);
+    }
+  });
+
+  it("v3-D167: `verifications` defaults to an empty array when the wire omitted the field", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({ frontier: { "1": { qari: "verified", admin: "verified" } } }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    ) as unknown as typeof fetch;
+
+    const load = await loadFrontier(12);
+    expect(load.state).toBe("ready");
+    if (load.state === "ready") {
+      expect(load.verifications).toEqual([]);
+    }
+  });
+});
+
+describe("WorkbenchIsland — the signature history is ayah-scoped, wired end to end", () => {
+  beforeEach(() => {
+    resetApiFetchForTests();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows the open ayah's own history and hides another ayah's, and re-scopes on ayah change", async () => {
+    // Before this fix, `verifications.ts` fetched and typed every row (v3-D152
+    // wired the aggregate `certification` from it) but no component ever read
+    // a single row — `WorkbenchIsland` had nowhere for a reviewer to see WHO
+    // signed a prior verification or WHAT their note said.
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          frontier: {
+            "1": { qari: "verified", admin: "verified" },
+            "2": { qari: "verified", admin: "verified" },
+          },
+          verifications: [
+            {
+              id: 1,
+              surah: 12,
+              ayah: 1,
+              tier: "qari",
+              contentHash: "h1",
+              hashSpecVersion: 1,
+              reviewerKind: "human",
+              verifiedBy: "ayah-one-reviewer@example.test",
+              note: null,
+              createdAt: 1000,
+            },
+            {
+              id: 2,
+              surah: 12,
+              ayah: 2,
+              tier: "admin",
+              contentHash: "h2",
+              hashSpecVersion: 1,
+              reviewerKind: "ai",
+              verifiedBy: "ayah-two-reviewer@example.test",
+              note: null,
+              createdAt: 2000,
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    ) as unknown as typeof fetch;
+
+    render(<WorkbenchIsland surah={12} corpus={corpus} />);
+
+    // Ayah 1 is the default selection — its own reviewer appears, ayah 2's
+    // does not.
+    expect(await screen.findByText(/ayah-one-reviewer@example\.test/)).toBeTruthy();
+    expect(screen.queryByText(/ayah-two-reviewer@example\.test/)).toBeNull();
+
+    // Move to ayah 2 the same way a reviewer does — the SPEC pane's Ayah
+    // number input (`getByLabelText` would also match the frontier row
+    // buttons' own `aria-label="Ayah N..."`, so scope by role instead).
+    const ayahInput = screen.getByRole("spinbutton", { name: /ayah/i }) as HTMLInputElement;
+    fireEvent.change(ayahInput, { target: { value: "2" } });
+
+    expect(await screen.findByText(/ayah-two-reviewer@example\.test/)).toBeTruthy();
+    expect(screen.queryByText(/ayah-one-reviewer@example\.test/)).toBeNull();
   });
 });
 

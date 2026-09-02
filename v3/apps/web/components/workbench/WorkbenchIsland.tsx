@@ -113,6 +113,14 @@ export function WorkbenchIsland({ surah, corpus }: WorkbenchIslandProps) {
       ? (load.worklist.rows.find((r) => r.ayah === ayah)?.chip ?? null)
       : null;
 
+  // v3-D167: the open ayah's own signature history — filtered from the same
+  // raw rows the frontier is reduced from, never a second fetch and never
+  // re-derived server-side.
+  const historyForAyah = useMemo(
+    () => (load.state === "ready" ? load.verifications.filter((v) => v.ayah === ayah) : []),
+    [load, ayah],
+  );
+
   const ayahCount = corpus.meta.ayahCount;
   const ayahWords = useMemo(() => corpus.words.filter((w) => w.ayah === ayah), [corpus, ayah]);
   const spec = useMemo(
@@ -188,6 +196,7 @@ export function WorkbenchIsland({ surah, corpus }: WorkbenchIslandProps) {
         ayah={ayah}
         chip={chipForAyah}
         onSigned={() => setFrontierEpoch((n) => n + 1)}
+        history={historyForAyah}
       />
 
       <OverrideEditor surah={surah} ayah={ayah} words={ayahWords} surahWords={corpus.words} />

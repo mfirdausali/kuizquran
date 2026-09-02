@@ -23,7 +23,12 @@
 // (skeleton / true-empty / broken).
 
 import { apiFetch } from "@/lib/sync/apiFetch.ts";
-import { buildWorklist, type FrontierResponse, type FrontierWorklist } from "./frontier.ts";
+import {
+  buildWorklist,
+  type FrontierResponse,
+  type FrontierWorklist,
+  type VerificationRow,
+} from "./frontier.ts";
 import { describeCertification, type CertificationClaim } from "./sign.ts";
 
 export type FrontierLoad =
@@ -37,6 +42,14 @@ export type FrontierLoad =
        *  the one place any surface may ask "may this UI say a scholar
        *  verified this." */
       certification: CertificationClaim;
+      /** v3-D167: the raw per-ayah rows behind `worklist`/`certification`
+       *  above, carried through unfiltered — the ONE place a caller (the
+       *  signature-history pane) can ask "who signed this ayah, and when",
+       *  a question the reduced chip and the aggregate claim cannot answer.
+       *  Defaults to `[]` when the wire omitted the field (an older cache, a
+       *  truncated body) — never a throw, matching `certification`'s own
+       *  degrade-to-the-safe-non-claim discipline just above. */
+      verifications: readonly VerificationRow[];
     }
   /** The API could not be reached or did not answer with a usable body. The
    *  worklist is NOT included — a broken load has no rows to show, and
@@ -84,6 +97,7 @@ export async function loadFrontier(surah: number): Promise<FrontierLoad> {
   // `verifications` is optional on the wire (an older cache, a truncated
   // body) — absence degrades to the safe non-claim via an empty row set,
   // never a throw and never a silently assumed claim.
-  const certification = describeCertification(parsed.verifications ?? [], worklist.allGreen);
-  return { state: "ready", worklist, certification };
+  const verifications = parsed.verifications ?? [];
+  const certification = describeCertification(verifications, worklist.allGreen);
+  return { state: "ready", worklist, certification, verifications };
 }
