@@ -126,6 +126,8 @@ export function BillingEventsPanel() {
               <thead>
                 <tr>
                   <th scope="col">Received</th>
+                  <th scope="col">Provider created</th>
+                  <th scope="col">Processed</th>
                   <th scope="col">Provider event</th>
                   <th scope="col">Type</th>
                   <th scope="col">Outcome</th>
@@ -137,6 +139,8 @@ export function BillingEventsPanel() {
                 {load.entries.map((e, i) => (
                   <tr key={`${e.providerEventId}-${i}`}>
                     <td>{new Date(e.receivedAt).toISOString()}</td>
+                    <td>{e.providerCreatedAt !== null ? new Date(e.providerCreatedAt).toISOString() : "—"}</td>
+                    <td>{e.processedAt !== null ? new Date(e.processedAt).toISOString() : "—"}</td>
                     <td>
                       <code className="ltr-island">{e.providerEventId}</code>
                     </td>

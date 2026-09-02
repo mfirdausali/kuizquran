@@ -53,9 +53,75 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2530 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2532 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 351 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1278 apps/web. (v3-D165, 2026-09-01)
+             # + 420 engine + 61 fold-runner + 1280 apps/web. (v3-D166, 2026-09-02)
+             # NOTE (v3-D166, 2026-09-02): `BillingEventsPanel.tsx` — named by
+             # v3-D164's own "NOT addressed" list and repeated unchanged by
+             # v3-D165's — fetched `providerCreatedAt`/`processedAt`
+             # (`lib/admin/billingEvents.ts#BillingEventEntry`, sent in full
+             # by `BillingEventsController::index()` since v3-D148) but
+             # rendered neither; the table showed only `receivedAt` (when
+             # this server first saw the delivery), a materially different
+             # timestamp from Stripe's own `created` or from when processing
+             # actually finished. The header's "EVERY FIELD IS RENDERED
+             # VERBATIM" claim was false for two of eight fields — the same
+             # shape as `FlagAuditPanel.tsx`'s (v3-D165) and
+             # `AuditLogPanel.tsx`'s (v3-D164) own dropped fields, the third
+             # and last of the three v3-D164's sweep found. `processedAt` is
+             # the one field the journal's own docblock says it exists to
+             # make visible ("a crash mid-handler leaves a replayable row
+             # rather than a silently-lost event") — an operator had no way
+             # to see it at all. Fixed, display-only, no server/wire change:
+             # two new columns, "Provider created" and "Processed", next to
+             # the existing "Received" column, each an ISO-8601 string or
+             # the table's existing "—" placeholder when null (both fields
+             # are genuinely nullable) — never a fabricated timestamp.
+             # RED confirmed directly: `git stash` of
+             # `BillingEventsPanel.tsx` alone (both new tests kept, 6
+             # pre-existing cases untouched) failed exactly the 2 new cases
+             # in `billing-events-panel.test.tsx`, 6 unaffected; restored
+             # byte-identically, 8/8 green. The positive case's
+             # `processedAt` fixture value is 100ms off `receivedAt` so
+             # `getByText` cannot match the wrong column; the null case's
+             # fixture keeps `subjectPseudonym`/`error`/`outcome` non-null so
+             # its two counted "—"s can only come from the two new columns.
+             # `TZ=UTC make test`: 2532 passing (was 2530, +2 — exactly this
+             # run's new tests; apps/web 1280, was 1278; no other suite
+             # moved). `check-test-floor.mjs`: OK, 2532 >= floor 1899 (+633
+             # margin, unmoved, same discipline as every prior entry).
+             # `TZ=UTC make build`: exit 0, 29 routes (unchanged — no new
+             # route; edits inside an existing component on the existing
+             # `/settings/billing` route). `npm run gates`: all green
+             # (boundaries 294 files, unchanged count — one existing file
+             # edited plus its test, no new production file; fonts
+             # degraded-but-non-blocking, pre-existing; corpus-morphology
+             # and corpus-glyphs unchanged). `npx tsc --noEmit`: clean. No
+             # `v1/**`/`v2/**` edit (stray `v2/tsconfig.tsbuildinfo`
+             # reverted before committing, same discipline as every prior
+             # entry). No Arabic codepoint (full diff swept over every
+             # Arabic block plus both Presentation Forms blocks, plus a
+             # `\u06xx`/`\u08xx`-escape and `fromCharCode` sweep — zero
+             # matches; every new string is a fixed English column header or
+             # an ISO timestamp derived from a fixture integer, never corpus
+             # text). With this, all three sibling gaps v3-D164's sweep
+             # found are closed — a future sweep should look elsewhere for
+             # the next instance of this bug class. NOT addressed:
+             # `BillingEventsPanel.tsx` still has no single-event detail
+             # view (the raw `payload` is deliberately never sent at all —
+             # a different, smaller follow-up); `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+             # `App\Billing\TrialAttribution` (v3-D148);
+             # `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate`
+             # as a whole class (v3-D88, v3-D151); multi-surah enrollment;
+             # the operational mailer/7-night window; PAY-1's Stripe
+             # fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`
+             # (v3-D111/D113/D123); the late-arrival refold half of v3-D32;
+             # `AccountDeletionRequest::isDue()` (v3-D146);
+             # `lib/i18n/dictionaries.ts#isLocale()` — all unchanged. See
+             # DECISIONS.md v3-D166.
              # NOTE (v3-D165, 2026-09-01): `FlagAuditPanel.tsx` — v3-D164's own
              # "NOT addressed" list named this exactly — fetched all four of
              # the enable-hard ceremony's inputs (`lib/admin/flagAudit.ts

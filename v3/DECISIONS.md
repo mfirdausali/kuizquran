@@ -12263,3 +12263,96 @@ mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
 `packages/engine/src/placement.ts` (v3-D111/D113/D123); the late-arrival
 refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146);
 `lib/i18n/dictionaries.ts#isLocale()`.
+
+### v3-D166 — `BillingEventsPanel.tsx` fetched `providerCreatedAt`/`processedAt` but rendered neither (2026-09-02)
+
+v3-D164's own "NOT addressed" list named this exactly, and v3-D165's own
+"NOT addressed" list repeated it unchanged: `lib/admin/billingEvents.ts
+#BillingEventEntry`/`isBillingEventEntry` fetched and type-validated both
+`providerCreatedAt` (Stripe's own `created` timestamp) and `processedAt`
+(when this server finished handling the delivery — the field the module's
+own docblock names as "the one gap the journal exists to make visible
+rather than hide," i.e. a `null` here after a mid-write crash), but
+`BillingEventsPanel.tsx`'s table rendered only `receivedAt` (when this
+server first SAW the delivery) — a materially different timestamp from
+either dropped field. The component's own header comment claimed "EVERY
+FIELD IS RENDERED VERBATIM," false for two of the type's eight fields, the
+same shape as `FlagAuditPanel.tsx`'s identical claim (v3-D165) and
+`AuditLogPanel.tsx`'s (v3-D164) on their own dropped fields — this is the
+third and, per this run's own re-check of both named siblings, last of the
+three v3-D164 sweep found. Concretely: an operator using this journal to
+answer "did Stripe's event actually finish processing, and when" (the
+question `WebhookHandler::ingest()`'s own header names as the reason this
+table's `processed_at` column exists — "a crash mid-handler leaves a
+replayable row rather than a silently-lost event") had no way to see
+`processedAt` at all, and no way to distinguish Stripe's own delivery
+timestamp from this server's receipt time.
+
+Backend and wire were already complete — `BillingEventsController::index()`
+has sent both fields since v3-D148, and `isBillingEventEntry()` has
+required both since the same commit; this was a pure display gap, no
+server or wire change.
+
+**Fixed:** two new table columns, "Provider created" and "Processed",
+inserted next to the existing "Received" column (all three are timestamps
+and read most naturally grouped). Each renders `new Date(...).toISOString()`
+when non-null, and the same "—" placeholder every other nullable column in
+this table already uses — never a fabricated timestamp — when `null` (both
+fields are genuinely nullable: `providerCreatedAt` for a delivery that
+carried none, `processedAt` for the crash-mid-handler case the docblock
+names).
+
+**Verified:** RED confirmed directly: `git stash` of
+`BillingEventsPanel.tsx` alone (both new tests kept, the 6 pre-existing
+cases in the file untouched) and re-running `billing-events-panel.test.tsx`
+failed exactly the 2 new cases — `getByText` misses on the ISO strings for
+the positive case, `dashes.length` 1 instead of >=2 for the null case — the
+6 pre-existing cases unaffected; restored byte-identically (`git diff`
+empty), reran: 8/8 green. The positive case uses a `processedAt` value
+distinct from `receivedAt` by 100ms (`appliedEntry`'s existing fixture
+already had this property, unmodified) so `getByText` cannot pass by
+matching the wrong column; the null case uses a fixture where
+`subjectPseudonym`/`error`/`outcome` are all non-null, so the two "—"s it
+counts can only come from the two new columns, not the pre-existing
+null-subject fallback.
+
+`TZ=UTC make test`: 2532 passing (was 2530, +2 — exactly this run's two new
+tests; apps/web 1280, was 1278; no other suite moved: 255 v2 vitest, 47
+v2/api, 351 v3/api, 118 corpus-compiler, 420 engine, 61 fold-runner).
+`check-test-floor.mjs`: OK, 2532 >= floor 1899 (+633 margin, unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 29 routes
+(unchanged — no new route; this edits inside an existing component on the
+existing `/settings/billing` route). `npm run gates`: all green (boundaries
+294 files, unchanged count — no new production file, one existing file
+edited plus its existing test file; fonts degraded-but-non-blocking,
+pre-existing and unrelated; corpus-morphology and corpus-glyphs
+unchanged). `npx tsc --noEmit`: clean (via `make build`'s own TypeScript
+pass). No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff produced by running the suite was reverted before
+committing, same discipline as every prior entry — `git status --porcelain
+-- v1 v2` empty immediately before commit). No Arabic codepoint (the full
+diff swept programmatically, in Python, over the Arabic (U+0600–06FF),
+Arabic Supplement (U+0750–077F), Arabic Extended-A (U+08A0–08FF) and both
+Presentation Forms blocks (U+FB50–FDFF, U+FE70–FEFF), plus a
+`\u06xx`/`\u08xx`-escape and `fromCharCode` sweep — zero matches; every new
+string is a fixed English column header or an ISO-8601 timestamp derived
+from a fixture integer, never corpus text).
+
+**NOT addressed**, named so a future run doesn't re-discover it as new: with
+this, all three sibling gaps v3-D164's sweep found
+(`AdminAuditController`'s `ip`/`requestId`, `FlagAuditPanel.tsx`'s ceremony
+fields, `BillingEventsPanel.tsx`'s `providerCreatedAt`/`processedAt`) are
+closed — a future sweep should look elsewhere for the next instance of this
+bug class, not re-check this trio. `BillingEventsPanel.tsx` still has no
+single-event detail view (the raw `payload` is deliberately never sent at
+all, per `BillingEventsController`'s own header — this is not that gap,
+this is a genuinely different, smaller follow-up: a detail view for the
+fields already on the wire). Also unchanged, all as before: `rhymeClassOf()`
+(v3-D136); `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148); `lib/pricing.ts#regionFromCountry()`
+(v3-D163); `PaywallGate` as a whole class (v3-D88, v3-D151); multi-surah
+enrollment; the operational mailer/7-night window; PAY-1's Stripe fixtures;
+surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy
+drift (v3-D127); `packages/engine/src/placement.ts` (v3-D111/D113/D123);
+the late-arrival refold half of v3-D32; `AccountDeletionRequest::isDue()`
+(v3-D146); `lib/i18n/dictionaries.ts#isLocale()`.

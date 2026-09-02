@@ -88,6 +88,46 @@ describe("BillingEventsPanel — three states, never two", () => {
     expect(row?.textContent).not.toContain("null");
   });
 
+  /**
+   * `providerCreatedAt`/`processedAt` are fetched and validated
+   * (`lib/admin/billingEvents.ts#isBillingEventEntry`) but the table used to
+   * render neither — the same "fetched and discarded" shape v3-D164 fixed for
+   * `admin_audit`'s `ip`/`requestId`. `processedAt` is the one field this
+   * journal's own docblock says it exists to make visible: "a mid-write
+   * crash between insert and update is the one gap the journal exists to
+   * make visible rather than hide." This entry uses a `processedAt` distinct
+   * from `receivedAt` so the assertion cannot pass by reading the wrong
+   * column.
+   */
+  it("renders each entry's providerCreatedAt and processedAt, distinct from receivedAt", async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse({ entries: [appliedEntry], limit: 200 })) as unknown as typeof fetch;
+    render(<BillingEventsPanel />);
+
+    await waitFor(() => expect(screen.getByText("evt_1")).toBeTruthy());
+    expect(screen.getByText(new Date(appliedEntry.providerCreatedAt).toISOString())).toBeTruthy();
+    expect(screen.getByText(new Date(appliedEntry.processedAt).toISOString())).toBeTruthy();
+  });
+
+  /**
+   * A delivery whose processing never completed (`processedAt: null` — "should
+   * not happen in practice", per the journal's own docblock, but the one case
+   * this column exists to surface) and a delivery that carried no provider
+   * timestamp (`providerCreatedAt: null`) each render an honest em-dash in
+   * their OWN column, never a fabricated timestamp and never silently
+   * omitted.
+   */
+  it("a null providerCreatedAt/processedAt renders as an em-dash, never a fabricated timestamp", async () => {
+    const incomplete = { ...appliedEntry, providerEventId: "evt_3", providerCreatedAt: null, processedAt: null };
+    globalThis.fetch = vi.fn(async () => jsonResponse({ entries: [incomplete], limit: 200 })) as unknown as typeof fetch;
+    render(<BillingEventsPanel />);
+
+    await waitFor(() => expect(screen.getByText("evt_3")).toBeTruthy());
+    const row = screen.getByText("evt_3").closest("tr");
+    expect(row?.textContent).not.toContain("null");
+    const dashes = row?.textContent?.match(/—/g) ?? [];
+    expect(dashes.length).toBeGreaterThanOrEqual(2);
+  });
+
   it("EMPTY renders an honest zero-state, not an eternal skeleton", async () => {
     globalThis.fetch = vi.fn(async () => jsonResponse({ entries: [], limit: 200 })) as unknown as typeof fetch;
     render(<BillingEventsPanel />);
