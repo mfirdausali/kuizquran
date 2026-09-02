@@ -12622,3 +12622,98 @@ in `SystemHealthPanel.tsx`'s own header ("inventing placeholder rows...
 would be the same 'manufactures confidence' mistake") — a known,
 acknowledged seam, not a silent defect, so it was not treated as a new
 finding here.
+
+## Ratified 2026-09-02 (nightly, later still) — v3-D169: `GlossDraftsPanel.tsx` fetched and typed `authorKind`/`authoredBy` since the workflow shipped, never rendered either
+
+**Session start note.** Verified `main` was at `origin/main`'s real tip
+(`0f8d3cd`, v3-D168) before starting — no stale-local-`main` recurrence.
+
+**Found:** `apps/web/lib/admin/glossDrafts.ts#GlossDraftRow.authorKind`
+(`"ai" | "human"`, `isGlossDraftRow()`'s own runtime check *requires* the
+field to be present) and `.authoredBy` (`string | null`) have been fetched
+and typed since the gloss-draft workflow shipped (v3-D145) — the backend
+writes both on every `store()` call (`api/app/Http/Controllers/
+GlossDraftsController.php:172-173`, `author_kind`/`authored_by` columns on
+`gloss_drafts`, migrated at `2026_08_11_130000_create_gloss_drafts_table
+.php:94-95`) and sends both on the wire (`toWire()`, lines 313-314: `'author
+Kind' => $r->author_kind, 'authoredBy' => $r->authored_by`) — but
+`GlossDraftsPanel.tsx`, the one screen that lists an ayah's drafts, never
+put either on screen: its table had six columns (Pos/Status/Text/Reviewed
+by/History/Action), no seventh naming who — or what — authored the row.
+Same "written, wire-carried, zero read surface" shape this build has
+closed repeatedly on sibling review-workflow surfaces (`Override::editor()`
+at v3-D163, `gloss_draft_reviews`' own history at v3-D156/D160,
+`ayah_verifications`' per-row history at v3-D167) — here on the SAME
+`GlossDraftsPanel.tsx` those entries already touched, one field over: the
+draft's own authorship, not its review history.
+
+This one has a sharper consequence than most instances of this class: the
+panel's own "Author" form field (the one an admin fills in when saving a
+correction) exists precisely so a reviewer can later tell an AI-drafted
+gloss from a human-authored one — MS content quality review (v3-D15/v3-D20's
+"LLM MS: Arabic codepoints / Indonesian false friends... human review
+mandatory before `reviewed`") depends on knowing which drafts came from an
+LLM batch and which from a human editor. A reviewer opening the History
+column could see WHO reviewed a draft and WHEN, but never who (or what)
+wrote it in the first place — the exact distinction the field exists to
+carry.
+
+**Fixed, display-only, no server/wire change:** one new `<th>`/`<td>`
+column, "Authored by", between Text and Reviewed by, rendering
+`` `${row.authorKind === "ai" ? "AI draft" : "human"} · ${row.authoredBy ??
+"—"}` `` — `"—"` only for a null `authoredBy` (an AI-authored row with no
+named human operator, or a legacy row from before an actor was tracked),
+never a fabricated name, matching this panel's own existing `"—"`
+convention for `reviewedBy` exactly.
+
+**Verified:** RED confirmed directly — `git stash` of
+`components/admin/GlossDraftsPanel.tsx` alone (both new/strengthened test
+cases in `test/gloss-drafts-panel.test.tsx` kept, the file's other 10
+pre-existing cases untouched) and rerunning failed exactly 2 of 12: the
+positive case (a new assertion, `screen.getByText("human ·
+admin@example.com")`, added to the pre-existing READY-state test, whose own
+fixture already carried `authorKind: "human"`/`authoredBy:
+"admin@example.com"` and had never been asserted on) and a new dedicated
+negative case (`AI draft · —` renders, and the human-author string does
+NOT, for a row with `authorKind: "ai"` and `authoredBy: null` — proving the
+fallback is real and that a null author is never rendered as a name rather
+than merely proving the happy path). `git stash pop` restored the component
+byte-identically (`git diff` empty on that file before reapplying), reran:
+12/12 green again.
+
+`TZ=UTC make test`: 2540 passing (was 2539, +1 — exactly this run's one net
+new `it()` block; the positive-case assertion was added to an EXISTING
+test, so it carries no separate count; apps/web 1288, was 1287; no other
+suite moved: 255 v2 vitest, 47 v2/api, 351 v3/api, 118 corpus-compiler, 420
+engine, 61 fold-runner). `check-test-floor.mjs`: OK, 2540 >= floor 1899
+(+641 margin, unmoved, same discipline as every prior entry). `TZ=UTC make
+build`: exit 0, 29 routes (unchanged — edits inside the existing
+`/settings/gloss-drafts` component, no new route). `npm run gates`: all
+green (boundaries 295 files, unchanged count — one existing production
+file edited plus its one existing test file, no new production file; fonts
+degraded-but-non-blocking, pre-existing; corpus-morphology 362 words/
+corpus-glyphs 206 codepoints, both unchanged). `npx tsc --noEmit`: clean.
+No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the suite was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2` empty
+immediately before commit). No Arabic codepoint (the diff swept
+programmatically over the Arabic, Arabic Supplement, Arabic Extended-A and
+both Presentation Forms Unicode blocks, plus a `\u06xx`/`\u08xx`-escape and
+`fromCharCode` sweep — zero matches; every new string is a fixed English
+column header, the literal words "AI draft"/"human"/"—", or the
+pre-existing fixture's synthetic `"admin@example.com"` placeholder, never
+corpus or gloss content).
+
+**NOT addressed, named so a future run doesn't re-discover it as new:**
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151); multi-surah enrollment; the operational
+mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123); the late-arrival
+refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146);
+`lib/i18n/dictionaries.ts#isLocale()`; `BillingEventsPanel.tsx`'s
+single-event detail view (v3-D166); `SystemHealthController::METRICS`'s
+`atom_cache_coverage`/`events_ingested_24h` (v3-D168, a known, reasoned
+omission, not a silent defect) — all unchanged.

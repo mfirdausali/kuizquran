@@ -53,9 +53,79 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2539 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2540 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 351 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1287 apps/web. (v3-D168, 2026-09-02)
+             # + 420 engine + 61 fold-runner + 1288 apps/web. (v3-D169, 2026-09-02)
+             # NOTE (v3-D169, 2026-09-02): `GlossDraftsPanel.tsx` fetched and
+             # typed `authorKind`/`authoredBy` (`lib/admin/glossDrafts.ts
+             # #GlossDraftRow`, required by `isGlossDraftRow()`'s own runtime
+             # check) since the gloss-draft workflow shipped (v3-D145) —
+             # `GlossDraftsController::toWire()` sends both on every row,
+             # backed by real `author_kind`/`authored_by` columns
+             # (`gloss_drafts` migration, `store()` sets both from the admin's
+             # form input) — but the one screen that lists an ayah's drafts
+             # never rendered either: six columns (Pos/Status/Text/Reviewed
+             # by/History/Action), no seventh naming who — or what — wrote the
+             # draft. Same "written, wire-carried, zero read surface" shape
+             # this build has closed repeatedly on sibling review-workflow
+             # surfaces (`Override::editor()` v3-D163, `gloss_draft_reviews`'
+             # own history v3-D156/D160, `ayah_verifications`' per-row history
+             # v3-D167) — here on the SAME `GlossDraftsPanel.tsx` those
+             # entries already touched, one field over. Sharper consequence
+             # than most instances of this class: the panel's own "Author"
+             # form field exists precisely so a reviewer can later tell an
+             # AI-drafted gloss from a human-authored one — v3-D15/D20's "LLM
+             # MS... human review mandatory before `reviewed`" depends on
+             # knowing which drafts came from an LLM batch — and a reviewer
+             # could see WHO reviewed a draft but never who (or what) wrote it
+             # in the first place. Fixed, display-only, no server/wire change:
+             # one new "Authored by" column rendering `` `${authorKind ===
+             # "ai" ? "AI draft" : "human"} · ${authoredBy ?? "—"}` `` — "—"
+             # only for a null `authoredBy`, never a fabricated name, matching
+             # the panel's existing "—" convention for `reviewedBy` exactly.
+             # RED confirmed directly: reverting the component alone (both new
+             # test cases kept — one assertion added to the existing
+             # READY-state test, one new dedicated case for an AI-authored
+             # row with a null `authoredBy`) failed exactly 2 of 12 in
+             # `gloss-drafts-panel.test.tsx`, 10 pre-existing cases unaffected;
+             # restored byte-identically, 12/12 green. The negative case
+             # proves the null-author fallback is real (`AI draft · —` renders
+             # and the human-author string does not) rather than merely
+             # proving the happy path. `TZ=UTC make test`: 2540 passing (was
+             # 2539, +1 — exactly this run's one net-new `it()` block; apps/web
+             # 1288, was 1287; no other suite moved). `check-test-floor.mjs`:
+             # OK, 2540 >= floor 1899 (+641 margin, unmoved). `TZ=UTC make
+             # build`: exit 0, 29 routes (unchanged — edits inside the
+             # existing `/settings/gloss-drafts` component). `npm run gates`:
+             # all green (boundaries 295 files, unchanged count — one
+             # existing production file edited plus its one existing test
+             # file, no new production file; fonts degraded-but-non-blocking,
+             # pre-existing). `npx tsc --noEmit`: clean. No `v1/**`/`v2/**`
+             # edit (stray `v2/tsconfig.tsbuildinfo` reverted before
+             # committing, same discipline as every prior entry). No Arabic
+             # codepoint (the diff swept programmatically over the Arabic,
+             # Arabic Supplement, Arabic Extended-A and both Presentation
+             # Forms Unicode blocks, plus a `\u06xx`/`\u08xx`-escape and
+             # `fromCharCode` sweep — zero matches; every new string is a
+             # fixed English column header, the literal words "AI
+             # draft"/"human"/"—", or the pre-existing fixture's synthetic
+             # "admin@example.com" placeholder, never corpus or gloss
+             # content). NOT addressed: `SystemHealthController::METRICS`'s
+             # `atom_cache_coverage`/`events_ingested_24h` (v3-D168, a known,
+             # reasoned omission); `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+             # `App\Billing\TrialAttribution` (v3-D148);
+             # `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate`
+             # as a whole class (v3-D88, v3-D151); multi-surah enrollment;
+             # the operational mailer/7-night window; PAY-1's Stripe
+             # fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`
+             # (v3-D111/D113/D123); the late-arrival refold half of v3-D32;
+             # `AccountDeletionRequest::isDue()` (v3-D146);
+             # `lib/i18n/dictionaries.ts#isLocale()`; `BillingEventsPanel
+             # .tsx`'s single-event detail view (v3-D166) — all unchanged.
+             # See DECISIONS.md v3-D169.
              # NOTE (v3-D168, 2026-09-02): `BillingAuditPanel.tsx`'s own
              # "EVERY FIELD IS RENDERED VERBATIM" header claim was false for
              # `providerEventId` — fetched, typed and validated

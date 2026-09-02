@@ -91,6 +91,12 @@ describe("GlossDraftsPanel — three read states, never two", () => {
     render(<GlossDraftsPanel />);
     await waitFor(() => expect(screen.getByText("first draft text")).toBeTruthy());
     expect(screen.getByText(/1 draft/)).toBeTruthy();
+    // `authorKind`/`authoredBy` are fetched and typed
+    // (`isGlossDraftRow` requires `authorKind`) but were never rendered
+    // anywhere in the table — a reviewer could not tell an AI-authored
+    // draft from a human-authored one, exactly the distinction the panel's
+    // own "Authored by" form field asks the admin to set on save.
+    expect(screen.getByText("human · admin@example.com")).toBeTruthy();
     vi.unstubAllGlobals();
   });
 
@@ -98,6 +104,29 @@ describe("GlossDraftsPanel — three read states, never two", () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(emptyWorklist())));
     render(<GlossDraftsPanel />);
     await waitFor(() => expect(screen.getByText(/no drafts yet/i)).toBeTruthy());
+  });
+});
+
+describe("GlossDraftsPanel — the draft's own author is visible, not just the reviewer", () => {
+  beforeEach(() => resetApiFetchForTests());
+  afterEach(() => vi.restoreAllMocks());
+
+  it("an AI-authored draft with no authoredBy renders the AI label and an em-dash, never a fabricated name", async () => {
+    const aiRow = { ...DRAFT_ROW, id: 9, authorKind: "ai", authoredBy: null };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          ...emptyWorklist(),
+          counts: { draft: 1, reviewed: 0, merged: 0, unauthored: 0 },
+          drafts: [aiRow],
+        }),
+      ),
+    );
+    render(<GlossDraftsPanel />);
+    await waitFor(() => expect(screen.getByText("first draft text")).toBeTruthy());
+    expect(screen.getByText("AI draft · —")).toBeTruthy();
+    expect(screen.queryByText("human · admin@example.com")).toBeNull();
   });
 });
 
