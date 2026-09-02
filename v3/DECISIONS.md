@@ -12511,3 +12511,114 @@ session start; `git fetch origin main && git checkout origin/main` (a
 deliberately detached, always-current checkout) or an explicit `git merge
 --ff-only origin/main` immediately after any `checkout main` would each have
 avoided it.
+
+---
+
+## Ratified 2026-09-02 (nightly, later) — v3-D168: `BillingAuditPanel.tsx`'s own "EVERY FIELD IS RENDERED VERBATIM" header claim was false for `providerEventId`
+
+**Session start note.** This run began on a detached `HEAD` one commit ahead
+of the local `main` ref (`55680ea`, v3-D167) — a leftover from the prior
+session's own recovery, not a fresh trap. `git fetch origin main` showed
+`origin/main` already at that same `55680ea` (the prior session's push had
+landed cleanly), so `git checkout main && git merge --ff-only origin/main`
+fast-forwarded the local branch with zero risk — the "stale local `main`"
+shape v3-D77/D91/D127/D138/D159/D167 each independently hit was checked for
+directly and did not recur this run.
+
+**Found:** `apps/web/lib/admin/billingAudit.ts#BillingAuditEntry.providerEventId`
+(`string | null`) has been fetched, typed and validated
+(`isBillingAuditEntry()`) since `Admin\AdminBillingController::index()`
+first put it on the wire (v3-D147/D148 era) — the controller sends it as the
+5th of 8 fields on every `entries[]` row
+(`api/app/Http/Controllers/Admin/AdminBillingController.php:77`), and it is
+a genuine, non-synthetic column (`entitlement_transitions.provider_event_id`,
+`api/app/Models/EntitlementTransition.php:13`) written by
+`EntitlementMachine::apply()` on every webhook-caused transition — but
+`BillingAuditPanel.tsx`, the one screen that renders this table, never put
+it on screen: its table had exactly 7 columns (When/Learner/From/To/Cause/
+Actor/Reason), and the component's own header comment states in capitals
+"EVERY FIELD IS RENDERED VERBATIM" — false, verified directly (`grep -n
+"providerEventId" components/admin/BillingAuditPanel.tsx` matched nothing
+before this fix). Same "docblock claims X, `grep` proves Y" / "fetched and
+typed, never rendered" shape this build has closed repeatedly on sibling
+audit panels — `admin_audit`'s `ip`/`requestId` (v3-D164), the flag-kill
+ceremony's two booleans (v3-D165), `BillingEventsPanel`'s own
+`providerCreatedAt`/`processedAt` (v3-D166, a DIFFERENT panel reading a
+DIFFERENT table — `billing_events`, not `entitlement_transitions`) and
+`ayah_verifications`' own per-row history (v3-D167) — here on the one
+sibling panel none of those five entries touched.
+
+An operator reconciling a webhook-caused entitlement flip against Stripe's
+own dashboard (the ordinary "why did this learner's tier change, and does
+it match what Stripe says happened" question `BillingAuditPanel`'s own
+docblock exists to answer) had no way to find the specific Stripe event
+that caused it — only the transition's cause (`"webhook"`), never which
+webhook delivery.
+
+**Fixed, display-only, no server/wire change:** one new `<th>`/`<td>`
+column, "Provider event", between Cause and Actor, rendering
+`e.providerEventId ?? "—"` — `"—"` for every non-webhook cause
+(`trial_start`, `admin_override`, `reconcile`), matching this table's own
+existing `"—"` convention for `fromState`/`reason` exactly, never a
+fabricated value.
+
+**Verified:** RED confirmed directly — a new assertion
+(`screen.getByText("evt_1")`) added to the pre-existing READY-state test
+(`test/billing-audit-panel.test.tsx`, whose own fixture already carried
+`providerEventId: "evt_1"` on the webhook-caused row, set at v3-D147/D148
+and never previously asserted on) failed against the unmodified component
+exactly as predicted (`getElementError`, `evt_1` not present in the
+rendered document — the DOM dump confirmed the row's cells ran When → When
+→ Learner → From → To → Cause → Actor → Reason with no eighth
+provider-event cell); the same test's pre-existing em-dash count
+(previously 3: grace's `reason` + trial-start's `fromState` and `reason`)
+was updated to 4 in the same edit, since trial-start's `providerEventId` is
+also null and the new column adds one more `"—"` cell — not a second RED
+run, since the count assertion cannot fail before the column exists (the
+denominator changes only once the column is added). Implemented, reran:
+9/9 green in the file, unchanged from before (no new `it()` block — the RED
+was carried entirely by strengthening an existing test's assertions, so the
+apps/web test count is +0 net, the same "existing test grows a real
+assertion" shape as several prior entries).
+
+`TZ=UTC make test`: 2539 passing (unchanged from v3-D167's own count — no
+new test file or case, only two assertions strengthened inside one
+pre-existing test; apps/web 1287, unchanged; no suite moved: 255 v2 vitest,
+47 v2/api, 351 v3/api, 118 corpus-compiler, 420 engine, 61 fold-runner).
+`check-test-floor.mjs`: OK, 2539 >= floor 1899 (+640 margin, unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 29 routes
+(unchanged — edits inside the existing `/settings/billing` component, no
+new route). `npm run gates`: all green (boundaries 295 files, unchanged
+count — one existing production file edited plus its one existing test
+file, no new production file; fonts degraded-but-non-blocking,
+pre-existing; corpus-morphology and corpus-glyphs unchanged). `npx tsc
+--noEmit`: clean. No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff produced by running the suite was reverted before
+committing, same discipline as every prior entry — `git status --porcelain
+-- v1 v2` empty immediately before commit). No Arabic codepoint (the diff
+swept programmatically over the Arabic, Arabic Supplement, Arabic
+Extended-A and both Presentation Forms Unicode blocks — zero matches; the
+only new string is a fixed English column header, and the rendered values
+are either the pre-existing fixture's synthetic `"evt_1"` placeholder or the
+table's own existing `"—"` fallback, never corpus text).
+
+**NOT addressed, named so a future run doesn't re-discover it as new:**
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151); multi-surah enrollment; the operational
+mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123); the late-arrival
+refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146);
+`lib/i18n/dictionaries.ts#isLocale()`; `BillingEventsPanel.tsx`'s
+single-event detail view (v3-D166) — all unchanged. A fresh sweep (an
+Explore agent, directed away from all of the above and the other
+already-closed instances of this bug class) checked
+`SystemHealthController::METRICS` declaring `atom_cache_coverage`/
+`events_ingested_24h` as registered members that `index()` never computes,
+but that gap is already self-documented as a deliberate, reasoned omission
+in `SystemHealthPanel.tsx`'s own header ("inventing placeholder rows...
+would be the same 'manufactures confidence' mistake") — a known,
+acknowledged seam, not a silent defect, so it was not treated as a new
+finding here.

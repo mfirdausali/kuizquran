@@ -55,7 +55,92 @@ make setup   # once
 make dev     # SPA :5273, API :8000
 make test    # 2539 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 351 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1287 apps/web. (v3-D167, 2026-09-02)
+             # + 420 engine + 61 fold-runner + 1287 apps/web. (v3-D168, 2026-09-02)
+             # NOTE (v3-D168, 2026-09-02): `BillingAuditPanel.tsx`'s own
+             # "EVERY FIELD IS RENDERED VERBATIM" header claim was false for
+             # `providerEventId` — fetched, typed and validated
+             # (`lib/admin/billingAudit.ts#BillingAuditEntry`) since
+             # `AdminBillingController::index()` first put it on the wire
+             # (v3-D147/D148 era), a genuine non-synthetic column
+             # (`entitlement_transitions.provider_event_id`, written by
+             # `EntitlementMachine::apply()` on every webhook-caused
+             # transition), but never rendered by the one panel that exists
+             # to show this history: the table had exactly 7 columns (When/
+             # Learner/From/To/Cause/Actor/Reason), no eighth. Same
+             # "docblock claims X, grep proves Y" / "fetched, typed, zero
+             # read surface" shape this build has closed on sibling audit
+             # panels (admin_audit's ip/requestId at v3-D164, the flag-kill
+             # ceremony's booleans at v3-D165, BillingEventsPanel's own
+             # providerCreatedAt/processedAt at v3-D166 — a DIFFERENT panel
+             # reading billing_events, not entitlement_transitions —
+             # ayah_verifications' own history at v3-D167) — here on the one
+             # sibling panel none of those five touched. An operator
+             # reconciling a webhook-caused entitlement flip against
+             # Stripe's own dashboard had no way to find the specific event
+             # that caused it, only the literal string "webhook". Fixed,
+             # display-only, no server/wire change: one new "Provider event"
+             # column between Cause and Actor, rendering `e.providerEventId
+             # ?? "—"` — "—" for every non-webhook cause (trial_start,
+             # admin_override, reconcile), matching this table's own
+             # existing "—" convention for fromState/reason exactly. RED
+             # confirmed directly: a new `screen.getByText("evt_1")`
+             # assertion added to the pre-existing READY-state test (whose
+             # own fixture already carried `providerEventId: "evt_1"` on the
+             # webhook row, set at v3-D147/D148 and never previously
+             # asserted on) failed against the unmodified component exactly
+             # as predicted — the rendered DOM's row ran When→Learner→From→
+             # To→Cause→Actor→Reason with no eighth cell; the same test's
+             # em-dash count (previously 3) was updated to 4 in the same
+             # edit, since trial-start's own `providerEventId` is also null
+             # and the new column adds one more "—" cell. Implemented,
+             # reran: 9/9 green, unchanged file count (no new `it()` block —
+             # the RED was carried entirely by strengthening an existing
+             # test's assertions, so the apps/web test count is +0 net).
+             # `TZ=UTC make test`: 2539 passing (unchanged from v3-D167's own
+             # count — no new test file or case; apps/web 1287, unchanged;
+             # no suite moved). `check-test-floor.mjs`: OK, 2539 >= floor
+             # 1899 (+640 margin, unmoved). `TZ=UTC make build`: exit 0, 29
+             # routes (unchanged — edits inside the existing
+             # `/settings/billing` component). `npm run gates`: all green
+             # (boundaries 295 files, unchanged count — one existing
+             # production file edited plus its one existing test file, no
+             # new production file; fonts degraded-but-non-blocking,
+             # pre-existing). `npx tsc --noEmit`: clean. No `v1/**`/`v2/**`
+             # edit (stray `v2/tsconfig.tsbuildinfo` reverted before
+             # committing, same discipline as every prior entry). No Arabic
+             # codepoint (the diff swept programmatically over the Arabic,
+             # Arabic Supplement, Arabic Extended-A and both Presentation
+             # Forms Unicode blocks — zero matches; the only new string is a
+             # fixed English column header, and the rendered values are
+             # either the pre-existing fixture's synthetic "evt_1"
+             # placeholder or the table's own existing "—" fallback, never
+             # corpus text). Session start: this run began on a detached
+             # HEAD one commit ahead of a stale local `main` — a leftover
+             # from the PRIOR session's own v3-D167 recovery, not a fresh
+             # trap — and `git fetch origin main` showed `origin/main`
+             # already at that same tip (the prior session's push had
+             # landed cleanly), so `git checkout main && git merge
+             # --ff-only origin/main` fast-forwarded safely; the "stale
+             # local main" shape v3-D77/D91/D127/D138/D159/D167 each
+             # independently hit was checked for directly and did not
+             # recur. NOT addressed: `SystemHealthController::METRICS`
+             # declaring `atom_cache_coverage`/`events_ingested_24h` as
+             # registered members `index()` never computes is already
+             # self-documented as a deliberate, reasoned omission in
+             # `SystemHealthPanel.tsx`'s own header, not a new finding;
+             # `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+             # (v3-D88..D94/D144/D145); `App\Billing\TrialAttribution`
+             # (v3-D148); `lib/pricing.ts#regionFromCountry()` (v3-D163);
+             # `PaywallGate` as a whole class (v3-D88, v3-D151); multi-surah
+             # enrollment; the operational mailer/7-night window; PAY-1's
+             # Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`
+             # (v3-D111/D113/D123); the late-arrival refold half of v3-D32;
+             # `AccountDeletionRequest::isDue()` (v3-D146);
+             # `lib/i18n/dictionaries.ts#isLocale()`; `BillingEventsPanel
+             # .tsx`'s single-event detail view (v3-D166) — all unchanged.
+             # See DECISIONS.md v3-D168.
              # NOTE (v3-D167, 2026-09-02): `/workbench`'s per-ayah verification
              # history (`ayah_verifications.verified_by`/`.note`/`.created_at`,
              # sent whole on `VerificationsController::index()`'s

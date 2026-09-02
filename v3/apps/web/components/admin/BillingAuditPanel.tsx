@@ -231,6 +231,7 @@ export function BillingAuditPanel() {
                   <th scope="col">From</th>
                   <th scope="col">To</th>
                   <th scope="col">Cause</th>
+                  <th scope="col">Provider event</th>
                   <th scope="col">Actor</th>
                   <th scope="col">Reason</th>
                 </tr>
@@ -245,6 +246,7 @@ export function BillingAuditPanel() {
                     <td>{e.fromState ?? "—"}</td>
                     <td>{e.toState}</td>
                     <td>{e.cause}</td>
+                    <td>{e.providerEventId ?? "—"}</td>
                     <td>
                       <code className="ltr-island">{e.actor}</code>
                     </td>

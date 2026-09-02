@@ -82,11 +82,18 @@ describe("BillingAuditPanel — three states, never two", () => {
     expect(screen.getByText("webhook")).toBeTruthy();
     expect(screen.getByText("trial_start")).toBeTruthy();
 
-    // Every null field (the first-ever transition's `fromState`, and both
-    // entries' `reason`) renders an em-dash placeholder, never a blank cell
-    // that could be misread as a missing/broken value: 1 (grace's reason) +
-    // 2 (trial-start's fromState and reason) = 3.
-    expect(screen.getAllByText("—").length).toBe(3);
+    // The webhook-caused entry's providerEventId is a real, non-null field —
+    // the header's own "EVERY FIELD IS RENDERED VERBATIM" claim requires it
+    // on screen, not merely fetched and typed.
+    expect(screen.getByText("evt_1")).toBeTruthy();
+
+    // Every null field (the first-ever transition's `fromState`, both
+    // entries' `reason`, and trial-start's own `providerEventId`, which is
+    // only ever set for a webhook-caused row) renders an em-dash placeholder,
+    // never a blank cell that could be misread as a missing/broken value:
+    // 1 (grace's reason) + 3 (trial-start's fromState, reason and
+    // providerEventId) = 4.
+    expect(screen.getAllByText("—").length).toBe(4);
   });
 
   it("a genuinely empty log says so, and never fabricates a row", async () => {
