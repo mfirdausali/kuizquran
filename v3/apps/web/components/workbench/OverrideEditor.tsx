@@ -47,6 +47,15 @@
 // (`OverridesController::toWire()`) and rendered here, `"—"` when unknown
 // (a pre-this-fix synced row, or a since-deleted editor account) — never a
 // guess, matching `AyahVerification.verifiedBy`'s own display convention.
+//
+// WHY EACH CORRECTION (v3-D171). `QuestionOverride.note` has been fetched
+// and typed since this table shipped (`OverridesController::toWire()`'s own
+// `'note' => $r->note`) but the list above never rendered it — the same
+// "written, wire-carried, zero read surface" shape this build has closed
+// repeatedly on sibling review-history surfaces. An admin's own reasoning
+// for a correction was recorded and then invisible to the next admin
+// reviewing the same ayah. Rendered here, `"—"` for a null note, matching
+// this file's own established convention.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CorpusWord } from "@engine/types.ts";
@@ -321,7 +330,7 @@ export function OverrideEditor({ surah, ayah, words, surahWords }: OverrideEdito
           {rows.map((o) => (
             <li key={o.id ?? `${o.field}-${o.createdAt}`}>
               <span className="caption">
-                {summarize(o)} — by {o.editorEmail ?? "—"}
+                {summarize(o)} — by {o.editorEmail ?? "—"} — note: {o.note ?? "—"}
               </span>{" "}
               {isActiveDisable(o) ? (
                 <button type="button" className="btn" onClick={() => onReEnable(o)}>

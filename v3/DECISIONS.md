@@ -12828,3 +12828,95 @@ refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146);
 single-event detail view (v3-D166); `SystemHealthController::METRICS`'s
 `atom_cache_coverage`/`events_ingested_24h` (v3-D168, a known, reasoned
 omission, not a silent defect) — all unchanged.
+
+---
+
+## Ratified 2026-09-03 (nightly, later) — v3-D171: `QuestionOverride.note` — an admin's own reasoning for a correction — was never rendered in `OverrideEditor.tsx`'s history list
+
+`QuestionOverride.note` has been fetched and typed since the override write
+path shipped (`OverridesController::toWire()`'s own `'note' => $r->note`,
+`OverridesController::store()`'s own `'note' => $validated['note'] ?? null`)
+— an admin filling in any of the editor's four "Note (optional)" fields
+(gloss/disable/distractor/group) records exactly the reasoning a later
+reviewer needs — but `OverrideEditor.tsx`'s history list, the one place an
+admin/qari reviews an ayah's prior corrections, never printed it.
+`summarize(o)` reported the field/value and `editorEmail` reported WHO made
+each correction (v3-D163), but WHY was invisible — the identical
+"written, wire-carried, zero read surface" shape v3-D169/D170 just closed on
+the sibling `GlossDraftsPanel.tsx`, here one workbench panel over.
+
+This is not a new finding — v3-D170's own sweep named it explicitly and
+deliberately left it: "`QuestionOverride.note` never rendered in
+`OverrideEditor.tsx`'s history list (self-named open since v3-D163)." It had
+sat unaddressed through v3-D163 itself and six more decisions since
+(v3-D164..D170), each of whose own "NOT addressed" list repeated it
+verbatim without fixing it. This run closes it.
+
+**Consequence:** an admin correcting, say, a distractor set and noting
+"visual near-duplicate, Firdaus flagged in QA sample 3" had that reasoning
+durably recorded and then permanently invisible to the NEXT admin looking at
+the same ayah's override history — who would see only that a correction was
+made and by whom, never why, the exact audit-trail gap `editorEmail`'s own
+v3-D163 fix closed one field over.
+
+**Fixed, display-only, no server/wire change:** the existing history
+`<span>`'s text gains `— note: {o.note ?? "—"}`, appended after the
+existing `— by {o.editorEmail ?? "—"}` clause — matching this panel's own
+established `"—"` convention for a missing `editorEmail` exactly, never a
+fabricated reason.
+
+**Verified:** RED confirmed directly against the unmodified component (two
+cases in `test/workbench-override-editor.test.tsx`, the file's other 13
+pre-existing cases untouched): (1) the pre-existing "degrades to an honest
+placeholder when no editor email is known" test's assertion was
+strengthened from `/— by —/` to `/— by — — note: —/` — both the row's
+`editorEmail` and `note` fixtures are already `null`, so a correct fix must
+render both fallbacks in sequence; failed as predicted (`— by —` matched,
+the trailing `— note: —` did not exist) before the change; (2) a new
+dedicated case renders a row with a non-null
+`note: "checked against an alternate transliteration"` and asserts
+`screen.getByText(...)` for it — failed with `getElementError` (no such
+node) against the unmodified component. Implemented, reran: 15/15 green
+(was 13).
+
+`TZ=UTC make test`: 2542 passing (was 2541, +1 — exactly this run's one
+net-new `it()` block; the em-dash strengthening was added to an EXISTING
+test, so it carries no separate count; apps/web 1290, was 1289; no other
+suite moved: 255 v2 vitest, 47 v2/api, 351 v3/api, 118 corpus-compiler, 420
+engine, 61 fold-runner). `check-test-floor.mjs`: OK, 2542 >= floor 1899
+(+643 margin, unmoved, same discipline as every prior entry). `TZ=UTC make
+build`: exit 0, 29 routes (unchanged — edits inside the existing
+`/workbench` component, no new route). `npm run gates`: all green
+(boundaries 294 files, unchanged count — one existing production file
+edited plus its one existing test file, no new production file; fonts
+degraded-but-non-blocking, pre-existing; corpus-morphology 362 words/
+corpus-glyphs 206 codepoints, both unchanged). `npx tsc --noEmit`: clean. No
+`v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the suite was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2` empty
+immediately before commit). No Arabic codepoint (both changed files swept
+programmatically over the Arabic, Arabic Supplement, Arabic Extended-A and
+both Presentation Forms Unicode blocks — zero matches; every new string is
+a fixed English label or a plain English placeholder note, never corpus
+text). Session start: local `main` was found two commits behind
+`origin/main` (`68bf199` vs the real tip `e0fc4d6`, v3-D170) — the
+recurring "stale local main" trap v3-D77/D91/D127/D138/D159/D167 each
+independently hit — caught via `git fetch` + `git checkout main && git
+merge --ff-only origin/main` before any exploration, no work lost or at
+risk.
+
+**NOT addressed, named so a future run doesn't re-discover it as new:**
+`FlagRow.ackAt` in `FlagsPanel.tsx` (v3-D170, weaker — redundant with
+`FlagAuditPanel.tsx`); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151); multi-surah enrollment; the operational
+mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123); the late-arrival
+refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146);
+`lib/i18n/dictionaries.ts#isLocale()`; `BillingEventsPanel.tsx`'s
+single-event detail view (v3-D166); `SystemHealthController::METRICS`'s
+`atom_cache_coverage`/`events_ingested_24h` (v3-D168, a known, reasoned
+omission, not a silent defect) — all unchanged.

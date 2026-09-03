@@ -130,7 +130,30 @@ describe("OverrideEditor — lists existing overrides for the ayah", () => {
 
     render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} />);
     await waitFor(() => expect(screen.getByTestId("override-list")).toBeTruthy());
-    expect(screen.getByText(/— by —/)).toBeTruthy();
+    expect(screen.getByText(/— by — — note: —/)).toBeTruthy();
+  });
+
+  // `QuestionOverride.note` has been fetched and typed since the override
+  // layer shipped (`OverridesController::toWire()`'s own `'note' => $r->note`)
+  // but this list never rendered it — an admin's own reasoning for a
+  // correction ("checked against an alternate transliteration") was recorded
+  // and then invisible to any other admin reviewing the same ayah's history.
+  it("renders a row's own note when present", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse({
+        overrides: [
+          {
+            id: 3, surah: 12, ayah: 4, position: 1, questionType: "s1", field: "gloss",
+            payload: { lang: "en", text: "when" }, editorId: 3, editorEmail: "qari@example.com",
+            note: "checked against an alternate transliteration", createdAt: 1_700_000_000_000,
+          },
+        ],
+      }),
+    ) as unknown as typeof fetch;
+
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} />);
+    await waitFor(() => expect(screen.getByTestId("override-list")).toBeTruthy());
+    expect(screen.getByText(/checked against an alternate transliteration/)).toBeTruthy();
   });
 });
 

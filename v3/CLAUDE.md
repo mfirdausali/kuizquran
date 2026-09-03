@@ -53,9 +53,80 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2541 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2542 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 351 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1289 apps/web. (v3-D170, 2026-09-03)
+             # + 420 engine + 61 fold-runner + 1290 apps/web. (v3-D171, 2026-09-03)
+             # NOTE (v3-D171, 2026-09-03): `QuestionOverride.note` — an
+             # admin's own reasoning for a correction, captured by
+             # `OverrideEditor.tsx`'s own four "Note (optional)" form fields
+             # (gloss/disable/distractor/group), persisted, and sent on the
+             # wire on every row (`OverridesController::toWire()`'s own
+             # `'note' => $r->note`) — was never rendered in the panel's own
+             # override-history list. `summarize(o)` reported WHAT changed
+             # and `editorEmail` (v3-D163) reported WHO changed it, but WHY
+             # was invisible. Same "written, wire-carried, zero read
+             # surface" shape v3-D169/D170 just closed on the sibling
+             # `GlossDraftsPanel.tsx` — here one workbench panel over, and
+             # not a new finding: v3-D170's own sweep named this exact gap
+             # ("self-named open since v3-D163") and left it; six decisions
+             # (v3-D164..D170) repeated it on their own "NOT addressed"
+             # lists without fixing it. Fixed, display-only, no server/wire
+             # change: the existing history line gains `— note: {o.note ??
+             # "—"}`, appended after the existing `— by {editorEmail ??
+             # "—"}` clause — the panel's own established fallback
+             # convention, never a fabricated reason. RED confirmed
+             # directly against the unmodified component (13 pre-existing
+             # cases in `test/workbench-override-editor.test.tsx`
+             # untouched): the pre-existing "degrades to an honest
+             # placeholder when no editor email is known" test's assertion
+             # was strengthened from `/— by —/` to `/— by — — note: —/`
+             # (both `editorEmail` and `note` are already null in that
+             # fixture) and failed as predicted before the change; a new
+             # dedicated case rendering a non-null note failed on
+             # `getElementError` (no such node). Implemented, reran: 15/15
+             # green (was 13). `TZ=UTC make test`: 2542 passing (was 2541,
+             # +1 — exactly this run's one net-new `it()` block; the
+             # em-dash strengthening was added to an EXISTING test, so it
+             # carries no separate count; apps/web 1290, was 1289; no other
+             # suite moved). `check-test-floor.mjs`: OK, 2542 >= floor 1899
+             # (+643 margin, unmoved). `TZ=UTC make build`: exit 0, 29
+             # routes (unchanged — edits inside the existing `/workbench`
+             # component, no new route). `npm run gates`: all green
+             # (boundaries 294 files, unchanged count — one existing
+             # production file edited plus its one existing test file, no
+             # new production file; fonts degraded-but-non-blocking,
+             # pre-existing; corpus-morphology and corpus-glyphs
+             # unchanged). `npx tsc --noEmit`: clean. Session start: local
+             # `main` was found two commits behind `origin/main` (`68bf199`
+             # vs the real tip `e0fc4d6`, v3-D170) — the recurring "stale
+             # local main" trap v3-D77/D91/D127/D138/D159/D167 each
+             # independently hit — caught via `git fetch` + `git checkout
+             # main && git merge --ff-only origin/main` before any
+             # exploration, no work lost or at risk. No `v1/**`/`v2/**`
+             # edit (stray `v2/tsconfig.tsbuildinfo` reverted before
+             # committing, same discipline as every prior entry). No
+             # Arabic codepoint (both changed files swept programmatically
+             # over the Arabic, Arabic Supplement, Arabic Extended-A and
+             # both Presentation Forms Unicode blocks — zero matches; every
+             # new string is a fixed English label or a plain English
+             # placeholder note, never corpus text). NOT addressed:
+             # `FlagRow.ackAt` in `FlagsPanel.tsx` (v3-D170, weaker —
+             # redundant with `FlagAuditPanel.tsx`); `rhymeClassOf()`
+             # (v3-D136); `EntitlementMachine::merge()`
+             # (v3-D88..D94/D144/D145); `App\Billing\TrialAttribution`
+             # (v3-D148); `lib/pricing.ts#regionFromCountry()` (v3-D163);
+             # `PaywallGate` as a whole class (v3-D88, v3-D151);
+             # multi-surah enrollment; the operational mailer/7-night
+             # window; PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`
+             # (v3-D111/D113/D123); the late-arrival refold half of
+             # v3-D32; `AccountDeletionRequest::isDue()` (v3-D146);
+             # `lib/i18n/dictionaries.ts#isLocale()`;
+             # `BillingEventsPanel.tsx`'s single-event detail view
+             # (v3-D166); `SystemHealthController::METRICS`'s
+             # `atom_cache_coverage`/`events_ingested_24h` (v3-D168) — all
+             # unchanged. See DECISIONS.md v3-D171.
              # NOTE (v3-D170, 2026-09-03): `GlossDraftRow.note` — the
              # author's own note, captured by `GlossDraftsPanel.tsx`'s own
              # "Note (optional)" form field at draft time, persisted
