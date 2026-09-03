@@ -13021,3 +13021,108 @@ refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146);
 single-event detail view (v3-D166); `SystemHealthController::METRICS`'s
 `atom_cache_coverage`/`events_ingested_24h` (v3-D168, a known, reasoned
 omission) — all unchanged.
+
+---
+
+## Ratified 2026-09-03 (nightly, later still) — v3-D173: `BillingEventEntry.provider` fetched, validated, and never rendered — `BillingEventsPanel.tsx`'s own "EVERY FIELD IS RENDERED VERBATIM" header claim was false for it
+
+`billing_events.provider` is not a hardcoded literal — `WebhookHandler
+::ingest(array $event, string $provider = 'stripe')` takes it as a real
+parameter (the journal schema is already multi-provider-shaped, per
+BUILD-PLAN Q7's still-open Curlec/FPX question), it is sent on every row
+by `BillingEventsController::toWire()` (`'provider' => $row->provider`),
+and `lib/admin/billingEvents.ts#isBillingEventEntry` requires
+`typeof e.provider === "string"` before accepting the response at all —
+but `grep -n "e\." components/admin/BillingEventsPanel.tsx` never showed
+`.provider`. The table rendered 8 columns (Received/Provider
+created/Processed/Provider event/Type/Outcome/Learner/Error); `provider`
+itself was absent from all of them, contradicting the panel's own header
+comment verbatim: "EVERY FIELD IS RENDERED VERBATIM."
+
+Same "written/fetched, zero read surface" + "docblock says X, reality is
+Y" shape this build has closed repeatedly on sibling admin audit tables
+(v3-D164, v3-D165, v3-D166, v3-D168 each fixed an identical false "EVERY
+FIELD IS RENDERED VERBATIM" claim) — here on a table two of those same
+passes already touched (`providerCreatedAt`/`processedAt` at v3-D166)
+but left this one field standing. Not hypothetical: an operator
+triaging a future non-Stripe delivery (or a misrouted/test-mode
+delivery landed in the wrong environment) had no way to see which
+provider a row came from at all, on the one screen built specifically to
+show every field of the raw webhook journal.
+
+**Fixed, display-only, no server/wire change:** one new "Provider"
+column, between "Processed" and "Provider event", rendering
+`e.provider` verbatim — the field is a required non-nullable string
+(`isBillingEventEntry`'s own guard), so no fallback is needed or added.
+
+**Found by a dedicated fresh-sweep agent**, handed the full list of
+~20 already-known/deliberately-deferred items (the same list v3-D172
+carried forward, reproduced above) and told explicitly not to re-report
+any of them; it also independently surfaced a second, weaker candidate
+(`GlossDraftsLoad.shipping`/`.excludedFromHashV1` in
+`GlossDraftsPanel.tsx`, replaced by static hand-authored prose instead
+of the live fields — real, but currently non-divergent, since
+`shipping` is always `false` server-side and the panel hardcodes its
+one language today, so the static prose cannot yet actually lie; left
+for a future run since it is a live gap only if `AUTHORABLE_LANGS`/
+`HASH_READ_LANGS` or the panel's hardcoded language ever changes).
+Both were grep-verified independently before choosing which to
+implement.
+
+**Verified:** RED confirmed directly against the unmodified component
+(`git stash` of `BillingEventsPanel.tsx` alone, the new
+`billing-events-panel.test.tsx` case kept, the file's 8 pre-existing
+cases untouched): a fixture entry with `provider: "curlec"` (a
+non-"stripe" value, so the assertion cannot pass by reading some other
+column that happens to also say "stripe" — Curlec is BUILD-PLAN Q7's
+own named second-provider candidate, not an invented string) failed on
+`screen.getByText("curlec")` — no such text anywhere in the rendered
+table — exactly as predicted; restored byte-identically, 9/9 green.
+
+`TZ=UTC make test`: 2545 passing (was 2544, +1 — exactly this run's one
+new `it()` block; apps/web 1293, was 1292; no other suite moved: 255 v2
+vitest, 47 v2/api, 351 v3/api, 118 corpus-compiler, 420 engine, 61
+fold-runner). `check-test-floor.mjs`: OK, 2545 >= floor 1899 (+646
+margin, unmoved, same discipline as every prior entry). `TZ=UTC make
+build`: exit 0, 29 routes (unchanged — edits inside the existing
+`/settings/billing` component, no new route). `npm run gates`: all
+green (boundaries 294 files, unchanged count — one existing production
+file edited plus its one existing test file, no new production file;
+fonts degraded-but-non-blocking, pre-existing; corpus-morphology 362
+words / corpus-glyphs 206 codepoints, both unchanged once the corpus was
+compiled for `make build`). `npx tsc --noEmit`: clean. No `v1/**`/
+`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the suite was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2`
+empty immediately before commit). No Arabic codepoint (both changed
+files swept programmatically, in Python, over the Arabic, Arabic
+Supplement, Arabic Extended-A and both Presentation Forms Unicode
+blocks — zero matches; every new string is a fixed English column
+header or the fixture's own synthetic provider-name placeholder, never
+corpus text).
+
+**Session start:** fresh container, `make setup` run from scratch (no
+`node_modules`/`vendor` anywhere on this container); local `main` was
+found 13 commits behind `origin/main` (a detached `HEAD` at `68bf199`
+vs. the real tip `96b0ae6`, v3-D172) — the recurring "stale local main"
+trap v3-D77/D91/D127/D138/D159/D167/D170/D172 each independently hit —
+caught via `git fetch` + `git checkout main && git merge --ff-only
+origin/main` before any exploration, no work lost or at risk.
+
+**NOT addressed, named so a future run doesn't re-discover it as new:**
+`GlossDraftsLoad.shipping`/`.excludedFromHashV1` in
+`GlossDraftsPanel.tsx` (above, currently non-divergent); `FlagRow.ackAt`
+in `FlagsPanel.tsx` (v3-D170, weaker); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151); multi-surah enrollment; the operational
+mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123); the late-arrival
+refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146);
+`lib/i18n/dictionaries.ts#isLocale()`; `BillingEventsPanel.tsx`'s
+single-event detail view (v3-D166); `SystemHealthController::METRICS`'s
+`atom_cache_coverage`/`events_ingested_24h` (v3-D168, a known, reasoned
+omission) — all unchanged. See CLAUDE.md's own `make test` comment for
+the updated count.

@@ -53,9 +53,81 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2544 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2545 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 351 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1292 apps/web. (v3-D172, 2026-09-03)
+             # + 420 engine + 61 fold-runner + 1293 apps/web. (v3-D173, 2026-09-03)
+             # NOTE (v3-D173, 2026-09-03): `BillingEventEntry.provider` —
+             # a genuinely dynamic field (`WebhookHandler::ingest(array
+             # $event, string $provider = 'stripe')` takes it as a real
+             # parameter, not a hardcoded literal — was fetched, typed and
+             # required by `lib/admin/billingEvents.ts#isBillingEventEntry`
+             # since the panel shipped (v3-D148), and never once rendered:
+             # `grep -n "e\." BillingEventsPanel.tsx` showed 8 columns, none
+             # of them `.provider`, contradicting the panel's own header
+             # claim "EVERY FIELD IS RENDERED VERBATIM" — the same false
+             # claim v3-D164/D165/D166/D168 each already fixed on sibling
+             # audit panels, here on a field two prior passes over this
+             # SAME panel (v3-D166) left standing. Fixed, display-only, no
+             # server/wire change: one new "Provider" column rendering
+             # `e.provider` verbatim (a required non-nullable string, no
+             # fallback needed). RED confirmed directly against the
+             # unmodified component (`git stash` of `BillingEventsPanel.tsx`
+             # alone, the new test case kept, 8 pre-existing cases
+             # untouched): a `provider: "curlec"` fixture (BUILD-PLAN Q7's
+             # own named second-provider candidate, not an invented string)
+             # failed on `screen.getByText("curlec")` — no such text
+             # anywhere in the rendered table; restored byte-identically,
+             # 9/9 green. `TZ=UTC make test`: 2545 passing (was 2544, +1 —
+             # exactly this run's one new `it()` block; apps/web 1293, was
+             # 1292; no other suite moved). `check-test-floor.mjs`: OK, 2545
+             # >= floor 1899 (+646 margin, unmoved). `TZ=UTC make build`:
+             # exit 0, 29 routes (unchanged — edits inside the existing
+             # `/settings/billing` component, no new route). `npm run
+             # gates`: all green (boundaries unchanged count — one existing
+             # production file edited plus its one existing test file, no
+             # new production file; fonts degraded-but-non-blocking,
+             # pre-existing; corpus-morphology/corpus-glyphs unchanged).
+             # `npx tsc --noEmit`: clean. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted before
+             # committing, same discipline as every prior entry). No Arabic
+             # codepoint (both changed files swept programmatically over
+             # the Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms Unicode blocks — zero matches; every new
+             # string is a fixed English column header or a synthetic
+             # provider-name test fixture, never corpus text). Found by a
+             # dedicated fresh-sweep agent handed the full list of already-
+             # known/deferred items and told not to re-report them,
+             # grep-verified independently before implementing — it also
+             # independently surfaced (not fixed this run)
+             # `GlossDraftsLoad.shipping`/`.excludedFromHashV1` in
+             # `GlossDraftsPanel.tsx`, replaced by static hand-authored
+             # prose instead of the live fields — real, but currently
+             # non-divergent (`shipping` is always `false` server-side and
+             # the panel hardcodes one language today), so left for a
+             # future run. Session start: fresh container, `make setup` run
+             # from scratch; local `main` was found 13 commits behind
+             # `origin/main` (detached `HEAD` at `68bf199` vs. the real tip
+             # `96b0ae6`, v3-D172) — the recurring "stale local main" trap
+             # v3-D77/D91/D127/D138/D159/D167/D170/D172 each independently
+             # hit — caught via `git fetch` + `git checkout main && git
+             # merge --ff-only origin/main` before any exploration, no work
+             # lost or at risk. NOT addressed:
+             # `GlossDraftsLoad.shipping`/`.excludedFromHashV1` (above);
+             # `FlagRow.ackAt` in `FlagsPanel.tsx` (v3-D170, weaker);
+             # `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+             # (v3-D88..D94/D144/D145); `App\Billing\TrialAttribution`
+             # (v3-D148); `lib/pricing.ts#regionFromCountry()` (v3-D163);
+             # `PaywallGate` as a whole class (v3-D88, v3-D151); multi-surah
+             # enrollment; the operational mailer/7-night window; PAY-1's
+             # Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`
+             # (v3-D111/D113/D123); the late-arrival refold half of v3-D32;
+             # `AccountDeletionRequest::isDue()` (v3-D146);
+             # `lib/i18n/dictionaries.ts#isLocale()`;
+             # `SystemHealthController::METRICS`'s `atom_cache_coverage`/
+             # `events_ingested_24h` (v3-D168) — all unchanged. See
+             # DECISIONS.md v3-D173.
              # NOTE (v3-D172, 2026-09-03): `StripeSettingsController::test()`'s
              # own `livemode` — Stripe's authoritative answer to "is this
              # live?", named in the controller's own comment as beating a

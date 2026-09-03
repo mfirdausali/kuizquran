@@ -128,6 +128,26 @@ describe("BillingEventsPanel — three states, never two", () => {
     expect(dashes.length).toBeGreaterThanOrEqual(2);
   });
 
+  /**
+   * `provider` is fetched and validated
+   * (`lib/admin/billingEvents.ts#isBillingEventEntry` requires
+   * `typeof e.provider === "string"`) — a genuinely dynamic field,
+   * `WebhookHandler::ingest(array $event, string $provider = 'stripe')` takes
+   * it as a real parameter, not a hardcoded literal, because the journal
+   * schema is already multi-provider-shaped. Yet the table never rendered
+   * it, contradicting this panel's own header claim: "EVERY FIELD IS
+   * RENDERED VERBATIM." Uses a non-"stripe" value so the assertion cannot
+   * pass by reading some other column that happens to also say "stripe".
+   */
+  it("renders each entry's provider, not just its provider event id", async () => {
+    const otherProvider = { ...appliedEntry, providerEventId: "evt_4", provider: "curlec" };
+    globalThis.fetch = vi.fn(async () => jsonResponse({ entries: [otherProvider], limit: 200 })) as unknown as typeof fetch;
+    render(<BillingEventsPanel />);
+
+    await waitFor(() => expect(screen.getByText("evt_4")).toBeTruthy());
+    expect(screen.getByText("curlec")).toBeTruthy();
+  });
+
   it("EMPTY renders an honest zero-state, not an eternal skeleton", async () => {
     globalThis.fetch = vi.fn(async () => jsonResponse({ entries: [], limit: 200 })) as unknown as typeof fetch;
     render(<BillingEventsPanel />);
