@@ -12920,3 +12920,104 @@ refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146);
 single-event detail view (v3-D166); `SystemHealthController::METRICS`'s
 `atom_cache_coverage`/`events_ingested_24h` (v3-D168, a known, reasoned
 omission, not a silent defect) — all unchanged.
+
+---
+
+## Ratified 2026-09-03 (nightly, later) — v3-D172: `StripeSettingsController::test()`'s own `livemode` — Stripe's authoritative answer, not the prefix guess — was fetched and typed and never compared against anything
+
+`StripeSettingsController::test()`'s live probe (`GET /v1/balance`) has
+returned `livemode` on every successful response since the probe shipped
+— the controller's own comment names exactly why: "Stripe's own answer to
+'is this live?', which beats inferring it from the prefix — the two
+disagreeing is worth knowing." `StripeSettingsPanel.tsx`'s `ProbeResult`
+interface has carried a matching `livemode?: boolean | null` field for just
+as long. But the one place that field was ever read was nowhere:
+`grep -n "probe\." components/admin/StripeSettingsPanel.tsx` showed exactly
+one hit, `probe.message` — the human-readable sentence, never the boolean
+the docblock says exists specifically to catch a disagreement. Meanwhile
+the CONNECTION section's own "Mode: {data.mode}" line is computed a
+different way entirely, from the configured secret's own PREFIX
+(`sk_test_…`/`sk_live_…`) at `index()` time — a self-reported, paste-time
+classification, not Stripe's own runtime answer.
+
+Same "written/fetched, zero read surface" shape this build has closed
+repeatedly on other admin surfaces (v3-D164 through v3-D171) — here on a
+field this codebase's OWN docblock already names as the reason the probe
+exists, on the one console screen that touches live payment credentials.
+
+**Consequence:** a swapped test/live secret with a correctly-formed prefix,
+or a restricted key issued under the wrong mode, would disagree with
+Stripe's own report and nothing on screen said so. An admin would have to
+separately notice that the probe's own prose ("Connected to Stripe in LIVE
+mode.") contradicts the "Mode: test" line above it — an easy thing to miss
+on the one screen guarding against exactly this class of paste error,
+unlike the panel's own existing `mixedModes` banner, which surfaces a
+parallel disagreement (live secret vs. test publishable key) loudly.
+
+**Fixed, display-only, no server/wire change:** `livemode` was already on
+the wire (`test()` never changed). The CONNECTION section gains one new
+conditional banner — `banner banner--warn`/`role="alert"`, matching this
+codebase's own established convention for every other admin-panel warning
+(`SystemHealthPanel.tsx`, `ContentFreezePanel.tsx`,
+`AccountDeletionPanel.tsx`, and `StripeSettingsPanel.tsx`'s own
+pre-existing `mixedModes` banner) — rendered only when a successful probe's
+own `livemode` disagrees with the configured `data.mode`; silent (no
+banner) when they agree, unknown (`livemode` or `mode` null), or the probe
+hasn't run yet.
+
+**Verified:** RED confirmed directly against the unmodified component
+(`git stash` of `StripeSettingsPanel.tsx` alone, both new
+`stripe-settings-panel.test.tsx` cases kept, the file's two pre-existing
+path-prefix cases untouched): a probe response with `livemode: true`
+against a `mode: "test"` fixture failed on `screen.findByRole("alert")`
+timing out — no such element — exactly as predicted; restored
+byte-identically, 4/4 green. A second case proves the negative: the
+identical fixture shape with `mode: "live"` (agreement) asserts
+`screen.queryByRole("alert")` is `null` — so the fix cannot be a banner
+that always renders once a probe succeeds; it must actually compare.
+
+`TZ=UTC make test`: 2544 passing (was 2542, +2 — exactly this run's two new
+`it()` blocks; apps/web 1292, was 1290; no other suite moved: 255 v2
+vitest, 47 v2/api, 351 v3/api, 118 corpus-compiler, 420 engine, 61
+fold-runner). `check-test-floor.mjs`: OK, 2544 >= floor 1899 (+645 margin,
+unmoved, same discipline as every prior entry). `TZ=UTC make build`: exit
+0, 29 routes (unchanged — edits inside the existing `/settings/stripe`
+component, no new route). `npm run gates`: all green (boundaries 295
+files, unchanged count — one existing production file edited plus its one
+existing test file, no new production file; fonts degraded-but-non-
+blocking, pre-existing; corpus-morphology 362 words/corpus-glyphs 206
+codepoints, both unchanged). `npx tsc --noEmit` (via `npm run typecheck`):
+clean. No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff produced by running the suite was reverted before
+committing, same discipline as every prior entry — `git status --porcelain
+-- v1 v2` empty immediately before commit). No Arabic codepoint (both
+changed files swept programmatically, in Python, over the Arabic, Arabic
+Supplement, Arabic Extended-A and both Presentation Forms Unicode blocks —
+zero matches; every new string is a fixed English label or a synthetic
+test-fixture placeholder, never corpus text). Session start: fresh
+container, `make setup` run from scratch (no `node_modules`/`vendor`
+anywhere); local `main` was found 12 commits behind `origin/main` (a
+detached `HEAD` at `68bf199` vs. the real tip `34b76b0`, v3-D171) — the
+recurring "stale local main" trap v3-D77/D91/D127/D138/D159/D167/D170 each
+independently hit — caught via `git fetch` + `git checkout main && git
+merge --ff-only origin/main` before any exploration, no work lost or at
+risk. The candidate itself was found by a dedicated fresh-sweep agent given
+the full list of ~20 already-known/deliberately-deferred items below and
+told explicitly not to re-report any of them, then grep-verified
+independently before implementing.
+
+**NOT addressed, named so a future run doesn't re-discover it as new:**
+`FlagRow.ackAt` in `FlagsPanel.tsx` (v3-D170, weaker — redundant with
+`FlagAuditPanel.tsx`); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151); multi-surah enrollment; the operational
+mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123); the late-arrival
+refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146);
+`lib/i18n/dictionaries.ts#isLocale()`; `BillingEventsPanel.tsx`'s
+single-event detail view (v3-D166); `SystemHealthController::METRICS`'s
+`atom_cache_coverage`/`events_ingested_24h` (v3-D168, a known, reasoned
+omission) — all unchanged.

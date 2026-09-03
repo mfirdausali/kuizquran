@@ -210,6 +210,19 @@ export function StripeSettingsPanel() {
             {probe.message}
           </p>
         ) : null}
+        {probe?.ok && probe.livemode != null && data.mode != null
+          ? (() => {
+              const probeMode = probe.livemode ? "live" : "test";
+              if (probeMode === data.mode) return null;
+              return (
+                <div className="banner banner--warn" role="alert">
+                  Stripe reports {probeMode.toUpperCase()} mode, but the
+                  configured keys look like {data.mode}. This disagrees —
+                  verify before charging a card.
+                </div>
+              );
+            })()
+          : null}
       </section>
     </div>
   );

@@ -53,9 +53,90 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2542 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2544 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 351 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1290 apps/web. (v3-D171, 2026-09-03)
+             # + 420 engine + 61 fold-runner + 1292 apps/web. (v3-D172, 2026-09-03)
+             # NOTE (v3-D172, 2026-09-03): `StripeSettingsController::test()`'s
+             # own `livemode` — Stripe's authoritative answer to "is this
+             # live?", named in the controller's own comment as beating a
+             # guess from the key prefix "because the two disagreeing is
+             # worth knowing" — was fetched and typed
+             # (`StripeSettingsPanel.tsx`'s own `ProbeResult.livemode`)
+             # since the probe shipped and never once compared against
+             # anything: `grep -n "probe\." StripeSettingsPanel.tsx` showed
+             # exactly one read, `probe.message`. The CONNECTION section's
+             # own "Mode: {data.mode}" line is a SEPARATE, prefix-derived
+             # guess computed at `index()` time — a swapped test/live
+             # secret with a correct-looking prefix could disagree with
+             # Stripe's own report and nothing on screen said so, on the
+             # one console screen that touches live payment credentials.
+             # Same "written/fetched, zero read surface" shape this build
+             # has closed repeatedly (v3-D164..D171), found this run by a
+             # dedicated fresh-sweep agent handed the full list of already-
+             # known/deferred items and told not to re-report them,
+             # grep-verified independently before implementing. Fixed,
+             # display-only, no server/wire change: the CONNECTION section
+             # gains one new `banner banner--warn`/`role="alert"` (matching
+             # this codebase's own established convention —
+             # `SystemHealthPanel.tsx`, `ContentFreezePanel.tsx`,
+             # `AccountDeletionPanel.tsx`, and this panel's own pre-existing
+             # `mixedModes` banner), rendered only when a successful probe's
+             # `livemode` genuinely disagrees with the configured
+             # `data.mode`; silent when they agree, unknown, or unprobed.
+             # RED confirmed directly against the unmodified component
+             # (`git stash` of `StripeSettingsPanel.tsx` alone, both new
+             # `stripe-settings-panel.test.tsx` cases kept, the file's two
+             # pre-existing path-prefix cases untouched): a probe with
+             # `livemode: true` against a `mode: "test"` fixture failed on
+             # `screen.findByRole("alert")` timing out, exactly as
+             # predicted; restored byte-identically, 4/4 green. A second
+             # case proves the negative — `mode: "live"` (agreement)
+             # asserts `screen.queryByRole("alert")` is `null` — so the fix
+             # cannot be a banner that always paints once a probe succeeds;
+             # it must actually compare. `TZ=UTC make test`: 2544 passing
+             # (was 2542, +2 — exactly this run's two new `it()` blocks;
+             # apps/web 1292, was 1290; no other suite moved). `check-test-
+             # floor.mjs`: OK, 2544 >= floor 1899 (+645 margin, unmoved).
+             # `TZ=UTC make build`: exit 0, 29 routes (unchanged — edits
+             # inside the existing `/settings/stripe` component, no new
+             # route). `npm run gates`: all green (boundaries 295 files,
+             # unchanged count — one existing production file edited plus
+             # its one existing test file, no new production file; fonts
+             # degraded-but-non-blocking, pre-existing; corpus-morphology
+             # and corpus-glyphs unchanged). `npx tsc --noEmit` (via `npm
+             # run typecheck`): clean. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted before
+             # committing, same discipline as every prior entry). No Arabic
+             # codepoint (both changed files swept programmatically, in
+             # Python, over the Arabic, Arabic Supplement, Arabic
+             # Extended-A and both Presentation Forms Unicode blocks — zero
+             # matches; every new string is a fixed English label or a
+             # synthetic test fixture placeholder, never corpus text).
+             # Session start: fresh container, `make setup` run from
+             # scratch (no `node_modules`/`vendor` anywhere); local `main`
+             # was found 12 commits behind `origin/main` (detached `HEAD`
+             # at `68bf199` vs. the real tip `34b76b0`, v3-D171) — the
+             # recurring "stale local main" trap
+             # v3-D77/D91/D127/D138/D159/D167/D170 each independently hit
+             # — caught via `git fetch` + `git checkout main && git merge
+             # --ff-only origin/main` before any exploration, no work lost
+             # or at risk. NOT addressed: `FlagRow.ackAt` in
+             # `FlagsPanel.tsx` (v3-D170, weaker); `rhymeClassOf()`
+             # (v3-D136); `EntitlementMachine::merge()`
+             # (v3-D88..D94/D144/D145); `App\Billing\TrialAttribution`
+             # (v3-D148); `lib/pricing.ts#regionFromCountry()` (v3-D163);
+             # `PaywallGate` as a whole class (v3-D88, v3-D151);
+             # multi-surah enrollment; the operational mailer/7-night
+             # window; PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`
+             # (v3-D111/D113/D123); the late-arrival refold half of v3-D32;
+             # `AccountDeletionRequest::isDue()` (v3-D146);
+             # `lib/i18n/dictionaries.ts#isLocale()`; `BillingEventsPanel
+             # .tsx`'s single-event detail view (v3-D166);
+             # `SystemHealthController::METRICS`'s
+             # `atom_cache_coverage`/`events_ingested_24h` (v3-D168) — all
+             # unchanged. See DECISIONS.md v3-D172.
              # NOTE (v3-D171, 2026-09-03): `QuestionOverride.note` — an
              # admin's own reasoning for a correction, captured by
              # `OverrideEditor.tsx`'s own four "Note (optional)" form fields

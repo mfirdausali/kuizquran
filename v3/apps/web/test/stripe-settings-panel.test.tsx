@@ -84,3 +84,71 @@ describe("StripeSettingsPanel — requests the real, api-prefixed paths", () => 
     expect(seen[0]).toContain("/api/admin/stripe/test");
   });
 });
+
+// `ProbeResult.livemode` — Stripe's own answer to "is this live?" (`test()`'s
+// own docblock: "which beats inferring it from the prefix — the two
+// disagreeing is worth knowing") — was fetched and typed
+// (`ProbeResult.livemode`) since the probe shipped, but never read anywhere
+// in the render; only `probe.message` was. So a swapped test/live secret
+// with a correct-looking prefix disagreed with Stripe's own report and
+// nothing on screen said so — the same "written, never read" shape this
+// build has closed repeatedly elsewhere, here on the one field this panel's
+// own docblock names as worth having.
+describe("StripeSettingsPanel — warns when Stripe's own livemode disagrees with the configured prefix", () => {
+  const realFetch = globalThis.fetch;
+
+  beforeEach(() => resetApiFetchForTests());
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    vi.restoreAllMocks();
+  });
+
+  function mockFetch(mode: "live" | "test" | null, livemode: boolean) {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/test") && init?.method === "POST") {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            livemode,
+            message: livemode ? "Connected to Stripe in LIVE mode." : "Connected to Stripe in test mode.",
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          fields: [],
+          configured: true,
+          mode,
+          mixedModes: false,
+          webhookUrl: "https://example.test/api/billing/stripe/webhook",
+          note: "",
+        }),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+  }
+
+  it("shows a disagreement banner when Stripe reports live but the configured keys look like test", async () => {
+    mockFetch("test", true);
+    render(<StripeSettingsPanel />);
+    const button = await screen.findByRole("button", { name: /test connection/i });
+    button.click();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/disagrees/i);
+    expect(alert.textContent).toMatch(/LIVE/);
+    expect(alert.textContent).toMatch(/test/);
+  });
+
+  it("shows no disagreement banner when Stripe's own livemode agrees with the configured prefix", async () => {
+    mockFetch("live", true);
+    render(<StripeSettingsPanel />);
+    const button = await screen.findByRole("button", { name: /test connection/i });
+    button.click();
+
+    await screen.findByText(/Connected to Stripe in LIVE mode\./);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
