@@ -97,6 +97,14 @@ describe("GlossDraftsPanel — three read states, never two", () => {
     // draft from a human-authored one, exactly the distinction the panel's
     // own "Authored by" form field asks the admin to set on save.
     expect(screen.getByText("human · admin@example.com")).toBeTruthy();
+    // `row.note` — the author's own note, captured by the panel's own
+    // "Note (optional)" form field at draft time — is fetched (DRAFT_ROW's
+    // `note: null` above) but was never rendered anywhere in the table,
+    // only a REVIEW's own `note` inside the History column. A null note
+    // falls back to the same "—" this panel already uses for a null
+    // `reviewedBy`, so the row now carries exactly two dashes (reviewedBy,
+    // note) rather than one.
+    expect(screen.getAllByText("—")).toHaveLength(2);
     vi.unstubAllGlobals();
   });
 
@@ -127,6 +135,28 @@ describe("GlossDraftsPanel — the draft's own author is visible, not just the r
     await waitFor(() => expect(screen.getByText("first draft text")).toBeTruthy());
     expect(screen.getByText("AI draft · —")).toBeTruthy();
     expect(screen.queryByText("human · admin@example.com")).toBeNull();
+  });
+});
+
+describe("GlossDraftsPanel — the draft's own note is visible, not just a review's note", () => {
+  beforeEach(() => resetApiFetchForTests());
+  afterEach(() => vi.restoreAllMocks());
+
+  it("renders a non-null row.note, distinct from any review-history note", async () => {
+    const rowWithNote = { ...DRAFT_ROW, id: 8, note: "flag: possible false friend, double-check register" };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          ...emptyWorklist(),
+          counts: { draft: 1, reviewed: 0, merged: 0, unauthored: 0 },
+          drafts: [rowWithNote],
+        }),
+      ),
+    );
+    render(<GlossDraftsPanel />);
+    await waitFor(() => expect(screen.getByText("first draft text")).toBeTruthy());
+    expect(screen.getByText("flag: possible false friend, double-check register")).toBeTruthy();
   });
 });
 

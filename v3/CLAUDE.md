@@ -53,9 +53,85 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2540 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2541 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 351 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1288 apps/web. (v3-D169, 2026-09-02)
+             # + 420 engine + 61 fold-runner + 1289 apps/web. (v3-D170, 2026-09-03)
+             # NOTE (v3-D170, 2026-09-03): `GlossDraftRow.note` — the
+             # author's own note, captured by `GlossDraftsPanel.tsx`'s own
+             # "Note (optional)" form field at draft time, persisted
+             # (`gloss_drafts.note`), and sent on the wire on every row
+             # (`GlossDraftsController.php:317`) — was never rendered
+             # anywhere in the table. Only a REVIEW's own note (one layer
+             # down, inside the History `<details>`, wired at v3-D156/D160)
+             # was shown; the draft's own current note — where an author
+             # flags e.g. "checked against Basmeih, unsure of register"
+             # BEFORE a reviewer decides "Mark reviewed" — was invisible.
+             # Same "written, wire-carried, zero read surface" shape this
+             # build has closed on this SAME `GlossDraftsPanel.tsx` twice
+             # already (`authorKind`/`authoredBy` at v3-D169, `textAtReview`
+             # at v3-D160), one field over each time. Found by a fresh
+             # Explore-agent sweep directed away from every already-known
+             # instance of this bug class; the sweep also independently
+             # surfaced (not fixed this run): `QuestionOverride.note` never
+             # rendered in `OverrideEditor.tsx`'s history list (self-named
+             # open since v3-D163); `FlagRow.ackAt` never rendered on
+             # `FlagsPanel.tsx`'s own row (weaker — redundant with
+             # `FlagAuditPanel.tsx`). Fixed, display-only, no server/wire
+             # change: one new "Note" column between "Authored by" and
+             # "Reviewed by", rendering `row.note ?? "—"` — the panel's own
+             # existing null-fallback convention. RED confirmed directly
+             # against the unmodified component (11 pre-existing cases in
+             # `test/gloss-drafts-panel.test.tsx` untouched): a strengthened
+             # assertion on the existing READY-state test
+             # (`getAllByText("—")` expected to double from 1 to 2, since
+             # DRAFT_ROW's own `note` is null) failed at 1; a new dedicated
+             # case rendering a non-null note failed on `getElementError`
+             # (no such node). Implemented, reran: 13/13 green (was 11).
+             # `TZ=UTC make test`: 2541 passing (was 2540, +1 — exactly this
+             # run's one net-new `it()` block; the em-dash-count assertion
+             # was added to an EXISTING test, so it carries no separate
+             # count; apps/web 1289, was 1288; no other suite moved).
+             # `check-test-floor.mjs`: OK, 2541 >= floor 1899 (+642 margin,
+             # unmoved). `TZ=UTC make build`: exit 0, 29 routes (unchanged —
+             # edits inside the existing `/settings/gloss-drafts` component,
+             # no new route). `npm run gates`: all green (boundaries 295
+             # files, unchanged count — one existing production file edited
+             # plus its one existing test file, no new production file;
+             # fonts degraded-but-non-blocking, pre-existing; corpus-
+             # morphology and corpus-glyphs unchanged). `npx tsc --noEmit`:
+             # clean. Session start: fresh container, `make setup` run from
+             # scratch; local `main` was found one branch-checkout away from
+             # a stale ref (`68bf199`, v3-D159) versus `origin/main`'s real
+             # tip (`f4197b5`, v3-D169) — the recurring "stale local main"
+             # trap v3-D77/D91/D127/D138/D159/D167 each independently hit —
+             # caught before any exploration via `git fetch` + `git checkout
+             # main && git merge --ff-only origin/main`, no work lost or at
+             # risk. No `v1/**`/`v2/**` edit (stray `v2/tsconfig.tsbuildinfo`
+             # reverted before committing, same discipline as every prior
+             # entry). No Arabic codepoint (the diff swept programmatically
+             # over the Arabic, Arabic Supplement, Arabic Extended-A and
+             # both Presentation Forms Unicode blocks, plus a `\u06xx`/
+             # `\u08xx`-escape and `fromCharCode` sweep — zero matches;
+             # every new string is a fixed English column header or a plain
+             # English placeholder note, matching this file's own "NO MALAY
+             # CONTENT ANYWHERE" header). NOT addressed:
+             # `QuestionOverride.note` in `OverrideEditor.tsx`;
+             # `FlagRow.ackAt` in `FlagsPanel.tsx`; `rhymeClassOf()`
+             # (v3-D136); `EntitlementMachine::merge()`
+             # (v3-D88..D94/D144/D145); `App\Billing\TrialAttribution`
+             # (v3-D148); `lib/pricing.ts#regionFromCountry()` (v3-D163);
+             # `PaywallGate` as a whole class (v3-D88, v3-D151); multi-surah
+             # enrollment; the operational mailer/7-night window; PAY-1's
+             # Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`
+             # (v3-D111/D113/D123); the late-arrival refold half of v3-D32;
+             # `AccountDeletionRequest::isDue()` (v3-D146);
+             # `lib/i18n/dictionaries.ts#isLocale()`; `BillingEventsPanel
+             # .tsx`'s single-event detail view (v3-D166);
+             # `SystemHealthController::METRICS`'s `atom_cache_coverage`/
+             # `events_ingested_24h` (v3-D168) — all unchanged. See
+             # DECISIONS.md v3-D170.
              # NOTE (v3-D169, 2026-09-02): `GlossDraftsPanel.tsx` fetched and
              # typed `authorKind`/`authoredBy` (`lib/admin/glossDrafts.ts
              # #GlossDraftRow`, required by `isGlossDraftRow()`'s own runtime

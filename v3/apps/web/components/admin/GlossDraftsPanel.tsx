@@ -176,6 +176,7 @@ export function GlossDraftsPanel() {
                   <th scope="col">Status</th>
                   <th scope="col">Text</th>
                   <th scope="col">Authored by</th>
+                  <th scope="col">Note</th>
                   <th scope="col">Reviewed by</th>
                   <th scope="col">History</th>
                   <th scope="col">Action</th>
@@ -191,6 +192,7 @@ export function GlossDraftsPanel() {
                     <td>
                       {row.authorKind === "ai" ? "AI draft" : "human"} · {row.authoredBy ?? "—"}
                     </td>
+                    <td>{row.note ?? "—"}</td>
                     <td>{row.reviewedBy ?? "—"}</td>
                     <td>
                       {row.reviews && row.reviews.length > 0 ? (

@@ -12717,3 +12717,114 @@ refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146);
 single-event detail view (v3-D166); `SystemHealthController::METRICS`'s
 `atom_cache_coverage`/`events_ingested_24h` (v3-D168, a known, reasoned
 omission, not a silent defect) — all unchanged.
+
+## Ratified 2026-09-03 (nightly) — v3-D170: `GlossDraftRow.note` — the author's own note, fetched and sent on every row, never rendered anywhere in `GlossDraftsPanel.tsx`
+
+**Session start note.** Fresh container, no `node_modules`/`vendor` anywhere
+(`make setup` had never run here). `git checkout main && git merge --ff-only
+origin/main` fast-forwarded 10 commits (`68bf199` → `f4197b5`, v3-D159 →
+v3-D169) — a *stale local `main` one branch-checkout away from the real tip*,
+the exact recurring shape v3-D77/D91/D127/D138/D159/D167 each independently
+hit, caught here before any exploration or edit, per NIGHTLY.md's own rule to
+re-derive from the repo rather than trust a written line. `make setup` then
+`TZ=UTC make test` established the true baseline (2540 passing, floor 1899,
++641 margin) before any change.
+
+**Found:** `GlossDraftRow.note` (`apps/web/lib/admin/glossDrafts.ts:74`,
+`string | null`) is the author's own optional note, captured by
+`GlossDraftsPanel.tsx`'s own "Note (optional)" form field at draft-save time
+(`noteDraft` state, threaded into `saveGlossDraft()`), persisted
+(`gloss_drafts.note`, migrated at
+`2026_08_11_130000_create_gloss_drafts_table.php:102`), and sent on the wire
+on every row (`GlossDraftsController.php:317`, `'note' => $r->note`) — but
+`GlossDraftsPanel.tsx`, the one screen that lists an ayah's drafts, never put
+it on screen. The table's 8 columns (Ayah/Pos/Status/Text/Authored by/
+Reviewed by/History/Action) render `rev.note` — a REVIEW's own note, one
+layer down inside the History `<details>`, correctly wired at v3-D156/D160 —
+but never `row.note`, the draft's own current-state note the author typed
+alongside the gloss text itself. Same "written, wire-carried, zero read
+surface" shape this build has closed repeatedly on sibling review-workflow
+surfaces, and on this SAME `GlossDraftsPanel.tsx` twice already
+(`authorKind`/`authoredBy` at v3-D169, `textAtReview` at v3-D160) — one field
+over each time.
+
+Found by a fresh Explore-agent sweep, directed away from every
+already-known/deferred instance of this bug class (`rhymeClassOf()`,
+`EntitlementMachine::merge()`, `TrialAttribution`, `regionFromCountry()`,
+`PaywallGate`, multi-surah enrollment, the mailer/7-night window, PAY-1
+fixtures, surah 67 scene beats, `severity.ts` taxonomy drift, `placement.ts`,
+late-arrival refold, `AccountDeletionRequest::isDue()`, `isLocale()`,
+`BillingEventsPanel`'s single-event view, `SystemHealthController::METRICS`'s
+two undeclared members). The sweep independently surfaced two further real
+candidates, named here so a future run does not re-discover them as new:
+`QuestionOverride.note` is never rendered in `OverrideEditor.tsx`'s history
+list either (self-named as an open gap since v3-D163 — "a smaller, separate,
+adjacent gap this run deliberately left alone" — and untouched through six
+more decisions since); `FlagRow.ackAt` is never rendered on `FlagsPanel.tsx`'s
+own row (weaker: `FlagAuditPanel.tsx`, its sibling screen, already shows
+every ack's own timestamp in the audit trail one click away).
+
+**Consequence:** a draft's own note is precisely where an author records
+context a reviewer needs BEFORE deciding "Mark reviewed" — e.g. "checked
+against Basmeih, unsure of register," or a flag that a word is a known false
+friend. v3-D169's own reasoning ("a reviewer could see WHO reviewed a draft
+but never who wrote it") applies identically one field over: a reviewer could
+see WHAT was drafted and WHO drafted it, but never WHY the author flagged it
+the way they did, until this fix.
+
+**Fixed, display-only, no server/wire change:** one new `<th>`/`<td>` column,
+"Note", between "Authored by" and "Reviewed by", rendering `row.note ?? "—"`
+— matching this panel's own existing `"—"` convention for a null
+`reviewedBy`/`authoredBy` exactly.
+
+**Verified:** RED confirmed directly against the unmodified component (two
+new test cases added to `test/gloss-drafts-panel.test.tsx`, the file's other
+11 pre-existing cases untouched): (1) a new assertion,
+`expect(screen.getAllByText("—")).toHaveLength(2)`, added to the pre-existing
+READY-state test — DRAFT_ROW's `reviewedBy: null` already renders one "—";
+adding the Note column doubles it to two, since DRAFT_ROW's own `note` is
+also `null` — failed as predicted (`getAllByText` found 1, not 2) before the
+column existed; (2) a new dedicated case renders a row with a non-null
+`note: "flag: possible false friend, double-check register"` and asserts
+`screen.getByText(...)` for it — failed with `getElementError` (no such
+node) against the unmodified component. Implemented, reran: 13/13 green (was
+11).
+
+`TZ=UTC make test`: 2541 passing (was 2540, +1 — exactly this run's one
+net-new `it()` block; the em-dash-count assertion was added to an EXISTING
+test, so it carries no separate count; apps/web 1289, was 1288; no other
+suite moved: 255 v2 vitest, 47 v2/api, 351 v3/api, 118 corpus-compiler, 420
+engine, 61 fold-runner). `check-test-floor.mjs`: OK, 2541 >= floor 1899 (+642
+margin, unmoved, same discipline as every prior entry). `TZ=UTC make build`:
+exit 0, 29 routes (unchanged — edits inside the existing
+`/settings/gloss-drafts` component, no new route). `npm run gates`: all
+green (boundaries 295 files, unchanged count — one existing production file
+edited plus its one existing test file, no new production file; fonts
+degraded-but-non-blocking, pre-existing; corpus-morphology 362 words/
+corpus-glyphs 206 codepoints, both unchanged). `npx tsc --noEmit`: clean. No
+`v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the suite was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2` empty
+immediately before commit). No Arabic codepoint (the diff swept
+programmatically over the Arabic, Arabic Supplement, Arabic Extended-A and
+both Presentation Forms Unicode blocks, plus a `\u06xx`/`\u08xx`-escape and
+`fromCharCode` sweep — zero matches; every new string is a fixed English
+column header or a plain English placeholder note, matching this file's own
+"NO MALAY CONTENT ANYWHERE IN THIS FILE" header exactly).
+
+**NOT addressed, named so a future run doesn't re-discover it as new:**
+`QuestionOverride.note` in `OverrideEditor.tsx` (self-named open since
+v3-D163, above); `FlagRow.ackAt` in `FlagsPanel.tsx` (above, weaker —
+redundant with `FlagAuditPanel.tsx`); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151); multi-surah enrollment; the operational
+mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123); the late-arrival
+refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146);
+`lib/i18n/dictionaries.ts#isLocale()`; `BillingEventsPanel.tsx`'s
+single-event detail view (v3-D166); `SystemHealthController::METRICS`'s
+`atom_cache_coverage`/`events_ingested_24h` (v3-D168, a known, reasoned
+omission, not a silent defect) — all unchanged.
