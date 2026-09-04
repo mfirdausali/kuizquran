@@ -88,6 +88,11 @@ function Row({
         <span className={CHIP_CLASS[row.chip]} aria-hidden="true" />
         <span className="wb-row__word">{CHIP_WORD[row.chip]}</span>
         <span className="caption wb-row__note">{row.note}</span>
+        {row.hashIngestedAt !== null ? (
+          <span className="caption wb-row__ingested">
+            hash ingested {new Date(row.hashIngestedAt).toISOString()}
+          </span>
+        ) : null}
       </button>
     </li>
   );

@@ -48,6 +48,12 @@ class VerificationsController extends Controller
                     $status[$tier] = 'stale';
                 }
             }
+            // v3-D176: when THIS ayah's current hash was last ingested — the
+            // one fact that lets an admin tell "just recomputed" from "stale
+            // from before the corpus last changed" (`ingested_at` has been
+            // stamped on every write since step 15, IngestHashesCommand and
+            // CorpusHashRecomputer alike, and was never reported here).
+            $status['ingestedAt'] = $hashRow->ingested_at;
             $frontier[$ayah] = $status;
         }
 

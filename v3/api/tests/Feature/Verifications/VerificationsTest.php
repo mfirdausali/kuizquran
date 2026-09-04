@@ -52,11 +52,11 @@ class VerificationsTest extends TestCase
         return ['Authorization' => 'Bearer '.$token];
     }
 
-    private function seedHash(int $surah, int $ayah, string $qariHash, string $adminHash = 'admin-hash'): void
+    private function seedHash(int $surah, int $ayah, string $qariHash, string $adminHash = 'admin-hash', int $ingestedAt = 1): void
     {
         CorpusAyahHash::create([
             'surah' => $surah, 'ayah' => $ayah, 'qari_hash' => $qariHash, 'admin_hash' => $adminHash,
-            'hash_spec_version' => 1, 'ingested_at' => 1,
+            'hash_spec_version' => 1, 'ingested_at' => $ingestedAt,
         ]);
     }
 
@@ -214,5 +214,40 @@ class VerificationsTest extends TestCase
         ], $this->qariAdminHeaders())->assertCreated();
 
         $this->assertSame('verified', $this->getJson('/api/verifications?surah=12')->json('frontier.4.qari'));
+    }
+
+    // ───────────── the ingestedAt gap: written since step 15, never read ──────────
+
+    /**
+     * `corpus_ayah_hashes.ingested_at` is stamped by the table's only writer
+     * (`IngestHashesCommand::ingestRows`, shared with `CorpusHashRecomputer`
+     * since v3-D174) on every ingest/recompute, but `index()`'s per-ayah
+     * `frontier` entry has only ever carried `qari`/`admin` — an admin had no
+     * way to tell "this hash was just recomputed" from "this row is stale
+     * from before the corpus last changed". Each ayah reports ITS OWN row's
+     * timestamp, never a surah-wide one.
+     */
+    public function test_the_frontier_reports_each_ayahs_own_hash_ingestion_time(): void
+    {
+        $this->seedHash(12, 4, 'hash-a', 'admin-hash', 1000);
+        $this->seedHash(12, 5, 'hash-b', 'admin-hash', 2000);
+
+        $response = $this->getJson('/api/verifications?surah=12')->assertOk();
+        $this->assertSame(1000, $response->json('frontier.4.ingestedAt'));
+        $this->assertSame(2000, $response->json('frontier.5.ingestedAt'));
+    }
+
+    /** A re-ingest (e.g. an override's synchronous recompute, v3-D174) that
+     *  changes the CURRENT hash also moves the reported timestamp forward —
+     *  proving this is read live off the row, never cached from the first
+     *  request. */
+    public function test_re_ingesting_moves_the_reported_timestamp_forward(): void
+    {
+        $this->seedHash(12, 4, 'hash-a', 'admin-hash', 1000);
+        $this->assertSame(1000, $this->getJson('/api/verifications?surah=12')->json('frontier.4.ingestedAt'));
+
+        CorpusAyahHash::where('surah', 12)->where('ayah', 4)->update(['qari_hash' => 'hash-b', 'ingested_at' => 5000]);
+
+        $this->assertSame(5000, $this->getJson('/api/verifications?surah=12')->json('frontier.4.ingestedAt'));
     }
 }

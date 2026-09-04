@@ -13359,3 +13359,158 @@ single-event detail view (v3-D166); `SystemHealthController::METRICS`'s
 `atom_cache_coverage`/`events_ingested_24h` (v3-D168, a known, reasoned
 omission); `QuestionOverride.note` and `FlagRow.ackAt` sweeps closed by
 v3-D170/D171 — all unchanged.
+
+## Ratified 2026-09-04 (nightly, later) — v3-D176: `corpus_ayah_hashes.ingested_at` was stamped on every write since step 15 and never reported anywhere — an admin/qari had no way to tell "just recomputed" from "stale from before the corpus last changed"
+
+`CorpusAyahHash` (`api/app/Models/CorpusAyahHash.php`) has an
+`ingested_at` column, fillable and populated on every write by the
+table's ONLY writer — `IngestHashesCommand::ingestRows()`
+(`api/app/Console/Commands/IngestHashesCommand.php:63-75`), shared since
+v3-D174 with `App\Support\CorpusHashRecomputer::recompute()`'s
+synchronous override-write recompute (`ingested_at` set to the current
+millisecond on every upsert, line 74). `VerificationsController::index()`
+(the `GET /api/verifications` endpoint `/workbench`'s frontier reads,
+DEFECTS.md#B3's own closing test) reads that same `CorpusAyahHash` row
+per ayah to compute `qari`/`admin` tier status
+(`api/app/Http/Controllers/VerificationsController.php:30-46`) but the
+per-ayah `frontier` entry it returns carried only those two tier
+strings — `ingested_at` was read into `$hashRow` and never once written
+back onto the response. `ContentFreezeController`'s
+`frontierCriterion()`/`hashSpecCriterion()` read the same table for the
+M9 freeze gate and likewise never touch it. `grep -rn
+"ingested_at|ingestedAt"` across `api/app` and `apps/web` (excluding
+this run's own new lines) turned up nothing beyond the one writer and
+three PHPUnit fixtures that set it as a required NOT-NULL value without
+ever asserting on it — the same "written on every commit, zero read
+surface" shape this build has closed roughly 90 times since v3-D82, here
+on the frontier's own hash-freshness fact rather than a sibling admin
+audit table.
+
+**Why this is a genuine, consequential gap, not a cosmetic one:** this is
+the one field that answers the exact question v3-D174 (the previous
+entry, closed hours earlier the same night) exists to let an admin ask
+about their OWN write — "did my correction's recompute actually run, or
+is this ayah's hash still the old one?" — but only at the moment of that
+one write, via an ephemeral toast. Once the page is reloaded, or a
+DIFFERENT admin opens `/workbench` later, nothing on the persistent
+frontier or the `/settings/content-freeze` report can answer that
+question at all. A silently-skipped or long-stale recompute (e.g. a
+surah whose `output/<n>/hashes.json` was never re-ingested after a
+corpus recompile) looks IDENTICAL on every existing screen to a hash
+ingested seconds ago.
+
+**Fixed, minimally, wire-additive:**
+`VerificationsController::index()` now sets
+`$status['ingestedAt'] = $hashRow->ingested_at;` inside the existing
+per-tier loop, alongside `qari`/`admin` — no other field on the response
+moved, and `store()`/`toWire()` (the verification-row endpoints) are
+untouched, since `ingested_at` belongs to the HASH row, not the
+verification row. `apps/web/lib/workbench/frontier.ts`'s `FrontierWire`
+gains `ingestedAt?: number` and `FrontierRow` gains `hashIngestedAt:
+number | null`, parsed in `buildWorklist` with this module's own
+established total-degradation rule (`typeof tiers?.ingestedAt ===
+"number" ? tiers.ingestedAt : null` — a missing or malformed value is
+`null`, never a fabricated timestamp, matching `toTierStatus`'s own
+"fails to the safe side" convention one field over).
+`FrontierNavigator.tsx`'s `Row` renders a new `caption
+wb-row__ingested` span, `` `hash ingested ${new
+Date(row.hashIngestedAt).toISOString()}` ``, present only when
+non-null — this component still decides nothing (check-boundaries.mjs
+clause 5): the timestamp, its presence, and its formatting rule all
+arrive as data from `lib/`.
+
+**Verified:** RED confirmed at three independent layers, each reverted
+byte-identically and rerun green. Backend
+(`VerificationsController.php` moved aside via `git stash`, both new
+`VerificationsTest` cases kept, the file's 13 pre-existing cases
+untouched): `test_the_frontier_reports_each_ayahs_own_hash_ingestion_time`
+seeds TWO ayat at distinct `ingested_at` values (1000, 2000) and failed
+on `expected null to be 1000` — proving the field is absent, not merely
+wrong; `test_re_ingesting_moves_the_reported_timestamp_forward` proves
+the value is read LIVE off the row on every request (a re-ingest that
+changes the current hash, exactly what an override recompute does,
+moves the reported timestamp from 1000 to 5000) rather than cached from
+first read. Restored, 15/15 green (was 13). Frontend (`frontier.ts`
+alone reverted, 2 new cases in `workbench-frontier.test.ts` kept, 17
+pre-existing cases untouched): a two-ayah fixture with distinct
+per-ayah `ingestedAt` values failed on `expected undefined to be
+1700000000000` — proving each row carries ITS OWN timestamp, not a
+surah-wide one a naive implementation might read once and broadcast; a
+missing/malformed-value case failed on `expected undefined to be null`.
+Restored, 19/19 green (was 17). Component
+(`FrontierNavigator.tsx`/`frontier.ts` both reverted together — the
+component test needs the real parsing wired, not a hand-built fixture —
+2 new cases in `workbench-ui.test.tsx` kept, 29 pre-existing cases
+untouched): the positive case failed on `expected '1VerifiedSigned and
+hash-current on both tiers.' to contain '2023-11-14T22:13:20.000Z'`; its
+negative sibling (no `ingestedAt` sent) passed vacuously against the
+UNFIXED component, which is exactly why it is paired with the positive
+one — a caption that always renders "hash ingested Invalid Date" would
+also fail the positive case's exact-string assertion, so the pairing
+proves the fix reads the real value, not merely that SOME text appears.
+Restored, 31/31 green (was 29).
+
+`TZ=UTC make test`: 2558 passing (was 2552, +6 — exactly this run's new
+tests: 2 in `VerificationsTest` + 2 in `workbench-frontier.test.ts` + 2
+in `workbench-ui.test.tsx`; v3/api 353, was 351; apps/web 1304, was
+1300; no other suite moved: 255 v2 vitest, 47 v2/api, 118
+corpus-compiler, 420 engine, 61 fold-runner). `check-test-floor.mjs`:
+OK, 2558 >= floor 1899 (+659 margin, unmoved, same discipline as every
+prior entry). `TZ=UTC make build`: exit 0, 29 routes (unchanged — edits
+inside the existing `/workbench` component's `lib/` layer plus one
+existing controller, no new route). `npm run gates`: all green
+(boundaries 295 files, unchanged count — three existing production
+files edited plus their three existing test files, no new production
+file; fonts degraded-but-non-blocking, pre-existing; corpus-morphology
+362 words / corpus-glyphs 206 codepoints, both unchanged). `npx tsc
+--noEmit` (via `make build`'s own TypeScript pass): clean. No
+`v1/**`/`v2/**` edit (`git status --porcelain -- v1 v2` empty
+immediately before committing — no stray build-cache diff this run).
+No Arabic codepoint (the full diff swept programmatically, in Python,
+over the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks — zero matches; every new string is a
+wire field name, an ISO timestamp derived from a fixture integer, or a
+fixed English caption, never corpus text).
+
+**Found by a dedicated fresh-sweep agent**, handed the full
+already-known/deliberately-deferred list v3-D175 carried forward (which
+now also names v3-D175's own just-closed item) and told explicitly not
+to re-report any of them. It also independently surfaced a weaker
+runner-up, left for a future run: `VerificationRow.contentHash`/
+`.hashSpecVersion` (`apps/web/lib/workbench/frontier.ts:73-74`) are
+fetched and required by the row validator, but `QariMode.tsx`'s
+signature-history list renders only `tier`/`reviewerKind`/`verifiedBy`/
+`createdAt`/`note` — the same "fetched, zero read surface" shape, but an
+opaque hash string is less actionable to a human reading a history list
+than a timestamp is, so this run judged the timestamp gap more
+consequential and scoped to it alone.
+
+**Session start:** fresh container, `make setup` run from scratch (no
+`node_modules`/`vendor` anywhere); local `main` was found ONE commit
+behind `origin/main` (on `4be9924` vs. the real tip `8e53020`, v3-D175 —
+the prior run's own push had landed cleanly minutes before this one
+started) — the recurring "stale local main" trap
+v3-D77/D91/D127/D138/D159/D167/D170/D172/D174 each independently hit was
+caught via `git fetch` + `git checkout main && git merge --ff-only
+origin/main` before any implementation work began. The only cost: an
+early `tail`/`grep` read of `DECISIONS.md` (to locate the most recent
+entry) ran against the pre-merge, stale content and appeared to show no
+v3-D175 entry at all; re-reading after the fast-forward merge showed it
+was present all along — no work was lost or based on the stale read.
+
+**NOT addressed, named so a future run doesn't re-discover it as new:**
+`VerificationRow.contentHash`/`.hashSpecVersion` (above);
+`GlossDraftsLoad.shipping`/`.excludedFromHashV1` (v3-D173,
+non-divergent); `FlagRow.ackAt` (v3-D170, weaker); `rhymeClassOf()`
+(v3-D136); `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151); multi-surah enrollment; the operational
+mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123); the late-arrival
+refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146);
+`lib/i18n/dictionaries.ts#isLocale()`; `BillingEventsPanel.tsx`'s
+single-event detail view (v3-D166); `SystemHealthController::METRICS`'s
+`atom_cache_coverage`/`events_ingested_24h` (v3-D168, a known, reasoned
+omission) — all unchanged.

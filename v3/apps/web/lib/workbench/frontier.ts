@@ -86,9 +86,12 @@ export type TierStatus = "verified" | "stale" | "unverified";
  *  view owns presentation and this module owns the judgement. */
 export type ChipState = "verified" | "stale" | "unverified";
 
-/** The `frontier` map as the API sends it: ayah number → per-tier status. */
+/** The `frontier` map as the API sends it: ayah number → per-tier status.
+ *  `ingestedAt` (v3-D176) is `corpus_ayah_hashes.ingested_at` for THIS ayah's
+ *  row — when its current hash was last written, by a manual ingest or an
+ *  override's synchronous recompute (v3-D174) alike. */
 export interface FrontierWire {
-  [ayah: string]: { qari?: string; admin?: string };
+  [ayah: string]: { qari?: string; admin?: string; ingestedAt?: number };
 }
 
 export interface FrontierResponse {
@@ -108,6 +111,11 @@ export interface FrontierRow {
   /** One sentence naming what to do about this row. Never jargon-free to the
    *  point of vagueness — an admin needs to know WHICH tier moved. */
   note: string;
+  /** v3-D176: when THIS ayah's current hash was last ingested (ms epoch),
+   *  straight off `corpus_ayah_hashes.ingested_at` — the one fact that lets
+   *  an admin tell "just recomputed" from "stale from before the corpus last
+   *  changed". `null` for a missing or malformed value, never fabricated. */
+  hashIngestedAt: number | null;
 }
 
 export interface FrontierWorklist {
@@ -186,7 +194,15 @@ export function buildWorklist(response: FrontierResponse | null): FrontierWorkli
       if (!Number.isInteger(ayah) || ayah < 1) return null;
       const qari = toTierStatus(tiers?.qari);
       const admin = toTierStatus(tiers?.admin);
-      return { ayah, qari, admin, chip: reduceChip(qari, admin), note: noteFor(qari, admin) };
+      const hashIngestedAt = typeof tiers?.ingestedAt === "number" ? tiers.ingestedAt : null;
+      return {
+        ayah,
+        qari,
+        admin,
+        chip: reduceChip(qari, admin),
+        note: noteFor(qari, admin),
+        hashIngestedAt,
+      };
     })
     .filter((r): r is FrontierRow => r !== null)
     .sort((a, b) => CHIP_PRIORITY[a.chip] - CHIP_PRIORITY[b.chip] || a.ayah - b.ayah);

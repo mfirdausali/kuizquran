@@ -283,6 +283,43 @@ describe("FrontierNavigator — the scholar-certification claim is on screen (v3
   });
 });
 
+describe("FrontierNavigator — a row shows when its hash was last ingested (v3-D176)", () => {
+  // `corpus_ayah_hashes.ingested_at` is stamped on every write (the manual
+  // CLI ingest and the override-write recompute alike) but was never
+  // reported on the frontier response — proves the WIRING, not just
+  // `buildWorklist`'s own parsing (already covered in
+  // workbench-frontier.test.ts).
+  it("renders the ISO timestamp when the server reports one", () => {
+    const worklist = buildWorklist({
+      frontier: { "1": { qari: "verified", admin: "verified", ingestedAt: 1700000000000 } },
+    });
+    render(
+      <FrontierNavigator
+        load={{ state: "ready", worklist, certification: NO_HUMAN_CLAIM, verifications: [] }}
+        selectedAyah={null}
+        onSelect={() => {}}
+      />,
+    );
+    const row = screen.getByRole("button", { name: /^Ayah 1\./ });
+    expect(row.textContent).toContain(new Date(1700000000000).toISOString());
+  });
+
+  it("renders no ingestion caption at all when the server sends no timestamp — never a fabricated date", () => {
+    const worklist = buildWorklist({
+      frontier: { "1": { qari: "verified", admin: "verified" } },
+    });
+    render(
+      <FrontierNavigator
+        load={{ state: "ready", worklist, certification: NO_HUMAN_CLAIM, verifications: [] }}
+        selectedAyah={null}
+        onSelect={() => {}}
+      />,
+    );
+    const row = screen.getByRole("button", { name: /^Ayah 1\./ });
+    expect(row.textContent).not.toContain("hash ingested");
+  });
+});
+
 describe("ExplainTrace — the preview is the LEARNER'S components", () => {
   const trace = explain(corpus, { lane: "s1", site: { kind: "ayah", surah: 12, ayah: 6 } });
 

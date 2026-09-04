@@ -53,9 +53,107 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2552 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 351 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1300 apps/web. (v3-D175, 2026-09-04)
+make test    # 2558 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 353 v3/api + 118 corpus-compiler
+             # + 420 engine + 61 fold-runner + 1304 apps/web. (v3-D176, 2026-09-04)
+             # NOTE (v3-D176, 2026-09-04): `corpus_ayah_hashes.ingested_at`
+             # — stamped on every write since step 15 by the table's only
+             # writer, `IngestHashesCommand::ingestRows` (shared with
+             # `CorpusHashRecomputer` since v3-D174's synchronous
+             # override-write recompute) — was never reported anywhere:
+             # `VerificationsController::index()`'s per-ayah `frontier`
+             # entry carried only `qari`/`admin` tier status, never the
+             # timestamp of the row those statuses are computed against.
+             # An admin/qari on `/workbench` had no way to tell "this
+             # ayah's hash was just recomputed" from "this hash row is
+             # stale from before the corpus last changed" — the same
+             # "written since the writer shipped, zero read surface"
+             # shape this build has closed ~90 times since v3-D82, here on
+             # the frontier's own hash-freshness fact rather than a
+             # sibling admin audit table. Fixed: `index()` now sets
+             # `$status['ingestedAt'] = $hashRow->ingested_at` per ayah
+             # (a wire-additive change, no other field moved);
+             # `lib/workbench/frontier.ts`'s `FrontierWire`/`FrontierRow`
+             # gain a matching `ingestedAt?: number`/`hashIngestedAt:
+             # number | null` (a missing or non-numeric value degrades to
+             # `null`, never a fabricated timestamp — `buildWorklist`'s
+             # own total-degradation discipline, same as every other
+             # field it parses); `FrontierNavigator.tsx`'s `Row` renders
+             # a new `hash ingested {ISO-8601}` caption beneath the
+             # existing note, present only when the value is non-null.
+             # RED confirmed at three independent layers, each reverted
+             # byte-identically and rerun green: backend (2 new
+             # `VerificationsTest` cases against the unmodified
+             # controller both failed on `expected null to be 1000`, one
+             # proving each ayah reports its OWN row's timestamp, the
+             # other proving a re-ingest — an override's recompute —
+             # moves it forward, not merely that a static value passes
+             # through); `frontier.ts` (2 new cases: the per-ayah
+             # timestamp carries through untouched, and a missing/
+             # malformed value degrades to `null` rather than `undefined`
+             # or a crash); the component (1 new case renders the ISO
+             # string, its negative sibling proves the caption is absent
+             # — not merely blank — when the server sends nothing, so the
+             # positive case cannot be reading a fabricated date).
+             # `TZ=UTC make test`: 2558 passing (was 2552, +6 — exactly
+             # this run's new tests: 2 PHPUnit + 2 + 2 vitest; v3/api 353,
+             # was 351; apps/web 1304, was 1300; no other suite moved).
+             # `check-test-floor.mjs`: OK, 2558 >= floor 1899 (+659
+             # margin, unmoved, same discipline as every prior entry).
+             # `TZ=UTC make build`: exit 0, 29 routes (unchanged — edits
+             # inside the existing `/workbench` component's `lib/` layer
+             # plus one existing controller, no new route). `npm run
+             # gates`: all green (boundaries 295 files, unchanged count —
+             # three existing production files edited plus their three
+             # existing test files, no new production file; fonts
+             # degraded-but-non-blocking, pre-existing; corpus-morphology
+             # and corpus-glyphs unchanged). `npx tsc --noEmit`: clean.
+             # No `v1/**`/`v2/**` edit (`git status --porcelain -- v1 v2`
+             # empty immediately before committing). No Arabic codepoint
+             # (the full diff swept programmatically, in Python, over the
+             # Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms Unicode blocks — zero matches; every
+             # new string is a wire field name, an ISO timestamp derived
+             # from a fixture integer, or a fixed English caption, never
+             # corpus text). Found by a dedicated fresh-sweep agent handed
+             # the full list of already-known/deferred items (the
+             # v3-D175 list plus v3-D175 itself) and told not to
+             # re-report any of them — it also independently surfaced
+             # (not fixed this run, weaker) `VerificationRow.contentHash`/
+             # `.hashSpecVersion` in `apps/web/lib/workbench/frontier.ts`,
+             # fetched and typed but never rendered in `QariMode.tsx`'s
+             # signature-history list — a real instance of the same shape,
+             # but an opaque hash string is less actionable to a human
+             # than a timestamp, so left for a future run. Session start:
+             # fresh container, `make setup` run from scratch; local
+             # `main` was found 1 commit behind `origin/main` (on
+             # `4be9924` vs. the real tip `8e53020`, v3-D175) — the
+             # recurring "stale local main" trap
+             # v3-D77/D91/D127/D138/D159/D167/D170/D172/D174 each
+             # independently hit — caught via `git fetch` + `git checkout
+             # main && git merge --ff-only origin/main` before any
+             # implementation work, no work lost or at risk (the only
+             # casualty was a `tail`/`grep` on DECISIONS.md run against
+             # the stale content before the merge, corrected by re-reading
+             # after). NOT addressed: `VerificationRow.contentHash`/
+             # `.hashSpecVersion` (above); `GlossDraftsLoad.shipping`/
+             # `.excludedFromHashV1` (v3-D173, non-divergent); `FlagRow
+             # .ackAt` (v3-D170, weaker); `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+             # `App\Billing\TrialAttribution` (v3-D148);
+             # `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate`
+             # as a whole class (v3-D88, v3-D151); multi-surah enrollment;
+             # the operational mailer/7-night window; PAY-1's Stripe
+             # fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`
+             # (v3-D111/D113/D123); the late-arrival refold half of v3-D32;
+             # `AccountDeletionRequest::isDue()` (v3-D146);
+             # `lib/i18n/dictionaries.ts#isLocale()`; `BillingEventsPanel
+             # .tsx`'s single-event detail view (v3-D166);
+             # `SystemHealthController::METRICS`'s `atom_cache_coverage`/
+             # `events_ingested_24h` (v3-D168) — all unchanged. See
+             # DECISIONS.md v3-D176.
              # NOTE (v3-D175, 2026-09-04): `buildDrillPreview`'s own
              # `partialNotice` — this file's own header calls it "the honest
              # up-front explanation of the denominator" — was gated on

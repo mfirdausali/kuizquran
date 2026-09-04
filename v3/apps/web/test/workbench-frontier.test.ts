@@ -193,3 +193,29 @@ describe("the note names WHICH tier moved — an admin has to know what to re-si
     expect(w.rows[0]!.note).toContain("hash-current");
   });
 });
+
+describe("hashIngestedAt — when THIS ayah's current hash was last ingested (v3-D176)", () => {
+  it("carries the server's own per-ayah timestamp through untouched", () => {
+    const w = buildWorklist({
+      frontier: {
+        "1": { qari: "verified", admin: "verified", ingestedAt: 1700000000000 },
+        "2": { qari: "verified", admin: "verified", ingestedAt: 1600000000000 },
+      },
+    } as FrontierResponse);
+    const byAyah = new Map(w.rows.map((r) => [r.ayah, r.hashIngestedAt]));
+    expect(byAyah.get(1)).toBe(1700000000000);
+    expect(byAyah.get(2)).toBe(1600000000000);
+  });
+
+  it("degrades a missing or malformed value to null, never a fabricated timestamp", () => {
+    const missing = buildWorklist({
+      frontier: { "1": { qari: "verified", admin: "verified" } },
+    } as FrontierResponse);
+    expect(missing.rows[0]!.hashIngestedAt).toBeNull();
+
+    const malformed = buildWorklist({
+      frontier: { "1": { qari: "verified", admin: "verified", ingestedAt: "not-a-number" } },
+    } as unknown as FrontierResponse);
+    expect(malformed.rows[0]!.hashIngestedAt).toBeNull();
+  });
+});
