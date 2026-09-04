@@ -55,7 +55,75 @@ make setup   # once
 make dev     # SPA :5273, API :8000
 make test    # 2558 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 353 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1304 apps/web. (v3-D176, 2026-09-04)
+             # + 420 engine + 61 fold-runner + 1304 apps/web. (v3-D177, 2026-09-04)
+             # NOTE (v3-D177, 2026-09-04): `VerificationRow.contentHash`/
+             # `.hashSpecVersion` — required, non-nullable fields on every
+             # signature-history row since step 15/v3-D167 — were fetched
+             # and typed but never rendered: `QariMode.tsx`'s history
+             # `<li>` printed `tier`/`reviewerKind`/`verifiedBy`/
+             # `createdAt`/`note` only, so a reviewer could not tell which
+             # hash spec version or content hash a PRIOR signature actually
+             # certified — material once an override recompute (v3-D174)
+             # or a recompile moves the current hash out from under an
+             # older row. Named as a real, weaker runner-up in v3-D176's
+             # own closing note and left for this run. Fixed, display-only,
+             # no server/wire change: the history `<li>` gains `— hash spec
+             # v{row.hashSpecVersion} — content hash {row.contentHash}`,
+             # both in the existing `ltr-island` class this file already
+             # uses for the same kind of value in `SignOutcome`. RED
+             # confirmed directly: the pre-existing v3-D167 history test's
+             # assertions were strengthened to check for the fixture's
+             # already-present `contentHash: "abc"` / `hashSpecVersion: 1`
+             # (set at v3-D167, never previously asserted on) and failed
+             # genuinely against the unmodified component; restored
+             # byte-identically, 12/12 green (unchanged count — a
+             # strengthened existing case, not a new one). `TZ=UTC make
+             # test`: 2558 passing (unchanged from v3-D176's own count —
+             # no new test file or case; apps/web 1304, unchanged; no other
+             # suite moved). `check-test-floor.mjs`: OK, 2558 >= floor 1899
+             # (+659 margin, unmoved, same discipline as every prior
+             # entry). `TZ=UTC make build`: exit 0, 29 routes (unchanged —
+             # edits inside the existing `/workbench` component, no new
+             # route). `npm run gates`: all green (boundaries 295 files,
+             # unchanged count — one existing production file edited plus
+             # its one existing test file, no new production file; fonts
+             # degraded-but-non-blocking, pre-existing; corpus-morphology
+             # and corpus-glyphs unchanged). `npx tsc --noEmit`: clean. No
+             # `v1/**`/`v2/**` edit (stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff reverted before committing, same
+             # discipline as every prior entry). No Arabic codepoint (both
+             # changed files swept programmatically, in Python, over the
+             # Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms Unicode blocks — zero matches; every new
+             # string is a fixed English label or a wire field read, and
+             # the test's hash/version values are the pre-existing
+             # synthetic fixture literals, never corpus text). Session
+             # start: fresh container, `make setup` run from scratch;
+             # local `HEAD` was found detached on a stale cached `main` ref
+             # (`4be9924`) one commit behind `origin/main`'s real tip
+             # (`51ce9cb`, v3-D176) — the recurring "stale local main" trap
+             # v3-D77/D91/D127/D138/D159/D167/D170/D172/D174/D175 each
+             # independently hit — caught via `git fetch` + `git checkout
+             # main && git merge --ff-only origin/main` before any
+             # implementation work, no work lost or at risk. NOT
+             # addressed: `GlossDraftsLoad.shipping`/`.excludedFromHashV1`
+             # (v3-D173, non-divergent); `FlagRow.ackAt` (v3-D170,
+             # weaker); `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+             # `App\Billing\TrialAttribution` (v3-D148);
+             # `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate`
+             # as a whole class (v3-D88, v3-D151); multi-surah enrollment;
+             # the operational mailer/7-night window; PAY-1's Stripe
+             # fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`
+             # (v3-D111/D113/D123); the late-arrival refold half of v3-D32;
+             # `AccountDeletionRequest::isDue()` (v3-D146);
+             # `lib/i18n/dictionaries.ts#isLocale()`; `BillingEventsPanel
+             # .tsx`'s single-event detail view (v3-D166);
+             # `SystemHealthController::METRICS`'s `atom_cache_coverage`/
+             # `events_ingested_24h` (v3-D168) — all unchanged. See
+             # DECISIONS.md v3-D177.
              # NOTE (v3-D176, 2026-09-04): `corpus_ayah_hashes.ingested_at`
              # — stamped on every write since step 15 by the table's only
              # writer, `IngestHashesCommand::ingestRows` (shared with

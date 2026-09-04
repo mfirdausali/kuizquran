@@ -127,6 +127,12 @@ describe("QariMode — v3-D167: the signature history for this ayah is rendered,
     expect(historyItem.textContent).toContain("reviewer@example.test");
     expect(historyItem.textContent).toContain("2025-01-01T00:00:00.000Z");
     expect(historyItem.textContent).toContain("checked distractor 3, wrong root — resubmit");
+    // v3-D177: `contentHash`/`hashSpecVersion` are fetched and typed on every
+    // `VerificationRow` (the exact hash this row was signed against) but were
+    // never rendered — a reviewer could not tell a PRIOR signature's hash
+    // spec version from the CURRENT one, or see the hash it actually covered.
+    expect(historyItem.textContent).toContain("v1");
+    expect(historyItem.textContent).toContain("abc");
   });
 
   it("falls back to — for a null verifiedBy, never a fabricated value", () => {

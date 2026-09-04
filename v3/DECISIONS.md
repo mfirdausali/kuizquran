@@ -13514,3 +13514,101 @@ refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146);
 single-event detail view (v3-D166); `SystemHealthController::METRICS`'s
 `atom_cache_coverage`/`events_ingested_24h` (v3-D168, a known, reasoned
 omission) — all unchanged.
+
+## Ratified 2026-09-04 (nightly) — v3-D177: `VerificationRow.contentHash`/`.hashSpecVersion` were fetched and required on every signature-history row and never rendered — a reviewer could not tell which content a PRIOR signature actually covered
+
+`apps/web/lib/workbench/frontier.ts:73-74` declares `contentHash` and
+`hashSpecVersion` as required (non-nullable) fields of `VerificationRow`
+— they come straight off `VerificationsController::toWire()`, which has
+sent both on every stored row since step 15 (B3's own closing schema:
+the hash IS what a signature actually certifies). `WorkbenchIsland`
+fetches the full `verifications` array and threads it, scoped to the
+open ayah, into `QariMode`'s `history` prop (v3-D167). But
+`QariMode.tsx`'s signature-history `<li>` rendered only `tier` /
+`reviewerKind` / `verifiedBy` / `createdAt` / `note` — `grep -n "row\."
+QariMode.tsx` showed exactly those five reads, never `row.contentHash`
+or `row.hashSpecVersion`. Same "fetched, typed, required by the
+validator, zero read surface" shape this build has closed roughly 90
+times since v3-D82 — named explicitly as a real but weaker runner-up in
+v3-D176's own closing note, left for tonight.
+
+**Why this is a genuine, consequential gap, not a cosmetic one:**
+`corpus_ayah_hashes` — and therefore the hash a NEW signature would be
+checked against — can change after an older signature was recorded
+(an override recompute, v3-D174; a corpus recompile). `describeCertification()`
+(v3-D152) already answers "is ANY row's hash current" for the aggregate
+chip, but a reviewer looking at the per-row history — deciding whether a
+PRIOR signature is still trustworthy, or re-reviewing after a rejection
+— had no way to see which hash spec version or which hash a given row
+actually certified. Two rows signed under different hash-spec versions
+looked identical in the list.
+
+**Fixed, display-only, no server/wire change:** `QariMode.tsx`'s history
+`<li>` gains `— hash spec v{row.hashSpecVersion} — content hash
+{row.contentHash}`, both wrapped in the existing `ltr-island` class this
+file already uses for the same kind of value in `SignOutcome` (a version
+number, a hex-ish string — neither is prose, both stay LTR regardless of
+page direction). Both fields are non-nullable on `VerificationRow`, so
+no fallback branch was needed — unlike `verifiedBy`/`note`, a stored row
+always carries the hash it was checked against.
+
+**Verified:** RED confirmed directly against the unmodified component
+(`git stash` of `QariMode.tsx` alone, the strengthened assertions in the
+pre-existing v3-D167 "renders tier, reviewer kind, who signed, when, and
+their note" case kept, the file's other 11 cases untouched): the
+existing fixture already carried `contentHash: "abc"` /
+`hashSpecVersion: 1` (set at v3-D167, never previously asserted on), so
+strengthening that one test's assertions to also check for `"v1"` and
+`"abc"` reproduced a genuine failure (`expected '...' to contain 'v1'`)
+against the real unmodified render — no new test file needed, matching
+this codebase's own precedent (v3-D169/D170/D171) for strengthening an
+existing case rather than adding a redundant new one when the fixture
+already carries the missing value. Restored, 12/12 green (unchanged
+count — a strengthened existing case, not a new one).
+
+`TZ=UTC make test`: 2558 passing (unchanged from v3-D176's own count —
+no new test file or case, the RED was carried entirely by strengthening
+an existing assertion; apps/web 1304, unchanged; no other suite moved).
+`check-test-floor.mjs`: OK, 2558 >= floor 1899 (+659 margin, unmoved,
+same discipline as every prior entry). `TZ=UTC make build`: exit 0, 29
+routes (unchanged — edits inside the existing `/workbench` component,
+no new route). `npm run gates`: all green (boundaries 295 files,
+unchanged count — one existing production file edited plus its one
+existing test file, no new production file; fonts
+degraded-but-non-blocking, pre-existing; corpus-morphology 362 words /
+corpus-glyphs 206 codepoints, both unchanged). `npx tsc --noEmit`:
+clean. No `v1/**`/`v2/**` edit (`git status --porcelain -- v1 v2` empty
+immediately before committing — a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff produced by running the suite was reverted first, same
+discipline as every prior entry). No Arabic codepoint (both changed
+files swept programmatically, in Python, over the Arabic, Arabic
+Supplement, Arabic Extended-A and both Presentation Forms Unicode
+blocks — zero matches; every new string is a fixed English label or a
+wire field read, and the test's own hash/version values are the
+pre-existing synthetic fixture literals `"abc"`/`1`, never corpus text).
+
+**Session start:** fresh container, `make setup` run from scratch (no
+`node_modules`/`vendor` anywhere); local `HEAD` was found detached, one
+branch-checkout away from the real tip (`4be9924` locally reachable via
+the cached `main` ref vs. `origin/main`'s real tip `51ce9cb`, v3-D176) —
+the recurring "stale local main" trap
+v3-D77/D91/D127/D138/D159/D167/D170/D172/D174/D175 each independently
+hit — caught before any implementation work via `git fetch` + `git
+checkout main && git merge --ff-only origin/main`, no work lost or at
+risk.
+
+**NOT addressed, named so a future run doesn't re-discover it as new:**
+`GlossDraftsLoad.shipping`/`.excludedFromHashV1` (v3-D173,
+non-divergent); `FlagRow.ackAt` (v3-D170, weaker); `rhymeClassOf()`
+(v3-D136); `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151); multi-surah enrollment; the operational
+mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123); the late-arrival
+refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146);
+`lib/i18n/dictionaries.ts#isLocale()`; `BillingEventsPanel.tsx`'s
+single-event detail view (v3-D166); `SystemHealthController::METRICS`'s
+`atom_cache_coverage`/`events_ingested_24h` (v3-D168, a known, reasoned
+omission) — all unchanged.

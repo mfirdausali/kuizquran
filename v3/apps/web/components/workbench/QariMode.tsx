@@ -152,7 +152,9 @@ export function QariMode({ surah, ayah, chip, onSigned, history = [] }: QariMode
             {history.map((row) => (
               <li key={row.id}>
                 {row.tier} tier — {row.reviewerKind} review — signed by{" "}
-                {row.verifiedBy ?? "—"} — {new Date(row.createdAt).toISOString()}
+                {row.verifiedBy ?? "—"} — {new Date(row.createdAt).toISOString()} — hash spec{" "}
+                <span className="ltr-island">v{row.hashSpecVersion}</span> — content hash{" "}
+                <span className="ltr-island">{row.contentHash}</span>
                 {row.note ? `: ${row.note}` : ""}
               </li>
             ))}
