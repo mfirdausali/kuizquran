@@ -112,9 +112,10 @@ export interface DrillPreview {
   structured: boolean;
   /** The consequence of a slip, in the learner's terms. Never jargon. */
   consequenceLabel: string;
-  /** Present only when something is skipped — the honest up-front explanation
-   *  of the denominator. Null when the whole selection is drillable, so the
-   *  view has nothing to render rather than rendering a reassuring no-op. */
+  /** Present only when something is skipped — an un-learned ayah, an
+   *  unreached seam, or both — the honest up-front explanation of the
+   *  denominator. Null when the whole selection is drillable, so the view
+   *  has nothing to render rather than rendering a reassuring no-op. */
   partialNotice: string | null;
 }
 
@@ -173,6 +174,24 @@ export function buildDrillPreview(input: BuildPreviewInput): DrillPreview {
 
   const totalAyat = ayahCount + skippedAyahCount;
 
+  // The ayah clause and the seam clause are separate sentences because they
+  // are separate reasons (this file's own header, above): an un-learned ayah
+  // and an unreached seam are different facts, so a learner watching the
+  // joint count drop deserves the same up-front honesty the ayah count
+  // already gets, not a silently smaller number with nothing to explain it.
+  const ayahClause =
+    skippedAyahCount > 0
+      ? `${ayahCount} of ${totalAyat} ayat here are ready. ` +
+        `The other ${skippedAyahCount} haven't been learned yet — ` +
+        `they'll be skipped, not marked wrong.`
+      : null;
+  const seamClause =
+    skippedSeamCount > 0
+      ? skippedSeamCount === 1
+        ? `1 joint hasn't been reached yet, so it's skipped too.`
+        : `${skippedSeamCount} joints haven't been reached yet, so they're skipped too.`
+      : null;
+
   return {
     sites: previewSites,
     drilledSites,
@@ -188,12 +207,7 @@ export function buildDrillPreview(input: BuildPreviewInput): DrillPreview {
       mode === "graded"
         ? "Slips will lower your strength."
         : "Nothing can be damaged; this still counts toward your streak.",
-    partialNotice:
-      skippedAyahCount > 0
-        ? `${ayahCount} of ${totalAyat} ayat here are ready. ` +
-          `The other ${skippedAyahCount} haven't been learned yet — ` +
-          `they'll be skipped, not marked wrong.`
-        : null,
+    partialNotice: [ayahClause, seamClause].filter((c) => c !== null).join(" ") || null,
   };
 }
 

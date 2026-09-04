@@ -13252,3 +13252,110 @@ refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146);
 single-event detail view (v3-D166); `SystemHealthController::METRICS`'s
 `atom_cache_coverage`/`events_ingested_24h` (v3-D168, a known, reasoned
 omission) — all unchanged.
+
+## Ratified 2026-09-04 (nightly, later) — v3-D175: `buildDrillPreview`'s `partialNotice` gated only on `skippedAyahCount` — an unreached joint dropped the on-screen count with no honest explanation, the seam-side sibling of the gap that field exists to close
+
+`lib/drill/preview.ts`'s own header states three promises the picker must
+keep before a learner taps Start, the first being "WHAT will be drilled,
+and what will be SKIPPED and why" — and its own `SkipReason` docblock
+names TWO distinct reasons on purpose: `"not-learned"` for an ayah and
+`"seam-not-reached"` for a seam, "because a missing connection atom
+genuinely is a different thing: the junction has not been reached yet,
+not failed." `skippedSeamCount` was computed and returned on the
+`DrillPreview` object since `buildDrillPreview` shipped, and
+`DrillSummary` in `components/drill/DrillPicker.tsx` prints
+`preview.seamCount` (the joints that WILL be drilled) directly — but
+`partialNotice`, the one field this file's own header calls "the honest
+up-front explanation of the denominator," was built `skippedAyahCount >
+0 ? … : null` only. A learner who saw "6 ayat · 4 joints" instead of the
+"6 ayat · 5 joints" a 6-ayah range implies (one seam genuinely unreached,
+its connection atom never having been visited) had every ayah ready and
+therefore no `partialNotice` at all — the joint count simply read lower,
+with nothing on screen distinguishing "unreached, skip it, nothing
+failed" from a silent miscount. Same "written, computed, zero read
+surface" shape this build has closed roughly 90 times since v3-D82, here
+on the picker's own honesty mechanism rather than an admin audit table.
+
+**Fixed in `lib/drill/preview.ts#buildDrillPreview` only** — no
+`DrillPicker.tsx`/`DrillSummary` change was needed, since that component
+already renders `preview.partialNotice` verbatim (check-boundaries.mjs
+clause 5: the view decides nothing, it prints what `lib/` decided).
+`partialNotice` is now composed from two independent clauses, joined by a
+space when both are present: the existing ayah clause, byte-identical to
+before, and a new seam clause (`"1 joint hasn't been reached yet, so
+it's skipped too."` / `"N joints haven't been reached yet, so they're
+skipped too."`, singular/plural), each `null` when nothing of that kind
+is skipped. The two reasons stay two sentences, matching `SkipReason`'s
+own "these are different facts" reasoning — never merged into one
+message that would blur an un-learned ayah with an unreached joint.
+
+**Verified:** RED confirmed directly against the unmodified module
+(`git stash` of `lib/drill/preview.ts` alone, both new
+`drill-preview.test.ts` cases kept, the file's 17 pre-existing cases
+untouched): a range with every ayah encoded but one seam's connection
+atom deliberately absent failed on `expected null to be "1 joint hasn't
+been reached yet, so it's skipped too."` — exactly the silent-drop this
+fix closes; a second case (3 skipped ayat AND 2 skipped seams on the same
+10-ayah page fixture the pre-existing ayah-only test already uses) failed
+on the combined string missing its seam sentence entirely. Restored
+byte-identically (`git diff` empty), reran: 17/17 green (was 15, +2).
+The pre-existing "states the honest denominator UP FRONT" and "says
+nothing when the whole selection is ready" tests were not touched and
+still pass unchanged, because both of their fixtures give every seam in
+range a real connection atom (`atomsFor`'s own contract) — proving the
+new seam clause is additive, not a silent rewording of the ayah-only
+case.
+
+`TZ=UTC make test`: 2552 passing (was 2550, +2 — exactly this run's new
+tests; apps/web 1300, was 1298; no other suite moved: 255 v2 vitest, 47
+v2/api, 351 v3/api, 118 corpus-compiler, 420 engine, 61 fold-runner).
+`check-test-floor.mjs`: OK, 2552 >= floor 1899 (+653 margin, unmoved,
+same discipline as every prior entry). `TZ=UTC make build`: exit 0, 29
+routes (unchanged — the fix lives entirely inside the existing `/drill`
+component's `lib/` layer, no new route). `npm run gates`: all green
+(boundaries 295 files checked — one existing production file edited
+plus its one existing test file, no new production file, confirmed via
+`git status`; fonts degraded-but-non-blocking, pre-existing;
+corpus-morphology 362 words / corpus-glyphs 206 codepoints, both
+unchanged). `npx tsc --noEmit` (via
+`make build`'s own TypeScript pass): clean. No `v1/**`/`v2/**` edit (a
+stray `v2/tsconfig.tsbuildinfo` build-cache diff produced by running the
+suite was reverted before committing, same discipline as every prior
+entry — `git status --porcelain -- v1 v2` empty immediately before
+commit). No Arabic codepoint (the diff swept programmatically, in
+Python, over the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks — zero matches; every new string is a
+fixed English sentence about a joint count, never corpus text).
+
+**Found by continuing v3-D174's own "NOT addressed" list**, which named
+this exact gap (`lib/drill/preview.ts#skipReason`/`skippedSeamCount` in
+`DrillPicker.tsx`, surfaced by that run's fresh-sweep agent as a
+"lower-consequence 'why did the joint count drop' UX gap, not a
+verification-integrity gap" and deliberately left for a future run) —
+this run picked it up rather than dispatching a fresh sweep, since it was
+already a named, scoped, real defect rather than a new discovery.
+
+**Session start:** fresh container, `make setup` run from scratch (no
+`node_modules`/`vendor` anywhere); local `main` was found at `4be9924`,
+the same commit `origin/main` was already at — the recurring "stale
+local main" trap v3-D77/D91/D127/D138/D159/D167/D170/D172/D174 each
+independently hit was checked for directly (`git log -1`, `git status`)
+and did not recur this run.
+
+**NOT addressed, named so a future run doesn't re-discover it as new:**
+`GlossDraftsLoad.shipping`/`.excludedFromHashV1` in
+`GlossDraftsPanel.tsx` (v3-D173, non-divergent); `FlagRow.ackAt` in
+`FlagsPanel.tsx` (v3-D170, weaker); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151); multi-surah enrollment; the operational
+mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123); the late-arrival
+refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146);
+`lib/i18n/dictionaries.ts#isLocale()`; `BillingEventsPanel.tsx`'s
+single-event detail view (v3-D166); `SystemHealthController::METRICS`'s
+`atom_cache_coverage`/`events_ingested_24h` (v3-D168, a known, reasoned
+omission); `QuestionOverride.note` and `FlagRow.ackAt` sweeps closed by
+v3-D170/D171 — all unchanged.

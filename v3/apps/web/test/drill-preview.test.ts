@@ -178,6 +178,42 @@ describe("partial pages — skipped is not failed", () => {
     expect([...seamReasons]).toEqual(["seam-not-reached"]);
   });
 
+  // G10. The seam-side sibling of "states the honest denominator UP FRONT":
+  // an unreached joint is a different fact from an un-learned ayah (this
+  // file's own header), so it needs its own honest sentence, not a silently
+  // smaller joint count with nothing on screen to explain it.
+  // MUTATION: gate partialNotice on skippedAyahCount alone — this goes RED.
+  it("also names an unreached joint even when every ayah is ready", () => {
+    const threeSites = sitesForRange(SURAH, 1, 3, COUNT); // ayat 1-3, seams 1-2
+    const atoms = atomsFor(threeSites, [1, 2, 3]);
+    // Every ayah is encoded; delete one seam's atom so it is genuinely
+    // unreached, not merely un-encoded (seams have no `encoded` concept).
+    atoms.delete(siteToAtomKey({ kind: "seam", surah: SURAH, ayah: 2 }));
+
+    const p = buildDrillPreview({ sites: threeSites, atoms, mode: "graded" });
+    expect(p.skippedAyahCount).toBe(0);
+    expect(p.skippedSeamCount).toBe(1);
+    expect(p.partialNotice).toBe("1 joint hasn't been reached yet, so it's skipped too.");
+  });
+
+  it("pluralizes and combines both clauses when ayat and joints are both partial", () => {
+    const span2 = { page: 236, firstAyah: 5, lastAyah: 14, sharedWithOtherSurah: false };
+    const pageSites = sitesForPage(SURAH, span2, COUNT);
+    const atoms = atomsFor(pageSites, learned); // 7 of 10 ayat, every seam present
+    // Two of the seams among the LEARNED ayat are genuinely unreached.
+    atoms.delete(siteToAtomKey({ kind: "seam", surah: SURAH, ayah: 5 }));
+    atoms.delete(siteToAtomKey({ kind: "seam", surah: SURAH, ayah: 6 }));
+
+    const p = buildDrillPreview({ sites: pageSites, atoms, mode: "graded" });
+    expect(p.skippedAyahCount).toBe(3);
+    expect(p.skippedSeamCount).toBe(2);
+    expect(p.partialNotice).toBe(
+      "7 of 10 ayat here are ready. The other 3 haven't been learned yet — " +
+        "they'll be skipped, not marked wrong. " +
+        "2 joints haven't been reached yet, so they're skipped too.",
+    );
+  });
+
   it("keeps the page's boundary seam among the drilled sites", () => {
     const all = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
     const p = buildDrillPreview({ sites, atoms: atomsFor(sites, all), mode: "graded" });
