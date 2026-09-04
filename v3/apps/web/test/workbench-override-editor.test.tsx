@@ -178,6 +178,7 @@ describe("OverrideEditor — submitting a gloss correction", () => {
               id: 5, surah: 12, ayah: 4, position: 1, questionType: "s1", field: "gloss",
               payload: { lang: "en", text: "at the time" }, editorId: 3, note: null, createdAt: 1_700_000_000_002,
             },
+            hashRecompute: { ok: true, rows: 1 },
           },
           201,
         );
@@ -223,6 +224,77 @@ describe("OverrideEditor — submitting a gloss correction", () => {
     const submit = screen.getByRole("button", { name: /submit gloss correction/i }) as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
   });
+
+  // `CorpusHashRecomputer::recompute()` (v3-D81) reports its own verdict on
+  // every write; `submitOverride` (as of this run) carries it through, but
+  // until this fix `OverrideEditor` printed a flat "gloss corrected"
+  // regardless — an admin correcting a gloss on a not-yet-compiled surah
+  // would see the SAME success message a genuinely-recomputed correction
+  // gets, with no way to learn the surah's tiered verification hash did not
+  // move (a previously-`verified` ayah could keep reading `verified`
+  // instead of `stale`).
+  it("warns on screen when the server's own hash recompute failed, naming its reason", async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      if (method === "POST") {
+        return jsonResponse(
+          {
+            override: {
+              id: 5, surah: 12, ayah: 4, position: 1, questionType: "s1", field: "gloss",
+              payload: { lang: "en", text: "at the time" }, editorId: 3, note: null, createdAt: 1_700_000_000_002,
+            },
+            hashRecompute: { ok: false, error: "surah 12 has never been compiled" },
+          },
+          201,
+        );
+      }
+      return jsonResponse({ overrides: [] });
+    }) as unknown as typeof fetch;
+
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} />);
+    await waitFor(() => expect(screen.getByText(/no overrides recorded/i)).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText(/^word$/i), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText(/corrected gloss/i), { target: { value: "at the time" } });
+    fireEvent.click(screen.getByRole("button", { name: /submit gloss correction/i }));
+
+    await waitFor(() => expect(screen.getByRole("status")).toBeTruthy());
+    expect(screen.getByRole("status").textContent).toMatch(/gloss corrected/i);
+    expect(screen.getByRole("status").textContent).toMatch(/did not recompute/i);
+    expect(screen.getByRole("status").textContent).toMatch(/surah 12 has never been compiled/);
+  });
+
+  // The negative case: a successful recompute must NOT paint the warning —
+  // otherwise the warning is noise, not a signal.
+  it("does not warn when the server's own hash recompute succeeded", async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      if (method === "POST") {
+        return jsonResponse(
+          {
+            override: {
+              id: 5, surah: 12, ayah: 4, position: 1, questionType: "s1", field: "gloss",
+              payload: { lang: "en", text: "at the time" }, editorId: 3, note: null, createdAt: 1_700_000_000_002,
+            },
+            hashRecompute: { ok: true, rows: 1 },
+          },
+          201,
+        );
+      }
+      return jsonResponse({ overrides: [] });
+    }) as unknown as typeof fetch;
+
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} />);
+    await waitFor(() => expect(screen.getByText(/no overrides recorded/i)).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText(/^word$/i), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText(/corrected gloss/i), { target: { value: "at the time" } });
+    fireEvent.click(screen.getByRole("button", { name: /submit gloss correction/i }));
+
+    await waitFor(() => expect(screen.getByRole("status")).toBeTruthy());
+    expect(screen.getByRole("status").textContent).toMatch(/gloss corrected/i);
+    expect(screen.getByRole("status").textContent).not.toMatch(/did not recompute/i);
+  });
 });
 
 describe("OverrideEditor — disabling and re-enabling a question", () => {
@@ -245,6 +317,7 @@ describe("OverrideEditor — disabling and re-enabling a question", () => {
               id: 7, surah: 12, ayah: 4, position: null, questionType: "cloze", field: "disable",
               payload: { disabled: true }, editorId: 3, note: null, createdAt: 1_700_000_000_003,
             },
+            hashRecompute: { ok: true, rows: 1 },
           },
           201,
         );
@@ -282,6 +355,7 @@ describe("OverrideEditor — disabling and re-enabling a question", () => {
               id: 8, surah: 12, ayah: 4, position: 2, questionType: "vocab", field: "disable",
               payload: { disabled: false }, editorId: 3, note: "re-enabled from workbench", createdAt: 1_700_000_000_004,
             },
+            hashRecompute: { ok: true, rows: 1 },
           },
           201,
         );
@@ -340,6 +414,7 @@ describe("OverrideEditor — replacing a distractor set", () => {
               },
               editorId: 3, note: null, createdAt: 1_700_000_000_005,
             },
+            hashRecompute: { ok: true, rows: 1 },
           },
           201,
         );
@@ -441,6 +516,7 @@ describe("OverrideEditor — grouping words into a multi-word idiom", () => {
               id: 12, surah: 12, ayah: 4, position: 1, questionType: "s1", field: "group",
               payload: { groupWith: [2, 3] }, editorId: 3, note: null, createdAt: 1_700_000_000_006,
             },
+            hashRecompute: { ok: true, rows: 1 },
           },
           201,
         );

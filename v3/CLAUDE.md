@@ -53,9 +53,89 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2545 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2550 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 351 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1293 apps/web. (v3-D173, 2026-09-03)
+             # + 420 engine + 61 fold-runner + 1298 apps/web. (v3-D174, 2026-09-04)
+             # NOTE (v3-D174, 2026-09-04): `CorpusHashRecomputer`'s own
+             # recompute verdict (`{ok:bool, rows?:int, error?:string}`,
+             # returned unconditionally by `OverridesController::store()` on
+             # every write since v3-D81) was fetched nowhere: `write.ts
+             # #submitOverride` read only `body.override`, so `OverrideEditor
+             # .tsx`'s four success messages ("gloss corrected", "disabled",
+             # "distractors replaced", "words grouped") printed the same
+             # string whether or not the surah's tiered verification hash
+             # actually recomputed. An admin correcting content on a
+             # not-yet-compiled surah could not tell their write from a
+             # genuinely-recomputed one — a previously-`verified` ayah could
+             # keep reading `verified` on the workbench frontier instead of
+             # `stale`, DEFECTS.md#B3's own failure mode, re-opened silently
+             # on the one client that writes overrides. Fixed:
+             # `SubmitOverrideResult`'s `"created"` variant gains a required
+             # `hashRecompute: HashRecomputeOutcome`, parsed from the
+             # response (a missing/malformed field degrades to a reported
+             # failure, never a silent `ok:true`); `OverrideEditor.tsx`
+             # appends a `hashRecomputeWarning()` suffix to each success
+             # message when `ok` is false, naming the server's own reported
+             # reason, never replacing the success message (the write did
+             # succeed). RED confirmed at both layers independently: three
+             # new `write.test.ts` cases against the unmodified module
+             # failed exactly as predicted (a discarded verdict, a crash on
+             # `undefined.ok` for both a failed and a missing verdict);
+             # implemented, 15/15 green (was 12). A new component test
+             # posting `hashRecompute:{ok:false,error:"surah 12 has never
+             # been compiled"}` failed on `expected 'gloss corrected' to
+             # match /did not recompute/i` against the unmodified component
+             # — the plain string, no warning; implemented, 17/17 green (was
+             # 15, +2: the warning case and its negative sibling, proving a
+             # SUCCESSFUL recompute paints no warning — the signal is real,
+             # not permanent noise). `TZ=UTC make test`: 2550 passing (was
+             # 2545, +5 — exactly this run's new tests: 3 + 2; apps/web
+             # 1298, was 1293; no other suite moved). `check-test-floor.mjs`:
+             # OK, 2550 >= floor 1899 (+651 margin, unmoved). `TZ=UTC make
+             # build`: exit 0, 29 routes (unchanged — edits inside the
+             # existing `/workbench` component, no new route). `npm run
+             # gates`: all green (boundaries 295 files, unchanged count —
+             # two existing production files edited plus their two existing
+             # test files, no new production file; fonts
+             # degraded-but-non-blocking, pre-existing; corpus-morphology
+             # and corpus-glyphs unchanged). `npx tsc --noEmit`: clean. No
+             # `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff reverted before committing, same discipline
+             # as every prior entry). No Arabic codepoint (the full diff
+             # swept programmatically, in Python, over the Arabic, Arabic
+             # Supplement, Arabic Extended-A and both Presentation Forms
+             # Unicode blocks — zero matches; every new string is a fixed
+             # English label, a wire field name, or a synthetic test
+             # fixture placeholder, never corpus text). Found by a dedicated
+             # fresh-sweep agent handed the full list of already-
+             # known/deferred items and told not to re-report them — it
+             # also independently surfaced (not fixed this run)
+             # `lib/drill/preview.ts#skipReason`/`skippedSeamCount` in
+             # `DrillPicker.tsx` (a lower-consequence "why did the joint
+             # count drop" UX gap, not a verification-integrity gap).
+             # Session start: fresh container, `make setup` run from
+             # scratch; local `main` was found detached at `e338e71`, the
+             # same commit `origin/main` was already at — the recurring
+             # "stale local main" trap named since v3-D77 was checked for
+             # directly and did not recur. NOT addressed:
+             # `lib/drill/preview.ts#skipReason`/`skippedSeamCount` (above);
+             # `GlossDraftsLoad.shipping`/`.excludedFromHashV1`
+             # (v3-D173); `FlagRow.ackAt` (v3-D170); `rhymeClassOf()`
+             # (v3-D136); `EntitlementMachine::merge()`
+             # (v3-D88..D94/D144/D145); `App\Billing\TrialAttribution`
+             # (v3-D148); `lib/pricing.ts#regionFromCountry()` (v3-D163);
+             # `PaywallGate` as a whole class (v3-D88, v3-D151); multi-surah
+             # enrollment; the operational mailer/7-night window; PAY-1's
+             # Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`
+             # (v3-D111/D113/D123); the late-arrival refold half of v3-D32;
+             # `AccountDeletionRequest::isDue()` (v3-D146);
+             # `lib/i18n/dictionaries.ts#isLocale()`; `BillingEventsPanel
+             # .tsx`'s single-event detail view (v3-D166);
+             # `SystemHealthController::METRICS`'s `atom_cache_coverage`/
+             # `events_ingested_24h` (v3-D168) — all unchanged. See
+             # DECISIONS.md v3-D174.
              # NOTE (v3-D173, 2026-09-03): `BillingEventEntry.provider` —
              # a genuinely dynamic field (`WebhookHandler::ingest(array
              # $event, string $provider = 'stripe')` takes it as a real

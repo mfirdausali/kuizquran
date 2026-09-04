@@ -64,7 +64,7 @@ const OVERRIDE_ROW = {
 
 describe("submitOverride — posts to /api/overrides and never throws", () => {
   it("posts the exact wire shape the real controller validates", async () => {
-    queue.push({ status: 201, body: { override: OVERRIDE_ROW } });
+    queue.push({ status: 201, body: { override: OVERRIDE_ROW, hashRecompute: { ok: true, rows: 3 } } });
 
     const result = await submitOverride({
       surah: 12,
@@ -89,6 +89,76 @@ describe("submitOverride — posts to /api/overrides and never throws", () => {
       payload: { lang: "en", text: "when" },
       note: "clarify archaic English",
     });
+  });
+
+  // `CorpusHashRecomputer::recompute()` (v3-D81, DEFECTS.md#B3's live-wiring
+  // closure) runs synchronously inside `OverridesController::store()` and
+  // reports its own verdict back on every 201 — `{ok:bool, rows?:int,
+  // error?:string}`, pinned server-side by
+  // `OverrideHashRecomputeTest::test_the_override_write_itself_still_succeeds_even_if_the_surah_was_never_compiled`.
+  // `submitOverride` discarded this field entirely: the caller had no way to
+  // learn a recompute failed, so a stale-but-actually-correct verified
+  // frontier could go undetected. This module is the sole egress
+  // (`OverrideEditor.tsx` never talks to `fetch` directly), so the field
+  // must survive here for anything downstream to see it.
+  it("carries the server's own hashRecompute verdict through on success", async () => {
+    queue.push({ status: 201, body: { override: OVERRIDE_ROW, hashRecompute: { ok: true, rows: 5 } } });
+    const result = await submitOverride({
+      surah: 12,
+      ayah: 4,
+      position: 1,
+      questionType: "s1",
+      field: "gloss",
+      payload: { lang: "en", text: "when" },
+    });
+    expect(result.state).toBe("created");
+    if (result.state === "created") {
+      expect(result.hashRecompute).toEqual({ ok: true, rows: 5 });
+    }
+  });
+
+  it("carries a FAILED hashRecompute verdict through too — the write still succeeded, the recompute did not", async () => {
+    queue.push({
+      status: 201,
+      body: {
+        override: OVERRIDE_ROW,
+        hashRecompute: { ok: false, error: "surah 999 has never been compiled (no .../999/corpus.json)" },
+      },
+    });
+    const result = await submitOverride({
+      surah: 999,
+      ayah: 1,
+      position: 1,
+      questionType: "s1",
+      field: "gloss",
+      payload: { lang: "en", text: "when" },
+    });
+    expect(result.state).toBe("created");
+    if (result.state === "created") {
+      expect(result.hashRecompute.ok).toBe(false);
+      expect(result.hashRecompute.error).toMatch(/never been compiled/);
+    }
+  });
+
+  // The real controller ALWAYS includes `hashRecompute` (it is unconditional
+  // in `OverridesController::store()`). A response that omits or malforms it
+  // is an anomaly this module must never read as a silent "ok" — the whole
+  // point of surfacing this field is to stop a recompute failure from
+  // passing as success.
+  it("a missing/malformed hashRecompute degrades to a reported failure, never a silent ok", async () => {
+    queue.push({ status: 201, body: { override: OVERRIDE_ROW } });
+    const result = await submitOverride({
+      surah: 12,
+      ayah: 4,
+      position: 1,
+      questionType: "s1",
+      field: "gloss",
+      payload: { lang: "en", text: "when" },
+    });
+    expect(result.state).toBe("created");
+    if (result.state === "created") {
+      expect(result.hashRecompute.ok).toBe(false);
+    }
   });
 
   it("a 401/403 reports the admin-gate reason, never a stack trace", async () => {

@@ -45,8 +45,30 @@ export interface SubmitOverrideInput {
   note?: string;
 }
 
+/**
+ * `CorpusHashRecomputer::recompute()`'s own verdict (v3-D81, DEFECTS.md#B3's
+ * live-wiring closure) — `OverridesController::store()` runs it
+ * SYNCHRONOUSLY on every write and returns it unconditionally alongside the
+ * new row. `ok:false` means the write itself still succeeded (the override
+ * is real content and is never blocked on this) but the surah's tiered
+ * verification hash did NOT move — a previously-`verified` ayah may still
+ * incorrectly read `verified` instead of `stale` until a human re-runs
+ * `corpus:ingest-hashes` by hand. The caller must never treat a missing or
+ * malformed report as `ok:true` — that would be exactly the silent failure
+ * this field exists to prevent.
+ */
+export interface HashRecomputeOutcome {
+  ok: boolean;
+  rows?: number;
+  error?: string;
+}
+
+function isHashRecomputeOutcome(v: unknown): v is HashRecomputeOutcome {
+  return typeof v === "object" && v !== null && typeof (v as { ok?: unknown }).ok === "boolean";
+}
+
 export type SubmitOverrideResult =
-  | { state: "created"; override: QuestionOverride }
+  | { state: "created"; override: QuestionOverride; hashRecompute: HashRecomputeOutcome }
   | { state: "failed"; reason: string };
 
 async function readErrorReason(response: Response): Promise<string> {
@@ -100,17 +122,21 @@ export async function submitOverride(input: SubmitOverrideInput): Promise<Submit
   }
 
   let override: QuestionOverride;
+  let hashRecompute: HashRecomputeOutcome;
   try {
-    const body = (await response.json()) as { override?: QuestionOverride };
+    const body = (await response.json()) as { override?: QuestionOverride; hashRecompute?: unknown };
     if (!body?.override) {
       return { state: "failed", reason: "the API accepted the override but returned no row" };
     }
     override = body.override;
+    hashRecompute = isHashRecomputeOutcome(body.hashRecompute)
+      ? body.hashRecompute
+      : { ok: false, error: "the API's response carried no verification-hash recompute report" };
   } catch {
     return { state: "failed", reason: "the API's answer was not JSON" };
   }
 
-  return { state: "created", override };
+  return { state: "created", override, hashRecompute };
 }
 
 /**

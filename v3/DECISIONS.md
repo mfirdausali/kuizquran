@@ -13126,3 +13126,129 @@ single-event detail view (v3-D166); `SystemHealthController::METRICS`'s
 `atom_cache_coverage`/`events_ingested_24h` (v3-D168, a known, reasoned
 omission) — all unchanged. See CLAUDE.md's own `make test` comment for
 the updated count.
+
+## Ratified 2026-09-04 (nightly) — v3-D174: `CorpusHashRecomputer`'s own recompute verdict was returned on every override write and thrown away by the client — an admin correcting content on a not-yet-compiled surah saw the same "gloss corrected" a genuinely-recomputed correction gets
+
+`OverridesController::store()` runs `CorpusHashRecomputer::recompute()`
+SYNCHRONOUSLY on every write (v3-D81, DEFECTS.md#B3's live-wiring
+closure) and returns its own verdict unconditionally —
+`{ok:bool, rows?:int, error?:string}` — alongside the new row
+(`OverridesController.php:79-81`). `reportFailure()` produces
+human-actionable strings ("surah {n} has never been compiled…", "ingest
+failed after a successful recompute: …") and the class's own docblock
+states the consequence plainly: a recompute failure "never blocks the
+override write itself" — the write always succeeds, but a `false`
+means the surah's TIERED VERIFICATION HASH did not move, so a
+previously-`verified` ayah can keep reading `verified` on the workbench
+frontier instead of `stale`. `OverrideHashRecomputeTest
+::test_the_override_write_itself_still_succeeds_even_if_the_surah_was_never_compiled`
+already pins `hashRecompute.ok === false` server-side.
+
+`apps/web/lib/overrides/write.ts#submitOverride` — the SOLE egress for
+this write path (`OverrideEditor.tsx` never calls `fetch` directly) —
+read only `body.override` from the 201 response; `SubmitOverrideResult`
+had no `hashRecompute` member at all, and `grep -rn "hashRecompute"
+apps/web/lib apps/web/app apps/web/components apps/web/test packages`
+returned zero hits before this run. `OverrideEditor.tsx`'s four success
+handlers (gloss/disable/distractor/group) each printed a flat, fixed
+string ("gloss corrected", "disabled", "distractors replaced", "words
+grouped") on `state === "created"` regardless of what the server
+reported — the same "written/fetched on the wire, zero read surface"
+shape this build has closed ~80 times before (v3-D82 onward), here on
+the write path's own OWN verdict about itself, not a sibling audit
+table.
+
+**Fixed, display-only plus a typed pass-through, no server change:**
+`write.ts`'s `SubmitOverrideResult`'s `"created"` variant gains a
+required `hashRecompute: HashRecomputeOutcome` field, parsed from the
+response body; a MISSING or malformed `hashRecompute` (the real
+controller always sends one — its absence is an anomaly) degrades to
+`{ok:false, error:"the API's response carried no verification-hash
+recompute report"}` rather than being silently read as success, since
+silently defaulting to `ok:true` would be exactly the failure this fix
+exists to prevent. `OverrideEditor.tsx` gains `hashRecomputeWarning()`,
+appended (never replacing) each of the four success messages when
+`hashRecompute.ok` is false, naming the server's own reported reason —
+e.g. `"gloss corrected — WARNING: the verification hash did not
+recompute (surah 12 has never been compiled) — this ayah's frontier may
+still show a stale "verified" status"`.
+
+**Verified:** RED confirmed at the `write.ts` layer directly (three new
+cases against the unmodified module: the success verdict is discarded,
+a failed verdict crashes on `undefined.ok`, a missing verdict crashes
+the same way) — all three failed exactly as predicted
+(`expected undefined to deeply equal {...}` / `Cannot read properties
+of undefined (reading 'ok')`); implemented, 15/15 green (was 12). RED
+confirmed independently at the component layer: a new test posting a
+`hashRecompute: {ok:false, error:"surah 12 has never been compiled"}`
+201 response failed on `expected 'gloss corrected' to match /did not
+recompute/i` against the unmodified component — the plain success
+string, no warning — exactly as predicted; implemented, 17/17 green
+(was 15, +2: the new warning case and its negative sibling, which
+proves a SUCCESSFUL recompute paints no warning at all, so the warning
+is a real signal and not permanent noise). The four existing
+POST-success mocks in `workbench-override-editor.test.tsx` were updated
+to include `hashRecompute: {ok:true, rows:1}` so their "all is well"
+scenarios stay honest against the now-required field, rather than
+silently exercising the new default-failure path by omission.
+
+`TZ=UTC make test`: 2550 passing (was 2545, +5 — exactly this run's new
+tests: 3 in `write.test.ts` + 2 in `workbench-override-editor.test.tsx`;
+apps/web 1298, was 1293; no other suite moved: 255 v2 vitest, 47 v2/api,
+351 v3/api, 118 corpus-compiler, 420 engine, 61 fold-runner).
+`check-test-floor.mjs`: OK, 2550 >= floor 1899 (+651 margin, unmoved,
+same discipline as every prior entry). `TZ=UTC make build`: exit 0, 29
+routes (unchanged — edits inside the existing `/workbench` component,
+no new route). `npm run gates`: all green (boundaries 295 files,
+unchanged count — two existing production files edited plus their two
+existing test files, no new production file; fonts
+degraded-but-non-blocking, pre-existing; corpus-morphology 362 words /
+corpus-glyphs 206 codepoints, both unchanged). `npx tsc --noEmit`
+(via `make build`'s own TypeScript pass): clean. No `v1/**`/`v2/**` edit
+(a stray `v2/tsconfig.tsbuildinfo` build-cache diff produced by running
+the suite was reverted before committing, same discipline as every
+prior entry — `git status --porcelain -- v1 v2` empty immediately
+before commit). No Arabic codepoint (the full diff swept
+programmatically, in Python, over the Arabic, Arabic Supplement, Arabic
+Extended-A and both Presentation Forms Unicode blocks — zero matches;
+every new string is a fixed English label, a wire field name, or a
+synthetic test fixture placeholder, never corpus text).
+
+**Found by a dedicated fresh-sweep agent**, handed the same
+~20-item already-known/deliberately-deferred list v3-D172/D173 carried
+forward and told explicitly not to re-report any of them; it also
+independently surfaced a second, weaker candidate
+(`lib/drill/preview.ts#skipReason`/`skippedSeamCount` — the
+`"seam-not-reached"` reason is computed but `DrillPicker.tsx`'s
+`partialNotice` only ever gates on `skippedAyahCount`, so the reason a
+joint count dropped for an unreached seam is never distinguished
+on-screen from any other skip) — real, but a lower-consequence "why did
+the count drop" UX gap rather than a verification-integrity gap; left
+for a future run.
+
+**Session start:** fresh container, `make setup` run from scratch (no
+`node_modules`/`vendor` anywhere); local `main` was found detached at
+`e338e71` — the same commit `origin/main` was already at (a prior
+session's push had landed cleanly, so a plain `git checkout main && git
+merge --ff-only origin/main` fast-forwarded with nothing to reconcile)
+— the recurring "stale local main" trap
+v3-D77/D91/D127/D138/D159/D167/D170/D172 each independently hit was
+checked for directly and did not recur this run.
+
+**NOT addressed, named so a future run doesn't re-discover it as new:**
+`lib/drill/preview.ts#skipReason`/`skippedSeamCount` (above);
+`GlossDraftsLoad.shipping`/`.excludedFromHashV1` in
+`GlossDraftsPanel.tsx` (v3-D173, non-divergent); `FlagRow.ackAt` in
+`FlagsPanel.tsx` (v3-D170, weaker); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151); multi-surah enrollment; the operational
+mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123); the late-arrival
+refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146);
+`lib/i18n/dictionaries.ts#isLocale()`; `BillingEventsPanel.tsx`'s
+single-event detail view (v3-D166); `SystemHealthController::METRICS`'s
+`atom_cache_coverage`/`events_ingested_24h` (v3-D168, a known, reasoned
+omission) — all unchanged.

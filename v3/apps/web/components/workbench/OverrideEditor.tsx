@@ -56,12 +56,35 @@
 // for a correction was recorded and then invisible to the next admin
 // reviewing the same ayah. Rendered here, `"—"` for a null note, matching
 // this file's own established convention.
+//
+// WHETHER THE VERIFICATION HASH ACTUALLY RECOMPUTED. `OverridesController
+// ::store()` runs `CorpusHashRecomputer::recompute()` synchronously on every
+// write (v3-D81, DEFECTS.md#B3's live-wiring closure) and returns its own
+// verdict — `{ok:bool, error?:string}` — on every 201, but `submitOverride`
+// discarded it and every success message here was a flat "gloss corrected"/
+// "disabled"/etc. regardless. A recompute can genuinely fail (the surah was
+// never compiled, the node subprocess errored) WITHOUT failing the write
+// itself, by design — so an admin correcting a not-yet-compiled surah saw
+// the identical success message a genuinely-recomputed correction gets,
+// with no way to learn the tiered hash did not move: a previously-`verified`
+// ayah could keep reading `verified` on the workbench frontier instead of
+// `stale`, the exact failure mode B3 exists to prevent, re-opened silently
+// on this one client. Each success message now appends a WARNING suffix
+// when `hashRecompute.ok` is false, naming the server's own reported reason
+// — never replacing the success message, since the write did succeed.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CorpusWord } from "@engine/types.ts";
 import type { QuestionOverride } from "@engine/overrides.ts";
 import { fetchOverrides } from "@/lib/overrides/fetch.ts";
-import { disableOverride, distractorOverride, glossOverride, groupOverride, submitOverride } from "@/lib/overrides/write.ts";
+import {
+  disableOverride,
+  distractorOverride,
+  glossOverride,
+  groupOverride,
+  submitOverride,
+  type HashRecomputeOutcome,
+} from "@/lib/overrides/write.ts";
 
 /** How many replacement distractors the picker offers. Matches
  *  `options.ts#options()`'s widest eligible pool — the Learn band accepts
@@ -128,6 +151,18 @@ function summarize(o: QuestionOverride): string {
     return `group @${o.position ?? "-"} + ${members} word${members === 1 ? "" : "s"}`;
   }
   return o.field;
+}
+
+/** `CorpusHashRecomputer::recompute()`'s own verdict (v3-D81), surfaced —
+ *  the write itself always succeeds regardless of this outcome, but a
+ *  `false` means the surah's tiered verification hash did NOT move, so a
+ *  previously-`verified` ayah may still incorrectly read `verified` on the
+ *  workbench frontier until a human re-runs `corpus:ingest-hashes` by hand.
+ *  Appended to the plain success message, never replacing it — the write
+ *  DID succeed. */
+function hashRecomputeWarning(h: HashRecomputeOutcome): string {
+  if (h.ok) return "";
+  return ` — WARNING: the verification hash did not recompute (${h.error ?? "unknown reason"}) — this ayah's frontier may still show a stale "verified" status`;
 }
 
 /** Whether a listed `disable` row is CURRENTLY active — the same latest-row
@@ -206,7 +241,7 @@ export function OverrideEditor({ surah, ayah, words, surahWords }: OverrideEdito
       if (outcome.state === "created") {
         setGlossText("");
         setGlossNote("");
-        setGlossMessage("gloss corrected");
+        setGlossMessage("gloss corrected" + hashRecomputeWarning(outcome.hashRecompute));
         refresh();
         return;
       }
@@ -226,7 +261,7 @@ export function OverrideEditor({ surah, ayah, words, surahWords }: OverrideEdito
       setDisableBusy(false);
       if (outcome.state === "created") {
         setDisableNote("");
-        setDisableMessage("disabled");
+        setDisableMessage("disabled" + hashRecomputeWarning(outcome.hashRecompute));
         refresh();
         return;
       }
@@ -282,7 +317,7 @@ export function OverrideEditor({ surah, ayah, words, surahWords }: OverrideEdito
       if (outcome.state === "created") {
         setDistractorPicks(Array(DISTRACTOR_SLOTS).fill(""));
         setDistractorNote("");
-        setDistractorMessage("distractors replaced");
+        setDistractorMessage("distractors replaced" + hashRecomputeWarning(outcome.hashRecompute));
         refresh();
         return;
       }
@@ -305,7 +340,7 @@ export function OverrideEditor({ surah, ayah, words, surahWords }: OverrideEdito
       if (outcome.state === "created") {
         setGroupPicks(Array(GROUP_SLOTS).fill(""));
         setGroupNote("");
-        setGroupMessage("words grouped");
+        setGroupMessage("words grouped" + hashRecomputeWarning(outcome.hashRecompute));
         refresh();
         return;
       }
