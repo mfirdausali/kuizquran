@@ -46,7 +46,7 @@ class NightlyWindowTest extends TestCase
         ])->save();
     }
 
-    private function appendRun(string $night, string $check, string $severity): void
+    private function appendRun(string $night, string $check, string $severity, ?array $report = null): void
     {
         $exit = ['green' => 0, 'warn' => 3, 'p1' => 4, 'error' => 5][$severity];
         NightlyCheckRun::create([
@@ -54,7 +54,7 @@ class NightlyWindowTest extends TestCase
             'night' => $night,
             'severity' => $severity,
             'exit_code' => $exit,
-            'report' => ['atomsCompared' => 8],
+            'report' => $report ?? ['atomsCompared' => 8],
             'trigger' => 'test',
             'ran_at' => 0,
         ]);
@@ -129,6 +129,70 @@ class NightlyWindowTest extends TestCase
         $this->assertFalse($response->json('satisfied'));
         $this->assertSame('2026-09-03', $response->json('lastP1.night'));
         $this->assertSame('fold_determinism_check', $response->json('lastP1.check'));
+    }
+
+    /**
+     * v3-D178: `NightlyCheckRun.report` — the runner's "full JSON verdict...
+     * the evidence" (this migration's own docblock) — is written every
+     * night and was never read by this controller: an operator paged on a
+     * confirmed P1 could see THAT it happened but not which learner or atom
+     * key diverged. This is the load-bearing case: findings for the P1's
+     * OWN run reach the wire, keyed to the correct (night, check) pair, and
+     * the learner id is pseudonymized exactly like every other admin
+     * surface (`AdminBillingController::toWire()`'s `subjectPseudonym`) —
+     * never the raw integer.
+     */
+    public function test_a_confirmed_p1_carries_its_pseudonymized_findings(): void
+    {
+        config(['admin.pseudonym_pepper' => 'test-pepper']);
+        $this->admin();
+        $this->window();
+        $this->night('2026-09-01', 'green');
+        $this->night('2026-09-02', 'green');
+        $this->appendRun('2026-09-03', 'fold_determinism_check', 'p1', [
+            'atomsCompared' => 4,
+            'findings' => [
+                ['userId' => 42, 'key' => '12:ayah:5', 'kind' => 'divergence', 'cachedVersion' => null],
+                ['userId' => 43, 'key' => '12:ayah:9', 'kind' => 'skew', 'cachedVersion' => '2026.08.01'],
+            ],
+        ]);
+        $this->appendRun('2026-09-03', 'selection_determinism_check', 'green');
+        $this->night('2026-09-04', 'green');
+
+        $response = $this->getJson('/api/admin/nightly-window')->assertOk();
+
+        $this->assertCount(2, $response->json('lastP1Findings'));
+        $this->assertSame('12:ayah:5', $response->json('lastP1Findings.0.key'));
+        $this->assertSame('divergence', $response->json('lastP1Findings.0.kind'));
+        $this->assertNull($response->json('lastP1Findings.0.cachedVersion'));
+        $this->assertSame('skew', $response->json('lastP1Findings.1.kind'));
+        $this->assertSame('2026.08.01', $response->json('lastP1Findings.1.cachedVersion'));
+
+        // Pseudonymized — the raw integer id must never appear on the wire.
+        $this->assertStringNotContainsString('"userId"', $response->getContent());
+        $pseudonymizer = app(\App\Http\Controllers\Admin\Pseudonymizer::class);
+        $this->assertSame($pseudonymizer->for(42), $response->json('lastP1Findings.0.subjectPseudonym'));
+        $this->assertSame($pseudonymizer->for(43), $response->json('lastP1Findings.1.subjectPseudonym'));
+        $this->assertNotSame(
+            $response->json('lastP1Findings.0.subjectPseudonym'),
+            $response->json('lastP1Findings.1.subjectPseudonym'),
+        );
+    }
+
+    /** A window with no confirmed P1 must report `null` findings, never an
+     *  empty array masquerading as "checked, nothing found". */
+    public function test_no_confirmed_p1_reports_null_findings(): void
+    {
+        $this->admin();
+        $this->window();
+        foreach (range(0, 6) as $i) {
+            $this->night(date('Y-m-d', strtotime("2026-09-01 +{$i} day")), 'green');
+        }
+
+        $response = $this->getJson('/api/admin/nightly-window')->assertOk();
+
+        $this->assertNull($response->json('lastP1'));
+        $this->assertNull($response->json('lastP1Findings'));
     }
 
     /** A missing night — the scheduler silently stopped running — must show

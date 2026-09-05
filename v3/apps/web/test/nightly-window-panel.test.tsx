@@ -111,6 +111,59 @@ describe("NightlyWindowPanel — three states, never two", () => {
     expect(screen.getAllByRole("alert").some((el) => /last P1/i.test(el.textContent ?? ""))).toBe(true);
   });
 
+  /**
+   * v3-D178: the P1's own per-atom evidence — `nightly_check_runs.report`,
+   * fetched and pseudonymized server-side but never rendered — must reach
+   * the screen the alert already points an operator at.
+   */
+  it("a confirmed P1's findings are rendered, pseudonym and atom key both, never the raw learner id", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse({
+        streak: 1,
+        required: 7,
+        satisfied: false,
+        windowStartedAt: "2026-09-01",
+        windowReason: "engine merge abc1234",
+        nights: [
+          { night: "2026-09-04", green: true, severities: { fold_determinism_check: "green" }, missing: [] },
+        ],
+        lastP1: { night: "2026-09-03", check: "fold_determinism_check" },
+        lastP1Findings: [
+          { subjectPseudonym: "u_abc123", key: "12:ayah:5", kind: "divergence", cachedVersion: null },
+          { subjectPseudonym: "u_def456", key: "12:ayah:9", kind: "skew", cachedVersion: "2026.08.01" },
+        ],
+        blockedBy: "1 of 7 consecutive green nights",
+      }),
+    ) as unknown as typeof fetch;
+    render(<NightlyWindowPanel />);
+
+    await waitFor(() => expect(screen.getByText(/u_abc123/)).toBeTruthy());
+    expect(screen.getByText(/12:ayah:5/)).toBeTruthy();
+    expect(screen.getByText(/u_def456/)).toBeTruthy();
+    expect(screen.getByText(/12:ayah:9/)).toBeTruthy();
+    expect(screen.getByText(/2026\.08\.01/)).toBeTruthy();
+  });
+
+  it("no confirmed P1 renders no findings section at all, never an empty one", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse({
+        streak: 7,
+        required: 7,
+        satisfied: true,
+        windowStartedAt: "2026-09-01",
+        windowReason: "engine merge abc1234",
+        nights: [],
+        lastP1: null,
+        lastP1Findings: null,
+        blockedBy: null,
+      }),
+    ) as unknown as typeof fetch;
+    render(<NightlyWindowPanel />);
+
+    await waitFor(() => expect(screen.getByText(/7 of 7/)).toBeTruthy());
+    expect(screen.queryByText(/findings/i)).toBeNull();
+  });
+
   it("a night missing one check renders that check as MISSING, not silently dropped", async () => {
     globalThis.fetch = vi.fn(async () =>
       jsonResponse({

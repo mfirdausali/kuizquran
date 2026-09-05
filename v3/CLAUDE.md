@@ -53,9 +53,85 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2558 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 353 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1304 apps/web. (v3-D177, 2026-09-04)
+make test    # 2565 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 355 v3/api + 118 corpus-compiler
+             # + 420 engine + 61 fold-runner + 1309 apps/web. (v3-D178, 2026-09-05)
+             # NOTE (v3-D178, 2026-09-05): `nightly_check_runs.report` — the
+             # determinism runner's per-atom evidence, written every night by
+             # `DeterminismCheckCommand::record()` since the ledger shipped —
+             # was never read by the one admin screen built to end "an
+             # operator has to check by hand" (v3-D143's own words):
+             # `Admin\NightlyWindowController::index()` returned only
+             # `NightlyWindowLedger::status()`, which derives everything from
+             # `check`/`night`/`severity` alone and never touches `report` at
+             # all (`grep -n "report" api/app/Support/NightlyWindowLedger.php`
+             # — zero hits). `App\Mail\DeterminismP1Alert`'s own docblock
+             # names the intended read path verbatim — "an operator follows
+             # up in the admin console... for the per-atom findings" — but
+             # nothing ever built that follow-up, so a confirmed P1 (the
+             # single highest-severity event in this system, the one that
+             # resets the 7-consecutive-green-nights launch gate) paged with
+             # counts only; finding WHICH learner or atom key diverged still
+             # meant a raw database query. Fixed narrowly: the ledger itself
+             # stays learner-identity-free exactly as documented; the
+             # controller separately fetches the ONE `NightlyCheckRun` row
+             # that produced `lastP1` and adds a `lastP1Findings` field, each
+             # finding's `userId` pseudonymized through the same HMAC every
+             # other admin surface uses (`AdminBillingController::toWire()`'s
+             # `subjectPseudonym`) — never the raw integer, never truncated,
+             # `null` (never a fabricated empty list) when there is no
+             # confirmed P1. `lib/admin/nightlyWindow.ts`/`NightlyWindowPanel
+             # .tsx` gain the matching parse-and-render, the parse degrading
+             # the WHOLE list to `null` on any malformed entry rather than a
+             # partial fabrication, same discipline as `frontier.ts`'s
+             # `hashIngestedAt` (v3-D176). RED confirmed at all three layers
+             # (backend, client lib, panel), each reverted from the fix alone
+             # with tests kept, each restored byte-identically and rerun
+             # green: 8/8 PHPUnit (was 6, +2), 10/10 lib vitest (was 7, +3),
+             # 8/8 panel vitest (was 6, +2). The load-bearing backend case
+             # seeds two real findings, asserts the literal substring
+             # `"userId"` never appears in the response body, and asserts
+             # each `subjectPseudonym` equals the same `Pseudonymizer`
+             # instance's own `->for($id)` output for two DIFFERENT ids,
+             # proving real per-learner HMAC pseudonymization rather than a
+             # constant placeholder. `TZ=UTC make test`: 2565 passing (was
+             # 2558, +7 — exactly this run's new tests: 2 PHPUnit + 3 + 2
+             # vitest; v3/api 355, was 353; apps/web 1309, was 1304; no other
+             # suite moved). `check-test-floor.mjs`: OK, 2565 >= floor 1899
+             # (+666 margin, unmoved, same discipline as every prior entry).
+             # `TZ=UTC make build`: exit 0, 29 routes (unchanged — edits
+             # inside the existing `/settings/health` component's
+             # `lib/`+`api/` layers, no new route). `npm run gates`: all
+             # green (boundaries 294 files, unchanged count — three existing
+             # production files edited plus their three existing test files,
+             # no new production file; fonts degraded-but-non-blocking,
+             # pre-existing; corpus-morphology and corpus-glyphs unchanged).
+             # `npx tsc --noEmit`: clean. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted before
+             # committing, same discipline as every prior entry). No Arabic
+             # codepoint (the full diff swept programmatically, in Python,
+             # over the Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms Unicode blocks — zero matches; every new
+             # string is a wire field name, a pseudonym/atom-key/engine-
+             # version test fixture value, or a fixed English caption, never
+             # corpus text). Found by a dedicated fresh-sweep agent handed
+             # the full list of already-known/deferred items carried forward
+             # through v3-D177 and told not to re-report any of them,
+             # directed at areas admitted as only lightly swept
+             # (`corpus-compiler/src`, `fold-runner/src`, Laravel model
+             # relations, wire fields fetched-but-unrendered) — it did not
+             # surface a second instance of this shape elsewhere. Session
+             # start: fresh container, `make setup` run from scratch; local
+             # `HEAD` was found detached one commit ahead of a stale local
+             # `main` ref (the branch pointer at `4be9924` vs. `origin/main`'s
+             # real tip `246c27b`, v3-D177) — the recurring "stale local
+             # main" trap
+             # v3-D77/D91/D127/D138/D159/D167/D170/D172/D174/D175/D176 each
+             # independently hit — caught via `git fetch` + `git checkout
+             # main && git merge --ff-only origin/main` before any
+             # implementation work, no work lost or at risk. NOT addressed:
+             # every item on v3-D177's own "NOT addressed" list, unchanged.
+             # See DECISIONS.md v3-D178.
              # NOTE (v3-D177, 2026-09-04): `VerificationRow.contentHash`/
              # `.hashSpecVersion` — required, non-nullable fields on every
              # signature-history row since step 15/v3-D167 — were fetched

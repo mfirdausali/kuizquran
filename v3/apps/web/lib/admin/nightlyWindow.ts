@@ -29,6 +29,16 @@ export interface NightlyWindowNight {
   missing: string[];
 }
 
+/** v3-D178: one `nightly_check_runs.report` finding, pseudonymized server-side
+ *  (`Admin\NightlyWindowController::findingsFor`) — the per-atom evidence
+ *  behind a confirmed P1, never the raw learner id. */
+export interface NightlyWindowFinding {
+  subjectPseudonym: string;
+  key: string;
+  kind: string;
+  cachedVersion: string | null;
+}
+
 export interface NightlyWindowStatus {
   streak: number;
   required: number;
@@ -37,6 +47,11 @@ export interface NightlyWindowStatus {
   windowReason: string | null;
   nights: NightlyWindowNight[];
   lastP1: { night: string; check: string } | null;
+  /** v3-D178: null when there is no confirmed P1 in the window's history;
+   *  otherwise the findings for that ONE run. Never fabricated — a missing
+   *  or malformed value degrades the whole list to null, same discipline
+   *  as every other parsed-from-the-wire field in this module. */
+  lastP1Findings: readonly NightlyWindowFinding[] | null;
   blockedBy: string | null;
 }
 
@@ -60,7 +75,22 @@ function isNight(v: unknown): v is NightlyWindowNight {
   );
 }
 
-function isStatus(v: unknown): v is NightlyWindowStatus {
+function isFinding(v: unknown): v is NightlyWindowFinding {
+  if (typeof v !== "object" || v === null) return false;
+  const f = v as Record<string, unknown>;
+  return (
+    typeof f.subjectPseudonym === "string" &&
+    typeof f.key === "string" &&
+    typeof f.kind === "string" &&
+    (typeof f.cachedVersion === "string" || f.cachedVersion === null)
+  );
+}
+
+/** `lastP1Findings` is checked separately (`parseLastP1Findings`), never
+ *  here — a malformed value there degrades to null rather than rejecting
+ *  the whole payload, same discipline as every other individually-degraded
+ *  field this module reads. */
+function isStatus(v: unknown): v is Omit<NightlyWindowStatus, "lastP1Findings"> {
   if (typeof v !== "object" || v === null) return false;
   const s = v as Record<string, unknown>;
   return (
@@ -118,5 +148,13 @@ export async function loadNightlyWindow(): Promise<NightlyWindowLoad> {
     return { state: "unavailable", reason: "the API's answer carried no window status" };
   }
 
-  return { state: "ready", status: body };
+  return { state: "ready", status: { ...body, lastP1Findings: parseLastP1Findings(body) } };
+}
+
+/** A missing or malformed `lastP1Findings` degrades to `null` — the same
+ *  "no live P1 findings" shape a genuinely-null field reports — rather than
+ *  a partial or fabricated list. */
+function parseLastP1Findings(body: unknown): readonly NightlyWindowFinding[] | null {
+  const raw = (body as { lastP1Findings?: unknown } | null)?.lastP1Findings;
+  return Array.isArray(raw) && raw.every(isFinding) ? raw : null;
 }

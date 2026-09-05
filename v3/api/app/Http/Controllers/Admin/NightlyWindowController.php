@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\NightlyCheckRun;
 use App\Support\NightlyWindowLedger;
 use Illuminate\Http\JsonResponse;
 
@@ -23,10 +24,11 @@ use Illuminate\Http\JsonResponse;
  * surface" shape v3-D129/D130/D141/D142 each closed for
  * `admin_audit`/`flag_ramp_audit`/`entitlement_transitions`/`purge_ledger`.
  *
- * A THIN, UNTRANSFORMED PASS-THROUGH. `NightlyWindowLedger::status()` is
- * already the one place the streak arithmetic lives (edge case #169); this
- * controller adds no second implementation of it, exactly the same
- * discipline `ContentFreezeController` follows for the freeze gate.
+ * A THIN, UNTRANSFORMED PASS-THROUGH for the streak itself.
+ * `NightlyWindowLedger::status()` is already the one place the streak
+ * arithmetic lives (edge case #169); this controller adds no second
+ * implementation of it, exactly the same discipline `ContentFreezeController`
+ * follows for the freeze gate.
  *
  * READ-ONLY BY CONSTRUCTION. No route is registered for anything but GET —
  * this screen may never declare or reset the window; that stays
@@ -35,13 +37,65 @@ use Illuminate\Http\JsonResponse;
  * this screen flip the window start would let staff self-serve past the one
  * check BUILD-PLAN insists a human make.
  *
- * No pseudonymization anywhere: this table carries no learner identity at
- * all, only check names, severities and calendar dates.
+ * v3-D178: `NightlyWindowLedger::status()`'s OWN `nights`/`severities`
+ * carry no learner identity — but `nightly_check_runs.report` (this table's
+ * OTHER column) does: its `findings: {userId, key, kind, cachedVersion}[]`
+ * is the runner's per-atom evidence, and `DeterminismP1Alert`'s own
+ * docblock names the intended read path verbatim — "an operator follows up
+ * in the admin console... for the per-atom findings" — but nothing ever
+ * built that follow-up: `status()` never touches `report` at all, so a
+ * confirmed P1 paged an operator with counts only and no way to see WHICH
+ * learner or atom key actually diverged short of a raw database query.
+ * Fixed here, not in the ledger: `NightlyWindowLedger::status()` stays
+ * learner-identity-free as documented (edge case #169's own arithmetic
+ * needs none of this); this controller separately fetches the ONE run that
+ * produced `lastP1` and pseudonymizes its findings on the way out, the same
+ * `Pseudonymizer` HMAC every other admin surface applies to a raw learner
+ * id (`AdminBillingController::toWire()`'s `subjectPseudonym`) — never the
+ * raw integer, and never truncated (the runner's own contract: "a check
+ * that hides findings past row 50 is a check that lies about the
+ * fiftieth-first").
  */
 class NightlyWindowController extends Controller
 {
+    public function __construct(private readonly Pseudonymizer $pseudonymizer) {}
+
     public function index(): JsonResponse
     {
-        return response()->json(NightlyWindowLedger::status());
+        $status = NightlyWindowLedger::status();
+        $status['lastP1Findings'] = $this->findingsFor($status['lastP1']);
+
+        return response()->json($status);
+    }
+
+    /**
+     * @param  array{night:string,check:string}|null  $lastP1
+     * @return list<array{subjectPseudonym:string,key:string,kind:string,cachedVersion:?string}>|null
+     */
+    private function findingsFor(?array $lastP1): ?array
+    {
+        if ($lastP1 === null) {
+            return null;
+        }
+
+        $run = NightlyCheckRun::query()
+            ->where('night', $lastP1['night'])
+            ->where('check', $lastP1['check'])
+            ->where('severity', 'p1')
+            ->orderByDesc('id')
+            ->first();
+
+        if ($run === null) {
+            return [];
+        }
+
+        $findings = $run->report['findings'] ?? [];
+
+        return array_values(array_map(fn (array $f) => [
+            'subjectPseudonym' => $this->pseudonymizer->for((int) $f['userId']),
+            'key' => (string) $f['key'],
+            'kind' => (string) $f['kind'],
+            'cachedVersion' => $f['cachedVersion'] ?? null,
+        ], $findings));
     }
 }

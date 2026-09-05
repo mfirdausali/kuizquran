@@ -13612,3 +13612,127 @@ refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146);
 single-event detail view (v3-D166); `SystemHealthController::METRICS`'s
 `atom_cache_coverage`/`events_ingested_24h` (v3-D168, a known, reasoned
 omission) — all unchanged.
+
+## Ratified 2026-09-05 (nightly) — v3-D178: `nightly_check_runs.report` — the determinism runner's per-atom evidence, written every night — was never read by the one admin screen built to show it, so a confirmed P1 could be seen but not debugged
+
+A fresh sweep (an Explore agent, handed the full "already-known/deferred"
+list carried forward through v3-D177 and told not to re-report any of
+it, directed at areas admitted as only lightly swept:
+`corpus-compiler/src`, `fold-runner/src`, Laravel model relations, and
+wire fields fetched-but-unrendered) found: the `nightly_check_runs`
+migration's own docblock names `report` as "the runner's full JSON
+verdict — the evidence. It answers 'what did that night actually
+compare?'... without which a green row means nothing."
+`DeterminismCheckCommand::record()` writes it on every run
+(`api/app/Console/Commands/DeterminismCheckCommand.php:441`), and
+`worker/fold-runner/src/foldCheck.ts`'s `FoldCheckReport.findings` is a
+real, sorted, **never-truncated** `{userId, key, kind, cachedVersion}[]`
+— exactly the per-learner, per-atom divergence detail behind a P1.
+`App\Mail\DeterminismP1Alert`'s own docblock even names the intended
+read path verbatim: "an operator follows up in the admin console... for
+the per-atom findings, which is where `userId`... already lives behind
+the reveal-audited admin surface." That admin surface
+(`Admin\NightlyWindowController`, v3-D143) never read `report` at all —
+`NightlyWindowLedger::status()` (the only thing the controller returned)
+derives everything from `check`/`night`/`severity` alone, confirmed via
+`grep -n "report" api/app/Support/NightlyWindowLedger.php` (zero hits)
+and `grep -rn "\->report\b" api/app --include="*.php"` (only the writer
+and `DeterminismP1Alert`'s own aggregate-count read). The one screen
+BUILD-PLAN M10 built specifically to end "an operator has to check by
+hand" (v3-D143's own words) reached the exact same dead end one field
+deeper: a confirmed P1 — the single highest-severity event in this
+system, the one that resets the 7-consecutive-green-nights launch gate —
+paged with counts only, and finding WHICH learner or atom key actually
+diverged still meant a raw database query.
+
+**Fixed**, narrowly: `NightlyWindowLedger::status()` itself is untouched
+and stays learner-identity-free exactly as its own controller docblock
+documented (edge case #169's streak arithmetic needs none of this).
+`Admin\NightlyWindowController::index()` separately fetches the ONE
+`NightlyCheckRun` row that produced `lastP1` (matched on
+`night`+`check`+`severity: 'p1'`, latest by id — a re-run after a fix
+never overwrites the row a launch-blocking P1 was recorded against) and
+adds a new `lastP1Findings` field, each finding's `userId` run through
+the same `Pseudonymizer` HMAC every other admin surface already applies
+to a raw learner id (`AdminBillingController::toWire()`'s
+`subjectPseudonym` is the direct precedent) — never the raw integer, and
+never truncated, matching the runner's own "a check that hides findings
+past row 50 is a check that lies about the fiftieth-first" contract.
+`null` when there is no confirmed P1 in the window's history (never a
+fabricated empty list masquerading as "checked, nothing found").
+`lib/admin/nightlyWindow.ts`'s `NightlyWindowStatus` gains a matching
+`lastP1Findings: readonly NightlyWindowFinding[] | null`, parsed
+separately from the rest of the shape and degrading the WHOLE list to
+`null` on any malformed entry — never a partial fabrication — the same
+per-field degradation discipline `frontier.ts`'s `hashIngestedAt`
+(v3-D176) already established. `NightlyWindowPanel.tsx` renders the list
+beneath the existing "last P1" alert, present only when non-empty.
+
+**Verified:**
+- RED confirmed at all three layers, each reverted from the fix alone
+  (tests kept): the backend case failed on
+  `PHPUnit\Framework\Assert::assertCount(): ... null given` — the
+  controller returned no `lastP1Findings` key at all; the client-lib
+  case failed two new degradation cases (`expected undefined to be
+  null`, and a malformed entry passing through un-degraded instead of
+  collapsing the whole list); the panel case timed out on
+  `screen.getByText(/u_abc123/)` — the pseudonym never reached the DOM.
+  All three restored byte-identically and reran green.
+- The load-bearing backend case seeds a P1 row carrying two real
+  findings (one `divergence` with a null `cachedVersion`, one `skew`
+  with a real one) and asserts: both findings' `key`/`kind`/
+  `cachedVersion` round-trip verbatim; the literal substring `"userId"`
+  never appears anywhere in the response body; each finding's
+  `subjectPseudonym` equals the SAME `Pseudonymizer` instance's own
+  `->for($id)` output (proving real HMAC pseudonymization, not an
+  invented string); and the two learners' pseudonyms differ from each
+  other (proving per-learner distinctness, not a constant placeholder).
+  A companion case proves a window with no confirmed P1 reports
+  `lastP1Findings: null`, not an empty array.
+- `TZ=UTC make test`: 2565 passing (was 2558, +7 — exactly this run's
+  new tests: 2 PHPUnit + 3 + 2 vitest; v3/api 355, was 353; apps/web
+  1309, was 1304; no other suite moved: 255 v2 vitest, 47 v2/api, 118
+  corpus-compiler, 420 engine, 61 fold-runner). `check-test-floor.mjs`:
+  OK, 2565 >= floor 1899 (+666 margin, unmoved, same discipline as every
+  prior entry). `TZ=UTC make build`: exit 0, 29 routes (unchanged — edits
+  inside the existing `/settings/health` component's `lib/`+`api/`
+  layers, no new route). `npm run gates`: all green (boundaries 294
+  files, unchanged count — three existing production files edited plus
+  their three existing test files, no new production file; fonts
+  degraded-but-non-blocking, pre-existing; corpus-morphology and
+  corpus-glyphs unchanged). `npx tsc --noEmit`: clean. No `v1/**`/
+  `v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+  reverted before committing, same discipline as every prior entry). No
+  Arabic codepoint (the full diff swept programmatically, in Python,
+  over the Arabic, Arabic Supplement, Arabic Extended-A and both
+  Presentation Forms Unicode blocks — zero matches; every new string is
+  a wire field name, a pseudonym/atom-key/engine-version test fixture
+  value, or a fixed English caption, never corpus text).
+
+**Session start:** fresh container, `make setup` run from scratch (no
+`node_modules`/`vendor` anywhere); local `HEAD` was found detached one
+commit ahead of a stale local `main` ref (the branch pointer at
+`4be9924` vs. `origin/main`'s real tip `246c27b`, v3-D177) — the
+recurring "stale local main" trap
+v3-D77/D91/D127/D138/D159/D167/D170/D172/D174/D175/D176 each
+independently hit — caught via `git fetch` + `git checkout main && git
+merge --ff-only origin/main` before any implementation work, no work
+lost or at risk.
+
+**NOT addressed, named so a future run doesn't re-discover it as new:**
+every item on v3-D177's own "NOT addressed" list above, unchanged;
+`GlossDraftsLoad.shipping`/`.excludedFromHashV1` (v3-D173,
+non-divergent); `FlagRow.ackAt` (v3-D170, weaker); `rhymeClassOf()`
+(v3-D136); `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151); multi-surah enrollment; the operational
+mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123); the late-arrival
+refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146);
+`lib/i18n/dictionaries.ts#isLocale()`; `BillingEventsPanel.tsx`'s
+single-event detail view (v3-D166); `SystemHealthController::METRICS`'s
+`atom_cache_coverage`/`events_ingested_24h` (v3-D168, a known, reasoned
+omission); `AdminAuditController`'s own `report`-shaped sibling gaps
+none were found in this run's scope — all unchanged.

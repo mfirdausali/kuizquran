@@ -69,6 +69,50 @@ describe("loadNightlyWindow — failure is a STATE, never an exception", () => {
     }
   });
 
+  it("a confirmed P1's pseudonymized findings round-trip verbatim (v3-D178)", async () => {
+    const status = {
+      ...readyStatus,
+      streak: 1,
+      lastP1: { night: "2026-09-03", check: "fold_determinism_check" },
+      lastP1Findings: [
+        { subjectPseudonym: "u_abc123", key: "12:ayah:5", kind: "divergence", cachedVersion: null },
+        { subjectPseudonym: "u_def456", key: "12:ayah:9", kind: "skew", cachedVersion: "2026.08.01" },
+      ],
+    };
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify(status), { status: 200 })) as unknown as typeof fetch;
+
+    const load = await loadNightlyWindow();
+    expect(load.state).toBe("ready");
+    if (load.state === "ready") {
+      expect(load.status.lastP1Findings).toEqual(status.lastP1Findings);
+    }
+  });
+
+  it("no confirmed P1 means null findings, never a fabricated empty list", async () => {
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify(readyStatus), { status: 200 })) as unknown as typeof fetch;
+
+    const load = await loadNightlyWindow();
+    expect(load.state).toBe("ready");
+    if (load.state === "ready") {
+      expect(load.status.lastP1Findings).toBeNull();
+    }
+  });
+
+  it("a malformed lastP1Findings entry degrades the whole list to null, never a partial fabrication", async () => {
+    const status = {
+      ...readyStatus,
+      lastP1: { night: "2026-09-03", check: "fold_determinism_check" },
+      lastP1Findings: [{ subjectPseudonym: "u_abc123", key: "12:ayah:5" /* missing kind/cachedVersion */ }],
+    };
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify(status), { status: 200 })) as unknown as typeof fetch;
+
+    const load = await loadNightlyWindow();
+    expect(load.state).toBe("ready");
+    if (load.state === "ready") {
+      expect(load.status.lastP1Findings).toBeNull();
+    }
+  });
+
   it("a network throw becomes `unavailable`, not a rejected promise", async () => {
     globalThis.fetch = vi.fn(async () => {
       throw new TypeError("Failed to fetch");

@@ -16,6 +16,12 @@
 //
 // EGRESS: through `lib/admin/nightlyWindow.ts`, which itself goes through
 // `apiFetch` only (check-boundaries.mjs clause 6).
+//
+// v3-D178: `lastP1Findings` (the confirmed P1's own pseudonymized per-atom
+// evidence, `NightlyCheckRun.report.findings`) is rendered beneath the "last
+// P1" alert, present only when non-empty — the operator that alert already
+// points at otherwise had no way to see WHICH learner or atom key diverged
+// short of a raw database query.
 
 import { useCallback, useEffect, useState } from "react";
 import { loadNightlyWindow, type NightlyWindowLoad } from "@/lib/admin/nightlyWindow";
@@ -70,6 +76,22 @@ export function NightlyWindowPanel() {
             <p className="caption" role="alert">
               last P1: {load.status.lastP1.night} ({load.status.lastP1.check}) — reset the window
             </p>
+          ) : null}
+
+          {load.status.lastP1Findings && load.status.lastP1Findings.length > 0 ? (
+            <>
+              <p className="caption" style={{ margin: "8px 0 4px" }}>
+                findings for that run:
+              </p>
+              <ul className="caption">
+                {load.status.lastP1Findings.map((f, i) => (
+                  <li key={`${f.subjectPseudonym}:${f.key}:${i}`}>
+                    {f.subjectPseudonym} — {f.key} — {f.kind}
+                    {f.cachedVersion !== null ? ` (cached ${f.cachedVersion})` : ""}
+                  </li>
+                ))}
+              </ul>
+            </>
           ) : null}
 
           {load.status.nights.length === 0 ? (
