@@ -40,6 +40,7 @@ import { FrontierNavigator } from "./FrontierNavigator";
 import { ExplainTrace } from "./ExplainTrace";
 import { QariMode } from "./QariMode";
 import { OverrideEditor } from "./OverrideEditor";
+import { LookAlikesPanel } from "./LookAlikesPanel";
 
 /** The lanes this picker can select. `rc` is absent BY DESIGN — WIREFRAME's
  *  DATA/CODE table keeps reconstruct.ts's state machine as CODE permanently,
@@ -200,6 +201,8 @@ export function WorkbenchIsland({ surah, corpus }: WorkbenchIslandProps) {
       />
 
       <OverrideEditor surah={surah} ayah={ayah} words={ayahWords} surahWords={corpus.words} />
+
+      <LookAlikesPanel ayah={ayah} lookalikes={corpus.lookalikes ?? []} />
 
       <ExplainTrace explanation={explanation} surah={surah} />
     </div>

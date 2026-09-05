@@ -647,6 +647,61 @@ describe("WorkbenchIsland — the signature history is ayah-scoped, wired end to
   });
 });
 
+describe("WorkbenchIsland — cross-verse look-alikes reach the reviewer", () => {
+  // `buildLookAlikes()` (corpus-compiler) computes cross-verse confusion pairs
+  // for every surah and ships them on every compiled corpus's own
+  // `lookalikes` field — validated at compile (`validate.ts`) and reported in
+  // the build summary (`compile.ts`) — but nothing downstream ever read the
+  // field: it wasn't even declared on the engine's own `Corpus` type, so no
+  // component could reach it even by accident. The one screen that already
+  // reviews per-ayah correction/verification quality (`/workbench`) had no
+  // way to show a reviewer the exact cross-verse collisions the mechanism was
+  // built to surface.
+  beforeEach(() => {
+    resetApiFetchForTests();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const readyFrontier = () =>
+    new Response(
+      JSON.stringify({
+        frontier: { "1": { qari: "verified", admin: "verified" } },
+        verifications: [],
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+
+  it("shows the open ayah's own cross-verse look-alike pair, from the real compiled fixture", async () => {
+    globalThis.fetch = vi.fn(async () => readyFrontier()) as unknown as typeof fetch;
+
+    render(<WorkbenchIsland surah={12} corpus={corpus} />);
+
+    // Ayah 1 is the default selection. The frozen fixture (12.json) carries
+    // exactly one look-alike pair touching ayah 1: {1:3} <-> {7:6}, "identical
+    // form across ayat" — verified directly against the fixture, not assumed.
+    const section = await screen.findByRole("region", { name: /look-alikes/i });
+    expect(within(section).getByText(/identical form across ayat/)).toBeTruthy();
+    expect(within(section).getByText(/7:6/)).toBeTruthy();
+  });
+
+  it("says so honestly when the open ayah has no recorded look-alike", async () => {
+    globalThis.fetch = vi.fn(async () => readyFrontier()) as unknown as typeof fetch;
+
+    render(<WorkbenchIsland surah={12} corpus={corpus} />);
+
+    const ayahInput = screen.getByRole("spinbutton", { name: /ayah/i }) as HTMLInputElement;
+    // Ayah 29 carries zero look-alike pairs in the fixture — verified
+    // directly against it, not assumed.
+    fireEvent.change(ayahInput, { target: { value: "29" } });
+
+    const section = await screen.findByRole("region", { name: /look-alikes/i });
+    expect(section.textContent).toMatch(/no cross-verse look-alikes/i);
+  });
+});
+
 describe("the workbench route reads the corpus through loadEffectiveCorpus (SSR override gap)", () => {
   // WorkbenchIsland's `explain(corpus, spec)` traces a spec against whatever
   // corpus it is handed — so an admin previewing a site must see the

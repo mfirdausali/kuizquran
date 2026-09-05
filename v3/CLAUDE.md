@@ -53,9 +53,85 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2570 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2572 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 356 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1313 apps/web. (v3-D180, 2026-09-05)
+             # + 420 engine + 61 fold-runner + 1315 apps/web. (v3-D181, 2026-09-05)
+             # NOTE (v3-D181, 2026-09-05): `corpus-compiler`'s
+             # `buildLookAlikes()` (cross-verse confusion pairs — exact-
+             # recurrence and near-identical-script word collisions across
+             # different ayat, same surah) has been computed on every
+             # compile, structurally validated, and counted in the build
+             # summary since build-plan step 3 — but the engine's own
+             # `Corpus` type never declared the `lookalikes` field at all,
+             # so no component could reach it even by accident (`grep -rln
+             # "lookalikes\|LookAlike" packages/engine/src apps/web/lib
+             # apps/web/components api/app` returned nothing before this
+             # fix). Sharper than this build's usual "fetched but
+             # unrendered" shape: this was "not even declared." Fixed:
+             # `packages/engine/src/types.ts` gains `LookAlike`/
+             # `LookAlikeWordRef` and an optional `lookalikes?: LookAlike[]`
+             # on `Corpus`; a new `LookAlikesPanel.tsx` (mirroring
+             # `ExplainTrace.tsx`'s diagnostic-only, writes-nothing
+             # discipline) renders the open ayah's own cross-verse pairs on
+             # `/workbench`, wired into `WorkbenchIsland.tsx` between
+             # `OverrideEditor` and `ExplainTrace`. Every rendered string is
+             # a fixture coordinate integer or the compiler's own fixed
+             # English/transliterated reason string, never Arabic. RED
+             # confirmed directly: the new component and the two wiring
+             # points reverted, both new `workbench-ui.test.tsx` cases kept
+             # (31 pre-existing untouched) — both failed
+             # (`findByRole("region", {name: /look-alikes/i})` timed out,
+             # no such region existed); restored byte-identically, 33/33
+             # green. The positive case verified against the frozen engine
+             # fixture's own real (pre-existing, previously-unread) 258
+             # look-alike rows: ayah 1 carries exactly one pair, `{1:3} ↔
+             # {7:6}`, "identical form across ayat" — confirmed with a
+             # throwaway script before writing the assertion, not assumed.
+             # `TZ=UTC make test`: 2572 passing (was 2570, +2 — exactly this
+             # run's two new `it()` blocks; apps/web 1315, was 1313; no
+             # other suite moved). `check-test-floor.mjs`: OK, 2572 >= floor
+             # 1899 (+673 margin, unmoved, same discipline as every prior
+             # entry). `TZ=UTC make build`: exit 0, 29 routes (unchanged —
+             # edits inside the existing `/workbench` component tree, no
+             # new route; the client-shipped `public/corpus/` subset is
+             # unchanged — `stage-corpus.mjs#slim()` never shipped
+             # `lookalikes` to the browser and still doesn't; this fix reads
+             # the SSR-only `output/` copy). `npm run gates`: all green
+             # (boundaries 295 files, up from 294 — exactly the one new
+             # component file; fonts degraded-but-non-blocking,
+             # pre-existing; corpus-morphology 362 words / corpus-glyphs 206
+             # codepoints, both unchanged — no new corpus data, only a type
+             # and a renderer for data already compiled). `npx tsc
+             # --noEmit`: clean. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted before
+             # committing, same discipline as every prior entry). No Arabic
+             # codepoint (every changed/new file swept programmatically, in
+             # Python, over the Arabic, Arabic Supplement, Arabic Extended-A
+             # and both Presentation Forms Unicode blocks — zero matches).
+             # Found by a dedicated fresh-sweep agent handed the full list
+             # of already-known/deferred items carried forward through
+             # v3-D180 and told not to re-report any of them, directed at
+             # this build's own engine/corpus-compiler/fold-runner packages
+             # rather than the admin-panel wire fields ~20 prior nights had
+             # already mined — it also independently surfaced (not fixed
+             # this run, not independently verified) that
+             # `corpus-compiler`'s `connections` table is ALSO absent from
+             # the engine's `Corpus` type, but the engine computes
+             # connection atoms from the compiled ayah range directly
+             # (`atom.ts`/`bridge.ts`), never from that table, so it is
+             # plausibly a genuinely-unused build artifact rather than a
+             # wiring gap — left for a future sweep to confirm or fix.
+             # Session start: fresh container, `make setup` run from
+             # scratch; local `HEAD` was found detached at the same commit
+             # `origin/main` was already at, on a stale LOCAL `main` branch
+             # ref six commits behind (`4be9924` vs. the real tip
+             # `0e4d515`, v3-D180) — the recurring "stale local main" trap
+             # v3-D77/D91/D127/D138/D159/D167/D170/D172/D174/D175/D176/D177/D178/D179/D180
+             # each independently hit, caught before any implementation
+             # work via `git fetch` + `git checkout main && git merge
+             # --ff-only origin/main`, no work lost or at risk. NOT
+             # addressed: every item on v3-D180's own "NOT addressed" list,
+             # unchanged. See DECISIONS.md v3-D181.
              # NOTE (v3-D180, 2026-09-05): `OverrideEditor.tsx`'s history list
              # never rendered `QuestionOverride.createdAt` — a required,
              # non-nullable wire field, sent on every row since the override

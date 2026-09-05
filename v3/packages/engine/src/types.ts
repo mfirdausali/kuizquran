@@ -51,6 +51,29 @@ export interface CorpusVerse {
   line: number | null;
 }
 
+/** One coordinate inside a `LookAlike` pair. */
+export interface LookAlikeWordRef {
+  ayah: number;
+  position: number;
+}
+
+/** A cross-verse confusion pair, computed at compile by
+ *  `corpus-compiler/src/lookalikes.ts#buildLookAlikes` — diagnostic seed data
+ *  for a reviewer, never consumed by grading or selection. Always intra-surah
+ *  (cross-ayah, same surah); `a.ayah !== b.ayah` always holds. */
+export interface LookAlike {
+  surah: number;
+  a: LookAlikeWordRef;
+  b: LookAlikeWordRef;
+  /** Human-readable reason (memory-hook name or "script similarity" /
+   *  "identical form across ayat") — a fixed English/transliterated string,
+   *  never Quranic Arabic. */
+  reason: string;
+  /** 0..1 normalized script similarity (1.0 for exact recurrence / curated
+   *  memory-hook pairs). */
+  score: number;
+}
+
 /** The slice of corpus.json the engine consumes. */
 /** Narrative act (scene beat) — the placement landmarks (FR10). */
 export interface CorpusSceneBeat {
@@ -68,6 +91,10 @@ export interface Corpus {
   distractors: CorpusDistractor[];
   /** The 19 acts (placement landmarks); optional for older corpus subsets. */
   sceneBeats?: CorpusSceneBeat[];
+  /** Cross-verse confusion pairs (see `LookAlike`); optional for older
+   *  corpus subsets that predate this field. Reviewer diagnostic only — no
+   *  grading or selection path may read this. */
+  lookalikes?: LookAlike[];
 }
 
 // ---- Ladder ----

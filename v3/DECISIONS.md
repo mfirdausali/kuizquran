@@ -13959,3 +13959,125 @@ refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146);
 single-event detail view (v3-D166); `SystemHealthController::METRICS`'s
 `atom_cache_coverage`/`events_ingested_24h` (v3-D168, a known, reasoned
 omission) — all unchanged.
+
+
+## Ratified 2026-09-05 (nightly) — v3-D181: `corpus-compiler`'s `buildLookAlikes()` computed, validated and shipped on every compiled corpus since build-plan step 3 — engine's own `Corpus` type didn't even declare the field, so nothing downstream could reach it
+
+A fresh sweep (an Explore agent, handed the full "already-known/deferred"
+list carried forward through v3-D180 and told not to re-report any of
+it, directed at areas no prior sweep had exhaustively checked — this
+build's own engine/corpus-compiler/fold-runner packages, as opposed to
+the admin-panel wire fields ~20 prior nights had already mined) found:
+`packages/corpus-compiler/src/lookalikes.ts#buildLookAlikes()` — a real,
+non-trivial cross-verse-confusion algorithm (exact-recurrence and
+near-identical-script pairs, ported from v1, re-parameterized per-surah
+for E-01) — is called by `buildCorpus.ts` on every compile, structurally
+validated by `validate.ts`, and counted in `compile.ts`'s own build
+summary. `grep -rln "lookalikes\|LookAlike" packages/engine/src
+apps/web/lib apps/web/components api/app` returned **nothing** before
+this fix: the engine's own `Corpus` interface
+(`packages/engine/src/types.ts`) declared only `meta | verses | words |
+distractors | sceneBeats?` — `lookalikes` was not even in the type, so
+no component could reach the field even by accident, distinct from
+every prior instance of this bug class (which was "fetched/typed but
+unrendered", not "not even declared"). Two dead ends confirm this was
+noticed and dropped, not merely overlooked: `stage-corpus.mjs#slim()`'s
+own comment says lookalikes are "server or admin concern... NOT shipped
+to a browser," and `lib/corpus/load.ts`'s SSR path (`JSON.parse(raw) as
+Corpus`) casts the raw bytes straight past the field — but no
+server/admin surface ever read it either, so "admin concern" never
+actually became true. Confirmed genuinely new: zero hits for "look-
+alike"/"lookalike" anywhere in this file's prior ~13,900 lines.
+
+⇒ `/workbench` — the one screen a qari/admin already uses to judge
+gloss/distractor quality per ayah (`OverrideEditor.tsx`,
+`QariMode.tsx`) — had no way to see the exact cross-verse word
+collisions (e.g. the same normalized form recurring in a different
+ayah) the mechanism exists to surface, even though the data reaches
+every compiled `output/<surah>/corpus.json` already on disk.
+
+**Fixed**, additive-only, no server/wire change: `packages/engine/src/types.ts`
+gains `LookAlikeWordRef`/`LookAlike` (mirroring the compiler's own
+shape) and an optional `lookalikes?: LookAlike[]` field on `Corpus` —
+optional so an older corpus subset (missing the field) still type-checks.
+A new `components/workbench/LookAlikesPanel.tsx` (matching
+`ExplainTrace.tsx`'s own "diagnostic only, writes nothing" discipline)
+filters `corpus.lookalikes` to the open ayah and renders each pair as a
+coordinate + the compiler's own fixed reason string ("identical form
+across ayat" / "script similarity" / a curated thread's own English
+name) — never Arabic. `WorkbenchIsland.tsx` renders it between
+`OverrideEditor` and `ExplainTrace`, reading `corpus.lookalikes ?? []`.
+
+**Verified:** RED confirmed directly against the unmodified tree (the
+new component moved aside, `WorkbenchIsland.tsx`'s wiring line and the
+`Corpus.lookalikes` field both reverted via `git diff`/`git checkout`,
+both new tests in `test/workbench-ui.test.tsx` kept, 31 pre-existing
+cases in that file untouched): both new cases failed —
+`findByRole("region", {name: /look-alikes/i})` timed out, since no such
+region existed at all; restored byte-identically (`git diff` empty
+against the fix), reran: 33/33 green (was 31, +2). The positive case
+uses the frozen engine fixture's own real data (`packages/engine/test/fixtures/12.json`,
+which already carries 258 look-alike rows from before this fix — a
+pre-existing, unread fixture field, not new test data): ayah 1 carries
+exactly one pair, `{1:3} ↔ {7:6}`, reason "identical form across ayat"
+— verified directly against the fixture with a throwaway Node script
+before writing the assertion, not assumed. The negative case (ayah 29,
+verified to have zero pairs the same way) proves the "no cross-verse
+look-alikes" message is a real empty-state, not a fixed caption that
+happens to always show something. `TZ=UTC make test`: 2572 passing (was
+2570, +2 — exactly this run's two new `it()` blocks; apps/web 1315, was
+1313; no other suite moved: 255 v2 vitest, 47 v2/api, 356 v3/api, 118
+corpus-compiler, 420 engine, 61 fold-runner). `check-test-floor.mjs`:
+OK, 2572 >= floor 1899 (+673 margin, unmoved, same discipline as every
+prior entry). `TZ=UTC make build`: exit 0, 29 routes (unchanged — edits
+inside the existing `/workbench` component tree, no new route; `stage-
+corpus.mjs` output unchanged — `lookalikes` was never in `slim()`'s
+shipped subset and still isn't, this fix reads the SSR-only `output/`
+copy, never the client-shipped one). `npm run gates` (via `prebuild`):
+all green (boundaries 295 files, up from 294 — exactly the one new
+component file; fonts degraded-but-non-blocking, pre-existing; corpus-
+morphology 362 words / corpus-glyphs 206 codepoints, both unchanged —
+this fix carries no new corpus data, only a type and a renderer for
+data already compiled). `npx tsc --noEmit` (via `next build`'s own
+TypeScript pass): clean. No `v1/**`/`v2/**` edit (`git status
+--porcelain -- v1 v2` empty immediately before committing — a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the
+suite was reverted first, same discipline as every prior entry). No
+Arabic codepoint (every changed/new file swept programmatically, in
+Python, over the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks — zero matches; every new string is a
+wire/type field name, a fixture coordinate integer, or the compiler's
+own fixed English/transliterated reason string, never corpus text).
+
+**Session start:** fresh container, `make setup` run from scratch (no
+`node_modules`/`vendor` anywhere); `git fetch` + `git checkout main &&
+git merge --ff-only origin/main` run before any exploration — local
+`HEAD` was found detached at `0e4d515`, the same commit `origin/main`
+was already at (a stale LOCAL `main` branch ref six commits behind, at
+`4be9924`, v3-D174) — the recurring "stale local main" trap
+v3-D77/D91/D127/D138/D159/D167/D170/D172/D174/D175/D176/D177/D178/D179/D180
+each independently hit, caught here before any implementation work, no
+work lost or at risk.
+
+**NOT addressed, named so a future run doesn't re-discover it as new:**
+every item on v3-D180's own "NOT addressed" list, unchanged;
+`GlossDraftsLoad.shipping`/`.excludedFromHashV1` (v3-D173,
+non-divergent); `FlagRow.ackAt` (v3-D170, weaker); `rhymeClassOf()`
+(v3-D136); `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151); multi-surah enrollment; the operational
+mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123); the late-arrival
+refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146);
+`lib/i18n/dictionaries.ts#isLocale()`; `BillingEventsPanel.tsx`'s
+single-event detail view (v3-D166); `SystemHealthController::METRICS`'s
+`atom_cache_coverage`/`events_ingested_24h` (v3-D168, a known, reasoned
+omission); `Connection[]` (corpus-compiler's own `connections` table) is
+ALSO absent from the engine's `Corpus` type, the same shape as
+`lookalikes` was — but the engine computes connection ATOMS from the
+compiled ayah range directly (`atom.ts`/`bridge.ts`), never from this
+table, so it is plausibly a genuinely-unused build artifact rather than
+a wiring gap; not independently verified this run and left for a future
+sweep to confirm or fix — all unchanged.
