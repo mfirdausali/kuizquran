@@ -155,6 +155,39 @@ describe("OverrideEditor — lists existing overrides for the ayah", () => {
     await waitFor(() => expect(screen.getByTestId("override-list")).toBeTruthy());
     expect(screen.getByText(/checked against an alternate transliteration/)).toBeTruthy();
   });
+
+  // `QuestionOverride.createdAt` is required and non-nullable
+  // (`packages/engine/src/overrides.ts`), sent on every row
+  // (`OverridesController::toWire()`), and is THE ordering key
+  // `applyOverrides()` resolves latest-wins by (DEFECTS.md#B4:
+  // `(createdAt, id)`) — not a decorative timestamp. Until this fix it was
+  // used only as a React `key`, never printed: two corrections on the same
+  // field (a realistic workflow — fix a typo, then later refine the wording)
+  // rendered as two visually-identical lines with no way to tell which one
+  // is currently in effect or how long ago either happened.
+  it("renders each row's own createdAt, so two corrections on the same field can be told apart", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse({
+        overrides: [
+          {
+            id: 10, surah: 12, ayah: 4, position: 1, questionType: "s1", field: "gloss",
+            payload: { lang: "en", text: "when" }, editorId: 3, editorEmail: "qari@example.com",
+            note: null, createdAt: 1_700_000_000_000,
+          },
+          {
+            id: 11, surah: 12, ayah: 4, position: 1, questionType: "s1", field: "gloss",
+            payload: { lang: "en", text: "at the time" }, editorId: 3, editorEmail: "qari@example.com",
+            note: null, createdAt: 1_700_000_086_400_000,
+          },
+        ],
+      }),
+    ) as unknown as typeof fetch;
+
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} />);
+    await waitFor(() => expect(screen.getByTestId("override-list")).toBeTruthy());
+    expect(screen.getByText(new Date(1_700_000_000_000).toISOString(), { exact: false })).toBeTruthy();
+    expect(screen.getByText(new Date(1_700_000_086_400_000).toISOString(), { exact: false })).toBeTruthy();
+  });
 });
 
 describe("OverrideEditor — submitting a gloss correction", () => {

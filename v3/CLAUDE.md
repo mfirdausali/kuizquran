@@ -53,9 +53,71 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2569 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2570 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 356 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1312 apps/web. (v3-D179, 2026-09-05)
+             # + 420 engine + 61 fold-runner + 1313 apps/web. (v3-D180, 2026-09-05)
+             # NOTE (v3-D180, 2026-09-05): `OverrideEditor.tsx`'s history list
+             # never rendered `QuestionOverride.createdAt` — a required,
+             # non-nullable wire field, sent on every row since the override
+             # layer shipped, and the actual `(createdAt, id)` precedence key
+             # DEFECTS.md#B4 closed (`applyOverrides()`'s own docblock: "the
+             # ordering that matters is (createdAt, id)"), not a decorative
+             # timestamp. `grep -n "createdAt" components/workbench/
+             # OverrideEditor.tsx` showed exactly one hit before this fix — a
+             # React `key`, never printed. Same "fetched, typed, required,
+             # zero human-visible read surface" shape this same component's
+             # own history list has been fixed on twice before, field by
+             # field (`editorEmail` at v3-D163, `note` at v3-D171): an admin
+             # correcting the same word twice (fix a typo, then later refine
+             # the wording) saw two visually-identical lines with no way to
+             # tell which correction is currently in effect or how long ago
+             # either happened. Fixed, display-only, no server/wire change:
+             # the history `<li>` gains `— {new Date(o.createdAt)
+             # .toISOString()}` inside an `ltr-island` span, following
+             # `QariMode.tsx`'s own established convention for rendering a
+             # `createdAt` and `FrontierNavigator.tsx`'s convention for
+             # wrapping a machine timestamp in `ltr-island`. RED confirmed
+             # directly: `git stash` of `OverrideEditor.tsx` alone (the new
+             # test kept, 17 pre-existing cases untouched) failed on two
+             # same-field overrides at different `createdAt` values — neither
+             # ISO string reached the rendered list; restored
+             # byte-identically, 18/18 green. The pre-existing "degrades to
+             # an honest placeholder" test's `/— by — — note: —/` regex
+             # matched unanchored against the new trailing clause, so it
+             # needed no change — proof the fix is additive, not a rewrite of
+             # an existing line. `TZ=UTC make test`: 2570 passing (was 2569,
+             # +1 — exactly this run's one new `it()` block; apps/web 1313,
+             # was 1312; no other suite moved). `check-test-floor.mjs`: OK,
+             # 2570 >= floor 1899 (+671 margin, unmoved, same discipline as
+             # every prior entry). `TZ=UTC make build`: exit 0, 29 routes
+             # (unchanged — edits inside the existing `/workbench` component,
+             # no new route). `npm run gates`: all green (boundaries 294
+             # files, unchanged count — one existing production file edited
+             # plus its one existing test file, no new production file;
+             # fonts degraded-but-non-blocking, pre-existing; corpus-
+             # morphology and corpus-glyphs unchanged). `npx tsc --noEmit`:
+             # clean. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted before
+             # committing, same discipline as every prior entry). No Arabic
+             # codepoint (both changed files swept programmatically, in
+             # Python, over the Arabic, Arabic Supplement, Arabic Extended-A
+             # and both Presentation Forms Unicode blocks — zero matches;
+             # every new string is a wire field read or an ISO timestamp
+             # derived from a fixture integer, never corpus text). Found by a
+             # dedicated fresh-sweep agent handed the full list of already-
+             # known/deferred items carried forward through v3-D179 and told
+             # not to re-report any of them. Session start: fresh container,
+             # `make setup` run from scratch; local `HEAD` was found detached
+             # at the same commit `origin/main` was already at, on a stale
+             # LOCAL `main` branch ref five commits behind (`4be9924` vs.
+             # the real tip `5c3efa1`, v3-D179) — the recurring "stale local
+             # main" trap
+             # v3-D77/D91/D127/D138/D159/D167/D170/D172/D174/D175/D176/D177/D178/D179
+             # each independently hit, caught before any implementation work
+             # via `git fetch` + `git checkout main && git merge --ff-only
+             # origin/main`, no work lost or at risk. NOT addressed: every
+             # item on v3-D179's own "NOT addressed" list, unchanged. See
+             # DECISIONS.md v3-D180.
              # NOTE (v3-D179, 2026-09-05): `selection_determinism_check`'s own
              # per-seed evidence (`SelectionCheckReport.divergences`,
              # worker/fold-runner/src/selectionCheck.ts) was silently

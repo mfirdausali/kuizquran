@@ -13873,3 +13873,89 @@ refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146);
 single-event detail view (v3-D166); `SystemHealthController::METRICS`'s
 `atom_cache_coverage`/`events_ingested_24h` (v3-D168, a known, reasoned
 omission) — all unchanged.
+
+## Ratified 2026-09-05 (nightly) — v3-D180: `OverrideEditor.tsx`'s history list never rendered `QuestionOverride.createdAt` — the actual `(createdAt, id)` ordering key `applyOverrides()` resolves latest-wins by, not a decorative timestamp
+
+A fresh sweep (an Explore agent, handed the full "already-known/deferred"
+list carried forward through v3-D179 and told not to re-report any of
+it) found: `QuestionOverride.createdAt` (`packages/engine/src/overrides.ts`)
+is a **required**, non-nullable field, sent on every row by
+`OverridesController::toWire()`, and is the precedence key DEFECTS.md#B4
+closed — `applyOverrides()`'s own docblock: "the ordering that matters is
+`(createdAt, id)`." `OverrideEditor.tsx` — the workbench panel this exact
+component's own field-by-field closures (`editorEmail` at v3-D163, `note`
+at v3-D171) have twice already fixed for this identical shape — used
+`createdAt` in exactly one place: a React `key` (`o.id ?? \`${o.field}-${o.createdAt}\``),
+never printed. `grep -n "createdAt" components/workbench/OverrideEditor.tsx`
+confirmed it before this fix: one hit, the key.
+
+⇒ An admin correcting the same word twice (a realistic workflow — fix a
+typo, then later refine the wording) saw two visually-identical history
+lines with no way to tell which correction is currently in effect or how
+long ago either happened, only that the list HAPPENS to render in
+chronological order — a fact never stated on screen.
+
+**Fixed**, display-only, no server/wire change: the existing history
+`<li>` gains `— {new Date(o.createdAt).toISOString()}` inside an
+`ltr-island` span, appended after the existing `— by {editorEmail} — note:
+{note}` clause, following `QariMode.tsx`'s own established convention for
+rendering a `createdAt` (`row.createdAt` → `new Date(...).toISOString()`)
+and `FrontierNavigator.tsx`'s convention for wrapping a machine timestamp
+in `ltr-island`.
+
+**Verified:** RED confirmed directly against the unmodified component
+(`git stash` of `OverrideEditor.tsx` alone, the new test kept, 17
+pre-existing cases in `test/workbench-override-editor.test.tsx`
+untouched): two same-field, same-position overrides at different
+`createdAt` values (one a day apart) failed on `getByText` finding
+neither ISO string anywhere in the rendered list; restored
+byte-identically, 18/18 green. The pre-existing "degrades to an honest
+placeholder" test's `/— by — — note: —/` regex still matches unanchored
+against the new trailing `— <ISO timestamp>` clause, so it needed no
+change. `TZ=UTC make test`: 2570 passing (was 2569, +1 — exactly this
+run's one new `it()` block; apps/web 1313, was 1312; no other suite
+moved: 255 v2 vitest, 47 v2/api, 356 v3/api, 118 corpus-compiler, 420
+engine, 61 fold-runner). `check-test-floor.mjs`: OK, 2570 >= floor 1899
+(+671 margin, unmoved, same discipline as every prior entry). `TZ=UTC
+make build`: exit 0, 29 routes (unchanged — edits inside the existing
+`/workbench` component, no new route). `npm run gates` (via `prebuild`):
+all green (boundaries 294 files, unchanged count — one existing
+production file edited plus its one existing test file, no new
+production file; fonts degraded-but-non-blocking, pre-existing;
+corpus-morphology 362 words / corpus-glyphs 206 codepoints, both
+unchanged). `npx tsc --noEmit` (via `next build`'s own TypeScript pass):
+clean. No `v1/**`/`v2/**` edit (`git status --porcelain -- v1 v2` empty
+immediately before committing — a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff produced by running the suite was reverted first, same
+discipline as every prior entry). No Arabic codepoint (both changed
+files swept programmatically, in Python, over the Arabic, Arabic
+Supplement, Arabic Extended-A and both Presentation Forms Unicode
+blocks — zero matches; every new string is a wire field read or an ISO
+timestamp derived from a fixture integer, never corpus text).
+
+**Session start:** fresh container, `make setup` run from scratch (no
+`node_modules`/`vendor` anywhere); `git fetch` + `git checkout main &&
+git merge --ff-only origin/main` run before any exploration — local
+`HEAD` was found detached at `5c3efa1`, the same commit `origin/main`
+was already at (a stale LOCAL `main` branch ref five commits behind, at
+`4be9924`, v3-D174) — the recurring "stale local main" trap
+v3-D77/D91/D127/D138/D159/D167/D170/D172/D174/D175/D176/D177/D178/D179
+each independently hit, caught here before any implementation work, no
+work lost or at risk.
+
+**NOT addressed, named so a future run doesn't re-discover it as new:**
+every item on v3-D179's own "NOT addressed" list, unchanged;
+`GlossDraftsLoad.shipping`/`.excludedFromHashV1` (v3-D173,
+non-divergent); `FlagRow.ackAt` (v3-D170, weaker); `rhymeClassOf()`
+(v3-D136); `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151); multi-surah enrollment; the operational
+mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123); the late-arrival
+refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146);
+`lib/i18n/dictionaries.ts#isLocale()`; `BillingEventsPanel.tsx`'s
+single-event detail view (v3-D166); `SystemHealthController::METRICS`'s
+`atom_cache_coverage`/`events_ingested_24h` (v3-D168, a known, reasoned
+omission) — all unchanged.

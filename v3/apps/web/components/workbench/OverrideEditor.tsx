@@ -365,7 +365,8 @@ export function OverrideEditor({ surah, ayah, words, surahWords }: OverrideEdito
           {rows.map((o) => (
             <li key={o.id ?? `${o.field}-${o.createdAt}`}>
               <span className="caption">
-                {summarize(o)} — by {o.editorEmail ?? "—"} — note: {o.note ?? "—"}
+                {summarize(o)} — by {o.editorEmail ?? "—"} — note: {o.note ?? "—"} —{" "}
+                <span className="ltr-island">{new Date(o.createdAt).toISOString()}</span>
               </span>{" "}
               {isActiveDisable(o) ? (
                 <button type="button" className="btn" onClick={() => onReEnable(o)}>
