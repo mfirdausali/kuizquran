@@ -162,6 +162,7 @@ class NightlyWindowTest extends TestCase
         $response = $this->getJson('/api/admin/nightly-window')->assertOk();
 
         $this->assertCount(2, $response->json('lastP1Findings'));
+        $this->assertSame('fold', $response->json('lastP1Findings.0.type'));
         $this->assertSame('12:ayah:5', $response->json('lastP1Findings.0.key'));
         $this->assertSame('divergence', $response->json('lastP1Findings.0.kind'));
         $this->assertNull($response->json('lastP1Findings.0.cachedVersion'));
@@ -177,6 +178,62 @@ class NightlyWindowTest extends TestCase
             $response->json('lastP1Findings.0.subjectPseudonym'),
             $response->json('lastP1Findings.1.subjectPseudonym'),
         );
+    }
+
+    /**
+     * v3-D179: `selection_determinism_check`'s own per-seed evidence
+     * (`SelectionCheckReport.divergences`, worker/fold-runner/src/
+     * selectionCheck.ts) is a DIFFERENT shape than the fold check's
+     * `findings` — `findingsFor()` read `report['findings']` unconditionally,
+     * so a selection-check P1 silently discarded its own evidence and
+     * reported an empty list, indistinguishable from "nothing found". This
+     * is the load-bearing case: a selection P1's divergences reach the wire
+     * under their own `type`, keyed to the correct (night, check) pair.
+     * `divergences` carries no learner id at all (the check replays a
+     * committed fixture log, never production data — `runSelection()`'s own
+     * `report['scope']`), so unlike a fold finding there is nothing to
+     * pseudonymize here.
+     */
+    public function test_a_selection_confirmed_p1_carries_its_divergence_findings(): void
+    {
+        $this->admin();
+        $this->window();
+        $this->night('2026-09-01', 'green');
+        $this->night('2026-09-02', 'green');
+        $this->appendRun('2026-09-03', 'fold_determinism_check', 'green');
+        $this->appendRun('2026-09-03', 'selection_determinism_check', 'p1', [
+            'seeds' => [7, 42],
+            'divergences' => [
+                [
+                    'seed' => 7,
+                    'traceKey' => 'site-a:device-1:3',
+                    'baseline' => ['lane' => 's1', 'variantIndex' => 0],
+                    'replayed' => ['lane' => 'cloze', 'variantIndex' => 1],
+                ],
+                [
+                    'seed' => 42,
+                    'traceKey' => 'site-b:device-2:1',
+                    'baseline' => null,
+                    'replayed' => ['lane' => 'junction', 'variantIndex' => 0],
+                ],
+            ],
+        ]);
+        $this->night('2026-09-04', 'green');
+
+        $response = $this->getJson('/api/admin/nightly-window')->assertOk();
+
+        $this->assertSame('selection_determinism_check', $response->json('lastP1.check'));
+        $this->assertCount(2, $response->json('lastP1Findings'));
+        $this->assertSame('selection', $response->json('lastP1Findings.0.type'));
+        $this->assertSame(7, $response->json('lastP1Findings.0.seed'));
+        $this->assertSame('site-a:device-1:3', $response->json('lastP1Findings.0.traceKey'));
+        $this->assertSame(['lane' => 's1', 'variantIndex' => 0], $response->json('lastP1Findings.0.baseline'));
+        $this->assertSame(['lane' => 'cloze', 'variantIndex' => 1], $response->json('lastP1Findings.0.replayed'));
+        $this->assertSame(42, $response->json('lastP1Findings.1.seed'));
+        $this->assertNull($response->json('lastP1Findings.1.baseline'));
+
+        // No learner id exists on this check's evidence at all.
+        $this->assertStringNotContainsString('"userId"', $response->getContent());
     }
 
     /** A window with no confirmed P1 must report `null` findings, never an

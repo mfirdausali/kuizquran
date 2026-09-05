@@ -13736,3 +13736,140 @@ single-event detail view (v3-D166); `SystemHealthController::METRICS`'s
 `atom_cache_coverage`/`events_ingested_24h` (v3-D168, a known, reasoned
 omission); `AdminAuditController`'s own `report`-shaped sibling gaps
 none were found in this run's scope — all unchanged.
+
+## Ratified 2026-09-05 (nightly) — v3-D179: a `selection_determinism_check` P1's own evidence (`divergences`) was silently discarded by v3-D178's own `findingsFor()`, which read only the fold check's `findings` key
+
+A fresh sweep (an Explore agent, handed the full "already-known/deferred"
+list carried forward through v3-D178 and told not to re-report any of
+it) found that v3-D178 — shipped the previous night — fixed only half
+of the two-check system its own commit message claims to cover.
+`nightly_check_runs.report` is written by BOTH `fold_determinism_check`
+(`FoldCheckReport.findings: KeyFinding[]`,
+`worker/fold-runner/src/foldCheck.ts`) and `selection_determinism_check`
+(`SelectionCheckReport.divergences: SelectionDivergence[]`,
+`worker/fold-runner/src/selectionCheck.ts`) — two DIFFERENT shapes in
+the same JSON column, both persisted verbatim by
+`DeterminismCheckCommand::record()`. `NightlyWindowController::findingsFor()`
+read `$run->report['findings'] ?? []` unconditionally, so a confirmed
+`selection_determinism_check` P1 — a reachable, first-class outcome
+(`selectionCheck.ts:102`: `severity: divergences.length > 0 ? "p1" :
+"green"`) — silently produced an empty findings array, rendering on
+`/settings/health` as indistinguishable from "checked, nothing found."
+Grep-confirmed: `grep -n "divergences" api/app/Http/Controllers/Admin/NightlyWindowController.php`
+returned zero hits before this fix, and every existing test in
+`NightlyWindowTest.php` seeded a P1 only for `fold_determinism_check` —
+`selection_determinism_check` appeared only as `'green'` — which is
+exactly why the gap shipped clean the previous night.
+
+**Fixed**, narrowly: `findingsFor()` now branches on `$lastP1['check']`
+and delegates to one of two new private methods. `foldFindings()` is
+v3-D178's own logic, unchanged in behavior, with each finding now
+tagged `'type' => 'fold'`. `selectionFindings()` reads
+`$run->report['divergences'] ?? []` and maps each entry to
+`{type: 'selection', seed, traceKey, baseline, replayed}` — `baseline`/
+`replayed` (the server's own `SelectionResult | null` for that trace)
+pass through untransformed. Unlike a fold finding, a selection
+divergence carries **no learner id to pseudonymize**: the check replays
+a COMMITTED FIXTURE log, never production events
+(`DeterminismCheckCommand::runSelection()`'s own `report['scope'] =
+'committed selection-log fixture — not production logs'`) — `seed` and
+`traceKey` (`${siteKey}:${deviceId}:${visitOrdinal}`) are the
+reproducible evidence a human re-runs to see the divergence again
+(`selectionCheck.ts`'s own header: "a divergence found under seed 7
+must be reproducible by re-running under seed 7").
+`apps/web/lib/admin/nightlyWindow.ts`'s `NightlyWindowFinding` becomes
+a discriminated union (`NightlyWindowFoldFinding | NightlyWindowSelectionFinding`)
+parsed by its own `type`-checking predicate — a malformed entry of
+either shape degrades the WHOLE list to `null`, the same discipline
+`v3-D178` established, never a partial fabrication.
+`NightlyWindowPanel.tsx` renders each finding per its own `type`,
+never assuming the fold shape.
+
+**Verified:**
+- RED confirmed at all three layers. Backend: both new/strengthened
+  PHPUnit cases failed against the unmodified controller — the fold
+  case on `Failed asserting that null is identical to 'fold'` (no
+  `type` key existed at all before this fix) and the new selection
+  case on `Failed asserting that actual size 0 matches expected size
+  2` (the controller returned `[]` for a genuine 2-divergence P1, not
+  merely a smaller number). Frontend: `git stash` of the two source
+  files only (`nightlyWindow.ts`, `NightlyWindowPanel.tsx`; every test
+  kept, including the two existing fixtures updated to carry
+  `type: "fold"`) failed exactly 2 of 21 tests across the two files —
+  the new selection round-trip case (old `isFinding` matched neither
+  shape, so the list degraded to `null` instead of the seeded 2
+  entries) and the panel's new selection-render case (`seed 7` never
+  reached the DOM); the malformed-selection-degrades-to-null case
+  passed vacuously against the unfixed frontend (the old parser
+  already rejected anything without `subjectPseudonym`/`key`/`kind`,
+  correctly but for the wrong reason) — expected, and not the
+  RED-carrying case, per the round-trip case's own failure. All three
+  restored byte-identically and reran green (21/21 frontend, 9/9
+  backend).
+- The load-bearing backend case seeds a night where `fold_determinism_check`
+  is green and only `selection_determinism_check` is `p1`, with 2 real
+  divergences (one with a non-null `baseline`/`replayed`, one with a
+  null `baseline`) — asserting `lastP1.check` itself correctly names
+  `selection_determinism_check` (proving `NightlyWindowLedger::status()`'s
+  pre-existing per-check severity scan, unmodified by this fix,
+  already picks the right check when only one of the two is red) and
+  that both divergences round-trip their `seed`/`traceKey`/`baseline`/
+  `replayed` verbatim, plus that the literal substring `"userId"` never
+  appears anywhere in the response (proving no fabricated learner
+  identity was invented to fill the pseudonym-shaped gap).
+- `TZ=UTC make test`: 2569 passing (was 2565, +4 — exactly this run's
+  new tests: 1 PHPUnit (the existing fold test's `type` assertion is a
+  strengthened existing case, +0 net) + 2 + 1 vitest; v3/api 356, was
+  355; apps/web 1312, was 1309; no other suite moved: 255 v2 vitest, 47
+  v2/api, 118 corpus-compiler, 420 engine, 61 fold-runner).
+  `check-test-floor.mjs`: OK, 2569 >= floor 1899 (+670 margin, unmoved,
+  same discipline as every prior entry). `TZ=UTC make build`: exit 0,
+  29 routes (unchanged — edits inside the existing `/settings/health`
+  component's `lib/`+`api/` layers, no new route). `npm run gates` (run
+  as part of `make build`'s `prebuild`): all green (boundaries 294
+  files, unchanged count — three existing production files edited plus
+  their three existing test files, no new production file; fonts
+  degraded-but-non-blocking, pre-existing; corpus-morphology and
+  corpus-glyphs unchanged). `npx tsc --noEmit`: clean (one real
+  iteration needed — the first draft's `isFoldFinding`/`isSelectionFinding`
+  helpers used a `f is NightlyWindowFoldFinding` type-predicate return
+  signature, which `tsc` rejected with TS2677 since neither interface
+  carries an index signature assignable from `Record<string, unknown>`;
+  fixed by widening both helpers' return type to plain `boolean` and
+  letting the caller's own `v is NightlyWindowFinding` predicate do the
+  narrowing). No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+  build-cache diff reverted before committing, same discipline as every
+  prior entry). No Arabic codepoint (the full diff swept
+  programmatically, in Python, over the Arabic, Arabic Supplement,
+  Arabic Extended-A and both Presentation Forms Unicode blocks — zero
+  matches; every new string is a wire field name/discriminator literal,
+  a fixture seed integer/trace-key string, or a fixed English caption,
+  never corpus text).
+
+**Session start:** fresh container, `make setup` run from scratch (no
+`node_modules`/`vendor` anywhere); `git fetch` + `git checkout main &&
+git merge --ff-only origin/main` run before any exploration — local
+`HEAD` was found detached at `f9e0d71`, the same commit `origin/main`
+was already at (a stale LOCAL `main` branch ref one commit behind, at
+`4be9924`, v3-D174) — the recurring "stale local main" trap
+v3-D77/D91/D127/D138/D159/D167/D170/D172/D174/D175/D176/D177/D178 each
+independently hit, caught here before any implementation work, no work
+lost or at risk.
+
+**NOT addressed, named so a future run doesn't re-discover it as new:**
+every item on v3-D178's own "NOT addressed" list, unchanged (this
+run's scope was v3-D178's own half-fixed gap, not a new sweep target);
+`GlossDraftsLoad.shipping`/`.excludedFromHashV1` (v3-D173,
+non-divergent); `FlagRow.ackAt` (v3-D170, weaker); `rhymeClassOf()`
+(v3-D136); `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151); multi-surah enrollment; the operational
+mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123); the late-arrival
+refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146);
+`lib/i18n/dictionaries.ts#isLocale()`; `BillingEventsPanel.tsx`'s
+single-event detail view (v3-D166); `SystemHealthController::METRICS`'s
+`atom_cache_coverage`/`events_ingested_24h` (v3-D168, a known, reasoned
+omission) — all unchanged.

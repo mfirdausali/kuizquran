@@ -55,6 +55,23 @@ use Illuminate\Http\JsonResponse;
  * raw integer, and never truncated (the runner's own contract: "a check
  * that hides findings past row 50 is a check that lies about the
  * fiftieth-first").
+ *
+ * v3-D179: v3-D178 read `report['findings']` UNCONDITIONALLY — the fold
+ * check's own shape (`worker/fold-runner/src/foldCheck.ts#FoldCheckReport`).
+ * `selection_determinism_check` writes to the exact same `report` column
+ * (`DeterminismCheckCommand::runSelection()` -> `record()`) but under a
+ * DIFFERENT key: `SelectionCheckReport.divergences`
+ * (`worker/fold-runner/src/selectionCheck.ts`). So a selection-check P1 —
+ * BUILD-PLAN's OTHER launch-gate check, reachable whenever a shuffled replay
+ * fails to reproduce the canonical selection trace — silently discarded its
+ * own evidence and reported an empty findings list, indistinguishable from
+ * "checked, nothing found". Fixed: `findingsFor()` branches on which check
+ * produced the P1 and reads the matching shape. A selection divergence
+ * carries no learner id at all — the check replays a COMMITTED FIXTURE log,
+ * never production data (`runSelection()`'s own `report['scope']`) — so
+ * unlike a fold finding there is nothing to pseudonymize; `seed` and
+ * `traceKey` (`${siteKey}:${deviceId}:${visitOrdinal}`) are the reproducible
+ * evidence a human re-runs to see the divergence again.
  */
 class NightlyWindowController extends Controller
 {
@@ -70,7 +87,7 @@ class NightlyWindowController extends Controller
 
     /**
      * @param  array{night:string,check:string}|null  $lastP1
-     * @return list<array{subjectPseudonym:string,key:string,kind:string,cachedVersion:?string}>|null
+     * @return list<array<string,mixed>>|null
      */
     private function findingsFor(?array $lastP1): ?array
     {
@@ -89,13 +106,43 @@ class NightlyWindowController extends Controller
             return [];
         }
 
+        return $lastP1['check'] === 'selection_determinism_check'
+            ? $this->selectionFindings($run)
+            : $this->foldFindings($run);
+    }
+
+    /**
+     * @return list<array{type:'fold',subjectPseudonym:string,key:string,kind:string,cachedVersion:?string}>
+     */
+    private function foldFindings(NightlyCheckRun $run): array
+    {
         $findings = $run->report['findings'] ?? [];
 
         return array_values(array_map(fn (array $f) => [
+            'type' => 'fold',
             'subjectPseudonym' => $this->pseudonymizer->for((int) $f['userId']),
             'key' => (string) $f['key'],
             'kind' => (string) $f['kind'],
             'cachedVersion' => $f['cachedVersion'] ?? null,
         ], $findings));
+    }
+
+    /**
+     * `SelectionCheckReport.divergences` — never a raw learner id, since
+     * this check replays a committed fixture log, not production events.
+     *
+     * @return list<array{type:'selection',seed:int,traceKey:string,baseline:?array,replayed:?array}>
+     */
+    private function selectionFindings(NightlyCheckRun $run): array
+    {
+        $divergences = $run->report['divergences'] ?? [];
+
+        return array_values(array_map(fn (array $d) => [
+            'type' => 'selection',
+            'seed' => (int) $d['seed'],
+            'traceKey' => (string) $d['traceKey'],
+            'baseline' => $d['baseline'] ?? null,
+            'replayed' => $d['replayed'] ?? null,
+        ], $divergences));
     }
 }

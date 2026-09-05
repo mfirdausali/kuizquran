@@ -129,8 +129,8 @@ describe("NightlyWindowPanel — three states, never two", () => {
         ],
         lastP1: { night: "2026-09-03", check: "fold_determinism_check" },
         lastP1Findings: [
-          { subjectPseudonym: "u_abc123", key: "12:ayah:5", kind: "divergence", cachedVersion: null },
-          { subjectPseudonym: "u_def456", key: "12:ayah:9", kind: "skew", cachedVersion: "2026.08.01" },
+          { type: "fold", subjectPseudonym: "u_abc123", key: "12:ayah:5", kind: "divergence", cachedVersion: null },
+          { type: "fold", subjectPseudonym: "u_def456", key: "12:ayah:9", kind: "skew", cachedVersion: "2026.08.01" },
         ],
         blockedBy: "1 of 7 consecutive green nights",
       }),
@@ -142,6 +142,42 @@ describe("NightlyWindowPanel — three states, never two", () => {
     expect(screen.getByText(/u_def456/)).toBeTruthy();
     expect(screen.getByText(/12:ayah:9/)).toBeTruthy();
     expect(screen.getByText(/2026\.08\.01/)).toBeTruthy();
+  });
+
+  /**
+   * v3-D179: a `selection_determinism_check` P1's own findings (seed +
+   * trace key, never a learner id) must render distinctly from a fold P1's
+   * — never assumed to carry `subjectPseudonym`/`key`/`kind`.
+   */
+  it("a selection-check P1's findings render seed and trace key, never a fold-shaped label", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse({
+        streak: 1,
+        required: 7,
+        satisfied: false,
+        windowStartedAt: "2026-09-01",
+        windowReason: "engine merge abc1234",
+        nights: [
+          { night: "2026-09-04", green: true, severities: { selection_determinism_check: "green" }, missing: [] },
+        ],
+        lastP1: { night: "2026-09-03", check: "selection_determinism_check" },
+        lastP1Findings: [
+          {
+            type: "selection",
+            seed: 7,
+            traceKey: "site-a:device-1:3",
+            baseline: { lane: "s1" },
+            replayed: { lane: "cloze" },
+          },
+        ],
+        blockedBy: "1 of 7 consecutive green nights",
+      }),
+    ) as unknown as typeof fetch;
+    render(<NightlyWindowPanel />);
+
+    await waitFor(() => expect(screen.getByText(/seed 7/)).toBeTruthy());
+    expect(screen.getByText(/site-a:device-1:3/)).toBeTruthy();
+    expect(screen.queryByText(/subjectPseudonym/)).toBeNull();
   });
 
   it("no confirmed P1 renders no findings section at all, never an empty one", async () => {

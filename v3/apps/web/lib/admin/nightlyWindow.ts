@@ -29,15 +29,35 @@ export interface NightlyWindowNight {
   missing: string[];
 }
 
-/** v3-D178: one `nightly_check_runs.report` finding, pseudonymized server-side
- *  (`Admin\NightlyWindowController::findingsFor`) — the per-atom evidence
- *  behind a confirmed P1, never the raw learner id. */
-export interface NightlyWindowFinding {
+/** v3-D178: one `nightly_check_runs.report` finding from a `fold_determinism_check`
+ *  P1, pseudonymized server-side (`Admin\NightlyWindowController::foldFindings`)
+ *  — the per-atom evidence behind a confirmed P1, never the raw learner id. */
+export interface NightlyWindowFoldFinding {
+  type: "fold";
   subjectPseudonym: string;
   key: string;
   kind: string;
   cachedVersion: string | null;
 }
+
+/** v3-D179: one `SelectionCheckReport.divergences` entry from a
+ *  `selection_determinism_check` P1 (`Admin\NightlyWindowController
+ *  ::selectionFindings`). The check replays a committed fixture log, never
+ *  production events, so — unlike a fold finding — there is no learner id
+ *  to pseudonymize here; `seed`/`traceKey` are what a human re-runs to see
+ *  the divergence again. `baseline`/`replayed` are the server's own
+ *  `SelectionResult | null` for that trace, passed through untransformed —
+ *  never re-validated field by field here, since this is diagnostic
+ *  evidence, not a value this module's own logic branches on. */
+export interface NightlyWindowSelectionFinding {
+  type: "selection";
+  seed: number;
+  traceKey: string;
+  baseline: unknown;
+  replayed: unknown;
+}
+
+export type NightlyWindowFinding = NightlyWindowFoldFinding | NightlyWindowSelectionFinding;
 
 export interface NightlyWindowStatus {
   streak: number;
@@ -75,15 +95,30 @@ function isNight(v: unknown): v is NightlyWindowNight {
   );
 }
 
-function isFinding(v: unknown): v is NightlyWindowFinding {
-  if (typeof v !== "object" || v === null) return false;
-  const f = v as Record<string, unknown>;
+function isFoldFinding(f: Record<string, unknown>): boolean {
   return (
+    f.type === "fold" &&
     typeof f.subjectPseudonym === "string" &&
     typeof f.key === "string" &&
     typeof f.kind === "string" &&
     (typeof f.cachedVersion === "string" || f.cachedVersion === null)
   );
+}
+
+function isSelectionFinding(f: Record<string, unknown>): boolean {
+  return (
+    f.type === "selection" &&
+    typeof f.seed === "number" &&
+    typeof f.traceKey === "string" &&
+    "baseline" in f &&
+    "replayed" in f
+  );
+}
+
+function isFinding(v: unknown): v is NightlyWindowFinding {
+  if (typeof v !== "object" || v === null) return false;
+  const f = v as Record<string, unknown>;
+  return isFoldFinding(f) || isSelectionFinding(f);
 }
 
 /** `lastP1Findings` is checked separately (`parseLastP1Findings`), never

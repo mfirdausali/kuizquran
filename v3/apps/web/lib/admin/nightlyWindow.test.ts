@@ -75,8 +75,8 @@ describe("loadNightlyWindow — failure is a STATE, never an exception", () => {
       streak: 1,
       lastP1: { night: "2026-09-03", check: "fold_determinism_check" },
       lastP1Findings: [
-        { subjectPseudonym: "u_abc123", key: "12:ayah:5", kind: "divergence", cachedVersion: null },
-        { subjectPseudonym: "u_def456", key: "12:ayah:9", kind: "skew", cachedVersion: "2026.08.01" },
+        { type: "fold", subjectPseudonym: "u_abc123", key: "12:ayah:5", kind: "divergence", cachedVersion: null },
+        { type: "fold", subjectPseudonym: "u_def456", key: "12:ayah:9", kind: "skew", cachedVersion: "2026.08.01" },
       ],
     };
     globalThis.fetch = vi.fn(async () => new Response(JSON.stringify(status), { status: 200 })) as unknown as typeof fetch;
@@ -85,6 +85,53 @@ describe("loadNightlyWindow — failure is a STATE, never an exception", () => {
     expect(load.state).toBe("ready");
     if (load.state === "ready") {
       expect(load.status.lastP1Findings).toEqual(status.lastP1Findings);
+    }
+  });
+
+  /** v3-D179: a `selection_determinism_check` P1's own findings are a
+   *  different shape than a fold P1's — no `subjectPseudonym`/`key`/`kind`,
+   *  and no learner id at all, since the check replays a committed fixture
+   *  log rather than production events. */
+  it("a selection-check P1's own divergence findings round-trip verbatim (v3-D179)", async () => {
+    const status = {
+      ...readyStatus,
+      streak: 1,
+      lastP1: { night: "2026-09-03", check: "selection_determinism_check" },
+      lastP1Findings: [
+        {
+          type: "selection",
+          seed: 7,
+          traceKey: "site-a:device-1:3",
+          baseline: { lane: "s1", variantIndex: 0 },
+          replayed: { lane: "cloze", variantIndex: 1 },
+        },
+        { type: "selection", seed: 42, traceKey: "site-b:device-2:1", baseline: null, replayed: null },
+      ],
+    };
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify(status), { status: 200 })) as unknown as typeof fetch;
+
+    const load = await loadNightlyWindow();
+    expect(load.state).toBe("ready");
+    if (load.state === "ready") {
+      expect(load.status.lastP1Findings).toEqual(status.lastP1Findings);
+    }
+  });
+
+  /** A malformed selection finding (missing `traceKey`) must degrade the
+   *  whole list to null, the exact same discipline as a malformed fold
+   *  finding — never a partial fabrication. */
+  it("a malformed selection finding degrades the whole list to null", async () => {
+    const status = {
+      ...readyStatus,
+      lastP1: { night: "2026-09-03", check: "selection_determinism_check" },
+      lastP1Findings: [{ type: "selection", seed: 7 /* missing traceKey */ }],
+    };
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify(status), { status: 200 })) as unknown as typeof fetch;
+
+    const load = await loadNightlyWindow();
+    expect(load.state).toBe("ready");
+    if (load.state === "ready") {
+      expect(load.status.lastP1Findings).toBeNull();
     }
   });
 

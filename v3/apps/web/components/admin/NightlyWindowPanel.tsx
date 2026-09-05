@@ -22,6 +22,12 @@
 // P1" alert, present only when non-empty — the operator that alert already
 // points at otherwise had no way to see WHICH learner or atom key diverged
 // short of a raw database query.
+//
+// v3-D179: a `selection_determinism_check` P1's own findings are a DIFFERENT
+// shape (seed/traceKey, never a learner id — the check replays a committed
+// fixture log) than a `fold_determinism_check` P1's (pseudonym/key/kind) —
+// the list is rendered per its own `type` discriminant, never assumed to be
+// the fold shape.
 
 import { useCallback, useEffect, useState } from "react";
 import { loadNightlyWindow, type NightlyWindowLoad } from "@/lib/admin/nightlyWindow";
@@ -84,12 +90,19 @@ export function NightlyWindowPanel() {
                 findings for that run:
               </p>
               <ul className="caption">
-                {load.status.lastP1Findings.map((f, i) => (
-                  <li key={`${f.subjectPseudonym}:${f.key}:${i}`}>
-                    {f.subjectPseudonym} — {f.key} — {f.kind}
-                    {f.cachedVersion !== null ? ` (cached ${f.cachedVersion})` : ""}
-                  </li>
-                ))}
+                {load.status.lastP1Findings.map((f, i) =>
+                  f.type === "fold" ? (
+                    <li key={`fold:${f.subjectPseudonym}:${f.key}:${i}`}>
+                      {f.subjectPseudonym} — {f.key} — {f.kind}
+                      {f.cachedVersion !== null ? ` (cached ${f.cachedVersion})` : ""}
+                    </li>
+                  ) : (
+                    <li key={`selection:${f.seed}:${f.traceKey}:${i}`}>
+                      seed {f.seed} — {f.traceKey} — baseline {JSON.stringify(f.baseline)} vs
+                      replayed {JSON.stringify(f.replayed)}
+                    </li>
+                  ),
+                )}
               </ul>
             </>
           ) : null}
