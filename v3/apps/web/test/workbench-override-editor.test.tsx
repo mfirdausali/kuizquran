@@ -27,10 +27,10 @@
 // are never typed into a test.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { resetApiFetchForTests } from "@/lib/sync/apiFetch";
 import { OverrideEditor } from "@/components/workbench/OverrideEditor";
-import type { CorpusWord } from "@engine/types.ts";
+import type { CorpusDistractor, CorpusWord } from "@engine/types.ts";
 
 afterEach(cleanup);
 
@@ -54,6 +54,15 @@ const SURAH_WORDS: CorpusWord[] = [
   { ayah: 5, position: 1, text_uthmani: "third", lemma: null, root: null, class: null, gloss: { en: "then", ms: null, ja: null }, act: null, sceneImage: null },
 ];
 
+// Word #1 (ayah 4) has two compiler-computed distractors on record; #2 and #3
+// have none — proving the "no distractors recorded yet" honest fallback is
+// real, not merely untested. No Arabic literal: `text` is a synthetic
+// placeholder, matching `WORDS`'/`SURAH_WORDS`' own convention.
+const DISTRACTORS: CorpusDistractor[] = [
+  { ayah: 4, position: 1, rank: 1, text: "look-alike-foil", prd_rank: "look-alike-verse", src_type: "visual", why: "shares script with the target across a different ayah" },
+  { ayah: 4, position: 1, rank: 2, text: "same-root-foil", prd_rank: "same-root", src_type: "semantic", why: "shares a root with the target" },
+];
+
 describe("OverrideEditor — lists existing overrides for the ayah", () => {
   const realFetch = globalThis.fetch;
   beforeEach(() => resetApiFetchForTests());
@@ -64,7 +73,7 @@ describe("OverrideEditor — lists existing overrides for the ayah", () => {
 
   it("renders zero-state honestly when nothing is recorded", async () => {
     globalThis.fetch = vi.fn(async () => jsonResponse({ overrides: [] })) as unknown as typeof fetch;
-    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} />);
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} distractors={DISTRACTORS} />);
     await waitFor(() => expect(screen.getByText(/no overrides recorded/i)).toBeTruthy());
   });
 
@@ -84,7 +93,7 @@ describe("OverrideEditor — lists existing overrides for the ayah", () => {
       }),
     ) as unknown as typeof fetch;
 
-    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} />);
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} distractors={DISTRACTORS} />);
     await waitFor(() => expect(screen.getByTestId("override-list")).toBeTruthy());
     expect(screen.getByText(/"when"/)).toBeTruthy();
     expect(screen.queryByText(/different ayah/)).toBeNull();
@@ -107,7 +116,7 @@ describe("OverrideEditor — lists existing overrides for the ayah", () => {
       }),
     ) as unknown as typeof fetch;
 
-    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} />);
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} distractors={DISTRACTORS} />);
     await waitFor(() => expect(screen.getByTestId("override-list")).toBeTruthy());
     expect(screen.getByText(/qari@example\.com/)).toBeTruthy();
   });
@@ -128,7 +137,7 @@ describe("OverrideEditor — lists existing overrides for the ayah", () => {
       }),
     ) as unknown as typeof fetch;
 
-    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} />);
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} distractors={DISTRACTORS} />);
     await waitFor(() => expect(screen.getByTestId("override-list")).toBeTruthy());
     expect(screen.getByText(/— by — — note: —/)).toBeTruthy();
   });
@@ -151,7 +160,7 @@ describe("OverrideEditor — lists existing overrides for the ayah", () => {
       }),
     ) as unknown as typeof fetch;
 
-    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} />);
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} distractors={DISTRACTORS} />);
     await waitFor(() => expect(screen.getByTestId("override-list")).toBeTruthy());
     expect(screen.getByText(/checked against an alternate transliteration/)).toBeTruthy();
   });
@@ -183,7 +192,7 @@ describe("OverrideEditor — lists existing overrides for the ayah", () => {
       }),
     ) as unknown as typeof fetch;
 
-    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} />);
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} distractors={DISTRACTORS} />);
     await waitFor(() => expect(screen.getByTestId("override-list")).toBeTruthy());
     expect(screen.getByText(new Date(1_700_000_000_000).toISOString(), { exact: false })).toBeTruthy();
     expect(screen.getByText(new Date(1_700_000_086_400_000).toISOString(), { exact: false })).toBeTruthy();
@@ -229,7 +238,7 @@ describe("OverrideEditor — submitting a gloss correction", () => {
       });
     }) as unknown as typeof fetch;
 
-    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} />);
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} distractors={DISTRACTORS} />);
     await waitFor(() => expect(screen.getByText(/no overrides recorded/i)).toBeTruthy());
 
     fireEvent.change(screen.getByLabelText(/^word$/i), { target: { value: "1" } });
@@ -252,7 +261,7 @@ describe("OverrideEditor — submitting a gloss correction", () => {
 
   it("cannot submit without choosing a word or typing a correction", async () => {
     globalThis.fetch = vi.fn(async () => jsonResponse({ overrides: [] })) as unknown as typeof fetch;
-    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} />);
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} distractors={DISTRACTORS} />);
     await waitFor(() => expect(screen.getByText(/no overrides recorded/i)).toBeTruthy());
     const submit = screen.getByRole("button", { name: /submit gloss correction/i }) as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
@@ -284,7 +293,7 @@ describe("OverrideEditor — submitting a gloss correction", () => {
       return jsonResponse({ overrides: [] });
     }) as unknown as typeof fetch;
 
-    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} />);
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} distractors={DISTRACTORS} />);
     await waitFor(() => expect(screen.getByText(/no overrides recorded/i)).toBeTruthy());
 
     fireEvent.change(screen.getByLabelText(/^word$/i), { target: { value: "1" } });
@@ -317,7 +326,7 @@ describe("OverrideEditor — submitting a gloss correction", () => {
       return jsonResponse({ overrides: [] });
     }) as unknown as typeof fetch;
 
-    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} />);
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} distractors={DISTRACTORS} />);
     await waitFor(() => expect(screen.getByText(/no overrides recorded/i)).toBeTruthy());
 
     fireEvent.change(screen.getByLabelText(/^word$/i), { target: { value: "1" } });
@@ -358,7 +367,7 @@ describe("OverrideEditor — disabling and re-enabling a question", () => {
       return jsonResponse({ overrides: [] });
     }) as unknown as typeof fetch;
 
-    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} />);
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} distractors={DISTRACTORS} />);
     await waitFor(() => expect(screen.getByText(/no overrides recorded/i)).toBeTruthy());
 
     fireEvent.change(screen.getByLabelText(/question type/i), { target: { value: "cloze" } });
@@ -403,7 +412,7 @@ describe("OverrideEditor — disabling and re-enabling a question", () => {
       });
     }) as unknown as typeof fetch;
 
-    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} />);
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} distractors={DISTRACTORS} />);
     await waitFor(() => expect(screen.getByRole("button", { name: /re-enable/i })).toBeTruthy());
 
     fireEvent.click(screen.getByRole("button", { name: /re-enable/i }));
@@ -471,7 +480,7 @@ describe("OverrideEditor — replacing a distractor set", () => {
       });
     }) as unknown as typeof fetch;
 
-    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} />);
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} distractors={DISTRACTORS} />);
     await waitFor(() => expect(screen.getByText(/no overrides recorded/i)).toBeTruthy());
 
     // Target word #1 ("target"); replacements picked from ACROSS the surah —
@@ -502,7 +511,7 @@ describe("OverrideEditor — replacing a distractor set", () => {
 
   it("the target word is never offered as its own replacement", async () => {
     globalThis.fetch = vi.fn(async () => jsonResponse({ overrides: [] })) as unknown as typeof fetch;
-    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} />);
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} distractors={DISTRACTORS} />);
     await waitFor(() => expect(screen.getByText(/no overrides recorded/i)).toBeTruthy());
 
     fireEvent.change(screen.getByLabelText(/target word/i), { target: { value: "1" } });
@@ -515,7 +524,7 @@ describe("OverrideEditor — replacing a distractor set", () => {
 
   it("cannot submit without a target word and at least one replacement pick", async () => {
     globalThis.fetch = vi.fn(async () => jsonResponse({ overrides: [] })) as unknown as typeof fetch;
-    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} />);
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} distractors={DISTRACTORS} />);
     await waitFor(() => expect(screen.getByText(/no overrides recorded/i)).toBeTruthy());
 
     const submit = screen.getByRole("button", { name: /replace distractors/i }) as HTMLButtonElement;
@@ -526,6 +535,42 @@ describe("OverrideEditor — replacing a distractor set", () => {
 
     fireEvent.change(screen.getByLabelText(/replacement 1/i), { target: { value: "4:2" } });
     expect(submit.disabled).toBe(false);
+  });
+
+  // The compiler's own classification and reasoning for the target word's
+  // CURRENT distractors (v3-D186) — computed since the compiler shipped,
+  // shipped verbatim to the browser, never rendered anywhere before this
+  // fix. Both rows come from the SAME target word so this cannot pass by
+  // reading only one of them.
+  it("shows the target word's own current distractors — rank, classification, and why — before replacing them", async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse({ overrides: [] })) as unknown as typeof fetch;
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} distractors={DISTRACTORS} />);
+    await waitFor(() => expect(screen.getByText(/no overrides recorded/i)).toBeTruthy());
+
+    expect(screen.queryByText(/look-alike-foil/)).toBeNull();
+
+    fireEvent.change(screen.getByLabelText(/target word/i), { target: { value: "1" } });
+
+    const region = screen.getByRole("region", { name: /current distractors/i });
+    expect(within(region).getByText(/look-alike-foil/)).toBeTruthy();
+    expect(within(region).getByText(/look-alike-verse/)).toBeTruthy();
+    expect(within(region).getByText(/shares script with the target/)).toBeTruthy();
+    expect(within(region).getByText(/same-root-foil/)).toBeTruthy();
+    expect(within(region).getByText(/same-root/)).toBeTruthy();
+  });
+
+  it("says so honestly when the target word has no distractors recorded yet", async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse({ overrides: [] })) as unknown as typeof fetch;
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} distractors={DISTRACTORS} />);
+    await waitFor(() => expect(screen.getByText(/no overrides recorded/i)).toBeTruthy());
+
+    // Word #2 has zero entries in DISTRACTORS — must not silently show word
+    // #1's rows, and must not stay blank either.
+    fireEvent.change(screen.getByLabelText(/target word/i), { target: { value: "2" } });
+
+    const region = screen.getByRole("region", { name: /current distractors/i });
+    expect(within(region).getByText(/no distractors recorded for this word yet/i)).toBeTruthy();
+    expect(within(region).queryByText(/look-alike-foil/)).toBeNull();
   });
 });
 
@@ -567,7 +612,7 @@ describe("OverrideEditor — grouping words into a multi-word idiom", () => {
       });
     }) as unknown as typeof fetch;
 
-    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} />);
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} distractors={DISTRACTORS} />);
     await waitFor(() => expect(screen.getByText(/no overrides recorded/i)).toBeTruthy());
 
     fireEvent.change(screen.getByLabelText(/anchor word/i), { target: { value: "1" } });
@@ -590,7 +635,7 @@ describe("OverrideEditor — grouping words into a multi-word idiom", () => {
 
   it("the anchor word is never offered as its own group-with pick", async () => {
     globalThis.fetch = vi.fn(async () => jsonResponse({ overrides: [] })) as unknown as typeof fetch;
-    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} />);
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} distractors={DISTRACTORS} />);
     await waitFor(() => expect(screen.getByText(/no overrides recorded/i)).toBeTruthy());
 
     fireEvent.change(screen.getByLabelText(/anchor word/i), { target: { value: "1" } });
@@ -603,7 +648,7 @@ describe("OverrideEditor — grouping words into a multi-word idiom", () => {
 
   it("cannot submit without an anchor word and at least one group-with pick", async () => {
     globalThis.fetch = vi.fn(async () => jsonResponse({ overrides: [] })) as unknown as typeof fetch;
-    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} />);
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} distractors={DISTRACTORS} />);
     await waitFor(() => expect(screen.getByText(/no overrides recorded/i)).toBeTruthy());
 
     const submit = screen.getByRole("button", { name: /^group words$/i }) as HTMLButtonElement;

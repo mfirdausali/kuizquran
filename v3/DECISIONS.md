@@ -14532,3 +14532,147 @@ lost or at risk. NOT addressed: every item on v3-D184's own "NOT addressed"
 list, unchanged; the `AdminRole::OPERATOR`/`MODERATOR` gating question
 (no gated action to attach to) remains a separate, open product-scope
 question, untouched by this fix.
+
+---
+
+## 2026-09-08 — nightly run: a distractor's own compiler-computed rationale had no reader (v3-D186)
+
+### v3-D186 — `CorpusDistractor.prd_rank`/`.src_type`/`.why` were computed, typed, shipped to the browser, and never rendered — sharpest on the one screen built to judge distractor quality
+
+`packages/corpus-compiler/src/prdRank.ts#mapPrdRank()` classifies every
+distractor — authored and kernel-generated alike — onto the FR1 rank
+taxonomy (suffix-variant > look-alike-verse > same-root > synonym >
+class-neighbor); `buildCorpus.ts` calls it for every distractor row and
+stores the result as `prd_rank`, alongside `src_type` and a human-readable
+`why` string, on `CorpusDistractor` (`packages/engine/src/types.ts` —
+all three required, non-nullable fields, confirmed present in the real
+compiled `output/12/corpus.json`). `stage-corpus.mjs#slim()` — the same
+function that DOES strip the QAC morphology fields (`lemma`/`root`/`class`,
+v3-D24, for real GPL-exposure reasons) — copies `distractors` through
+UNCHANGED into the client-staged `public/corpus/{112,103,67}.json`, so all
+three fields have reached the browser bundle since the compiler shipped.
+
+Nothing under `apps/web` ever read any of them back:
+`grep -rn "prd_rank|src_type|srcType|prdRank" apps/web --include=*.ts
+--include=*.tsx` (excluding test fixtures and the two literal placeholder
+strings `lib/overrides/write.ts`'s `distractorOverride()` posts for a
+BRAND NEW admin-authored replacement — `prd_rank: "override"`, `src_type:
+"admin"`, never a read of an EXISTING row's real values) returned nothing.
+`macro/facts.ts`'s own header and v3-D43 both assert this data "is
+compile-time-only and stripped from the learner artifact" — false today
+for the client-staged surahs, and unlike v3-D24's morphology strip this
+claim has no code or gate enforcing it.
+
+Sharpest consequence: `apps/web/components/workbench/OverrideEditor.tsx`'s
+"Replace distractors" fieldset — the one screen an admin uses to correct a
+bad distractor — let them pick a target word and up to four replacements,
+but never showed the word's CURRENT distractors or the compiler's own
+reason for choosing them. An admin correcting a distractor set worked
+blind: unable to tell a genuinely weak foil (the reason this panel exists
+at all) from one they simply hadn't been shown the rationale for. Same
+"computed, shipped, zero read surface" shape this build has closed
+repeatedly since v3-D82 (~90 instances across admin audit tables, wire
+fields, and engine functions) — here on the compiler's own distractor
+rationale, reaching a human for the first time since the FR1 taxonomy
+shipped.
+
+**Fixed, read-only, no write-path or wire-schema change** (both fields
+were already required and already reaching the browser — this is a
+renderer, not a new pipe): `OverrideEditorProps` gains a `distractors:
+readonly CorpusDistractor[]` prop (`corpus.distractors`, threaded from
+`WorkbenchIsland` exactly like `surahWords` already is — `WorkbenchIsland`
+already held the full `Corpus` object, so no new fetch). A new
+`currentDistractors` `useMemo` filters the array to `{ayah, position:
+distractorTarget}` and sorts by rank ascending — mirroring
+`distractorsFor()`'s own contract exactly, repeated rather than imported
+since `distractorsFor` takes a whole `Corpus` object and this component
+already receives the distractor array pre-sliced. Selecting a target word
+now renders a `role="region"` list of its own current distractors (rank,
+`prd_rank`, `src_type`, `why`) directly above the replacement pickers, or
+an honest "No distractors recorded for this word yet" when the array holds
+none for that word — never silently reusing another word's rows, and never
+writing anything: a replacement is still always posted as a full new set
+through the unchanged `onSubmitDistractor` path.
+
+RED confirmed directly: `git stash` of the two component files only
+(`OverrideEditor.tsx`, `WorkbenchIsland.tsx` — both new test cases kept,
+plus the mechanical `distractors={DISTRACTORS}` prop threaded through all
+18 pre-existing `render()` calls in `workbench-override-editor.test.tsx`)
+and rerunning that file: exactly the 2 new cases failed
+(`screen.getByRole("region", {name: /current distractors/i})` found
+nothing — the unfixed component renders no such region at all, regardless
+of which word is selected), the 18 pre-existing cases unaffected; restored
+byte-identically (`git diff` empty), reran: 20/20 green. The positive case
+seeds TWO distractors on the SAME target word with distinct
+`prd_rank`/`src_type`/`why` values, so it cannot pass by reading only the
+first one; the negative case selects a DIFFERENT word with zero recorded
+distractors in the fixture and asserts both the honest fallback text AND
+the absence of the first word's rows (`within(region).queryByText(...)`),
+proving the empty state is genuinely computed per-word rather than a
+shared static placeholder.
+
+`TZ=UTC make test`: **2618 passing** (was 2616, +2 — exactly this run's two
+new `it()` blocks; apps/web 1351, was 1349; no other suite moved: 255 v2
+vitest, 47 v2/api, 366 v3/api, 118 corpus-compiler, 420 engine, 61
+fold-runner). `check-test-floor.mjs`: OK, 2618 >= floor 1899 (+719 margin,
+unmoved, same discipline as every prior entry). `TZ=UTC make build`: exit
+0, 30 routes (unchanged — edits inside the existing `/workbench` component
+tree, no new route). `npm run gates`: all green (boundaries 305 files, up
+from 304 — no new production file, two existing files edited plus their
+one existing test file; fonts degraded-but-non-blocking, pre-existing;
+corpus-morphology 362 words / corpus-glyphs 206 codepoints, both unchanged
+— no new corpus data, only a prop and a renderer for data already
+compiled). `npx tsc --noEmit` (via `next build`'s own TypeScript pass):
+clean. No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff produced by running the suite was reverted before
+committing — twice this run — same discipline as every prior entry —
+`git status --porcelain -- v1 v2` empty immediately before committing). No
+Arabic codepoint (the full diff swept programmatically, in Python, over
+the Arabic, Arabic Supplement, Arabic Extended-A and both Presentation
+Forms Unicode blocks, plus a `\u06xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape and
+`fromCharCode` sweep — zero matches; every new string is a wire field
+name, a fixed English caption, or a synthetic placeholder value
+("look-alike-foil", "same-root-foil" — matching this test file's own
+established no-Arabic convention, never a real ayah's bytes).
+
+Found by a dedicated fresh-sweep agent handed the full list of
+already-known/deferred items carried forward through v3-D185 and told not
+to re-report any of them, directed at Laravel Console Commands and
+Middleware, Eloquent model relations, `apps/web/lib` subdirectories not
+recently named, and exported functions across
+`packages/engine/src`/`packages/corpus-compiler/src`/`worker/fold-runner/src`.
+The engine/fold-runner zero-caller sweep and a React-component-mount sweep
+(every file under `components/` is transitively reachable from `app/`, no
+orphaned component) both came back clean; this candidate was the one that
+survived direct, independent verification (each claimed fact — the
+compiler call site, the required type fields, the `slim()` passthrough,
+the zero-grep-hit claim, the exact panel and line where the fix belongs —
+re-checked by hand with a live grep/read before implementing, rather than
+trusted from the agent's report alone).
+
+Session start: fresh container, `make setup` run from scratch (no
+`node_modules`/`vendor` anywhere); local `HEAD` was found detached at
+`1bb0e64`, the same commit `origin/main` was already at, on a stale LOCAL
+`main` branch ref eleven commits behind (`4be9924`, v3-D174) — the
+recurring "stale local main" trap
+v3-D77/D91/D127/D138/D159/D167/D170/D172/D174/D175/D176/D177/D178/D179/D180/D181/D182/D183/D184/D185
+each independently hit, caught before any implementation work via `git
+fetch` + `git checkout main && git merge --ff-only origin/main`, no work
+lost or at risk.
+
+NOT addressed: every item on v3-D185's own "NOT addressed" list, unchanged
+— `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class / `permitsIssuance`/`permitsReview` (v3-D88, v3-D151); multi-surah
+enrollment; the operational mailer/7-night window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy drift (v3-D127); `packages/engine/src/placement.ts`
+(v3-D111/D113/D123); the late-arrival refold half of v3-D32;
+`AccountDeletionRequest::isDue()` (v3-D146); the `AdminRole::OPERATOR`/
+`MODERATOR` gating question (v3-D185) — all unchanged. Also not addressed:
+`CorpusDistractor.origin` (`"authored"` vs `"kernel"`) is a fourth field on
+the same struct with the identical shape (shipped, never rendered) — left
+for a future run, since `prd_rank`/`src_type`/`why` already closes the
+sharpest instance of this gap and a fourth column can wait for its own
+sweep to confirm it's worth the screen space.

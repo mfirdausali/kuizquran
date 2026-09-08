@@ -72,9 +72,23 @@
 // on this one client. Each success message now appends a WARNING suffix
 // when `hashRecompute.ok` is false, naming the server's own reported reason
 // — never replacing the success message, since the write did succeed.
+//
+// WHY THE CURRENT DISTRACTORS ARE THERE, BEFORE REPLACING THEM. Every
+// distractor the compiler ever emits — authored or kernel-generated — carries
+// `prd_rank`/`src_type`/`why` (`corpus-compiler/src/prdRank.ts`,
+// `buildCorpus.ts`), and `stage-corpus.mjs#slim()` ships all three to the
+// browser verbatim, unlike the QAC morphology fields it does strip
+// (v3-D24). Nothing anywhere ever read them back: an admin choosing
+// replacements below picked blind, with no way to see what a word's
+// existing distractors were or why the compiler chose them — the same
+// "computed, shipped, zero read surface" shape this build has closed
+// repeatedly elsewhere, here on the one screen built to judge distractor
+// quality. Fixed, read-only, no write-path change: selecting a target word
+// now lists its own current distractors (rank, classification, and the
+// compiler's own reason string) above the replacement pickers.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { CorpusWord } from "@engine/types.ts";
+import type { CorpusDistractor, CorpusWord } from "@engine/types.ts";
 import type { QuestionOverride } from "@engine/overrides.ts";
 import { fetchOverrides } from "@/lib/overrides/fetch.ts";
 import {
@@ -116,6 +130,14 @@ export interface OverrideEditorProps {
    *  ayah, and `CorpusWord.position` is only unique WITHIN an ayah, so
    *  candidates here are always keyed `${ayah}:${position}`. */
   surahWords: readonly CorpusWord[];
+  /** Every distractor row the compiler emitted for this surah — `corpus
+   *  .distractors`, threaded straight through from `WorkbenchIsland`. Shown
+   *  read-only above the replacement pickers so an admin can see a target
+   *  word's CURRENT distractors and why the compiler chose them before
+   *  replacing them; never written back through here — a replacement is
+   *  always a full new set (`onSubmitDistractor`), never an edit of one of
+   *  these rows. */
+  distractors: readonly CorpusDistractor[];
 }
 
 function isDisabledPayload(v: unknown): v is { disabled?: boolean } {
@@ -172,7 +194,7 @@ function isActiveDisable(o: QuestionOverride): boolean {
   return o.field === "disable" && (!isDisabledPayload(o.payload) || o.payload.disabled !== false);
 }
 
-export function OverrideEditor({ surah, ayah, words, surahWords }: OverrideEditorProps) {
+export function OverrideEditor({ surah, ayah, words, surahWords, distractors }: OverrideEditorProps) {
   const [rows, setRows] = useState<QuestionOverride[] | null>(null);
 
   const [glossPosition, setGlossPosition] = useState<PositionChoice>("");
@@ -208,6 +230,21 @@ export function OverrideEditor({ surah, ayah, words, surahWords }: OverrideEdito
   const distractorCandidates = useMemo(
     () => surahWords.filter((w) => !(w.ayah === ayah && w.position === distractorTarget)),
     [surahWords, ayah, distractorTarget],
+  );
+
+  // The target word's own CURRENT distractors, oldest-compiler-decision
+  // first — mirrors `distractorsFor()`'s own "sorted by rank ascending"
+  // contract (that function takes a whole `Corpus`, not this already-sliced
+  // `distractors` array, so the filter+sort is repeated here rather than
+  // imported). Read-only: shown so an admin can see what is there and why
+  // before choosing a replacement, never mutated from this list.
+  const currentDistractors = useMemo(
+    () =>
+      distractors
+        .filter((d) => d.ayah === ayah && d.position === distractorTarget)
+        .slice()
+        .sort((a, b) => a.rank - b.rank),
+    [distractors, ayah, distractorTarget],
   );
 
   // Same-ayah only — `GroupPayload#groupWith` has no cross-ayah member key,
@@ -507,6 +544,21 @@ export function OverrideEditor({ surah, ayah, words, surahWords }: OverrideEdito
             ))}
           </select>
         </label>
+        {distractorTarget !== "" ? (
+          <div className="caption" role="region" aria-label="current distractors for this word">
+            {currentDistractors.length === 0 ? (
+              <p>No distractors recorded for this word yet.</p>
+            ) : (
+              <ul>
+                {currentDistractors.map((d) => (
+                  <li key={d.rank}>
+                    #{d.rank} {d.text} — {d.prd_rank} ({d.src_type}){d.why ? `: ${d.why}` : ""}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : null}
         {Array.from({ length: DISTRACTOR_SLOTS }, (_, i) => i).map((i) => (
           <label key={i}>
             {`Replacement ${i + 1}`}

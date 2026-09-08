@@ -200,7 +200,13 @@ export function WorkbenchIsland({ surah, corpus }: WorkbenchIslandProps) {
         history={historyForAyah}
       />
 
-      <OverrideEditor surah={surah} ayah={ayah} words={ayahWords} surahWords={corpus.words} />
+      <OverrideEditor
+        surah={surah}
+        ayah={ayah}
+        words={ayahWords}
+        surahWords={corpus.words}
+        distractors={corpus.distractors}
+      />
 
       <LookAlikesPanel ayah={ayah} lookalikes={corpus.lookalikes ?? []} />
 

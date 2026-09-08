@@ -53,9 +53,112 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2616 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2618 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 366 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1349 apps/web. (v3-D185, 2026-09-08)
+             # + 420 engine + 61 fold-runner + 1351 apps/web. (v3-D186, 2026-09-08)
+             # NOTE (v3-D186, 2026-09-08): `CorpusDistractor.prd_rank`/`.src_type`/
+             # `.why` — every distractor's classification onto the FR1 rank
+             # taxonomy and the compiler's own reason string for choosing it
+             # (`corpus-compiler/src/prdRank.ts#mapPrdRank()`, called for every
+             # authored and kernel-generated distractor since `buildCorpus.ts`
+             # shipped) — were computed, typed as required fields on
+             # `CorpusDistractor` (`packages/engine/src/types.ts`), and shipped
+             # to the browser VERBATIM by `stage-corpus.mjs#slim()` (the same
+             # function that DOES strip the QAC morphology fields, v3-D24, but
+             # does nothing for these three), yet nothing under `apps/web` ever
+             # read any of them back: `grep -rn "prd_rank|src_type|srcType|
+             # prdRank" apps/web --include=*.ts --include=*.tsx` (excluding
+             # tests and the two literal placeholder strings `write.ts` posts
+             # for a BRAND NEW admin-authored replacement) returned nothing.
+             # Sharpest consequence on the one screen built to judge distractor
+             # quality: `OverrideEditor.tsx`'s "Replace distractors" fieldset
+             # let an admin pick a target word and up to four replacements, but
+             # never showed what the word's CURRENT distractors were or WHY the
+             # compiler chose them — an admin corrected blind, unable to tell
+             # a genuinely bad foil (the reason this panel exists) from one
+             # they simply hadn't read the rationale for. Same "computed,
+             # shipped, zero read surface" shape this build has closed ~90
+             # times since v3-D82, here on the compiler's own distractor
+             # rationale rather than a database audit column. Fixed,
+             # read-only, no write-path or wire-schema change (both fields
+             # were already required and already reaching the browser):
+             # `OverrideEditorProps` gains a `distractors: readonly
+             # CorpusDistractor[]` prop (`corpus.distractors`, threaded from
+             # `WorkbenchIsland` exactly like `surahWords` already is); a new
+             # `currentDistractors` `useMemo` filters+sorts it to the chosen
+             # target word (mirroring `distractorsFor()`'s own "sorted by rank
+             # ascending" contract, repeated rather than imported since this is
+             # a plain array slice, not a `Corpus` object); selecting a target
+             # word now renders a `role="region"` list of its own current
+             # distractors (rank, `prd_rank`, `src_type`, `why`) above the
+             # replacement pickers, or an honest "No distractors recorded for
+             # this word yet" when none exist — never silently reusing another
+             # word's rows. RED confirmed directly: `git stash` of the two
+             # component files only (both new tests kept, 18 pre-existing
+             # cases in `workbench-override-editor.test.tsx` untouched) failed
+             # exactly the 2 new cases (`getByRole("region", {name: /current
+             # distractors/i})` found nothing — the unfixed component renders
+             # no such region at all); restored byte-identically, 20/20 green.
+             # The positive case seeds TWO distractors on the SAME target word
+             # with distinct `prd_rank`/`src_type`/`why` values, so it cannot
+             # pass by reading only one of them; the negative case selects a
+             # DIFFERENT word with zero recorded distractors and asserts both
+             # the honest fallback text and the absence of the first word's
+             # rows, proving the empty state is real rather than a shared
+             # placeholder. `TZ=UTC make test`: 2618 passing (was 2616, +2 —
+             # exactly this run's two new `it()` blocks; apps/web 1351, was
+             # 1349; no other suite moved: 255 v2 vitest, 47 v2/api, 366
+             # v3/api, 118 corpus-compiler, 420 engine, 61 fold-runner).
+             # `check-test-floor.mjs`: OK, 2618 >= floor 1899 (+719 margin,
+             # unmoved, same discipline as every prior entry). `TZ=UTC make
+             # build`: exit 0, 30 routes (unchanged — edits inside the existing
+             # `/workbench` component tree, no new route). `npm run gates`:
+             # all green (boundaries 305 files, up from 304 — no new
+             # production file, two existing files edited plus their one
+             # existing test file; fonts degraded-but-non-blocking,
+             # pre-existing; corpus-morphology 362 words / corpus-glyphs 206
+             # codepoints, both unchanged — no new corpus data, only a prop
+             # and a renderer for data already compiled). `npx tsc --noEmit`
+             # (via `next build`'s own TypeScript pass): clean. No
+             # `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff produced by running the suite was reverted
+             # before committing, twice this run, same discipline as every
+             # prior entry — `git status --porcelain -- v1 v2` empty
+             # immediately before committing). No Arabic codepoint (the full
+             # diff swept programmatically, in Python, over the Arabic,
+             # Arabic Supplement, Arabic Extended-A and both Presentation
+             # Forms Unicode blocks, plus a `\u06xx`/`\u08xx`/`\uFBxx`/`\uFExx`
+             # escape and `fromCharCode` sweep — zero matches; every new
+             # string is a wire field name, a fixed English caption, or a
+             # synthetic placeholder value ("look-alike-foil", matching this
+             # test file's own established no-Arabic convention — never a
+             # real ayah's bytes). Found by a dedicated fresh-sweep agent
+             # handed the full list of already-known/deferred items carried
+             # forward through v3-D185 and told not to re-report any of them,
+             # directed at Laravel Console Commands/Middleware, Eloquent
+             # relations, `apps/web/lib` subdirectories not recently named,
+             # and engine/corpus-compiler/fold-runner exported functions —
+             # both the engine/fold-runner zero-caller sweep and the
+             # React-component-mount sweep came back clean (every component
+             # under `components/` is transitively reachable from `app/`), and
+             # this was the one candidate that survived direct verification
+             # (grep-confirmed at every claimed step before implementing,
+             # rather than trusted from the agent's report). Session start:
+             # fresh container, `make setup` run from scratch (no
+             # `node_modules`/`vendor` anywhere); `HEAD` was found detached at
+             # `1bb0e64`, the same commit `origin/main` was already at, on a
+             # stale LOCAL `main` branch ref eleven commits behind (`4be9924`,
+             # v3-D174) — the recurring "stale local main" trap
+             # v3-D77/D91/D127/D138/D159/D167/D170/D172/D174/D175/D176/D177/D178/D179/D180/D181/D182/D183/D184/D185
+             # each independently hit, caught before any implementation work
+             # via `git fetch` + `git checkout main && git merge --ff-only
+             # origin/main`, no work lost or at risk. NOT addressed: every
+             # item on v3-D185's own "NOT addressed" list, unchanged (see
+             # DECISIONS.md v3-D185 for the full enumeration — rhymeClassOf(),
+             # EntitlementMachine::merge(), TrialAttribution, PaywallGate,
+             # multi-surah enrollment, the mailer/7-night window, PAY-1
+             # fixtures, surah 67's scene beats, and the rest). See
+             # DECISIONS.md v3-D186.
              # NOTE (v3-D185, 2026-09-08): `admin_roles.granted_at`/`.granted_by`
              # — stamped on every grant since `admin:grant-role` shipped
              # (v3-D92), the ONLY writer of this table — had no admin-facing
