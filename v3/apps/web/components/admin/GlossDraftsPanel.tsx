@@ -204,6 +204,8 @@ export function GlossDraftsPanel() {
                             {row.reviews.map((rev, i) => (
                               <li key={i}>
                                 {rev.fromStatus} → {rev.toStatus} by {rev.actor ?? "—"}
+                                {" — "}
+                                <span className="ltr-island">{new Date(rev.createdAt).toISOString()}</span>
                                 {rev.note ? `: ${rev.note}` : ""}
                                 {rev.textAtReview !== null ? (
                                   <>

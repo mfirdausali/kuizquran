@@ -53,9 +53,91 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2587 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2588 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 356 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1330 apps/web. (v3-D182, 2026-09-08)
+             # + 420 engine + 61 fold-runner + 1331 apps/web. (v3-D183, 2026-09-08)
+             # NOTE (v3-D183, 2026-09-08): `GlossDraftReviewRow.createdAt` — the
+             # append-only review trail's own "WHEN" half, required and
+             # non-nullable, sent on every review entry since
+             # `GlossDraftsController::toWire()` first emitted `reviews[]`
+             # (v3-D156) — was fetched and typed
+             # (`lib/admin/glossDrafts.ts#GlossDraftReviewRow`) but never
+             # rendered anywhere: `GlossDraftsPanel.tsx`'s History `<details>`
+             # printed `fromStatus → toStatus by {actor}` plus the optional
+             # note, never `createdAt`. Same "written, wire-carried, zero
+             # read surface" shape this build has closed on this exact
+             # panel's OWN history list three times before, field by field
+             # (`textAtReview` at v3-D160, `authorKind`/`authoredBy` at
+             # v3-D169, `note` at v3-D170) — and the direct sibling of
+             # `QuestionOverride.createdAt` in `OverrideEditor.tsx`, fixed
+             # one workbench panel over at v3-D180. Two review entries on
+             # the same draft (e.g. rejected, corrected, approved) were
+             # distinguishable only by trusting the array's own JSON
+             # order — a fact never shown on screen — never by an actual
+             # visible timestamp, so a reviewer could not tell how long ago
+             # either correction happened or put two same-day corrections
+             # in order. Fixed, display-only, no server/wire change:
+             # each history `<li>` gains `— {ISO timestamp}` in an
+             # `ltr-island` span, following `OverrideEditor.tsx`'s own
+             # established convention for exactly this shape of history row
+             # verbatim (`— <span className="ltr-island">{new Date(rev
+             # .createdAt).toISOString()}</span>`). RED confirmed directly:
+             # `git stash` of `GlossDraftsPanel.tsx` alone (the new test
+             # kept, 13 pre-existing cases in `gloss-drafts-panel.test.tsx`
+             # untouched) failed exactly the new case (`getByText` on the
+             # ISO string threw — no such text existed in the rendered
+             # DOM); restored byte-identically, 14/14 green. The new test
+             # seeds two review entries on the SAME draft at two different
+             # `createdAt` values and asserts BOTH ISO strings render,
+             # proving each entry carries its own timestamp rather than one
+             # shared or hardcoded value. `TZ=UTC make test`: 2588 passing
+             # (was 2587, +1 — exactly this run's one new `it()` block;
+             # apps/web 1331, was 1330; no other suite moved: 255 v2
+             # vitest, 47 v2/api, 356 v3/api, 118 corpus-compiler, 420
+             # engine, 61 fold-runner). `check-test-floor.mjs`: OK, 2588 >=
+             # floor 1899 (+689 margin, unmoved, same discipline as every
+             # prior entry). `TZ=UTC make build`: exit 0, 29 routes
+             # (unchanged — edits inside the existing
+             # `/settings/gloss-drafts` component, no new route). `npm run
+             # gates` (via `prebuild`): all green (boundaries 299 files,
+             # unchanged count — one existing production file edited plus
+             # its one existing test file, no new production file; fonts
+             # degraded-but-non-blocking, pre-existing; corpus-morphology
+             # 362 words / corpus-glyphs 206 codepoints, both unchanged —
+             # no new corpus data). `npx tsc --noEmit` (via `next build`'s
+             # own TypeScript pass): clean. No `v1/**`/`v2/**` edit (a
+             # stray `v2/tsconfig.tsbuildinfo` build-cache diff produced by
+             # running the suite was reverted before committing, same
+             # discipline as every prior entry — `git status --porcelain
+             # -- v1 v2` empty immediately before committing). No Arabic
+             # codepoint (both changed files swept programmatically, in
+             # Python, over the Arabic, Arabic Supplement, Arabic
+             # Extended-A and both Presentation Forms Unicode blocks — zero
+             # matches; every new string is a wire field read through
+             # `new Date(...).toISOString()`, never corpus text).
+             # Found by a dedicated fresh-sweep agent (Explore) handed the
+             # full list of already-known/deferred items carried forward
+             # through v3-D182 and told not to re-report any of them,
+             # directed at Laravel Console Commands/Middleware/Jobs,
+             # apps/web/lib subdirectories not recently named, and
+             # zero-renderer React components — it identified this as the
+             # direct, unfixed sibling of v3-D180's own change on
+             # `OverrideEditor.tsx`, one panel over. Session start: fresh
+             # container, `make setup` run from scratch (no
+             # `node_modules`/`vendor` anywhere); local `HEAD` was found
+             # detached at `4d4f56a`, the same commit `origin/main` was
+             # already at (a stale LOCAL `main` branch ref eight commits
+             # behind, at `4be9924`, v3-D174) — the recurring "stale local
+             # main" trap
+             # v3-D77/D91/D127/D138/D159/D167/D170/D172/D174/D175/D176/D177/D178/D179/D180/D181/D182
+             # each independently hit, caught before any implementation
+             # work via `git fetch` + `git checkout main && git merge
+             # --ff-only origin/main`, no work lost or at risk. NOT
+             # addressed: every item on v3-D182's own "NOT addressed" list,
+             # unchanged; `row.createdAt`/`row.updatedAt`/`row.reviewedAt`
+             # (the draft ROW's own timestamps, as opposed to each review
+             # ENTRY's) remain unrendered too — a smaller, separate,
+             # adjacent gap on the same panel, left for a future run.
              # NOTE (v3-D182, 2026-09-08): `lib/entitlement/sync.ts#readEntitlement
              # Snapshot()`/`refreshEntitlementSnapshot()` (v3-D88/v3-D89) have
              # fetched and cached a learner's real entitlement snapshot in

@@ -255,6 +255,57 @@ describe("GlossDraftsPanel — the review history is readable, not just current 
     expect(screen.getByText(/originally approved wording before the edit/)).toBeTruthy();
   });
 
+  it("renders each review entry's own createdAt, not just its note — two same-day corrections must be distinguishable by when, not only by what changed", async () => {
+    // `GlossDraftReviewRow.createdAt` is required, non-nullable, and sent on
+    // every review entry (`GlossDraftsController::toWire()`) — the append-only
+    // trail's own "WHEN" half, alongside the "WHO" (`actor`) this same panel
+    // already renders. Without it, two review entries on the same draft are
+    // distinguishable only by trusting the array's own JSON order, never by a
+    // fact actually shown on screen — the same gap `OverrideEditor.tsx` closed
+    // for its own history list at v3-D180, one workbench panel over.
+    const firstReviewAt = 1_700_000_100_000;
+    const secondReviewAt = 1_700_000_200_000;
+    const rowWithHistory = {
+      ...REVIEWED_ROW,
+      status: "draft",
+      reviewedBy: null,
+      reviews: [
+        {
+          fromStatus: "draft",
+          toStatus: "reviewed",
+          textAtReview: "first draft text",
+          actorKind: "human",
+          actor: "reviewer@example.com",
+          note: "checked against Basmeih",
+          createdAt: firstReviewAt,
+        },
+        {
+          fromStatus: "reviewed",
+          toStatus: "draft",
+          textAtReview: "first draft text",
+          actorKind: "human",
+          actor: "reviewer@example.com",
+          note: "wrong register — too formal",
+          createdAt: secondReviewAt,
+        },
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          ...emptyWorklist(),
+          counts: { draft: 1, reviewed: 0, merged: 0, unauthored: 0 },
+          drafts: [rowWithHistory],
+        }),
+      ),
+    );
+    render(<GlossDraftsPanel />);
+    await waitFor(() => expect(screen.getByText("first draft text")).toBeTruthy());
+    expect(screen.getByText(new Date(firstReviewAt).toISOString())).toBeTruthy();
+    expect(screen.getByText(new Date(secondReviewAt).toISOString())).toBeTruthy();
+  });
+
   it("a row with no review history yet renders no history list", async () => {
     vi.stubGlobal(
       "fetch",

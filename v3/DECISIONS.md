@@ -14229,3 +14229,98 @@ late-arrival refold half of v3-D32; `AccountDeletionRequest::isDue()`
 `SystemHealthController::METRICS`'s `atom_cache_coverage`/
 `events_ingested_24h` (v3-D168, a known, reasoned omission) — all
 unchanged.
+
+
+## Ratified 2026-09-08 (nightly) — v3-D183: a gloss-draft review entry's own `createdAt` was fetched and typed, never rendered — the direct sibling of v3-D180's `OverrideEditor.tsx` fix, one workbench panel over
+
+A fresh sweep (an Explore agent, handed the full "already-known/deferred"
+list carried forward through v3-D182 and told not to re-report any of
+it, directed at Laravel Console Commands/Middleware/Jobs, apps/web/lib
+subdirectories not recently named, and zero-renderer React components —
+areas the last two sweeps had not targeted, since v3-D181 was scoped to
+engine/corpus-compiler/fold-runner and v3-D182 to api/app model relations
+and apps/web/lib zero-caller exports) found: `GlossDraftReviewRow
+.createdAt` (`lib/admin/glossDrafts.ts`) — the append-only review trail's
+own "WHEN" half, required and non-nullable, sent on every review entry
+since `GlossDraftsController::toWire()` first emitted `reviews[]`
+(v3-D156) — was fetched and typed but never rendered anywhere.
+
+`grep -rln "GlossDraftRow\|GlossDraftReviewRow" apps/web --include="*.ts"
+--include="*.tsx"` returns exactly three files: the type declaration
+(`lib/admin/glossDrafts.ts`), its one production consumer
+(`components/admin/GlossDraftsPanel.tsx`), and its test file. Inside that
+consumer, `grep -n "reviewedAt\|updatedAt\|rev\.createdAt\|row\.createdAt"`
+returns exactly one hit — `reviewedAt === null` used purely as a boolean
+gate to auto-focus the note field on rejection, never printed. The
+review-history `<li>` rendered `{rev.fromStatus} → {rev.toStatus} by
+{rev.actor ?? "—"}` plus an optional note — never `rev.createdAt`.
+
+⇒ Two review entries on the same draft (e.g. rejected once, corrected,
+approved) were distinguishable only by trusting the array's own JSON
+order — a fact never surfaced to the human reading it, only an
+implementation detail of `orderBy('id')` server-side — never by an
+actual visible timestamp. A reviewer could not tell how long ago either
+correction happened, or confidently order two same-day corrections. This
+is the exact harm this codebase already fixed for the sibling case in
+`OverrideEditor.tsx` at v3-D180 ("an admin correcting the same word
+twice... saw two visually-identical lines with no way to tell... how long
+ago either happened") — here one workbench panel over, on a history list
+this same `GlossDraftsPanel.tsx` component has already had three prior
+fields wired onto it field by field (`textAtReview` at v3-D160,
+`authorKind`/`authoredBy` at v3-D169, `note` at v3-D170), but never
+reached its own timestamp.
+
+**Fixed**, display-only, no server/wire change: the history `<li>` gains
+`— {ISO timestamp}` in an `ltr-island` span, reusing `OverrideEditor
+.tsx`'s own established convention for exactly this shape of history row
+verbatim — `<span className="ltr-island">{new Date(rev.createdAt)
+.toISOString()}</span>` — rather than inventing a second formatting
+convention for the same kind of value.
+
+**Verified:** RED confirmed directly: `git stash` of
+`GlossDraftsPanel.tsx` alone (the new test kept, all 13 pre-existing
+cases in `test/gloss-drafts-panel.test.tsx` untouched) failed exactly the
+new case — `screen.getByText(new Date(...).toISOString())` threw, no
+such text existed anywhere in the rendered DOM; restored byte-
+identically, 14/14 green. The new test seeds two review entries on the
+SAME draft at two different `createdAt` values and asserts both ISO
+strings render, so it cannot pass on a single hardcoded or shared
+timestamp — each entry must carry its own.
+
+`TZ=UTC make test`: 2588 passing (was 2587, +1 — exactly this run's one
+new `it()` block; apps/web 1331, was 1330; no other suite moved: 255 v2
+vitest, 47 v2/api, 356 v3/api, 118 corpus-compiler, 420 engine, 61
+fold-runner). `check-test-floor.mjs`: OK, 2588 >= floor 1899 (+689
+margin, unmoved, same discipline as every prior entry). `TZ=UTC make
+build`: exit 0, 29 routes (unchanged — edits inside the existing
+`/settings/gloss-drafts` component, no new route). `npm run gates` (via
+`prebuild`): all green (boundaries 299 files, unchanged count — one
+existing production file edited plus its one existing test file, no new
+production file; fonts degraded-but-non-blocking, pre-existing;
+corpus-morphology 362 words / corpus-glyphs 206 codepoints, both
+unchanged — no new corpus data). `npx tsc --noEmit` (via `next build`'s
+own TypeScript pass): clean. No `v1/**`/`v2/**` edit (`git status
+--porcelain -- v1 v2` empty immediately before committing — a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite
+was reverted first, same discipline as every prior entry). No Arabic
+codepoint (both changed files swept programmatically, in Python, over
+the Arabic, Arabic Supplement, Arabic Extended-A and both Presentation
+Forms Unicode blocks — zero matches; every new string is a wire field
+read through `new Date(...).toISOString()`, never corpus text).
+
+**Session start:** fresh container, `make setup` run from scratch (no
+`node_modules`/`vendor` anywhere); `git fetch` + `git checkout main &&
+git merge --ff-only origin/main` run before any exploration — local
+`HEAD` was found detached at `4d4f56a`, the same commit `origin/main`
+was already at (a stale LOCAL `main` branch ref eight commits behind, at
+`4be9924`, v3-D174) — the recurring "stale local main" trap
+v3-D77/D91/D127/D138/D159/D167/D170/D172/D174/D175/D176/D177/D178/D179/D180/D181/D182
+each independently hit, caught here before any implementation work, no
+work lost or at risk.
+
+**NOT addressed, named so a future run doesn't re-discover it as new:**
+every item on v3-D182's own "NOT addressed" list, unchanged;
+`GlossDraftRow.createdAt`/`.updatedAt`/`.reviewedAt` (the draft ROW's own
+timestamps, as opposed to each review ENTRY's `createdAt` this run fixed)
+remain unrendered too — a smaller, separate, adjacent gap on the same
+panel, left for a future run.
