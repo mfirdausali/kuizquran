@@ -316,12 +316,14 @@ const ENTITLEMENT_TOKENS = /\bEntitlement|\bentitlement|\bPaywall|\bentitled\b/;
 // `permitsIssuance`/`permitsReview`.
 const ENTITLEMENT_ALLOWLIST = new Set([
   "components/session/SessionIsland.tsx",
+  "components/settings/PlanPanel.tsx",
   "lib/account/api.ts",
   "lib/entitlement/cache.ts",
   "lib/entitlement/gate.ts",
   "lib/entitlement/sync.ts",
   "lib/entitlement/types.ts",
   "lib/pricing.ts",
+  "lib/settings/planSummary.ts",
 ]);
 // Named EXPLICITLY as forbidden, so the inverse mutation (removing one from the
 // allowlist) has something to prove against. These are the ingestion and fold

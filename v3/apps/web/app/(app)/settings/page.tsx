@@ -16,6 +16,7 @@ import { AccountAuthPanel } from "@/components/settings/AccountAuthPanel";
 import { AccountExportPanel } from "@/components/settings/AccountExportPanel";
 import { AccountDeletionPanel } from "@/components/settings/AccountDeletionPanel";
 import { AnchorHourPanel } from "@/components/settings/AnchorHourPanel";
+import { PlanPanel } from "@/components/settings/PlanPanel";
 
 export default function SettingsPage() {
   return (
@@ -36,6 +37,15 @@ export default function SettingsPage() {
             </h2>
           </div>
           <AccountAuthPanel />
+        </section>
+
+        <section className="card" aria-labelledby="plan-h">
+          <div className="card-header">
+            <h2 id="plan-h" style={{ margin: 0, fontSize: 12, fontWeight: 600 }}>
+              YOUR PLAN
+            </h2>
+          </div>
+          <PlanPanel />
         </section>
 
         <section className="card" aria-labelledby="anchor-h">

@@ -14081,3 +14081,151 @@ compiled ayah range directly (`atom.ts`/`bridge.ts`), never from this
 table, so it is plausibly a genuinely-unused build artifact rather than
 a wiring gap; not independently verified this run and left for a future
 sweep to confirm or fix — all unchanged.
+
+
+## Ratified 2026-09-08 (nightly) — v3-D182: a learner had no way to see their own plan/trial status anywhere in the app — `readEntitlementSnapshot()` fetched and cached it for ~90 nights with zero renderers
+
+A fresh sweep (an Explore agent, handed the full "already-known/deferred"
+list carried forward through v3-D181 and told not to re-report any of
+it, directed at `api/app`'s model/controller relations and
+`apps/web/lib`'s zero-caller exports — areas v3-D181's own sweep had
+not targeted, since that run was scoped to
+engine/corpus-compiler/fold-runner) found: `lib/entitlement/sync.ts
+#readEntitlementSnapshot()`/`refreshEntitlementSnapshot()` (built at
+v3-D88/v3-D89 specifically because `gate.ts#permitsIssuance()` had zero
+callers) have fetched `GET /api/entitlement` and persisted the result
+into IndexedDB on every `SessionIsland.tsx` mount since the entry right
+after v3-D89 — but nothing under `apps/web` ever rendered any of it.
+`grep -rn "readEntitlementSnapshot"` outside test files returns only
+the definition; a field-level check (`grep -rln "snapshot\.state\|
+snapshot\.tier\|snapshot\.trialSurah\|\.trialStartedAt\b" components
+app --include="*.tsx"`) returned nothing. The only screen that ever
+showed entitlement data was the ADMIN billing console
+(`/settings/billing`, `BillingAuditPanel.tsx`), and only for looking up
+OTHER users.
+
+Before implementing, this run first re-checked v3-D181's own deferred
+tail item directly: `corpus-compiler`'s `connections` table
+(`{surah, from, to}` rows, `buildConnections()`) is read only by
+`validate.ts`'s own `connections = ayahCount - 1` structural check and
+`compile.ts`'s build-summary print — `packages/engine/src/atom.ts`/
+`bridge.ts` compute connection ATOMS independently, straight from
+`ayahCount`, via `atomKey(surah, "connection", fromAyah)`, never from
+this table. Confirmed a genuinely-unused build-validation artifact, not
+a wiring gap — resolved as a false lead, not merely deferred again.
+
+⇒ A learner thirteen days into a fourteen-day trial, or one who had
+already paid for lifetime access, had no way to see that fact anywhere
+in their own account. Distinct from the long-open, deliberately-deferred
+`PaywallGate`/`permitsIssuance`/`permitsReview` gap (v3-D88, v3-D151):
+that one is an unresolved GATING question (what "lapsed" should deny in
+a mixed review/new-content queue, still undecided). This is a pure,
+passive DISPLAY of already-fetched, already-cached data, with no
+dependency on the still-missing Stripe checkout flow —
+`EntitlementController::show()` already returns a sensible
+`trial`/`tier:none` default even with zero `Entitlement` rows in the
+database, confirmed directly by reading the controller.
+
+**Fixed**, additive-only, no server/wire change: new
+`lib/settings/planSummary.ts#buildPlanSummary()` (pure — the component
+only prints what this computes, the same "module computes, component
+prints" split `rows.ts`/`growth.ts`/`frontier.ts` already established)
+maps a raw snapshot to a human sentence per state. A `trial` computes
+real days-remaining from `trialStartedAt` against `gate.ts`'s own
+exported `TRIAL_DAYS_MS` — imported, not re-declared a third time, since
+a second copy of that constant would only recreate the exact
+wiring/drift class this fix exists to close.
+`active`/`grace`/`lapsed_review_only` each get a fixed, honest sentence
+— never a bare wire literal shown to a learner (§15's rule against
+raw-enum display, extended here). New
+`components/settings/PlanPanel.tsx` mirrors `AnchorHourPanel`'s
+three-state discipline exactly: `loading` / `unavailable` / `ready`.
+Tries a live `refreshEntitlementSnapshot()` first (the most current
+answer for a screen a learner opens specifically to check this); falls
+back to the cached `readEntitlementSnapshot()` on failure — never a
+blank screen for an offline learner who has synced before, the same
+"cache absent/stale never denies" posture `cache.ts`/`gate.ts` already
+hold, applied here to DISPLAY rather than gating; only shows the honest
+`unavailable` banner when neither a live fetch nor a prior cache exists.
+Wired into `/settings` as a new "YOUR PLAN" card, first among the
+existing four (Account, Anchor, Data, Delete).
+
+`check-boundaries.mjs`'s `ENTITLEMENT_ALLOWLIST` (edge case #124's
+enforcement-surface guard, which already allowlists
+`SessionIsland.tsx` for the identical "reads the snapshot, decides
+nothing" reason) required both new files added by name — a real gate
+catch hit while running `make build`, not a pre-anticipated exemption;
+both files are display-only readers, the same shape as the existing
+`SessionIsland.tsx` entry, not a new enforcement point.
+
+**Verified:** RED confirmed directly: both new source files
+(`planSummary.ts`, `PlanPanel.tsx`) moved aside (all 15 new tests kept
+— 9 in `lib/settings/planSummary.test.ts`, 6 in
+`test/settings-plan-panel.test.tsx`) failed on module-resolution
+errors; restored byte-identically, 15/15 green. The component suite's
+load-bearing cases: a live 200 response renders the state sentence and
+tier/region; a trial 3 days in reports "11 days left" (computed from a
+real `trialStartedAt` against the real 14-day constant, not hardcoded);
+a failed live fetch AFTER a prior successful render (which persisted a
+real cache entry through the real IndexedDB path, not a stub) still
+renders the cached state plus an honest "last known status" caption —
+proving the fallback reads a genuine cache, not a fixture shortcut; a
+failed fetch with no prior cache renders the `alert` banner, never a
+blank card; a `lapsed_review_only` snapshot never leaks the bare wire
+literal in its rendered text, only "review... stays open forever."
+
+`TZ=UTC make test`: 2587 passing (was 2572, +15 — exactly this run's
+new tests: 9 + 6; apps/web 1330, was 1315; no other suite moved: 255 v2
+vitest, 47 v2/api, 356 v3/api, 118 corpus-compiler, 420 engine, 61
+fold-runner). `check-test-floor.mjs`: OK, 2587 >= floor 1899 (+688
+margin, unmoved, same discipline as every prior entry). `TZ=UTC make
+build`: exit 0, 29 routes (unchanged — edits inside the existing
+`/settings` page, no new route; `stage-corpus.mjs` ships no entitlement
+data of any kind to the browser, so the client-shipped corpus subset is
+unaffected by this change). `npm run gates` (via `prebuild`): all green
+after the boundaries-allowlist fix above (boundaries 297 files, up from
+295 — the two new production files, `lib/settings/planSummary.ts` and
+`components/settings/PlanPanel.tsx`; fonts degraded-but-non-blocking,
+pre-existing; corpus-morphology and corpus-glyphs unchanged — this fix
+carries no new corpus data). `npx tsc --noEmit` (via `next build`'s own
+TypeScript pass): clean. No `v1/**`/`v2/**` edit (`git status
+--porcelain -- v1 v2` empty immediately before committing — a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the
+suite was reverted first, same discipline as every prior entry). No
+Arabic codepoint (every changed/new file swept programmatically, in
+Python, over the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks, plus a `\u06xx`/`\u08xx`-escape and
+`fromCharCode` sweep — zero matches; every new string is a wire field
+read, a millisecond-arithmetic result, or a fixed English sentence,
+never corpus text).
+
+**Session start:** fresh container, `make setup` run from scratch (no
+`node_modules`/`vendor` anywhere); `git fetch` + `git checkout main &&
+git merge --ff-only origin/main` run before any exploration — local
+`HEAD` was found detached at `006ec48`, the same commit `origin/main`
+was already at (a stale LOCAL `main` branch ref seven commits behind,
+at `4be9924`, v3-D174) — the recurring "stale local main" trap
+v3-D77/D91/D127/D138/D159/D167/D170/D172/D174/D175/D176/D177/D178/D179/D180/D181
+each independently hit, caught here before any implementation work, no
+work lost or at risk.
+
+**NOT addressed, named so a future run doesn't re-discover it as new:**
+every item on v3-D181's own "NOT addressed" list, unchanged (the
+`connections`-table item is now resolved as a confirmed false lead,
+not merely deferred — see above); `GlossDraftsLoad.shipping`/
+`.excludedFromHashV1` (v3-D173, non-divergent); `FlagRow.ackAt`
+(v3-D170, weaker); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a
+whole class / the gating question itself (v3-D88, v3-D151 — this run's
+fix is display-only and does not resolve it); multi-surah enrollment;
+the operational mailer/7-night window; PAY-1's Stripe fixtures; surah
+67's scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy drift
+(v3-D127); `packages/engine/src/placement.ts` (v3-D111/D113/D123); the
+late-arrival refold half of v3-D32; `AccountDeletionRequest::isDue()`
+(v3-D146); `lib/i18n/dictionaries.ts#isLocale()`; `BillingEventsPanel
+.tsx`'s single-event detail view (v3-D166);
+`SystemHealthController::METRICS`'s `atom_cache_coverage`/
+`events_ingested_24h` (v3-D168, a known, reasoned omission) — all
+unchanged.

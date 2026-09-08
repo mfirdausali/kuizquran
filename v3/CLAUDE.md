@@ -53,9 +53,110 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2572 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2587 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 356 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1315 apps/web. (v3-D181, 2026-09-05)
+             # + 420 engine + 61 fold-runner + 1330 apps/web. (v3-D182, 2026-09-08)
+             # NOTE (v3-D182, 2026-09-08): `lib/entitlement/sync.ts#readEntitlement
+             # Snapshot()`/`refreshEntitlementSnapshot()` (v3-D88/v3-D89) have
+             # fetched and cached a learner's real entitlement snapshot in
+             # IndexedDB on every `SessionIsland.tsx` mount for ~90 nights, but
+             # nothing under `apps/web` ever RENDERED it — `grep -rn
+             # "readEntitlementSnapshot"` outside test files returned only the
+             # definition itself, and a field-level check
+             # (`grep -rln "snapshot\.state\|snapshot\.tier\|snapshot\.trialSurah\|
+             # \.trialStartedAt\b" components app --include="*.tsx"`) came back
+             # empty. The only screen that ever showed entitlement data was the
+             # ADMIN billing console (`/settings/billing`), and only for looking
+             # up OTHER users — a learner thirteen days into a fourteen-day
+             # trial, or one who had already paid for lifetime access, had no
+             # way to see that fact anywhere in their own account. Distinct from
+             # the long-open, deliberately-deferred `PaywallGate`/
+             # `permitsIssuance`/`permitsReview` gap (v3-D88, v3-D151): that one
+             # is an unresolved GATING question (what "lapsed" should deny in a
+             # mixed review/new-content queue); this is a pure, passive DISPLAY
+             # of already-fetched, already-cached data, with no dependency on
+             # the still-missing Stripe checkout flow — `EntitlementController
+             # ::show()` already returns a sensible `trial`/`tier:none` default
+             # even with zero `Entitlement` rows in the DB, confirmed directly.
+             # Fixed: new `lib/settings/planSummary.ts#buildPlanSummary()` (pure
+             # — the component only prints what this computes, the same split
+             # `rows.ts`/`growth.ts`/`frontier.ts` already established) maps a
+             # snapshot to a human sentence per state (`trial` computes days
+             # remaining from `trialStartedAt` against `gate.ts`'s own
+             # `TRIAL_DAYS_MS` — imported, not re-declared a third time, since a
+             # second copy would only recreate the exact drift-shaped gap this
+             # fix exists to close; `active`/`grace`/`lapsed_review_only` each
+             # get a fixed, honest sentence, never a bare wire literal) + a new
+             # `components/settings/PlanPanel.tsx` (mirrors `AnchorHourPanel`'s
+             # three-state discipline exactly: `loading` / `unavailable` /
+             # `ready`; tries a live `refreshEntitlementSnapshot()` first, falls
+             # back to the cached `readEntitlementSnapshot()` on failure — never
+             # a blank screen for an offline learner who has synced before —
+             # and only shows the honest `unavailable` banner when neither a
+             # live fetch nor a prior cache exists), wired into `/settings` as a
+             # new "YOUR PLAN" card, first among the existing four (Account,
+             # Anchor, Data, Delete). `check-boundaries.mjs`'s
+             # `ENTITLEMENT_ALLOWLIST` (edge case #124's enforcement-surface
+             # guard) required both new files added by name — a real gate catch
+             # along the way, not a pre-anticipated exemption. RED confirmed
+             # directly: both new source files moved aside (all 15 new tests
+             # kept — 9 in `planSummary.test.ts`, 6 in
+             # `settings-plan-panel.test.tsx`) failed on module-resolution
+             # errors; restored byte-identically, 15/15 green. The component
+             # suite's own load-bearing cases: a live 200 renders the state
+             # sentence and tier/region; a trial 3 days in reports "11 days
+             # left" (computed, not hardcoded); a failed live fetch after a
+             # PRIOR successful render (which persisted a real cache entry via
+             # the real IndexedDB path) still renders the cached state plus an
+             # honest "last known status" caption, proving the fallback reads a
+             # REAL cache, not a stub; a failed fetch with no prior cache shows
+             # the `alert` banner, not a blank card; `lapsed_review_only` never
+             # leaks the bare wire literal, only "review... stays open forever."
+             # `TZ=UTC make test`: 2587 passing (was 2572, +15 — exactly this
+             # run's new tests: 9 + 6; apps/web 1330, was 1315; no other suite
+             # moved). `check-test-floor.mjs`: OK, 2587 >= floor 1899 (+688
+             # margin, unmoved, same discipline as every prior entry). `TZ=UTC
+             # make build`: exit 0, 29 routes (unchanged — edits inside the
+             # existing `/settings` page, no new route; `stage-corpus.mjs`
+             # ships no entitlement data of any kind, so the client-shipped
+             # corpus subset is unaffected). `npm run gates` (via `prebuild`):
+             # all green after the boundaries fix above (boundaries 297 files,
+             # up from 295 — the two new production files; fonts
+             # degraded-but-non-blocking, pre-existing; corpus-morphology and
+             # corpus-glyphs unchanged — no new corpus data). `npx tsc
+             # --noEmit` (via `next build`'s own TypeScript pass): clean. No
+             # `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff reverted before committing, same discipline as
+             # every prior entry). No Arabic codepoint (every changed/new file
+             # swept programmatically, in Python, over the Arabic, Arabic
+             # Supplement, Arabic Extended-A and both Presentation Forms
+             # Unicode blocks — zero matches; every new string is a wire field
+             # read, a millisecond arithmetic result, or a fixed English
+             # sentence, never corpus text). Found by a dedicated fresh-sweep
+             # agent handed the full list of already-known/deferred items
+             # carried forward through v3-D181 (that list's own tail item,
+             # `corpus-compiler`'s `connections` table, was checked directly
+             # this run FIRST and confirmed a genuinely-unused build-validation
+             # artifact, not a wiring gap — the engine computes connection
+             # atoms independently from `ayahCount` via `atomKey()`/
+             # `bridge.ts`, never reads that table; recorded so a future run
+             # does not re-open it) and told not to re-report any of them,
+             # directed at `api/app` model/controller relations and
+             # `apps/web/lib` zero-caller exports rather than the
+             # engine/corpus-compiler/fold-runner packages v3-D181's sweep had
+             # just covered. Session start: fresh container, `make setup` run
+             # from scratch (no `node_modules`/`vendor` anywhere); local `HEAD`
+             # was found detached at `006ec48`, the same commit `origin/main`
+             # was already at, on a stale LOCAL `main` branch ref seven commits
+             # behind (`4be9924` vs. the real tip, v3-D181) — the recurring
+             # "stale local main" trap
+             # v3-D77/D91/D127/D138/D159/D167/D170/D172/D174/D175/D176/D177/D178/D179/D180/D181
+             # each independently hit, caught before any implementation work
+             # via `git fetch` + `git checkout main && git merge --ff-only
+             # origin/main`, no work lost or at risk. NOT addressed: every item
+             # on v3-D181's own "NOT addressed" list, unchanged (the
+             # `connections` item is now resolved as a false lead, not merely
+             # deferred — see above).
              # NOTE (v3-D181, 2026-09-05): `corpus-compiler`'s
              # `buildLookAlikes()` (cross-verse confusion pairs — exact-
              # recurrence and near-identical-script word collisions across
