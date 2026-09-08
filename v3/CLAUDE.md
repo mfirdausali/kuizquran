@@ -53,9 +53,99 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2590 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 356 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1333 apps/web. (v3-D184, 2026-09-08)
+make test    # 2616 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 366 v3/api + 118 corpus-compiler
+             # + 420 engine + 61 fold-runner + 1349 apps/web. (v3-D185, 2026-09-08)
+             # NOTE (v3-D185, 2026-09-08): `admin_roles.granted_at`/`.granted_by`
+             # — stamped on every grant since `admin:grant-role` shipped
+             # (v3-D92), the ONLY writer of this table — had no admin-facing
+             # reader anywhere: `GET /api/admin/whoami` returns only the
+             # CALLING admin's own roles (`$user->adminRoles()`, consumed
+             # solely to disable the qari-signature radio for a non-qari
+             # admin, v3-D131), and no `/admin/roles` route existed at all
+             # (confirmed against the full `routes/api.php` admin group).
+             # Since `tier: qari` is this app's one security-gated action
+             # (v3-D92), an operator auditing "who currently holds qari
+             # access, and who granted it" had a database console and
+             # nothing else. Same "written, wire-carried, zero read surface"
+             # shape this build has closed ~60 times since v3-D82, here on
+             # the role-grant audit trail rather than a sibling table.
+             # Distinct from the already-recorded `AdminRole::OPERATOR`/
+             # `MODERATOR` gap (no gated action to attach to, a
+             # product-scope question) — that is about those two roles
+             # having nothing to DO yet; this is about the audit trail every
+             # grant, `qari` included, already produces never reaching a
+             # reader. Fixed on the exact template `PurgeLedgerController`/
+             # `AdminAuditController` already established: new
+             # `Admin\AdminRolesController::index()` (`GET /api/admin/roles`,
+             # READ-ONLY BY CONSTRUCTION) + `lib/admin/roles.ts` +
+             # `AdminRolesPanel.tsx`, on a new standalone `/settings/roles`
+             # route (no existing page is a natural home, same precedent
+             # `/settings/audit`/`/settings/privacy` set). The role-holder's
+             # `user_id` is pseudonymized on the way out (the same HMAC
+             # `Pseudonymizer` every other admin surface applies to a raw
+             # `users` FK); `granted_by` passes through unpseudonymized — it
+             # is a free-text operator string (an email or `"cli"`), not a
+             # `users` id, the same treatment `AdminAuditController` already
+             # gives `ip`/`request_id`. Two SQL-level filters: `role` (the
+             # closed set) and `userId` (raw, from the database — a
+             # pseudonym is one-way by design and cannot be reversed to
+             # query by). RED confirmed at all three layers, each moved
+             # aside with its tests kept and restored byte-identically
+             # after: backend (`AdminRolesController.php` moved aside — 9 of
+             # 10 new PHPUnit cases failed on a missing-file error, the
+             # tenth being the auth-gate test which needed no controller to
+             # fail correctly); frontend lib (`roles.ts` moved aside — 0/9,
+             # module resolution); frontend panel (`AdminRolesPanel.tsx` +
+             # the new page moved aside — 0/7, module resolution). Restored,
+             # reran: 10/10 + 9/9 + 7/7 green. The load-bearing backend case
+             # grants two roles through the REAL command (never a hand-built
+             # row) at two different `granted_at` values and asserts
+             # newest-first ordering, each row's own `role`/`grantedBy`, and
+             # that the pseudonym is genuinely a one-way HMAC
+             # (`assertNotEquals` the raw id). `TZ=UTC make test`: 2616
+             # passing (was 2590, +26 — exactly this run's new tests: 10
+             # PHPUnit + 9 + 7 vitest; v3/api 366, was 356; apps/web 1349,
+             # was 1333; no other suite moved). `check-test-floor.mjs`: OK,
+             # 2616 >= floor 1899 (+717 margin, unmoved, same discipline as
+             # every prior entry). `TZ=UTC make build`: exit 0, 30 routes
+             # (was 29 — `/settings/roles` is new). `npm run gates` (via
+             # `prebuild`): all green (boundaries 304 files, up from 299 —
+             # exactly the three new apps/web production files; fonts
+             # degraded-but-non-blocking, pre-existing; corpus-morphology
+             # 362 words / corpus-glyphs 206 codepoints, both unchanged — no
+             # new corpus data). `npx tsc --noEmit` (via `next build`'s own
+             # TypeScript pass): clean. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff produced by
+             # running the suite was reverted before committing, same
+             # discipline as every prior entry — `git status --porcelain --
+             # v1 v2` empty immediately before committing). No Arabic
+             # codepoint (every new/changed file swept programmatically, in
+             # Python, over the Arabic, Arabic Supplement, Arabic
+             # Extended-A and both Presentation Forms Unicode blocks — zero
+             # matches; every new string is a wire field name, a closed-set
+             # role value, a pseudonym/timestamp/email test fixture, or a
+             # fixed English label, never corpus text). Found by a dedicated
+             # fresh-sweep agent handed the full list of already-known/
+             # deferred items carried forward through v3-D184 and told not
+             # to re-report any of them, directed at `v3/api`'s Console
+             # Commands/Middleware/Jobs, `apps/web/lib` subdirectories not
+             # recently named, and zero-caller Eloquent relations. Session
+             # start: fresh container, `make setup` run from scratch (no
+             # `node_modules`/`vendor` anywhere); local `HEAD` was found
+             # detached at `c205251`, the same commit `origin/main` was
+             # already at, on a stale LOCAL `main` branch ref ten commits
+             # behind (`4be9924`, v3-D174) — the recurring "stale local
+             # main" trap
+             # v3-D77/D91/D127/D138/D159/D167/D170/D172/D174/D175/D176/D177/D178/D179/D180/D181/D182/D183/D184
+             # each independently hit, caught before any implementation
+             # work via `git fetch` + `git checkout main && git merge
+             # --ff-only origin/main`, no work lost or at risk. NOT
+             # addressed: every item on v3-D184's own "NOT addressed" list,
+             # unchanged; the `AdminRole::OPERATOR`/`MODERATOR` gating
+             # question (no gated action to attach to) remains a separate,
+             # open product-scope question, untouched by this fix. See
+             # DECISIONS.md v3-D185.
              # NOTE (v3-D184, 2026-09-08): `GlossDraftRow.createdAt`/`.updatedAt`/
              # `.reviewedAt` — the DRAFT ROW's own timestamps, as opposed to each
              # review ENTRY's own `createdAt` fixed the prior night (v3-D183) —

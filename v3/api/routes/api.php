@@ -8,6 +8,7 @@ use App\Http\Controllers\Admin\AdminAuditController;
 use App\Http\Controllers\Admin\AdminAuthController;
 use App\Http\Controllers\Admin\AdminBillingController;
 use App\Http\Controllers\Admin\AdminRevealController;
+use App\Http\Controllers\Admin\AdminRolesController;
 use App\Http\Controllers\Admin\AdminUsersController;
 use App\Http\Controllers\Admin\BillingEventsController;
 use App\Http\Controllers\Admin\FlagAuditController;
@@ -104,6 +105,13 @@ Route::middleware('auth:sanctum')->group(function () {
         // unbuilt since v3-D92, closed here): "is THIS token actually
         // admin?", answered by the real gate, not a client-invented flag.
         Route::get('/whoami', [AdminAuthController::class, 'whoami']);
+
+        // The admin roles viewer — `admin_roles` has been written by
+        // `admin:grant-role` since v3-D92 with no admin-facing reader
+        // anywhere; `/whoami` above answers "what does THIS admin hold",
+        // never "who holds what". Read-only — see AdminRolesController's
+        // own header.
+        Route::get('/roles', [AdminRolesController::class, 'index']);
 
         // Privacy / reveal (WIREFRAME §16, edge cases #147/#148).
         Route::post('/users/{userId}/reveal', [AdminRevealController::class, 'reveal']);

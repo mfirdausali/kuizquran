@@ -14430,3 +14430,105 @@ lost or at risk.
 **NOT addressed, named so a future run doesn't re-discover it as new:**
 every item on v3-D182's own "NOT addressed" list, unchanged (v3-D183 and
 this entry both being the only items resolved from it since).
+
+---
+
+## 2026-09-08 — nightly run: `admin_roles`'s own grant audit trail had no reader (v3-D185)
+
+### v3-D185 — `admin_roles.granted_at`/`.granted_by` had a real writer (`admin:grant-role`, v3-D92) and zero admin-facing reader anywhere
+
+Continuing the same "written, wire-carried, zero read surface" bug class
+this build has closed ~60 times since v3-D82. A dedicated fresh-sweep
+Explore agent, handed the full list of already-known/deferred items and
+told not to re-report any of them, was directed at `v3/api`'s Console
+Commands/Middleware/Jobs, `apps/web/lib` subdirectories not recently named,
+and zero-caller Eloquent relations — it found `admin_roles`.
+
+`GrantAdminRoleCommand` (`admin:grant-role`, the ONLY writer —
+`AdminRole::create`/`new AdminRole(` had zero hits outside that command, the
+model, and tests) stamps every grant with `granted_at` (epoch ms) and
+`granted_by` (the `--by=` option, or the literal string `"cli"`). Neither
+field was ever read back anywhere: `grep -n "granted_by\|granted_at"` across
+`api/app` and `apps/web` (excluding the command/model themselves) returned
+nothing. The only HTTP surface touching `AdminRole` at all was `GET
+/api/admin/whoami`, which returns `$user->adminRoles()` — the CALLING
+admin's own roles only, consumed solely by `identity-context.tsx`/
+`QariMode.tsx` to disable the qari-signature radio for a non-qari admin
+(v3-D131). Since `tier: qari` is this app's one security-gated action
+(v3-D92), an operator wanting to know "who currently holds qari access, and
+who granted it" had a database console and nothing else — no `/admin/roles`
+route existed at all (confirmed against the full `routes/api.php` admin
+group).
+
+Distinct from the already-recorded `AdminRole::OPERATOR`/`MODERATOR` gap
+(no gated action to attach to, a product-scope question, ~line 4062): that
+entry is about those two roles having nothing to DO yet; this one is about
+the audit trail every role grant — `qari` included — already produces
+never reaching a reader.
+
+**Fixed**, on the exact template `PurgeLedgerController`/`AdminAuditController`
+already established: new `Admin\AdminRolesController::index()` (`GET
+/api/admin/roles`, READ-ONLY BY CONSTRUCTION — no write route registered)
++ `lib/admin/roles.ts` + `components/admin/AdminRolesPanel.tsx`, on a new
+standalone `/settings/roles` route (mirrors `/settings/audit`'s/
+`/settings/privacy`'s own "no existing page is a natural home" precedent).
+The role-holder's `user_id` is pseudonymized on the way out — same HMAC
+`Pseudonymizer` every other admin surface applies to a raw `users` FK
+(`AdminAuditController`'s `actor_admin_id`, `PurgeLedgerController`'s
+`user_id`) — since this is the first surface that ever renders it to a
+human and returning it verbatim would deanonymize an admin to their peers.
+`granted_by` passes through UNPSEUDONYMIZED — it is not a `users` FK, only
+a free-text operator string (an email or `"cli"`), the same "an admin's own
+self-supplied operational string" treatment `AdminAuditController` already
+gives `ip`/`request_id`. Two filters, both SQL-level: `role` (the closed
+set) and `userId` (raw, from the database — a pseudonym is one-way by
+design and cannot be reversed to query by, same convention
+`PurgeLedgerController`/`AdminBillingController` established).
+
+RED confirmed at every layer, each moved aside with its test kept and
+restored byte-identically after: backend (`AdminRolesController.php` moved
+aside — 9 of 10 new PHPUnit cases failed on `Failed to open stream: No such
+file or directory`, the tenth being the auth-gate test which needed no
+controller to fail correctly); frontend lib (`roles.ts` moved aside —
+`lib/admin/roles.test.ts` failed on module resolution, 0/9); frontend panel
+(`AdminRolesPanel.tsx` + the new `/settings/roles` page moved aside —
+`test/admin-roles-panel.test.tsx` failed on module resolution, 0/7).
+Restored, reran: 10/10 + 9/9 + 7/7 green. The load-bearing backend case
+grants two roles through the REAL command (never a hand-built row) at two
+different `granted_at` values and asserts newest-first ordering, each row's
+own `role`/`grantedBy`, and that the pseudonym is genuinely a one-way HMAC
+(`assertNotEquals` the raw id) — not a renamed passthrough.
+
+`TZ=UTC make test`: **2616 passing** (was 2590, +26 — exactly this run's new
+tests: 10 PHPUnit + 9 + 7 vitest; v3/api 366, was 356; apps/web 1349, was
+1333; no other suite moved: 255 v2 vitest, 47 v2/api, 118 corpus-compiler,
+420 engine, 61 fold-runner). `check-test-floor.mjs`: OK, 2616 >= floor 1899
+(+717 margin, unmoved, same discipline as every prior entry). `TZ=UTC make
+build`: exit 0, 30 routes (was 29 — `/settings/roles` is new). `npm run
+gates` (via `prebuild`): all green (boundaries 304 files, up from 299 —
+exactly the three new apps/web production files, the two new test files
+adding no separate count since boundaries counts production+test together
+per its own convention; fonts degraded-but-non-blocking, pre-existing;
+corpus-morphology 362 words / corpus-glyphs 206 codepoints, both unchanged
+— no new corpus data). `npx tsc --noEmit` (via `next build`'s own
+TypeScript pass): clean. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite
+was reverted before committing, same discipline as every prior entry —
+`git status --porcelain -- v1 v2` empty immediately before committing). No
+Arabic codepoint (every new/changed file swept programmatically, in
+Python, over the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks — zero matches; every new string is a
+wire field name, a closed-set role value, a pseudonym/timestamp/email test
+fixture, or a fixed English label, never corpus text). Session start:
+fresh container, `make setup` run from scratch (no `node_modules`/`vendor`
+anywhere); local `HEAD` was found detached at `c205251`, the same commit
+`origin/main` was already at, on a stale LOCAL `main` branch ref ten
+commits behind (`4be9924`, v3-D174) — the recurring "stale local main"
+trap
+v3-D77/D91/D127/D138/D159/D167/D170/D172/D174/D175/D176/D177/D178/D179/D180/D181/D182/D183/D184
+each independently hit, caught before any implementation work via `git
+fetch` + `git checkout main && git merge --ff-only origin/main`, no work
+lost or at risk. NOT addressed: every item on v3-D184's own "NOT addressed"
+list, unchanged; the `AdminRole::OPERATOR`/`MODERATOR` gating question
+(no gated action to attach to) remains a separate, open product-scope
+question, untouched by this fix.
