@@ -53,9 +53,85 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2588 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2590 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 356 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1331 apps/web. (v3-D183, 2026-09-08)
+             # + 420 engine + 61 fold-runner + 1333 apps/web. (v3-D184, 2026-09-08)
+             # NOTE (v3-D184, 2026-09-08): `GlossDraftRow.createdAt`/`.updatedAt`/
+             # `.reviewedAt` — the DRAFT ROW's own timestamps, as opposed to each
+             # review ENTRY's own `createdAt` fixed the prior night (v3-D183) —
+             # were fetched and typed (`lib/admin/glossDrafts.ts#GlossDraftRow`,
+             # required for createdAt/updatedAt, genuinely nullable for
+             # reviewedAt) since this panel shipped, but never rendered:
+             # `grep -n "row\.createdAt\|row\.updatedAt\|row\.reviewedAt"
+             # GlossDraftsPanel.tsx` returned nothing before this fix —
+             # `reviewedAt` was read only as a boolean null-check inside the
+             # draft-save success message (`outcome.draft.reviewedAt === null`),
+             # never printed; `createdAt`/`updatedAt` had zero reads anywhere.
+             # Named explicitly as v3-D183's own leftover ("a smaller, separate,
+             # adjacent gap on the same panel, left for a future run") rather
+             # than a fresh sweep finding. A reviewer had no way to tell when a
+             # draft row was first created, when it was last touched (an edit
+             # after review silently returns it to `draft` — `store()`'s own
+             # un-review branch — with no visible trace of when that happened),
+             # or when the CURRENT review decision was actually made. Fixed,
+             # display-only, no server/wire change: two new columns, "Created"
+             # and "Updated" (`new Date(row.createdAt/.updatedAt).toISOString()`,
+             # both required, no fallback needed), and the existing "Reviewed
+             # by" cell gains `— {ISO timestamp}` when `row.reviewedAt !== null`
+             # — all three in this panel's own `ltr-island` convention, the
+             # same one `OverrideEditor.tsx` (v3-D180) and this panel's own
+             # review-history list (v3-D183) already use for exactly this shape
+             # of value. RED confirmed directly: `git stash` of
+             # `GlossDraftsPanel.tsx` alone (both new tests kept, 14
+             # pre-existing cases in `gloss-drafts-panel.test.tsx` untouched)
+             # failed exactly the 2 new cases — one `getByText` on an ISO
+             # string threw (no such text existed), the other's
+             # `getAllByText` returned 0 instead of 2; restored byte-
+             # identically, 16/16 green. The first new test seeds THREE
+             # distinct values (createdAt/updatedAt/reviewedAt all different)
+             # so no single rendered timestamp can satisfy more than one
+             # assertion; the second proves a never-reviewed row renders its
+             # own createdAt/updatedAt (equal in that fixture, so the ISO
+             # string legitimately appears twice, asserted via
+             # `getAllByText(...).toHaveLength(2)`) while adding no fabricated
+             # reviewedAt timestamp. `TZ=UTC make test`: 2590 passing (was
+             # 2588, +2 — exactly this run's two new `it()` blocks; apps/web
+             # 1333, was 1331; no other suite moved: 255 v2 vitest, 47 v2/api,
+             # 356 v3/api, 118 corpus-compiler, 420 engine, 61 fold-runner).
+             # `check-test-floor.mjs`: OK, 2590 >= floor 1899 (+691 margin,
+             # unmoved, same discipline as every prior entry). `TZ=UTC make
+             # build`: exit 0, 29 routes (unchanged — edits inside the
+             # existing `/settings/gloss-drafts` component, no new route).
+             # `npm run gates` (via `prebuild`): all green (boundaries 299
+             # files, unchanged count — one existing production file edited
+             # plus its one existing test file, no new production file; fonts
+             # degraded-but-non-blocking, pre-existing; corpus-morphology 362
+             # words / corpus-glyphs 206 codepoints, both unchanged — no new
+             # corpus data). `npx tsc --noEmit` (via `next build`'s own
+             # TypeScript pass): clean. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff produced by running
+             # the suite was reverted before committing, same discipline as
+             # every prior entry — `git status --porcelain -- v1 v2` empty
+             # immediately before committing). No Arabic codepoint (both
+             # changed files swept programmatically, in Python, over the
+             # Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms Unicode blocks — zero matches; every new
+             # string is a wire field read through `new
+             # Date(...).toISOString()`, never corpus text). Session start:
+             # fresh container, `make setup` run from scratch (no
+             # `node_modules`/`vendor` anywhere — composer install for
+             # `v3/api` hit a transient proxy timeout cloning `laravel/pint`
+             # on the first attempt; retried with `COMPOSER_PROCESS_TIMEOUT=900`
+             # and completed clean, no code or config change); local `HEAD`
+             # was found detached at `bd55afc`, the same commit `origin/main`
+             # was already at, on a stale LOCAL `main` branch ref nine commits
+             # behind (`4be9924`, v3-D174) — the recurring "stale local main"
+             # trap
+             # v3-D77/D91/D127/D138/D159/D167/D170/D172/D174/D175/D176/D177/D178/D179/D180/D181/D182/D183
+             # each independently hit, caught before any implementation work
+             # via `git fetch` + `git checkout main && git merge --ff-only
+             # origin/main`, no work lost or at risk. NOT addressed: every
+             # item on v3-D183's own "NOT addressed" list, unchanged.
              # NOTE (v3-D183, 2026-09-08): `GlossDraftReviewRow.createdAt` — the
              # append-only review trail's own "WHEN" half, required and
              # non-nullable, sent on every review entry since

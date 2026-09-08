@@ -306,6 +306,70 @@ describe("GlossDraftsPanel — the review history is readable, not just current 
     expect(screen.getByText(new Date(secondReviewAt).toISOString())).toBeTruthy();
   });
 
+  it("renders the row's own createdAt, updatedAt and reviewedAt — the draft row's own timestamps, distinct from any review entry's own createdAt", async () => {
+    // `GlossDraftRow.createdAt`/`.updatedAt`/`.reviewedAt` are required
+    // (createdAt/updatedAt) or genuinely nullable (reviewedAt) wire fields,
+    // fetched and typed since this panel shipped (`isGlossDraftRow`'s own
+    // runtime check touches none of them, but `lib/admin/glossDrafts.ts
+    // #GlossDraftRow` declares all three) — yet nothing in this table ever
+    // rendered them; `reviewedAt` was read only as a boolean null-check in
+    // the draft-save success message, never printed. A reviewer had no way
+    // to tell when a DRAFT ROW itself was created or last touched, or when
+    // its current review decision was actually made — distinct facts from
+    // each review-history entry's own `createdAt` (v3-D183), which this
+    // panel already renders. Three distinct values below, so the assertion
+    // cannot pass on one value doing triple duty.
+    const createdAt = 1_700_000_000_000;
+    const updatedAt = 1_700_000_050_000;
+    const reviewedAt = 1_700_000_100_000;
+    const rowWithTimestamps = {
+      ...DRAFT_ROW,
+      id: 11,
+      status: "reviewed",
+      reviewedBy: "reviewer@example.com",
+      reviewedAt,
+      createdAt,
+      updatedAt,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          ...emptyWorklist(),
+          counts: { draft: 0, reviewed: 1, merged: 0, unauthored: 0 },
+          drafts: [rowWithTimestamps],
+        }),
+      ),
+    );
+    render(<GlossDraftsPanel />);
+    await waitFor(() => expect(screen.getByText("first draft text")).toBeTruthy());
+    expect(screen.getByText(new Date(createdAt).toISOString())).toBeTruthy();
+    expect(screen.getByText(new Date(updatedAt).toISOString())).toBeTruthy();
+    expect(screen.getByText(new Date(reviewedAt).toISOString())).toBeTruthy();
+  });
+
+  it("a row never reviewed renders no reviewedAt timestamp, never a fabricated one", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          ...emptyWorklist(),
+          counts: { draft: 1, reviewed: 0, merged: 0, unauthored: 0 },
+          drafts: [DRAFT_ROW],
+        }),
+      ),
+    );
+    render(<GlossDraftsPanel />);
+    await waitFor(() => expect(screen.getByText("first draft text")).toBeTruthy());
+    // DRAFT_ROW's own createdAt and updatedAt are equal in this fixture, so
+    // the ISO string legitimately renders twice (Created column, Updated
+    // column) — still proves both are rendered, never dropped
+    expect(screen.getAllByText(new Date(DRAFT_ROW.createdAt).toISOString())).toHaveLength(2);
+    // reviewedBy and note are both null on DRAFT_ROW — two dashes, never a
+    // fabricated reviewedAt timestamp for a row that was never reviewed
+    expect(screen.getAllByText("—")).toHaveLength(2);
+  });
+
   it("a row with no review history yet renders no history list", async () => {
     vi.stubGlobal(
       "fetch",

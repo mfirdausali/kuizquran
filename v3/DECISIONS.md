@@ -14324,3 +14324,109 @@ every item on v3-D182's own "NOT addressed" list, unchanged;
 timestamps, as opposed to each review ENTRY's `createdAt` this run fixed)
 remain unrendered too — a smaller, separate, adjacent gap on the same
 panel, left for a future run.
+
+---
+
+## Ratified 2026-09-08 (nightly) — v3-D184: the gloss-draft ROW's own `createdAt`/`updatedAt`/`reviewedAt` were fetched and typed, never rendered — v3-D183's own named leftover, one field-group over
+
+v3-D183's own "NOT addressed" list named this exactly: "`GlossDraftRow
+.createdAt`/`.updatedAt`/`.reviewedAt` (the draft ROW's own timestamps, as
+opposed to each review ENTRY's) remain unrendered too — a smaller,
+separate, adjacent gap on the same panel, left for a future run." This run
+picked that up directly rather than dispatching a fresh sweep, since the
+gap was already found, scoped, and named — re-discovering it would have
+wasted a sweep on ground already covered.
+
+Confirmed independently before touching anything:
+`GlossDraftsController.php` sends `createdAt`/`updatedAt`/`reviewedAt` on
+every row (`toWire()`, lines 316-319); `lib/admin/glossDrafts.ts
+#GlossDraftRow` declares all three (`createdAt`/`updatedAt` required,
+`reviewedAt: number | null`); `grep -n "row\.createdAt|row\.updatedAt
+|row\.reviewedAt|draft\.createdAt|draft\.updatedAt|draft\.reviewedAt"`
+across `apps/web` returned exactly one hit — `outcome.draft.reviewedAt
+=== null` inside `onSubmitDraft`'s success-message branch, a boolean
+gate deciding WHICH sentence to show, never a printed value. Nothing in
+`GlossDraftsPanel.tsx`'s nine-column table read any of the three.
+
+⇒ A reviewer could not tell when a draft row was first created; could
+not tell when it was last touched (an edit after review silently returns
+the row to `draft` — `store()`'s own un-review branch — with no visible
+trace of when that happened, distinct from and invisible alongside the
+review-HISTORY list v3-D183 just made readable one field over); and
+could not tell when the CURRENT review decision (as opposed to a past
+one already in the History `<details>`) was actually made. Same
+"written, wire-carried, zero read surface" shape this build has closed
+on this exact panel four times running now (`textAtReview` v3-D160,
+`authorKind`/`authoredBy` v3-D169, `note` v3-D170, review `createdAt`
+v3-D183) — here on the row's OWN three timestamp fields rather than a
+review entry's.
+
+**Fixed**, display-only, no server/wire change: two new table columns,
+"Created" and "Updated" (`<span className="ltr-island">{new Date(row
+.createdAt/.updatedAt).toISOString()}</span>` — both required fields, no
+fallback needed), placed after the existing "Reviewed by" column; that
+existing cell gains `— {ISO timestamp}` appended when `row.reviewedAt
+!== null`, matching this file's own established convention for exactly
+this shape of value (`OverrideEditor.tsx` at v3-D180, this same panel's
+review-history list at v3-D183) rather than inventing a fourth
+formatting convention for the same kind of fact.
+
+**Verified:** RED confirmed directly against the unmodified component:
+`git stash` of `GlossDraftsPanel.tsx` alone (both new test cases kept,
+14 pre-existing cases in `test/gloss-drafts-panel.test.tsx` untouched)
+failed exactly the 2 new cases — the first on `getByText` throwing (no
+such ISO string existed anywhere in the rendered DOM), the second on
+`getAllByText` returning 0 matches instead of 2; restored byte-
+identically, 16/16 green. The first new test seeds THREE genuinely
+distinct values for createdAt/updatedAt/reviewedAt on a `reviewed` row,
+so no single rendered timestamp can satisfy more than one of the three
+assertions by coincidence. The second test uses a never-reviewed row
+whose createdAt and updatedAt happen to be equal in the fixture (so the
+ISO string legitimately renders twice — Created column, Updated
+column — asserted via `getAllByText(...).toHaveLength(2)` rather than
+the single-match `getByText`, which would have thrown on the duplicate)
+and asserts exactly two "—" placeholders remain (reviewedBy, note),
+proving no fabricated `reviewedAt` timestamp is painted for a row that
+was never reviewed.
+
+`TZ=UTC make test`: 2590 passing (was 2588, +2 — exactly this run's two
+new `it()` blocks; apps/web 1333, was 1331; no other suite moved: 255 v2
+vitest, 47 v2/api, 356 v3/api, 118 corpus-compiler, 420 engine, 61
+fold-runner). `check-test-floor.mjs`: OK, 2590 >= floor 1899 (+691
+margin, unmoved, same discipline as every prior entry). `TZ=UTC make
+build`: exit 0, 29 routes (unchanged — edits inside the existing
+`/settings/gloss-drafts` component, no new route). `npm run gates` (via
+`prebuild`): all green (boundaries 299 files, unchanged count — one
+existing production file edited plus its one existing test file, no new
+production file; fonts degraded-but-non-blocking, pre-existing;
+corpus-morphology 362 words / corpus-glyphs 206 codepoints, both
+unchanged — no new corpus data). `npx tsc --noEmit` (via `next build`'s
+own TypeScript pass): clean. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite
+was reverted before committing, same discipline as every prior entry —
+`git status --porcelain -- v1 v2` empty immediately before committing).
+No Arabic codepoint (the full diff swept programmatically, in Python,
+over the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks — zero matches; every new string is a
+wire field read through `new Date(...).toISOString()`, never corpus
+text).
+
+**Session start:** fresh container, `make setup` run from scratch (no
+`node_modules`/`vendor` anywhere). Composer install for `v3/api` hit a
+transient proxy timeout cloning `laravel/pint`'s git mirror on the first
+attempt (`curl error 28`/`Proxy CONNECT aborted due to timeout` across
+several PHPUnit dependencies, then a hard `Process` timeout on
+`laravel/pint` itself); retried with `COMPOSER_PROCESS_TIMEOUT=900` and
+completed clean on the second attempt, entirely an environment/network
+condition — no code, config, or dependency-version change. Local `HEAD`
+was found detached at `bd55afc`, the same commit `origin/main` was
+already at, on a stale LOCAL `main` branch ref nine commits behind
+(`4be9924`, v3-D174) — the recurring "stale local main" trap
+v3-D77/D91/D127/D138/D159/D167/D170/D172/D174/D175/D176/D177/D178/D179/D180/D181/D182/D183
+each independently hit, caught before any implementation work via `git
+fetch` + `git checkout main && git merge --ff-only origin/main`, no work
+lost or at risk.
+
+**NOT addressed, named so a future run doesn't re-discover it as new:**
+every item on v3-D182's own "NOT addressed" list, unchanged (v3-D183 and
+this entry both being the only items resolved from it since).

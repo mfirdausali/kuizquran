@@ -178,6 +178,8 @@ export function GlossDraftsPanel() {
                   <th scope="col">Authored by</th>
                   <th scope="col">Note</th>
                   <th scope="col">Reviewed by</th>
+                  <th scope="col">Created</th>
+                  <th scope="col">Updated</th>
                   <th scope="col">History</th>
                   <th scope="col">Action</th>
                 </tr>
@@ -193,7 +195,21 @@ export function GlossDraftsPanel() {
                       {row.authorKind === "ai" ? "AI draft" : "human"} · {row.authoredBy ?? "—"}
                     </td>
                     <td>{row.note ?? "—"}</td>
-                    <td>{row.reviewedBy ?? "—"}</td>
+                    <td>
+                      {row.reviewedBy ?? "—"}
+                      {row.reviewedAt !== null ? (
+                        <>
+                          {" — "}
+                          <span className="ltr-island">{new Date(row.reviewedAt).toISOString()}</span>
+                        </>
+                      ) : null}
+                    </td>
+                    <td>
+                      <span className="ltr-island">{new Date(row.createdAt).toISOString()}</span>
+                    </td>
+                    <td>
+                      <span className="ltr-island">{new Date(row.updatedAt).toISOString()}</span>
+                    </td>
                     <td>
                       {row.reviews && row.reviews.length > 0 ? (
                         <details>
