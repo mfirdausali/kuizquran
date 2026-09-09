@@ -42,6 +42,8 @@ import { WorkbenchIsland } from "@/components/workbench/WorkbenchIsland";
 import { loadFrontier } from "@/lib/workbench/verifications";
 import { resetApiFetchForTests } from "@/lib/sync/apiFetch";
 import { describeCertification } from "@/lib/workbench/sign";
+import { macroFactsFor } from "@/lib/macro/facts";
+import type { MacroFacts } from "@/components/macro/facts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -629,7 +631,7 @@ describe("WorkbenchIsland — the signature history is ayah-scoped, wired end to
       ),
     ) as unknown as typeof fetch;
 
-    render(<WorkbenchIsland surah={12} corpus={corpus} />);
+    render(<WorkbenchIsland surah={12} corpus={corpus} macro={macroFactsFor(corpus)} />);
 
     // Ayah 1 is the default selection — its own reviewer appears, ayah 2's
     // does not.
@@ -677,7 +679,7 @@ describe("WorkbenchIsland — cross-verse look-alikes reach the reviewer", () =>
   it("shows the open ayah's own cross-verse look-alike pair, from the real compiled fixture", async () => {
     globalThis.fetch = vi.fn(async () => readyFrontier()) as unknown as typeof fetch;
 
-    render(<WorkbenchIsland surah={12} corpus={corpus} />);
+    render(<WorkbenchIsland surah={12} corpus={corpus} macro={macroFactsFor(corpus)} />);
 
     // Ayah 1 is the default selection. The frozen fixture (12.json) carries
     // exactly one look-alike pair touching ayah 1: {1:3} <-> {7:6}, "identical
@@ -690,7 +692,7 @@ describe("WorkbenchIsland — cross-verse look-alikes reach the reviewer", () =>
   it("says so honestly when the open ayah has no recorded look-alike", async () => {
     globalThis.fetch = vi.fn(async () => readyFrontier()) as unknown as typeof fetch;
 
-    render(<WorkbenchIsland surah={12} corpus={corpus} />);
+    render(<WorkbenchIsland surah={12} corpus={corpus} macro={macroFactsFor(corpus)} />);
 
     const ayahInput = screen.getByRole("spinbutton", { name: /ayah/i }) as HTMLInputElement;
     // Ayah 29 carries zero look-alike pairs in the fixture — verified
@@ -699,6 +701,90 @@ describe("WorkbenchIsland — cross-verse look-alikes reach the reviewer", () =>
 
     const section = await screen.findByRole("region", { name: /look-alikes/i });
     expect(section.textContent).toMatch(/no cross-verse look-alikes/i);
+  });
+});
+
+describe("WorkbenchIsland — the macro classification's own reason reaches the reviewer", () => {
+  // `corpus-compiler/src/macro.ts#classify()` stamps a `reason` on every
+  // MacroFacts it emits (e.g. "ruku=12", "rhyme -uun 78%", "refrain x3",
+  // "default") — the audit trail for WHY a surah got RING/LITANY/ARC. It is
+  // a REQUIRED field, ships to the browser on every compiled corpus's own
+  // `meta.macro` (v3-D136), and the learner-facing MacroPanel deliberately
+  // never shows it (its own docblock: "Rendered nowhere by default"). But
+  // nothing on the ADMIN side showed it either — an admin auditing a
+  // borderline classification (e.g. a surah sitting exactly at
+  // RING_MIN_RUKU) had no way to see WHY the compiler decided what it did,
+  // short of reading source. This proves the WIRING (page -> island ->
+  // panel), not just that `classify()` computes a reason in isolation
+  // (already covered by `packages/corpus-compiler/test/macro.test.ts`).
+  beforeEach(() => {
+    resetApiFetchForTests();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const readyFrontier = () =>
+    new Response(
+      JSON.stringify({
+        frontier: { "1": { qari: "verified", admin: "verified" } },
+        verifications: [],
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+
+  it("renders the archetype and the compiler's own reason for a RING classification", async () => {
+    globalThis.fetch = vi.fn(async () => readyFrontier()) as unknown as typeof fetch;
+    const ring: MacroFacts = {
+      archetype: "RING",
+      reason: "ruku=12",
+      layout: "arc",
+      authored: true,
+      ring: { rukuCount: 12, segments: [] },
+    };
+
+    render(<WorkbenchIsland surah={12} corpus={corpus} macro={ring} />);
+
+    const section = await screen.findByRole("region", { name: /macro classification/i });
+    expect(within(section).getByText("RING")).toBeTruthy();
+    expect(within(section).getByText(/ruku=12/)).toBeTruthy();
+  });
+
+  it("renders a different archetype and reason for a LITANY classification — proves it is not a hardcoded string", async () => {
+    globalThis.fetch = vi.fn(async () => readyFrontier()) as unknown as typeof fetch;
+    const litany: MacroFacts = {
+      archetype: "LITANY",
+      reason: "refrain x3",
+      layout: "arc",
+      authored: true,
+      litany: { refrainAyat: [1, 5, 9], rhymeShare: 0, rhymeLabel: "" },
+    };
+
+    render(<WorkbenchIsland surah={12} corpus={corpus} macro={litany} />);
+
+    const section = await screen.findByRole("region", { name: /macro classification/i });
+    expect(within(section).getByText("LITANY")).toBeTruthy();
+    expect(within(section).getByText(/refrain x3/)).toBeTruthy();
+    expect(within(section).queryByText(/ruku=12/)).toBeNull();
+  });
+
+  it("renders the REAL classification computed from the frozen 12.json fixture, not a fabricated one", async () => {
+    // `macroFactsFor` is what the page actually calls — proves the fixture's
+    // own real ayahCount/verse-text inputs (no vendored ruku/rhyme data in
+    // this fixture) genuinely reach ARC/"default" through the real
+    // classifier, end to end, rather than merely rendering whatever object
+    // a test hands the component.
+    globalThis.fetch = vi.fn(async () => readyFrontier()) as unknown as typeof fetch;
+    const real = macroFactsFor(corpus);
+    expect(real.archetype).toBe("ARC");
+    expect(real.reason).toBe("default");
+
+    render(<WorkbenchIsland surah={12} corpus={corpus} macro={real} />);
+
+    const section = await screen.findByRole("region", { name: /macro classification/i });
+    expect(within(section).getByText("ARC")).toBeTruthy();
+    expect(within(section).getByText(/default/)).toBeTruthy();
   });
 });
 
@@ -715,5 +801,18 @@ describe("the workbench route reads the corpus through loadEffectiveCorpus (SSR 
     const src = pageSrc();
     expect(src).toMatch(/loadEffectiveCorpus/);
     expect(src).not.toMatch(/\bloadCorpus\(/);
+  });
+
+  it("computes macroFactsFor on the server and passes it to WorkbenchIsland as `macro`", () => {
+    // `macroFactsFor` imports the compiler's `classify()` directly (its own
+    // docblock: importing it into a client bundle would ship the classifier
+    // and its thresholds to the browser) — so it must be called HERE, on the
+    // server, never inside the "use client" island. A missing `macro=` prop
+    // would TypeScript-fail WorkbenchIslandProps' required field, but that
+    // only proves *something* is passed, not that it is the real classifier's
+    // output rather than a placeholder — this proves the actual wiring.
+    const src = pageSrc();
+    expect(src).toMatch(/macroFactsFor/);
+    expect(src).toMatch(/macro=\{[^}]*macro[^}]*\}/);
   });
 });

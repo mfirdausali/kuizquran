@@ -34,6 +34,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Corpus } from "@engine/types.ts";
 import type { Spec } from "@engine/buildQuestion.ts";
+import type { MacroFacts } from "@/components/macro/facts.ts";
 import { explain } from "@/lib/workbench/explain.ts";
 import { loadFrontier, type FrontierLoad } from "@/lib/workbench/verifications.ts";
 import { FrontierNavigator } from "./FrontierNavigator";
@@ -41,6 +42,7 @@ import { ExplainTrace } from "./ExplainTrace";
 import { QariMode } from "./QariMode";
 import { OverrideEditor } from "./OverrideEditor";
 import { LookAlikesPanel } from "./LookAlikesPanel";
+import { MacroClassificationPanel } from "./MacroClassificationPanel";
 
 /** The lanes this picker can select. `rc` is absent BY DESIGN — WIREFRAME's
  *  DATA/CODE table keeps reconstruct.ts's state machine as CODE permanently,
@@ -52,6 +54,11 @@ type PickableLane = (typeof PICKABLE_LANES)[number];
 export interface WorkbenchIslandProps {
   surah: number;
   corpus: Corpus;
+  /** Computed server-side by `macroFactsFor()` — never here. That function
+   *  imports the compiler's `classify()` directly, and importing it into
+   *  this "use client" island would ship the classifier and its thresholds
+   *  to the browser (`lib/macro/facts.ts`'s own docblock, §A.1). */
+  macro: MacroFacts;
 }
 
 /** Build the Spec for a (lane, ayah) selection. `locate` and `reorder` carry
@@ -85,7 +92,7 @@ function specFor(lane: PickableLane, surah: number, ayah: number, ayahCount: num
   }
 }
 
-export function WorkbenchIsland({ surah, corpus }: WorkbenchIslandProps) {
+export function WorkbenchIsland({ surah, corpus, macro }: WorkbenchIslandProps) {
   const [load, setLoad] = useState<FrontierLoad>({ state: "loading" });
   const [ayah, setAyah] = useState<number>(1);
   const [lane, setLane] = useState<PickableLane>("s1");
@@ -136,6 +143,8 @@ export function WorkbenchIsland({ surah, corpus }: WorkbenchIslandProps) {
   return (
     <div className="wb-grid">
       <FrontierNavigator load={load} selectedAyah={ayah} onSelect={setAyah} />
+
+      <MacroClassificationPanel facts={macro} />
 
       <section className="card" aria-labelledby="spec-h">
         <div className="card-header">

@@ -70,6 +70,7 @@
 
 import { notFound } from "next/navigation";
 import { loadEffectiveCorpus, AVAILABLE_SURAHS } from "@/lib/corpus/load.ts";
+import { macroFactsFor } from "@/lib/macro/facts.ts";
 import { WorkbenchIsland } from "@/components/workbench/WorkbenchIsland";
 
 /** The surah under edit. A query parameter rather than a path segment: the
@@ -104,6 +105,13 @@ export default async function WorkbenchPage({
   const corpus = effective?.corpus ?? null;
   if (corpus === null) notFound();
 
+  // `macroFactsFor` imports the compiler's `classify()` directly (its own
+  // docblock: shipping that import into a "use client" island would ship the
+  // classifier and its thresholds to the browser, §A.1) — so it is computed
+  // HERE, server-side, exactly like the surah page and `/progress` already
+  // do, never inside `WorkbenchIsland`.
+  const macro = macroFactsFor(corpus);
+
   return (
     <div className="screen">
       <div className="stack">
@@ -117,7 +125,7 @@ export default async function WorkbenchPage({
           </p>
         </header>
 
-        <WorkbenchIsland surah={surah} corpus={corpus} />
+        <WorkbenchIsland surah={surah} corpus={corpus} macro={macro} />
       </div>
     </div>
   );
