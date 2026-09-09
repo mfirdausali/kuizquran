@@ -42,6 +42,16 @@ export interface CorpusDistractor {
   prd_rank: string;
   src_type: string;
   why: string;
+  /** Compile-time provenance — `"authored"` (a vendored mcq-items row) or
+   *  `"kernel"` (derived by the foil kernels), per
+   *  `corpus-compiler/src/types.ts#Distractor.origin` — plus `"admin"` for a
+   *  row an admin/qari built directly through the override editor's
+   *  replacement picker (`OverrideEditor.tsx`), which is neither authored
+   *  nor kernel-derived. Loosened to `string` here (not the compiler's
+   *  closed `"authored" | "kernel"` union) for the same reason `prd_rank`/
+   *  `src_type` already are: the admin-written path's own values
+   *  (`"override"`/`"admin"`) live outside the compiler's closed sets. */
+  origin: string;
 }
 
 export interface CorpusVerse {

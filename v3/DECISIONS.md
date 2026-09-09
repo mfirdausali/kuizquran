@@ -14676,3 +14676,141 @@ the same struct with the identical shape (shipped, never rendered) — left
 for a future run, since `prd_rank`/`src_type`/`why` already closes the
 sharpest instance of this gap and a fourth column can wait for its own
 sweep to confirm it's worth the screen space.
+
+---
+
+## v3-D187 (2026-09-09) — `CorpusDistractor.origin` shipped since the compiler emitted it, never rendered — v3-D186's own named leftover, closed
+
+**Context.** Continuing the nightly agent build (`v3/NIGHTLY.md`). Session
+start: fresh container, `make setup` run from scratch (no `node_modules`/
+`vendor` anywhere); local `HEAD` was found detached at `04ed7f0`, the same
+commit `origin/main` was already at, on a stale LOCAL `main` branch ref
+twelve commits behind (`4be9924`, v3-D174) — the recurring "stale local
+main" trap
+v3-D77/D91/D127/D138/D159/D167/D170/D172/D174/D175/D176/D177/D178/D179/D180/D181/D182/D183/D184/D185/D186
+each independently hit, caught before any implementation work via `git
+fetch` + `git checkout main && git merge --ff-only origin/main`, no work
+lost or at risk.
+
+**The gap.** `corpus-compiler/src/types.ts#Distractor.origin`
+(`"authored" | "kernel"`) — compile-time provenance, distinguishing a row
+vendored from `data/yusuf-mcq-items.json` from one derived by the foil
+kernels (`foilKernels.ts`) — is stamped on every distractor
+`buildCorpus.ts` emits (lines 212/241) and copied to the browser verbatim
+by `stage-corpus.mjs#slim()`, exactly like `prd_rank`/`src_type`/`why` did
+before v3-D186 closed that gap the previous night. But
+`packages/engine/src/types.ts#CorpusDistractor` — the engine's own wire
+type, the one place a TypeScript reader could reach the field at all —
+never declared `origin`, so no client-side code could read it even by
+accident: `grep -rln "\.origin\b" apps/web --include=*.ts --include=*.tsx`
+(excluding tests) returned nothing. v3-D186's own closing note named this
+exactly and deliberately left it: "`CorpusDistractor.origin`... is a fourth
+field on the same struct with the identical shape (shipped, never
+rendered) — left for a future run, since `prd_rank`/`src_type`/`why`
+already closes the sharpest instance of this gap." This run is that future
+run.
+
+Consequence: `OverrideEditor.tsx`'s "current distractors" list (v3-D186)
+showed rank, classification and reason for a target word's existing
+distractors, but not whether a given row came from the vendored authored
+set or was algorithmically derived — material, since `NIGHTLY.md`'s own
+foil-kernel table exists precisely to flag kernel rows for qari
+adjudication, and an authored row carries no such flag. An admin reviewing
+the list v3-D186 just built could not tell which distractors most needed a
+second look.
+
+**Fixed, read-only for the compiler-emitted case, one write-side addition
+for the admin case.** `CorpusDistractor` gains `origin: string` —
+loosened from the compiler's closed `"authored" | "kernel"` union, matching
+`prd_rank`/`src_type`'s own established precedent for exactly this reason:
+the admin override write path (`OverrideEditor.tsx#onSubmitDistractor`)
+already stamps synthetic values (`prd_rank: "override"`, `src_type:
+"admin"`) outside the compiler's closed sets, and now stamps
+`origin: "admin"` alongside them — so a later admin reading the SAME
+current-distractors list can tell an override-authored replacement from a
+compiler row, not just a compiler-authored row from a kernel-derived one.
+`applyOverrides()` (`packages/engine/src/overrides.ts`) needed no change:
+it already spreads the whole payload object (`{...d, ayah, position}`)
+into the merged `CorpusDistractor[]`, so `origin` rides through for free
+once it exists. `OverrideEditor.tsx`'s current-distractors `<li>` now
+renders `({d.src_type}, {d.origin})` instead of `({d.src_type})`.
+
+**RED confirmed directly.** `git stash` of `OverrideEditor.tsx` alone (both
+new/strengthened test cases kept — one new dedicated `it()` for the
+render side, one strengthened `toMatchObject` assertion on the write-side
+`it()` — 19 other pre-existing cases in `workbench-override-editor.test.tsx`
+untouched) and rerunning that file: exactly the 2 predicted cases failed —
+`within(region).getByText(/authored/)` found nothing (the unfixed
+component renders no such text regardless of which word is selected), and
+the posted body's `payload.distractors` entries lacked `origin: "admin"`
+entirely; 19 pre-existing cases unaffected. Restored byte-identically
+(`git diff` empty), reran: 21/21 green.
+
+The new render-side test seeds the DISTRACTORS fixture with TWO rows on
+the SAME target word carrying DIFFERENT `origin` values (`"authored"` vs
+`"kernel"` — the compiler's own real closed set, not an invented third
+value) so it cannot pass by reading only one of them. The write-side
+assertion was folded into the pre-existing "posts a full-replacement set"
+test (a strengthened `toMatchObject`, not a new `it()`), proving the
+SUBMIT path stamps `origin: "admin"` on every row it builds — the same
+wiring-proof discipline `write.test.ts`'s three now-updated fixtures also
+needed (`distractorOverride`'s real parameter type is
+`Array<Omit<CorpusDistractor, "ayah" | "position">>`, so making `origin`
+required forced every literal passed there to carry it, a genuine TS
+compile-time catch of every call site — not a test-only concern).
+
+**Verified.**
+
+`TZ=UTC make test`: **2619 passing** (was 2618, +1 — this run's net change:
+one new `it()` in `workbench-override-editor.test.tsx` plus one
+strengthened existing assertion, so the net new-test count is +1, not +2;
+apps/web 1352, was 1351; no other suite moved: 255 v2 vitest, 47 v2/api,
+366 v3/api, 118 corpus-compiler, 420 engine, 61 fold-runner).
+`check-test-floor.mjs`: OK, 2619 >= floor 1899 (+720 margin, unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 30 routes
+(unchanged — edits inside the existing `/workbench` component tree, no new
+route). `npm run gates`: all green (boundaries 304 files, unchanged count
+— no new production file, one existing production file edited plus its
+one existing test file plus one other existing test file
+(`write.test.ts`); fonts degraded-but-non-blocking, pre-existing;
+corpus-morphology 362 words / corpus-glyphs 206 codepoints, both unchanged
+— no new corpus data, only a type field and a renderer for data already
+compiled). `npx tsc --noEmit`, run separately across all four v3 node
+packages (`apps/web`, `packages/engine`, `packages/corpus-compiler`,
+`worker/fold-runner` — since widening a shared engine type can silently
+break a sibling package's own typecheck without touching its source):
+clean in all four. `packages/engine`'s own `npm test`: 420/420, unchanged
+from before this run (no engine test file touched — `overrides.test.ts`'s
+`payload: unknown`-typed literals were checked directly and confirmed they
+need no `origin` field to keep compiling, since TypeScript does not
+excess-property-check an object literal assigned to an `unknown`-typed
+location).
+
+No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the suite was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2` empty
+immediately before committing). No Arabic codepoint (the full diff swept
+programmatically, in Python, over the Arabic, Arabic Supplement, Arabic
+Extended-A and both Presentation Forms Unicode blocks, plus a
+`\u06xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape and `fromCharCode` sweep — zero
+matches; every new string is a wire field name, a fixed English label, or
+a synthetic placeholder value ("authored"/"kernel"/"admin" — the compiler's
+own real closed-set values plus the admin path's own established
+"admin"/"override" convention — never a real ayah's bytes).
+
+**NOT addressed, named so a future run doesn't re-discover them as new:**
+every item on v3-D186's own "NOT addressed" list, unchanged —
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class / `permitsIssuance`/`permitsReview` (v3-D88, v3-D151); multi-surah
+enrollment; the operational mailer/7-night window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy drift (v3-D127); `packages/engine/src/placement.ts`
+(v3-D111/D113/D123); the late-arrival refold half of v3-D32;
+`AccountDeletionRequest::isDue()` (v3-D146); the `AdminRole::OPERATOR`/
+`MODERATOR` gating question (v3-D185) — all unchanged. This run's own
+sweep was scoped to the single named leftover v3-D186 left; a fresh
+sweep of Laravel Console Commands/Middleware, Eloquent relations, and
+`apps/web/lib` subdirectories for the next instance of this bug class is
+still owed to a future run.

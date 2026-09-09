@@ -86,6 +86,27 @@
 // quality. Fixed, read-only, no write-path change: selecting a target word
 // now lists its own current distractors (rank, classification, and the
 // compiler's own reason string) above the replacement pickers.
+//
+// ...AND WHERE EACH ONE CAME FROM (v3-D186's own named leftover).
+// `Distractor.origin` (`"authored"` vs `"kernel"`, `corpus-compiler/src/
+// types.ts`) ships to the browser exactly like `prd_rank`/`src_type`/`why`
+// did — `slim()` copies the whole distractor object, unfiltered — but the
+// engine's `CorpusDistractor` wire type never declared the field at all, so
+// no client could read it even by accident. v3-D186's own closing note named
+// this exactly and left it for a future sweep: "a fourth field on the same
+// struct with the identical shape... left for a future run." An admin
+// judging a distractor's quality could tell WHAT it was and WHY the
+// compiler picked it, but not whether it came from the vendored authored
+// set or was algorithmically derived — material, since a kernel-derived row
+// is exactly the class DECISIONS.md's own foil-kernel table (NIGHTLY.md)
+// flags for qari adjudication and an authored row is not. Fixed the same
+// way: `CorpusDistractor` gains `origin: string` (loosened from the
+// compiler's closed `"authored" | "kernel"` union, matching `prd_rank`/
+// `src_type`'s own precedent, so the override write path below can stamp
+// its own `"admin"` value); the current-distractors list renders it
+// alongside `src_type`; the admin replacement picker now stamps
+// `origin: "admin"` on every row it writes, so a LATER admin reading this
+// same list can tell an override-authored replacement from a compiler row.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CorpusDistractor, CorpusWord } from "@engine/types.ts";
@@ -346,6 +367,7 @@ export function OverrideEditor({ surah, ayah, words, surahWords, distractors }: 
             prd_rank: "override",
             src_type: "admin",
             why: "admin-selected replacement",
+            origin: "admin",
           })),
           distractorNote.trim() || undefined,
         ),
@@ -552,7 +574,7 @@ export function OverrideEditor({ surah, ayah, words, surahWords, distractors }: 
               <ul>
                 {currentDistractors.map((d) => (
                   <li key={d.rank}>
-                    #{d.rank} {d.text} — {d.prd_rank} ({d.src_type}){d.why ? `: ${d.why}` : ""}
+                    #{d.rank} {d.text} — {d.prd_rank} ({d.src_type}, {d.origin}){d.why ? `: ${d.why}` : ""}
                   </li>
                 ))}
               </ul>

@@ -53,9 +53,91 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2618 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2619 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 366 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1351 apps/web. (v3-D186, 2026-09-08)
+             # + 420 engine + 61 fold-runner + 1352 apps/web. (v3-D187, 2026-09-09)
+             # NOTE (v3-D187, 2026-09-09): `CorpusDistractor.origin` ("authored" vs
+             # "kernel" compile-time provenance) shipped to the browser verbatim
+             # since `buildCorpus.ts` stamped it, exactly like `prd_rank`/
+             # `src_type`/`why` did before v3-D186 closed that gap the previous
+             # night — but the engine's own `CorpusDistractor` wire type never
+             # declared the field, so no client could read it even by accident.
+             # v3-D186's own closing note named this exactly and deliberately
+             # left it: "a fourth field on the same struct with the identical
+             # shape... left for a future run." This run is that future run.
+             # `OverrideEditor.tsx`'s "current distractors" list (v3-D186) showed
+             # rank/classification/reason but not whether a row was
+             # compiler-authored, kernel-derived, or (a third, admin-only value
+             # this run also introduces) admin-written through the override
+             # picker itself — material, since NIGHTLY.md's own foil-kernel
+             # table flags kernel rows for qari adjudication. Fixed:
+             # `CorpusDistractor` gains `origin: string` (loosened from the
+             # compiler's closed `"authored" | "kernel"` union, matching
+             # `prd_rank`/`src_type`'s own precedent, so the admin write path
+             # can stamp its own `"admin"` value); `applyOverrides()` needed no
+             # change (it already spreads the whole payload object through);
+             # the current-distractors `<li>` now renders `({d.src_type},
+             # {d.origin})`; `onSubmitDistractor` now stamps `origin: "admin"`
+             # on every replacement row it posts. RED confirmed directly: `git
+             # stash` of `OverrideEditor.tsx` alone (one new `it()` plus one
+             # strengthened existing assertion, both kept; 19 pre-existing cases
+             # untouched) failed exactly those 2 predicted cases — no
+             # `/authored/` text anywhere in the rendered region, and the posted
+             # body's distractor rows lacked `origin: "admin"`; restored
+             # byte-identically, 21/21 green. The render test seeds two rows on
+             # the SAME target word with DIFFERENT origin values so it cannot
+             # pass by reading only one; making `origin` required also forced
+             # `write.test.ts`'s three `distractorOverride(...)` call-site
+             # fixtures to carry it — a genuine TS compile-time catch, not a
+             # test-only concern, since that function's real parameter type is
+             # `Array<Omit<CorpusDistractor, "ayah" | "position">>`. `TZ=UTC make
+             # test`: 2619 passing (was 2618, +1 — one new `it()` plus one
+             # strengthened existing assertion, so net +1 not +2; apps/web 1352,
+             # was 1351; no other suite moved: 255 v2 vitest, 47 v2/api, 366
+             # v3/api, 118 corpus-compiler, 420 engine, 61 fold-runner).
+             # `check-test-floor.mjs`: OK, 2619 >= floor 1899 (+720 margin,
+             # unmoved, same discipline as every prior entry). `TZ=UTC make
+             # build`: exit 0, 30 routes (unchanged — edits inside the existing
+             # `/workbench` component tree, no new route). `npm run gates`: all
+             # green (boundaries 304 files, unchanged count — one existing
+             # production file edited plus two existing test files, no new
+             # production file; fonts degraded-but-non-blocking, pre-existing;
+             # corpus-morphology 362 words / corpus-glyphs 206 codepoints, both
+             # unchanged — no new corpus data, only a type field and a renderer
+             # for data already compiled). `npx tsc --noEmit`, run separately
+             # across all four v3 node packages (`apps/web`, `packages/engine`,
+             # `packages/corpus-compiler`, `worker/fold-runner` — widening a
+             # shared engine type can silently break a sibling package's own
+             # typecheck without touching its source): clean in all four.
+             # `packages/engine`'s own `npm test`: 420/420, unchanged (no engine
+             # test file touched — `overrides.test.ts`'s `payload: unknown`-typed
+             # literals need no `origin` field to keep compiling, since
+             # TypeScript does not excess-property-check an object literal
+             # assigned to an `unknown`-typed location). No `v1/**`/`v2/**` edit
+             # (a stray `v2/tsconfig.tsbuildinfo` build-cache diff reverted
+             # before committing, same discipline as every prior entry — `git
+             # status --porcelain -- v1 v2` empty immediately before
+             # committing). No Arabic codepoint (the full diff swept
+             # programmatically, in Python, over the Arabic, Arabic Supplement,
+             # Arabic Extended-A and both Presentation Forms Unicode blocks,
+             # plus a `\u06xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape and
+             # `fromCharCode` sweep — zero matches; every new string is a wire
+             # field name or a synthetic placeholder value — "authored"/
+             # "kernel"/"admin", the compiler's own real closed-set values plus
+             # the admin path's own established convention — never a real
+             # ayah's bytes). Session start: fresh container, `make setup` run
+             # from scratch (no `node_modules`/`vendor` anywhere); `HEAD` was
+             # found detached at `04ed7f0`, the same commit `origin/main` was
+             # already at, on a stale LOCAL `main` branch ref twelve commits
+             # behind (`4be9924`, v3-D174) — the recurring "stale local main"
+             # trap
+             # v3-D77/D91/D127/D138/D159/D167/D170/D172/D174/D175/D176/D177/D178/D179/D180/D181/D182/D183/D184/D185/D186
+             # each independently hit, caught before any implementation work
+             # via `git fetch` + `git checkout main && git merge --ff-only
+             # origin/main`, no work lost or at risk. NOT addressed: every item
+             # on v3-D186's own "NOT addressed" list, unchanged (see
+             # DECISIONS.md v3-D186/v3-D187 for the full enumeration). See
+             # DECISIONS.md v3-D187.
              # NOTE (v3-D186, 2026-09-08): `CorpusDistractor.prd_rank`/`.src_type`/
              # `.why` — every distractor's classification onto the FR1 rank
              # taxonomy and the compiler's own reason string for choosing it

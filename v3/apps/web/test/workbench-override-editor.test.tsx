@@ -57,10 +57,13 @@ const SURAH_WORDS: CorpusWord[] = [
 // Word #1 (ayah 4) has two compiler-computed distractors on record; #2 and #3
 // have none — proving the "no distractors recorded yet" honest fallback is
 // real, not merely untested. No Arabic literal: `text` is a synthetic
-// placeholder, matching `WORDS`'/`SURAH_WORDS`' own convention.
+// placeholder, matching `WORDS`'/`SURAH_WORDS`' own convention. The two rows
+// deliberately carry DIFFERENT `origin` values ("authored" vs "kernel" — the
+// compiler's own real closed set) so a rendering test cannot pass by reading
+// only one of them.
 const DISTRACTORS: CorpusDistractor[] = [
-  { ayah: 4, position: 1, rank: 1, text: "look-alike-foil", prd_rank: "look-alike-verse", src_type: "visual", why: "shares script with the target across a different ayah" },
-  { ayah: 4, position: 1, rank: 2, text: "same-root-foil", prd_rank: "same-root", src_type: "semantic", why: "shares a root with the target" },
+  { ayah: 4, position: 1, rank: 1, text: "look-alike-foil", prd_rank: "look-alike-verse", src_type: "visual", why: "shares script with the target across a different ayah", origin: "authored" },
+  { ayah: 4, position: 1, rank: 2, text: "same-root-foil", prd_rank: "same-root", src_type: "semantic", why: "shares a root with the target", origin: "kernel" },
 ];
 
 describe("OverrideEditor — lists existing overrides for the ayah", () => {
@@ -500,8 +503,8 @@ describe("OverrideEditor — replacing a distractor set", () => {
       field: "distractor",
       payload: {
         distractors: [
-          { rank: 1, text: "other" },
-          { rank: 2, text: "third" },
+          { rank: 1, text: "other", origin: "admin" },
+          { rank: 2, text: "third", origin: "admin" },
         ],
       },
     });
@@ -557,6 +560,23 @@ describe("OverrideEditor — replacing a distractor set", () => {
     expect(within(region).getByText(/shares script with the target/)).toBeTruthy();
     expect(within(region).getByText(/same-root-foil/)).toBeTruthy();
     expect(within(region).getByText(/same-root/)).toBeTruthy();
+  });
+
+  // The compiler's own provenance for each current distractor (v3-D186's own
+  // named leftover: `origin` was fetched/shipped identically to
+  // `prd_rank`/`src_type`/`why` but the wire type never declared it, so no
+  // client could read it). The two DISTRACTORS rows carry DIFFERENT origin
+  // values ("authored" vs "kernel"), so this cannot pass by reading only one.
+  it("shows each current distractor's own compile-time provenance — authored vs kernel-derived", async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse({ overrides: [] })) as unknown as typeof fetch;
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} distractors={DISTRACTORS} />);
+    await waitFor(() => expect(screen.getByText(/no overrides recorded/i)).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText(/target word/i), { target: { value: "1" } });
+
+    const region = screen.getByRole("region", { name: /current distractors/i });
+    expect(within(region).getByText(/authored/)).toBeTruthy();
+    expect(within(region).getByText(/kernel/)).toBeTruthy();
   });
 
   it("says so honestly when the target word has no distractors recorded yet", async () => {

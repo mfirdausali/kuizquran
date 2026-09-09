@@ -257,8 +257,8 @@ describe("distractorOverride — builds a full-replacement distractor set's wire
       4,
       1,
       [
-        { rank: 1, text: "other", prd_rank: "override", src_type: "admin", why: "admin-selected replacement" },
-        { rank: 2, text: "third", prd_rank: "override", src_type: "admin", why: "admin-selected replacement" },
+        { rank: 1, text: "other", prd_rank: "override", src_type: "admin", why: "admin-selected replacement", origin: "admin" },
+        { rank: 2, text: "third", prd_rank: "override", src_type: "admin", why: "admin-selected replacement", origin: "admin" },
       ],
       "visually similar surface",
     );
@@ -270,8 +270,8 @@ describe("distractorOverride — builds a full-replacement distractor set's wire
       field: "distractor",
       payload: {
         distractors: [
-          { rank: 1, text: "other", prd_rank: "override", src_type: "admin", why: "admin-selected replacement" },
-          { rank: 2, text: "third", prd_rank: "override", src_type: "admin", why: "admin-selected replacement" },
+          { rank: 1, text: "other", prd_rank: "override", src_type: "admin", why: "admin-selected replacement", origin: "admin" },
+          { rank: 2, text: "third", prd_rank: "override", src_type: "admin", why: "admin-selected replacement", origin: "admin" },
         ],
       },
       note: "visually similar surface",
@@ -280,7 +280,7 @@ describe("distractorOverride — builds a full-replacement distractor set's wire
 
   it("carries no note when omitted, matching gloss/disableOverride's own optionality", () => {
     const input = distractorOverride(12, 4, 1, [
-      { rank: 1, text: "other", prd_rank: "override", src_type: "admin", why: "admin-selected replacement" },
+      { rank: 1, text: "other", prd_rank: "override", src_type: "admin", why: "admin-selected replacement", origin: "admin" },
     ]);
     expect(input.note).toBeUndefined();
   });
