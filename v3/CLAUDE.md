@@ -53,9 +53,98 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2619 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2623 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 366 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1352 apps/web. (v3-D187, 2026-09-09)
+             # + 420 engine + 61 fold-runner + 1356 apps/web. (v3-D188, 2026-09-09)
+             # NOTE (v3-D188, 2026-09-09): `MacroFacts.reason` — the compiler's own
+             # audit trail for WHICH v3-D21 rule fired ("ayahCount=3", "ruku=12",
+             # "rhyme -uun 78%", "refrain x3", "default"), a required field, ships
+             # to the browser on every compiled corpus's own `meta.macro` since
+             # v3-D136 wired real ruku counts — had exactly one read anywhere in
+             # the tree: two `expect(f.reason)` assertions in the compiler's own
+             # `macro.test.ts`. Its own docblock says "rendered nowhere by
+             # default" — correct for the LEARNER-facing `MacroPanel`, which has
+             # no business showing a compiler internal to a learner — but nothing
+             # on the ADMIN side showed it either: a reviewer looking at a
+             # borderline classification (a surah landing exactly at
+             # `RING_MIN_RUKU`, or one that fell through to ARC because a
+             # vendoring error left its ruku/rhyme inputs missing) had no way to
+             # see WHY the compiler decided what it did, short of reading source.
+             # Found by a dedicated fresh-sweep agent handed the full list of
+             # already-known/deferred items and told not to re-report any of
+             # them, directed at Console Commands, Middleware, `lib/`
+             # subdirectories not recently named, and a full exported-symbol pass
+             # over `packages/engine/src`/`packages/corpus-compiler/src`/
+             # `worker/fold-runner/src` — both zero-caller sweeps came back
+             # clean, and this was the one candidate that survived direct
+             # verification (the agent's other lead, `MacroFacts.litany
+             # .rhymeLabel`, was checked and rejected: real, but currently
+             # unreachable in production — none of the four launch surahs
+             # classify LITANY today, confirmed directly from the vendored ruku
+             # files, 12=RING/67=ARC/103+112=ATOMIC — and its only non-empty path
+             # needs `rhymeClassOf()`, already deferred since v3-D136). Fixed
+             # with a new diagnostic-only panel, mirroring `LookAlikesPanel.tsx`'s
+             # own precedent (v3-D181): `MacroClassificationPanel.tsx` renders
+             # the surah's archetype and reason; `macroFactsFor()` (which imports
+             # the compiler's `classify()` directly) is computed server-side in
+             # `/workbench/page.tsx`, exactly like the surah page and `/progress`
+             # already do, and threaded to `WorkbenchIsland` as a new required
+             # `macro` prop — never inside the "use client" island, which would
+             # ship the classifier and its thresholds to the browser (the exact
+             # arrangement `lib/macro/facts.ts`'s own docblock, §A.1, rejects).
+             # RED confirmed directly: the new tests (3 in a dedicated describe
+             # block, plus 1 wiring assertion reading `/workbench/page.tsx`'s own
+             # source, mirroring the file's existing `loadEffectiveCorpus` source
+             # check) failed against the unmodified tree — `getByRole("region",
+             # {name: /macro classification/i})` found nothing; implemented,
+             # reran: 37/37 green in `workbench-ui.test.tsx` (was 33, +4). Three
+             # pre-existing `WorkbenchIsland` call sites needed a `macro` prop
+             # added (now required, not defaulted) — each passes the real
+             # `macroFactsFor(corpus)` computed from the frozen fixture, never a
+             # placeholder. The LITANY test case seeds a DIFFERENT archetype and
+             # reason ("refrain x3") than the RING case ("ruku=12") and asserts
+             # the RING string is absent, so neither could pass on a hardcoded
+             # string; a third case calls the real `macroFactsFor` against the
+             # frozen 12.json fixture and asserts it independently resolves to
+             # ARC/"default" (no vendored ruku/rhyme data in that fixture) before
+             # asserting the same values render — proving genuine end-to-end
+             # integration, not a fabricated prop. `TZ=UTC make test`: 2623
+             # passing (was 2619, +4 — exactly this run's new tests; apps/web
+             # 1356, was 1352; no other suite moved). `check-test-floor.mjs`: OK,
+             # 2623 >= floor 1899 (+724 margin, unmoved, same discipline as every
+             # prior entry). `TZ=UTC make build`: exit 0, 30 routes (unchanged —
+             # edits inside the existing `/workbench` component tree, no new
+             # route). `npm run gates`: all green (boundaries 306 files, up from
+             # 304 — exactly the one new production file; fonts
+             # degraded-but-non-blocking, pre-existing; corpus-morphology 362
+             # words / corpus-glyphs 206 codepoints, both unchanged — no new
+             # corpus data). `npx tsc --noEmit`: clean. No `v1/**`/`v2/**` edit (a
+             # stray `v2/tsconfig.tsbuildinfo` build-cache diff reverted before
+             # committing, same discipline as every prior entry — `git status
+             # --porcelain -- v1 v2` empty immediately before committing). No
+             # Arabic codepoint (the full diff swept programmatically, in
+             # Python, over the Arabic, Arabic Supplement, Arabic Extended-A and
+             # both Presentation Forms Unicode blocks, plus a `\u06xx`/`\u08xx`/
+             # `\uFBxx`/`\uFExx` escape and `fromCharCode` sweep — zero matches;
+             # every new string is a wire field name, a fixed English caption,
+             # or a synthetic MacroFacts test fixture value, never corpus text).
+             # Session start: fresh container, `make setup` run from scratch (no
+             # `node_modules`/`vendor` anywhere); `HEAD` was found detached at
+             # `0429285`, the same commit `origin/main` was already at, on a
+             # stale LOCAL `main` branch ref thirteen commits behind (`4be9924`,
+             # v3-D174) — the recurring "stale local main" trap
+             # v3-D77/D91/D127/D138/D159/D167/D170/D172/D174-D187 each
+             # independently hit, caught before any implementation work via `git
+             # fetch` + `git checkout main && git merge --ff-only origin/main`,
+             # no work lost or at risk. NOT addressed: `rhymeClassOf()`
+             # (v3-D136); `EntitlementMachine::merge()`
+             # (v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+             # `PaywallGate` (v3-D88/D151); multi-surah enrollment; the
+             # mailer/7-night window; PAY-1 fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+             # `packages/engine/src/placement.ts` (v3-D111/D113/D123); the
+             # late-arrival refold half of v3-D32; `AccountDeletionRequest
+             # ::isDue()` (v3-D146) — all unchanged. See DECISIONS.md v3-D188.
              # NOTE (v3-D187, 2026-09-09): `CorpusDistractor.origin` ("authored" vs
              # "kernel" compile-time provenance) shipped to the browser verbatim
              # since `buildCorpus.ts` stamped it, exactly like `prd_rank`/

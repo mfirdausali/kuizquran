@@ -14814,3 +14814,127 @@ sweep was scoped to the single named leftover v3-D186 left; a fresh
 sweep of Laravel Console Commands/Middleware, Eloquent relations, and
 `apps/web/lib` subdirectories for the next instance of this bug class is
 still owed to a future run.
+
+### v3-D188 — `MacroFacts.reason` was computed by `classify()` since v3-D21, shipped on `meta.macro` since v3-D136, and read only by the compiler's own unit test — no reviewer-facing surface ever showed it (2026-09-09)
+
+**Found by:** a dedicated fresh-sweep agent, handed the full list of
+already-known/deferred items (everything named on v3-D186/D187's own "NOT
+addressed" lists) and told not to re-report any of them, directed at areas
+this build's ~90-night sweep history had not recently named by file: Laravel
+Console Commands, Middleware, Eloquent relations, `apps/web/lib`
+subdirectories, and a full exported-symbol pass over
+`packages/engine/src`/`packages/corpus-compiler/src`/`worker/fold-runner/src`.
+Both zero-caller sweeps (engine/fold-runner exports, and a React-component-
+mount sweep) came back genuinely clean.
+
+**The gap.** `corpus-compiler/src/macro.ts#classify()` — v3-D21's four-
+archetype panel classifier — stamps a required `reason: string` on every
+`MacroFacts` it returns: `"ayahCount=3"` for ATOMIC, `"ruku=12"` for RING,
+`` `rhyme ${label} ${pct}%` `` or `` `refrain x${n}` `` for LITANY, `"default"`
+for ARC. It has shipped to the browser, verbatim, on every compiled corpus's
+own `meta.macro` field since v3-D136 wired real Tanzil ruku counts into the
+compiler. But `grep -rn "\.reason\b"` across the whole tree, excluding
+`macro.ts` itself, found exactly two hits — both `expect(f.reason)`
+assertions in `corpus-compiler/test/macro.test.ts`. `MacroFacts.reason`'s own
+docblock says "Rendered nowhere by default" — correct for the LEARNER-facing
+`MacroPanel.tsx`, which has no legitimate reason to show a compiler internal
+to a learner drilling a surah. But nothing on the ADMIN side showed it
+either: a reviewer looking at a borderline classification (a surah landing
+exactly at `RING_MIN_RUKU`, or one that fell through to ARC because a
+vendoring error left its `ruku`/rhyme inputs missing — the exact failure mode
+v3-D21's own motivating example named, and v3-D136 fixed for real launch
+data) had no way to see WHY the compiler decided what it did, short of
+reading source.
+
+**A second lead, checked and rejected.** The same sweep surfaced
+`MacroFacts.litany.rhymeLabel` — required, computed by `dominantRhyme()`,
+never rendered anywhere in `LitanyLegend` (which shows `rhymeShare` and
+`refrainAyat` but not `rhymeLabel`). Verified directly rather than assumed:
+`rhymeClasses` is never populated by `buildCorpus.ts` (its own comment:
+"Rhyme-class input is not computed yet — no `rhymeClassOf` exists"), so
+`dominantRhyme([])` always returns `null` in production and the rhyme-share
+LITANY branch can never fire; only the verbatim-refrain LITANY branch can,
+where `rhymeLabel` is unconditionally `""`. Checking the vendored ruku data
+directly (`data/raw/*-ruku.json`) against `classify()`'s own thresholds:
+12→RING (ruku=12), 67→ARC (ruku=2, below `RING_MIN_RUKU`, and Al-Mulk has no
+verbatim 3-repeat refrain), 103/112→ATOMIC (≤8 ayat). **None of the four
+launch surahs classify LITANY today.** So this field is not just unrendered,
+it is currently unreachable with real data — a genuine instance of the same
+bug class, but strictly weaker than `reason`, and bundled with the same
+already-deferred `rhymeClassOf()` scope (v3-D136) rather than an independent
+gap. Left for a future run, once/if a LITANY-classified surah ever ships.
+
+**Fixed**, mirroring `LookAlikesPanel.tsx`'s own precedent (v3-D181) exactly:
+diagnostic-only, no write path, no learner-facing consequence. New
+`components/workbench/MacroClassificationPanel.tsx` renders the surah's
+`archetype` and `reason`. `macroFactsFor()` — which imports the compiler's
+`classify()` directly, so it must never run inside a "use client" island
+(`lib/macro/facts.ts`'s own docblock, §A.1: doing so would ship the
+classifier and its thresholds to the browser) — is now called in
+`app/(admin)/workbench/page.tsx`, exactly like the surah page and
+`/progress` already call it, and the result threaded to `WorkbenchIsland`
+as a new required `macro: MacroFacts` prop, rendered via the new panel
+right after `FrontierNavigator`.
+
+**Verified.** RED confirmed directly: three new tests in a dedicated
+`workbench-ui.test.tsx` describe block, plus one new wiring assertion on
+`/workbench/page.tsx`'s own source (mirroring that file's pre-existing
+`loadEffectiveCorpus` source-string check), all failed against the
+unmodified tree — `screen.findByRole("region", {name: /macro
+classification/i})` found nothing, and the source check found no
+`macroFactsFor`/`macro=` reference. Implemented, reran: 37/37 green (was
+33). The LITANY test case seeds a DIFFERENT archetype and reason
+(`"refrain x3"`) than the RING case (`"ruku=12"`) and asserts the RING
+string is absent, so neither could pass on a hardcoded string; a third case
+calls the REAL `macroFactsFor` against the frozen `12.json` fixture (which
+carries no vendored ruku/rhyme data) and asserts it independently resolves
+to ARC/`"default"` before asserting those exact values render — proving
+genuine end-to-end integration through the real classifier, not a
+fabricated prop handed straight to the component. Three pre-existing
+`WorkbenchIsland` render call sites needed the now-required `macro` prop
+added; each passes the real `macroFactsFor(corpus)` for the frozen fixture,
+never a placeholder value.
+
+`TZ=UTC make test`: **2623 passing** (was 2619, +4 — exactly this run's new
+tests; apps/web 1356, was 1352; no other suite moved: 255 v2 vitest, 47
+v2/api, 366 v3/api, 118 corpus-compiler, 420 engine, 61 fold-runner).
+`check-test-floor.mjs`: OK, 2623 >= floor 1899 (+724 margin, unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 30 routes
+(unchanged — edits inside the existing `/workbench` component tree, no new
+route). `npm run gates`: all green (boundaries 306 files, up from 304 —
+exactly the one new production file; fonts degraded-but-non-blocking,
+pre-existing; corpus-morphology 362 words / corpus-glyphs 206 codepoints,
+both unchanged — no new corpus data, only a prop and a renderer for data
+already compiled). `npx tsc --noEmit`: clean.
+
+No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the suite was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2` empty
+immediately before committing). No Arabic codepoint (the full diff swept
+programmatically, in Python, over the Arabic, Arabic Supplement, Arabic
+Extended-A and both Presentation Forms Unicode blocks, plus a
+`\u06xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape and `fromCharCode` sweep — zero
+matches; every new string is a wire field name, a fixed English caption, or
+a synthetic `MacroFacts` test fixture value, never corpus text).
+
+Session start: fresh container, `make setup` run from scratch (no
+`node_modules`/`vendor` anywhere); `HEAD` was found detached at `0429285`,
+the same commit `origin/main` was already at, on a stale LOCAL `main`
+branch ref thirteen commits behind (`4be9924`, v3-D174) — the recurring
+"stale local main" trap
+v3-D77/D91/D127/D138/D159/D167/D170/D172/D174-D187 each independently hit,
+caught before any implementation work via `git fetch` + `git checkout main
+&& git merge --ff-only origin/main`, no work lost or at risk.
+
+**NOT addressed, named so a future run doesn't re-discover them as new:**
+`MacroFacts.litany.rhymeLabel` (above — real, currently unreachable,
+bundled with `rhymeClassOf()`); `rhymeClassOf()` itself (v3-D136);
+`EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148); `lib/pricing.ts#regionFromCountry()`
+(v3-D163); `PaywallGate` as a whole class / `permitsIssuance`/
+`permitsReview` (v3-D88, v3-D151); multi-surah enrollment; the operational
+mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123); the late-arrival
+refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146); the
+`AdminRole::OPERATOR`/`MODERATOR` gating question (v3-D185) — all unchanged.
