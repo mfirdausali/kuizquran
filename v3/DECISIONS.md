@@ -15134,3 +15134,110 @@ mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
 refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146); the
 `AdminRole::OPERATOR`/`MODERATOR` gating question (v3-D185);
 `MacroFacts.litany.rhymeLabel` (v3-D188) — all unchanged.
+
+### v3-D191 — `CorpusWord.line` (real mushaf geometry, shipped since the compiler's geometry merge) was never declared on the engine's own consuming type, so nothing could read it (2026-09-10)
+
+**Finding.** `corpus-compiler/src/buildCorpus.ts#lineOf()` computes a real,
+non-null mushaf line number for every word of all four launch surahs (each
+has vendored Tanzil geometry, `data/raw/<surah>-geometry.json`), and
+`stage-corpus.mjs#slim()`/`stripMorphology()` ships `line` to the browser
+verbatim — confirmed directly against the staged artifact, `public/corpus
+/112.json`'s first word carries `"line": 3`, a real value. But the
+ENGINE's own `CorpusWord` type (`packages/engine/src/types.ts`) never
+declared a `line` field at all, so `grep -rn "\.line\b" apps/web`
+(excluding tests) returned zero hits in production code before this fix —
+nothing could read the field even by accident, TypeScript would reject the
+access outright. Same "shipped, never declared on the consuming type"
+shape as `Corpus.lookalikes` (v3-D181) and `CorpusDistractor.origin`
+(v3-D187), here on the per-word geometry field neither of those runs
+touched. Concretely: the ayah-detail page's own "WORD BY WORD" list showed
+each word's gloss but no way to locate it on a physical mushaf page —
+data this build has compiled and shipped since M1 with no reader anywhere.
+
+**Fixed**, display-only, additive type change: `CorpusWord` gains an
+optional `line?: number | null` (optional because an older compiled
+fixture predates the field, matching this codebase's own established
+convention for exactly this shape — see the field's own docblock); new
+`lib/corpus/wordReference.ts#mushafLineLabel()` is the one place the
+three-way degradation is decided (a real number → `"line N"`; `null` → no
+vendored geometry for this surah; `undefined` → an older corpus subset) —
+`typeof word.line === "number"`, deliberately, never a truthiness check,
+so a genuine line 0 could never be silently read as absent even though no
+current vendored geometry produces one; the ayah-detail page's word list
+calls it and renders the label beside the gloss only when non-null, never
+reading `word.line` inline itself.
+
+**Verified.** RED confirmed directly: the two production files
+(`types.ts`, the ayah-detail page) reverted to their pre-fix content (the
+new `wordReference.ts`/its test kept, since removing an additive type
+field has no runtime effect vitest's transpile-only test run would catch)
+— the dedicated wiring assertion in `test/ayah-detail.test.tsx`
+(`expect(pageSrc()).toMatch(/mushafLineLabel/)`, matching that file's own
+established source-string-check convention for this exact page) failed
+genuinely (1 failed, 47 passed) since the page's source no longer
+mentioned the function; restored byte-identically, 48/48 green (44 in
+`ayah-detail.test.tsx`, was 43, +1; 4 in the new `wordReference.test.ts`).
+The unit-test suite's own fourth case seeds `line: 0` and asserts
+`"line 0"` is returned — proving the function checks `typeof`, not
+truthiness, so it cannot silently misclassify a genuine (if currently
+unobserved) line-0 value as absent.
+
+`TZ=UTC make test`: **2636 passing** (was 2631, +5 — exactly this run's
+new tests: 4 in `wordReference.test.ts` + 1 in `ayah-detail.test.tsx`; no
+other suite moved: 255 v2 vitest, 47 v2/api, 367 v3/api, 118
+corpus-compiler, 420 engine, 61 fold-runner; apps/web 1368, was 1363).
+`check-test-floor.mjs`: OK, 2636 >= floor 1899 (+737 margin, unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 30 routes
+(unchanged — edits inside the existing `/surah/[surah]/[ayah]` route, no
+new route). `npm run gates`: all green (boundaries 308 files, up from 306
+— exactly the one new production file, `wordReference.ts`; fonts
+degraded-but-non-blocking, pre-existing; corpus-morphology 362 words /
+corpus-glyphs 206 codepoints, both unchanged — no new corpus data, only a
+type field and a renderer for geometry already compiled). `npx tsc
+--noEmit`, run separately across all four v3 node packages (`apps/web`,
+`packages/engine`, `packages/corpus-compiler`, `worker/fold-runner` — a
+widened shared engine type can silently break a sibling package's own
+typecheck without touching its source): clean in all four.
+
+No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache
+diff produced by running the suite was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2` empty
+immediately before committing). No Arabic codepoint (both new files and
+the full tracked diff swept programmatically, in Python, over the Arabic,
+Arabic Supplement, Arabic Extended-A and both Presentation Forms Unicode
+blocks — zero matches; every new string is a wire field name, the fixed
+English word "line" plus an integer, or a fixture-derived placeholder
+value, never corpus text — the vendored geometry itself carries no text,
+only position/line/page integers).
+
+Found by a dedicated fresh-sweep agent handed the full exclusion list
+carried through v3-D190 and told not to re-report any of them, directed
+at `packages/engine/src/types.ts`'s own wire fields with zero renders (a
+narrower, more targeted version of the "shipped, never declared" bug
+class v3-D181/D187 already closed twice). One other candidate was checked
+this run and rejected: `App\Models\AdminAudit::actor()` (a `BelongsTo`
+relation) has zero callers anywhere — but `AdminAuditController`
+deliberately reads `actor_admin_id` raw and pseudonymizes it instead of
+using the relation, a documented, intentional choice rather than a
+learner- or operator-facing gap; left alone.
+
+Session start: dependencies already installed from the prior run in this
+same container; `HEAD` and local `main` both already matched `origin/main`
+at `5697c0f` (v3-D190) — no stale-local-main trap this run.
+
+**NOT addressed, named so a future run doesn't re-discover them as new:**
+every item on v3-D190's own "NOT addressed" list, unchanged, plus
+`App\Models\AdminAudit::actor()` (real zero-caller relation, deliberately
+unused — above) — `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class / `permitsIssuance`/`permitsReview` (v3-D88, v3-D151); multi-surah
+enrollment; the operational mailer/7-night window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy drift (v3-D127); `packages/engine/src/placement.ts`
+(v3-D111/D113/D123); the late-arrival refold half of v3-D32;
+`AccountDeletionRequest::isDue()` (v3-D146); the `AdminRole::OPERATOR`/
+`MODERATOR` gating question (v3-D185); `MacroFacts.litany.rhymeLabel`
+(v3-D188); `lib/idb/writeLock.ts#useWriterStatus()` (v3-D190);
+`lib/plan/forecast.ts`'s `awayDays` (v3-D190); the spec/selection-engine
+subsystem's own lack of a learner-facing caller (v3-D190) — all unchanged.

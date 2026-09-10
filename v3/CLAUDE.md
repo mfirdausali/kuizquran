@@ -53,9 +53,47 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2631 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2636 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 367 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1363 apps/web. (v3-D190, 2026-09-10)
+             # + 420 engine + 61 fold-runner + 1368 apps/web. (v3-D191, 2026-09-10)
+             # NOTE (v3-D191, 2026-09-10): `CorpusWord.line` — a real, non-null
+             # mushaf line number computed for every word of all four launch
+             # surahs since the compiler's geometry merge (M1), shipped to the
+             # browser verbatim (`stage-corpus.mjs#slim()` strips only
+             # `lemma`/`root`/`class`, never `line`) — was never even DECLARED
+             # on the engine's own `CorpusWord` type, so nothing anywhere could
+             # read it; TypeScript would reject the access outright. Same
+             # "shipped, never declared on the consuming type" shape as
+             # `Corpus.lookalikes` (v3-D181) and `CorpusDistractor.origin`
+             # (v3-D187), here on the per-word geometry field. Fixed: `CorpusWord`
+             # gains an optional `line?: number | null`; new
+             # `lib/corpus/wordReference.ts#mushafLineLabel()` decides the
+             # three-way degradation (real number/null/undefined) with a
+             # `typeof` check, never truthiness; the ayah-detail page's own
+             # "WORD BY WORD" list renders it beside each word's gloss. RED
+             # confirmed directly: reverting the two production files (new
+             # `wordReference.ts`/its test kept) failed the dedicated wiring
+             # assertion in `ayah-detail.test.tsx` genuinely (source no longer
+             # mentioned `mushafLineLabel`); restored, 48/48 green (44 + 4).
+             # `TZ=UTC make test`: 2636 passing (was 2631, +5; apps/web 1368,
+             # was 1363). `check-test-floor.mjs`: OK, 2636 >= floor 1899 (+737
+             # margin, unmoved). `TZ=UTC make build`: exit 0, 30 routes
+             # (unchanged). `npm run gates`: all green (boundaries 308 files, up
+             # from 306 — exactly the one new production file). `npx tsc
+             # --noEmit`, run separately across all four v3 node packages:
+             # clean in all four. No `v1/**`/`v2/**` edit (stray
+             # `v2/tsconfig.tsbuildinfo` reverted before committing). No Arabic
+             # codepoint (every new/changed file swept programmatically over
+             # every Arabic block plus both Presentation Forms blocks — zero
+             # matches; every new string is a wire field name or the fixed
+             # English word "line" plus an integer, never corpus text). Found
+             # by a dedicated fresh-sweep agent handed the full exclusion list
+             # through v3-D190, directed at `packages/engine/src/types.ts`'s
+             # own wire fields with zero renders. One candidate checked and
+             # rejected: `App\Models\AdminAudit::actor()` (zero-caller
+             # relation, but the controller deliberately reads the raw FK and
+             # pseudonymizes it instead — an intentional choice, not a gap).
+             # See DECISIONS.md v3-D191.
              # NOTE (v3-D190, 2026-09-10): `SessionSummary.ayatRefs` — computed by
              # `summarizeSession()` on every session (it's literally what
              # `ayatCompleted` is the LENGTH of) — had exactly one read anywhere

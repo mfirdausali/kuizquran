@@ -63,6 +63,7 @@ import { loadEffectiveCorpus } from "@/lib/corpus/load.ts";
 import { macroFactsFor } from "@/lib/macro/facts.ts";
 import { ayahWords, wordGloss } from "@engine/corpus.ts";
 import { buildFace } from "@engine/faces.ts";
+import { mushafLineLabel } from "@/lib/corpus/wordReference.ts";
 import { FaceText } from "@/components/quiz/FaceText";
 import { MacroPanelIsland } from "@/components/macro/MacroPanelIsland";
 import { AyahStatsIsland } from "@/components/progress/AyahStatsIsland";
@@ -184,6 +185,12 @@ export default async function AyahPage({
                   ? buildFace(corpus, { kind: "word", ayah, position: word.position })
                   : null;
                 if (!face) return null;
+                // `mushafLineLabel` owns the null/undefined/real-number
+                // degradation — see its own docblock. Reading the word's
+                // raw geometry field directly here would print a bare
+                // integer with no unit and no honest "no geometry yet"
+                // fallback.
+                const lineLabel = mushafLineLabel(word);
                 return (
                   <li key={word.position} className="meta-line">
                     <FaceText face={face} as="bdi" />
@@ -192,6 +199,12 @@ export default async function AyahPage({
                         Reading `word.gloss.en` here instead would hardcode one
                         language and silently break the day MS lands. */}
                     <span>{wordGloss(word)}</span>
+                    {lineLabel !== null ? (
+                      <>
+                        <span className="meta-line__sep">·</span>
+                        <span className="ltr-island">{lineLabel}</span>
+                      </>
+                    ) : null}
                   </li>
                 );
               })}

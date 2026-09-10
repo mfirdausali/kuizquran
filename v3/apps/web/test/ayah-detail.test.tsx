@@ -709,6 +709,22 @@ describe("the route is actually wired (not two stubs behind a green suite)", () 
     expect(pageSrc()).not.toMatch(/lib\/idb/);
   });
 
+  it("renders each word's own mushaf line, through mushafLineLabel — never a bare word.line read", () => {
+    // `CorpusWord.line` is real, non-null geometry data for every launch
+    // surah (vendored: packages/corpus-compiler/data/raw/<surah>-geometry.json
+    // exists for all four), shipped verbatim to the browser by
+    // stage-corpus.mjs#slim() (it strips only lemma/root/class), but the
+    // engine's own CorpusWord type never declared the field until this fix —
+    // so nothing could read it. `mushafLineLabel` is the one place that
+    // degradation (null vs. undefined vs. a real line) is decided; the page
+    // must call it rather than re-deriving `word.line` inline, the same
+    // "component prints, lib decides" discipline `wordGloss`/`buildFace`
+    // already enforce two lines above this one.
+    const src = pageSrc();
+    expect(src).toMatch(/mushafLineLabel/);
+    expect(src).not.toMatch(/word\.line\b/);
+  });
+
   it("the stats island IS a client island and owns the log read", () => {
     const src = readFileSync(resolve(WEB, "components/progress/AyahStatsIsland.tsx"), "utf8");
     expect(src.split("\n")[0]!.trim()).toBe('"use client";');

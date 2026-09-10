@@ -32,6 +32,14 @@ export interface CorpusWord {
    *  first (lowest) position is ever probed as an independent S1 meaning item
    *  — see ladder.ts. */
   groupPositions?: number[];
+  /** Mushaf line within its page — `corpus-compiler/src/types.ts#Word.line`,
+   *  real (non-null) for every launch surah, since all four have vendored
+   *  geometry (`data/raw/<surah>-geometry.json`). `null` for a surah with no
+   *  vendored geometry yet; `undefined` for an older corpus subset compiled
+   *  before this field existed. Optional here for exactly that reason — see
+   *  `lib/corpus/wordReference.ts#mushafLineLabel`, the one place that
+   *  three-way degradation is decided. */
+  line?: number | null;
 }
 
 export interface CorpusDistractor {
