@@ -56,6 +56,23 @@ make dev     # SPA :5273, API :8000
 make test    # 2650 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 371 v3/api + 118 corpus-compiler
              # + 420 engine + 61 fold-runner + 1378 apps/web. (v3-D195, 2026-09-10)
+             # NOTE (v3-D197, 2026-09-10): second consecutive empty sweep — after
+             # v3-D196, a fresh pass over `lib/session/run.ts` (28 exports),
+             # `components/quiz/*`/`macro/*`/`progress/*`/`onboarding/*`
+             # (prop-by-prop), migrations, admin controller/caller pairs, and
+             # console scheduling found no new zero-caller gap; every candidate
+             # traced to a real caller or an already-excluded reason
+             # (`OnboardingChoices.placement` → the `placement.ts` gap;
+             # `FlagService::enabled()` → real zero-caller, but every registered
+             # flag gates a feature that doesn't exist yet, same shape as
+             # `PaywallGate`). A direct regression check (full apps/web vitest +
+             # v3/api PHPUnit) matched the counts already on record — no drift in
+             # any DEFECTS.md closure claim. Documentation-only; test/build
+             # numbers unchanged. This bug class is now genuinely exhausted
+             # across most of the codebase; a future run should not expect
+             # another one-night find without a genuinely fresh corner or a
+             # willingness to take on a larger architectural item. See
+             # DECISIONS.md v3-D197.
              # NOTE (v3-D196, 2026-09-10): the "computed/shipped, zero reader" and
              # "stale-justification stub" sweep came back empty this run — the
              # widest single-run pass this bug class has had since v3-D95's own

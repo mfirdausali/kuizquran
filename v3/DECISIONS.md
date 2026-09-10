@@ -15748,3 +15748,94 @@ taxonomy drift (v3-D127); `packages/engine/src/placement.ts`
 `lib/plan/forecast.ts`'s `awayDays` (v3-D190); the spec/selection-engine
 subsystem's own lack of a learner-facing caller (v3-D190);
 `App\Models\AdminAudit::actor()` (v3-D191) — all unchanged.
+
+### v3-D197 — second consecutive empty sweep; several large surfaces confirmed fully wired, one genuine zero-caller function traced to an already-excluded reason (2026-09-10)
+
+**Sweep performed, no code change.** Following v3-D196's own empty sweep,
+a second dedicated agent covered ground not yet explicitly named clean
+in any prior entry, confirming callers directly rather than assuming:
+
+- `apps/web/lib/session/run.ts` — all 28 exported functions traced to a
+  real caller in `SessionIsland.tsx`/`TodaySession.tsx`/
+  `DrillPicker.tsx`/`PracticePicker.tsx`. Fully exhausted.
+- `apps/web/components/quiz/*`, `components/macro/*`,
+  `components/progress/*` — every declared prop traced end-to-end to a
+  real caller and a real render; no dead prop found.
+- `apps/web/components/onboarding/*` — `OnboardingFlow.tsx`/
+  `FirstRecall.tsx` fully wired. One candidate,
+  `OnboardingChoices.placement` (captured at onboarding but never read
+  back by any `readChoices()` caller), traced directly to the
+  already-excluded `packages/engine/src/placement.ts` gap
+  (v3-D111/D113/D123) — the binary-search onboarding path structurally
+  cannot run for the surahs this build currently serves. Not a fresh
+  finding, the same documented reason.
+- `App\Flags\FlagService::enabled()` — the flag plane's own evaluation
+  function genuinely has zero production callers (only its own test
+  calls it). Every registered flag (`social.*`, `notifications.*`,
+  `experiments.*`, `billing.checkout_live`) gates a feature that does
+  not exist yet in this codebase (M11 social, live Stripe checkout) —
+  the flag plane was deliberately built BEFORE its consumers, per its
+  own class docblock ("social code before the flag plane"). Same shape
+  as the already-excluded `PaywallGate`: a real zero-caller mechanism
+  whose callers are legitimately still-unbuilt future features, not a
+  wiring gap in anything that exists today.
+- `api/database/migrations/*` spot-checked (`entitlements`, `users`,
+  `events`, `account_deletion_requests`) — every column traced to a real
+  reader; `api/app/Http/Requests/*` does not exist in this codebase
+  (validation is inline `$request->validate()`, confirmed, not a gap);
+  all 14 admin controllers confirmed to have a matching
+  `apps/web/lib/admin/*.ts` caller; `routes/console.php` scheduling
+  confirmed complete for all three nightly commands.
+
+**Regression check, not just a sweep.** The full `apps/web` vitest suite
+(1378/1378) and `v3/api` PHPUnit suite (371 passed, 2 incomplete-by-
+design/PAY-1, 6 skipped) were run directly and matched the exact counts
+already on record from v3-D195/CLAUDE.md — confirming no drift in any
+DEFECTS.md closure claim since the last entry.
+
+`git status --porcelain` was empty throughout (no source or test file
+touched); no `v1/**`/`v2/**` file was touched; no Arabic codepoint was
+introduced (nothing was written). `origin/main` was re-checked at both
+the start and end of this run and stayed at `6c9f198` throughout — no
+concurrent-session collision this time.
+
+Session start: `HEAD` and local `main` both already matched `origin/main`
+at `6c9f198` (v3-D196) — no stale-local-main trap this run.
+
+**Assessment.** This is the SECOND consecutive genuinely empty sweep for
+this bug class (v3-D196, then this entry), now covering: the entire
+`Corpus` type family (five passes), most admin/settings/workbench
+panels, `lib/idb/*`, `lib/session/run.ts`, `components/quiz/*`,
+`components/macro/*`, `components/progress/*`, `components/onboarding/*`,
+every admin controller/caller pair, migration columns, and console
+scheduling. The remaining open items are, without exception, either
+architecturally large (the spec/selection-engine subsystem, a real
+device-reset/restore design, `EntitlementMachine::merge()`'s
+surrounding UI), genuinely blocked on human/calendar factors (scene
+beats, qari sessions, Stripe KYC, the mailer), or deliberate,
+already-reasoned non-gaps (`FlagService::enabled()` above,
+`AdminAudit::actor()`, `AccountDeletionRequest::isDue()`). A future run
+should not expect another one-night "zero-caller" find without either a
+genuinely fresh corner of the codebase or a willingness to take on one
+of the larger, already-named architectural items.
+
+**NOT addressed, named so a future run doesn't re-discover them as new:**
+every item on v3-D196's own "NOT addressed" list, unchanged, plus
+`App\Flags\FlagService::enabled()` (real zero-caller, but its callers
+are legitimately unbuilt future features — above) — `rhymeClassOf()`
+(v3-D136); `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148); `lib/pricing.ts
+#regionFromCountry()` (v3-D163); `PaywallGate` as a whole class /
+`permitsIssuance`/`permitsReview` (v3-D88, v3-D151); multi-surah
+enrollment; the operational mailer/7-night window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy drift (v3-D127); `packages/engine/src/placement.ts`
+(v3-D111/D113/D123); the late-arrival refold half of v3-D32;
+`AccountDeletionRequest::isDue()` (v3-D146); the `AdminRole::OPERATOR`/
+`MODERATOR` gating question (v3-D185); `MacroFacts.litany.rhymeLabel`
+(v3-D188); `lib/idb/writeLock.ts#useWriterStatus()` (v3-D190);
+`lib/plan/forecast.ts`'s `awayDays` (v3-D190); the spec/selection-engine
+subsystem's own lack of a learner-facing caller (v3-D190);
+`App\Models\AdminAudit::actor()` (v3-D191);
+`components/home/DeviceReset.tsx`'s disabled control (v3-D196) — all
+unchanged.
