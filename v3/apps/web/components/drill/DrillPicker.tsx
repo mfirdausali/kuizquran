@@ -298,6 +298,20 @@ function DrillSummary({ preview }: { preview: DrillPreview }) {
         <p className="drill-partial">{preview.partialNotice}</p>
       ) : null}
 
+      {/* WHICH ones, not just how many — `preview.sites` has always carried
+          this (each entry's own `skipReason`), but nothing ever named the
+          actual ayah numbers on screen: a learner watched the count drop
+          with no way to tell which ayah to go learn first. Absent entirely
+          when nothing is skipped, matching `partialNotice`'s own "nothing to
+          render rather than a reassuring no-op" rule. */}
+      {preview.skippedAyahNumbers.length > 0 ? (
+        <p className="drill-skipped">
+          {preview.skippedAyahNumbers.length === 1
+            ? `Not yet ready: ayah ${preview.skippedAyahNumbers[0]}.`
+            : `Not yet ready: ayat ${preview.skippedAyahNumbers.join(", ")}.`}
+        </p>
+      ) : null}
+
       <p className="drill-consequence">{preview.consequenceLabel}</p>
 
       {preview.stepCount === 0 ? (

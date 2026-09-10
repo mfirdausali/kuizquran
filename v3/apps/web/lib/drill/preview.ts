@@ -103,6 +103,14 @@ export interface DrillPreview {
   skippedAyahCount: number;
   /** Seam sites skipped because their connection atom does not exist yet. */
   skippedSeamCount: number;
+  /** Ascending ayah numbers of the skipped-because-not-learned ayat — the
+   *  granular answer to "which ones", not just "how many". `sites` already
+   *  carries this (each entry's own `skipReason`), but until now no caller
+   *  ever read it back out; a learner saw a count drop with no way to tell
+   *  which ayah to go learn first. Never includes a seam — a seam has no
+   *  single ayah number of its own to name (it is a junction, `site.ayah` is
+   *  its FROM ayah, not "the ayah that's missing"). */
+  skippedAyahNumbers: number[];
   /** Total steps that will be drilled (ayat + seams). */
   stepCount: number;
   /** Engine-computed minutes for the drilled work only. */
@@ -160,8 +168,10 @@ export function buildDrillPreview(input: BuildPreviewInput): DrillPreview {
   const ayahCount = drilled.filter((p) => p.site.kind === "ayah").length;
   const seamCount = drilled.filter((p) => p.site.kind === "seam").length;
   const skipped = previewSites.filter((p) => !p.drilled);
-  const skippedAyahCount = skipped.filter((p) => p.site.kind === "ayah").length;
+  const skippedAyat = skipped.filter((p) => p.site.kind === "ayah");
+  const skippedAyahCount = skippedAyat.length;
   const skippedSeamCount = skipped.filter((p) => p.site.kind === "seam").length;
+  const skippedAyahNumbers = skippedAyat.map((p) => p.site.ayah).sort((a, b) => a - b);
 
   // The engine's cost model, never a local formula. Chains are ayat, junctions
   // are seams; a picker adds no new words and no due reviews.
@@ -199,6 +209,7 @@ export function buildDrillPreview(input: BuildPreviewInput): DrillPreview {
     seamCount,
     skippedAyahCount,
     skippedSeamCount,
+    skippedAyahNumbers,
     stepCount: drilled.length,
     estimatedMinutes,
     mode,

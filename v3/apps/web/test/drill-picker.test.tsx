@@ -132,6 +132,40 @@ describe("the mushaf page picker", () => {
   });
 });
 
+// The granular sibling of the honest-denominator notice: `preview.sites`
+// (and now `skippedAyahNumbers`) always carried WHICH ayat were skipped, but
+// the summary only ever printed a count. These pin the actual numbers on
+// screen — a count alone cannot distinguish "ayat 2, 4, 5, 6 skipped" from
+// any other 4-of-6 split, so a test asserting only `partialNotice`'s count
+// sentence could not catch a regression here.
+describe("the skipped ayat are named, not just counted", () => {
+  it("lists which ayat in the default range are not yet ready", () => {
+    // Default range is 1..6. Encode 1 and 3; leave 2, 4, 5, 6 un-encoded.
+    logState = { status: "ready", data: [encoded(1), encoded(3)] };
+    render(<DrillPicker corpus={WITH_GEOMETRY} now={0} />);
+    expect(screen.getByText("Not yet ready: ayat 2, 4, 5, 6.")).toBeDefined();
+  });
+
+  it("uses the singular sentence for exactly one skipped ayah", () => {
+    // Encode every ayah in 1..6 except 6.
+    logState = {
+      status: "ready",
+      data: [encoded(1), encoded(2), encoded(3), encoded(4), encoded(5)],
+    };
+    render(<DrillPicker corpus={WITH_GEOMETRY} now={0} />);
+    expect(screen.getByText("Not yet ready: ayah 6.")).toBeDefined();
+  });
+
+  it("says nothing when everything in the range is ready", () => {
+    logState = {
+      status: "ready",
+      data: [1, 2, 3, 4, 5, 6].map((a) => encoded(a)),
+    };
+    render(<DrillPicker corpus={WITH_GEOMETRY} now={0} />);
+    expect(screen.queryByText(/Not yet ready/)).toBeNull();
+  });
+});
+
 describe("log states", () => {
   // Edge case #73: a pending read must never paint a number.
   it("paints no counts while the log is still loading", () => {

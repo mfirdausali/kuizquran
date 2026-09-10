@@ -122,6 +122,17 @@ describe("partial pages — skipped is not failed", () => {
     for (const s of skipped) expect(s.skipReason).toBe("not-learned");
   });
 
+  // `sites` already carried this (each entry's own `skipReason`), but nothing
+  // ever read it back into the plain "which ones" answer a caller actually
+  // wants — `skippedAyahCount` alone cannot distinguish "ayat 1-3 skipped"
+  // from "ayat 12-14 skipped". Ascending, never in site order (`sitesForPage`
+  // does not guarantee it), and never including a seam — a seam has no
+  // single ayah number of its own to name.
+  it("names WHICH ayat were skipped, ascending, never a seam", () => {
+    const p = buildDrillPreview({ sites, atoms: atomsFor(sites, learned), mode: "graded" });
+    expect(p.skippedAyahNumbers).toEqual([12, 13, 14]);
+  });
+
   it("states the honest denominator UP FRONT, and says skipped not wrong", () => {
     const p = buildDrillPreview({ sites, atoms: atomsFor(sites, learned), mode: "graded" });
     expect(p.partialNotice).toBe(
@@ -137,6 +148,7 @@ describe("partial pages — skipped is not failed", () => {
     const p = buildDrillPreview({ sites, atoms: atomsFor(sites, all), mode: "graded" });
     expect(p.partialNotice).toBeNull();
     expect(p.skippedAyahCount).toBe(0);
+    expect(p.skippedAyahNumbers).toEqual([]);
   });
 
   // THE MUTATION-KILLING CASE, kept explicit and separate.

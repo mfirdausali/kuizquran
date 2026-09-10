@@ -53,9 +53,69 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2654 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2658 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 375 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1378 apps/web. (v3-D198, 2026-09-10)
+             # + 420 engine + 61 fold-runner + 1382 apps/web. (v3-D199, 2026-09-10)
+             # NOTE (v3-D199, 2026-09-10): `lib/drill/preview.ts`'s own
+             # `buildDrillPreview()` computed a `PreviewSite` per site since
+             # the picker shipped (build-plan step 20), each carrying its own
+             # `site.ayah`/`skipReason` — but `DrillPreview` exposed only the
+             # AGGREGATE `skippedAyahCount`, and `DrillPicker.tsx`'s
+             # `DrillSummary` rendered only `preview.partialNotice` ("7 of 10
+             # ayat here are ready. The other 3 haven't been learned yet.").
+             # `grep -rn "\.skipReason\b|drilledSites" apps/web` outside
+             # tests returned only `preview.ts`'s own definition/computation
+             # — zero production readers. A learner saw a count drop with no
+             # way to tell WHICH ayat to go learn first, despite the module
+             # already knowing exactly which ones. Found by a dedicated
+             # fresh-sweep agent directed at `lib/plan`/`lib/library`/
+             # `lib/home`/`lib/drill` and their components — corners the
+             # last two sweeps (v3-D196/D197) had not named. Fixed,
+             # additive, no engine/wire change: `DrillPreview` gains
+             # `skippedAyahNumbers: number[]` (ascending, ayah-kind only,
+             # `not-learned` reason — never a seam, which has no single ayah
+             # number of its own); `DrillSummary` gains one new paragraph,
+             # present only when non-empty: `Not yet ready: ayah 6.`
+             # singular, `Not yet ready: ayat 2, 4, 5, 6.` plural — the same
+             # singular/plural convention `SessionIsland.tsx`'s `ayatRefs`
+             # rendering already established (v3-D190), on a different
+             # field, different screen. RED confirmed independently at both
+             # layers, each reverted via `git stash` and restored
+             # byte-identically: library level, both new/strengthened cases
+             # failed on `expected undefined to equal [...]`, 18/18 green
+             # after (was 16, +2); component level, 2 of 3 new cases failed
+             # on `getByText` finding nothing (the negative "says nothing
+             # when everything is ready" case passed vacuously, correctly —
+             # it never depended on the fix), 14/14 green after (was 11,
+             # +3). The load-bearing component case encodes ayat 1 and 3 of
+             # the default 1..6 range and asserts the exact string `"Not yet
+             # ready: ayat 2, 4, 5, 6."`, which cannot pass on a hardcoded
+             # placeholder or a bare count. `TZ=UTC make test`: 2658 passing
+             # (was 2654, +4; apps/web 1382, was 1378; no other suite
+             # moved). `check-test-floor.mjs`: OK, 2658 >= floor 1899 (+759
+             # margin, unmoved). `TZ=UTC make build`: exit 0, 30 routes
+             # (unchanged — edits inside the existing `/drill` component
+             # tree, no new route). `npm run gates`: all green (boundaries
+             # 310 files, unchanged count — no new production file; fonts
+             # degraded-but-non-blocking, pre-existing; corpus-morphology
+             # 362 words / corpus-glyphs 206 codepoints, both unchanged).
+             # `npx tsc --noEmit`, run separately across all four v3 node
+             # packages: clean in all four. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted twice
+             # before committing, same discipline as every prior entry). No
+             # Arabic codepoint (all four changed files swept
+             # programmatically, in Python, over the Arabic, Arabic
+             # Supplement, Arabic Extended-A and both Presentation Forms
+             # Unicode blocks, plus a `\u06xx`-escape and `fromCharCode`
+             # sweep — zero matches; every new string is a fixed English
+             # sentence built from a fixture ayah integer, never corpus
+             # text). NOT addressed: the skipped-SEAM sibling of this fix
+             # (`skippedSeamCount` has the identical aggregate-only shape —
+             # a learner is never told WHICH joint is unreached) was
+             # considered and deliberately left for a future run rather
+             # than widening this one past a single field; every item on
+             # v3-D198's own "NOT addressed" list, unchanged. See
+             # DECISIONS.md v3-D199.
              # NOTE (v3-D198, 2026-09-10): the late-arrival refold — v3-D32's
              # other deferred half, and the one item on v3-D196/D197's own
              # repeated "NOT addressed" list that was neither human/calendar-

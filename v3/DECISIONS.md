@@ -15975,3 +15975,118 @@ subsystem's own lack of a learner-facing caller (v3-D190);
 `App\Models\AdminAudit::actor()` (v3-D191); `App\Flags\FlagService::enabled()`
 (v3-D197); `components/home/DeviceReset.tsx`'s disabled control (v3-D196) —
 all unchanged.
+
+### v3-D199 — the drill picker names WHICH ayat are skipped, not just how many (2026-09-10)
+
+A dedicated fresh-sweep agent, handed the full exclusion list carried through
+v3-D198 and told not to re-report any of them, was pointed away from every
+area the last several nights' sweeps had already covered exhaustively
+(`lib/session/run.ts`'s exports; `components/quiz`/`macro`/`progress`/
+`onboarding` prop-by-prop; migrations; admin controller/caller pairs; console
+scheduling) and toward corners those sweeps had not named: `lib/plan`,
+`lib/library`, `lib/home`, `lib/drill` and their consuming components,
+Console Commands, Eloquent relations, and the remaining corpus-compiler
+exports. It found one real instance of this build's recurring "computed by
+real production code, never read back" shape, verified directly rather than
+assumed.
+
+**The gap.** `lib/drill/preview.ts#buildDrillPreview()` — the module whose own
+header states its job as "WHAT will be drilled, and what will be SKIPPED and
+why" — has computed a `PreviewSite` per site since the picker shipped (build-
+plan step 20), each carrying its own `site.ayah` and `skipReason`. But
+`DrillPreview` only ever exposed the AGGREGATE `skippedAyahCount` (a bare
+integer), never the ayah numbers themselves, and `components/drill/
+DrillPicker.tsx`'s `DrillSummary` rendered only `preview.partialNotice` — a
+sentence like "7 of 10 ayat here are ready. The other 3 haven't been learned
+yet." Grep-confirmed before touching anything: `grep -rn "\.skipReason\b\|
+drilledSites" apps/web` outside test files returns only the definition and
+computation sites inside `preview.ts` itself — `preview.sites` had zero
+production readers anywhere. A learner previewing a page saw a count drop
+from 10 to 7 with no way to tell which 3 ayat to go learn first, despite the
+module having already decided exactly which ones.
+
+**Fixed, additive, no engine/wire change.** `DrillPreview` gains
+`skippedAyahNumbers: number[]` — the ascending ayah numbers of every
+`PreviewSite` with `skipReason === "not-learned"`, a pure re-derivation of
+data `buildDrillPreview` already computes (never a seam: a seam has no single
+ayah number of its own to name, per the file's own existing reasoning for why
+`SkipReason` splits ayah from seam in the first place). `DrillSummary` gains
+one new paragraph, present only when the list is non-empty (matching
+`partialNotice`'s own "nothing to render rather than a reassuring no-op"
+rule): `Not yet ready: ayah 6.` singular, `Not yet ready: ayat 2, 4, 5, 6.`
+plural — the identical singular/plural sentence-construction convention
+`SessionIsland.tsx`'s own `ayatRefs` rendering already established
+(v3-D190), applied here to a different field on a different screen.
+
+**RED confirmed independently at both layers, each reverted and restored
+byte-identically.** Library level (`git stash` of `lib/drill/preview.ts`
+alone, both new/strengthened test cases in `test/drill-preview.test.ts`
+kept, 16 pre-existing cases untouched): both failed on `expected undefined to
+[deeply] equal [...]` — the field did not exist yet; restored, 18/18 green
+(was 16, +2). Component level (`git stash` of `components/drill/
+DrillPicker.tsx` alone, all 3 new cases in a dedicated `describe` block in
+`test/drill-picker.test.tsx` kept, 11 pre-existing cases untouched): 2 of 3
+failed on `getByText` finding nothing (the plural and singular sentences);
+the third, the negative "says nothing when everything is ready" case, passed
+vacuously against the unfixed component — correct, since it never depended
+on the fix, the same discipline this codebase applies to every negative case.
+Restored, 14/14 green (was 11, +3). The positive component case encodes ayat
+1 and 3 of the default 1..6 range and asserts the EXACT string `"Not yet
+ready: ayat 2, 4, 5, 6."`, which cannot pass on a hardcoded placeholder or a
+bare count.
+
+**Full verification.** `TZ=UTC make test` (full monorepo, all seven suites,
+fresh container — `make setup` run from scratch, no `node_modules`/`vendor`
+anywhere): **2658 passing** (was 2654, +4 — exactly this run's new tests: 2
+in `drill-preview.test.ts` + 3 in `drill-picker.test.tsx`, net +1 from a
+strengthened pre-existing case that gained one extra assertion rather than a
+new `it()`; apps/web 1382, was 1378; no other suite moved — 255 v2 vitest, 47
+v2/api, 375 v3/api, 118 corpus-compiler, 420 engine, 61 fold-runner).
+`check-test-floor.mjs`: OK, 2658 >= floor 1899 (+759 margin, unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 30 routes
+(unchanged — edits inside the existing `/drill` component tree, no new
+route). `npm run gates`: all green (boundaries 310 files, unchanged count —
+no new production file, two existing files edited plus their two existing
+test files; fonts degraded-but-non-blocking, pre-existing; corpus-morphology
+362 words / corpus-glyphs 206 codepoints, both unchanged — no new corpus
+data). `npx tsc --noEmit`, run separately across all four v3 node packages
+(`apps/web`, `packages/engine`, `packages/corpus-compiler`,
+`worker/fold-runner`): clean in all four. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite was
+reverted twice before committing, same discipline as every prior entry —
+`git status --porcelain -- v1 v2` empty immediately before committing). No
+Arabic codepoint (all four changed files swept programmatically, in Python,
+over the Arabic, Arabic Supplement, Arabic Extended-A and both Presentation
+Forms Unicode blocks, plus a `\u06xx`-escape and `fromCharCode` sweep — zero
+matches; every new string is a fixed English sentence built from a fixture
+ayah integer, never corpus text).
+
+Session start: fresh container, `make setup` run from scratch; `HEAD` and
+local `main` were both found at `ba678c7`, matching `origin/main`'s real tip
+exactly — the recurring "stale local main" trap
+v3-D77/D91/D127/D138/D159/D167/D170/D172/D174–D198 each independently hit did
+not recur this run.
+
+**NOT addressed, named so a future run doesn't re-discover it as new:** the
+skipped-SEAM sibling of this fix (`skippedSeamCount` has the identical
+aggregate-only shape — a learner is never told WHICH joint is unreached, only
+how many) was considered and deliberately left for a future run rather than
+widening this one past a single, cleanly-scoped field; every item on
+v3-D198's own "NOT addressed" list, unchanged and not re-copied here in full
+— see that entry — including `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148); `lib/pricing.ts
+#regionFromCountry()` (v3-D163); `PaywallGate` as a whole class /
+`permitsIssuance`/`permitsReview` (v3-D88, v3-D151); multi-surah enrollment;
+the operational mailer/7-night window; PAY-1's Stripe fixtures; surah 67's
+scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123);
+`AccountDeletionRequest::isDue()` (v3-D146); the `AdminRole::OPERATOR`/
+`MODERATOR` gating question (v3-D185); `MacroFacts.litany.rhymeLabel`
+(v3-D188); `lib/idb/writeLock.ts#useWriterStatus()` (v3-D190);
+`lib/plan/forecast.ts`'s `awayDays` (v3-D190); the spec/selection-engine
+subsystem's own lack of a learner-facing caller (v3-D190);
+`App\Models\AdminAudit::actor()` (v3-D191); `App\Flags\FlagService::enabled()`
+(v3-D197); `components/home/DeviceReset.tsx`'s disabled control (v3-D196);
+`DeterminismCheckCommand`'s DB-sampling path never having run against a real
+production database (C5/gate 20, infra+calendar) — all unchanged.
