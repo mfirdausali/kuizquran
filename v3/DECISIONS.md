@@ -15576,6 +15576,7 @@ taxonomy drift (v3-D127); `packages/engine/src/placement.ts`
 `lib/plan/forecast.ts`'s `awayDays` (v3-D190); the spec/selection-engine
 subsystem's own lack of a learner-facing caller (v3-D190);
 `App\Models\AdminAudit::actor()` (v3-D191) — all unchanged.
+
 ---
 
 ## v3-D195 (2026-09-10) — `StripeField.setVia` reaches the console
@@ -15657,3 +15658,93 @@ v3-D194) — renumbered from a colliding first draft of "v3-D193" through
 **NOT addressed, named so a future run doesn't re-discover it as new:**
 `ProbeResult.reason` (above); every item on v3-D194's own "NOT addressed"
 list, unchanged.
+
+---
+
+### v3-D196 — the "computed/shipped, zero reader" and "stale-justification stub" sweep came back empty this run; one candidate investigated and deliberately left (2026-09-10)
+
+**Sweep performed, no code change.** A dedicated fresh-sweep agent,
+handed the full exclusion list through v3-D194 (including the explicit
+note that the entire `Corpus`/`CorpusMeta`/`CorpusWord`/`CorpusDistractor`
+type family is now exhausted after five dedicated passes, v3-D181/D187/
+D191/D192/D193), checked: every `api/app/Http/Controllers/*` for a
+v3-D194-shaped stale-justification comment; every `api/app/Models/*`
+relation for callers; `api/app/Console/Commands/*` scheduling;
+`app/Support/*`, `app/Billing/*`, `app/Flags/*`, `app/Mail/*`; every
+exported function in `packages/engine/src/*` (daybound, resume, corpus,
+faces, events, site, scheduler, strength, decay, atom, update, ladder,
+options, gate, freeplay, render, corpusRef); `worker/fold-runner/src/*`
+(re-confirmed against its own already-recorded clean sweep, v3-D127);
+every export in `apps/web/lib/{onboarding,drill,progress,idb,sync,
+settings,account,library,plan,entitlement}` function-by-function; every
+admin/workbench/billing panel re-verified field-by-field against its own
+controller; the quiz render-item components field-by-field. This is the
+widest single-run sweep this bug class has had since v3-D95's own
+original empty pass. It came back with no new, real, safely-scoped
+instance.
+
+**One candidate investigated and deliberately left, named so a future
+run does not re-discover it as new or waste time re-investigating it:**
+`components/home/DeviceReset.tsx`'s "Clear this device" button is
+permanently disabled, with its own docblock stating why: "This build has
+no account adoption and no server-side identity to restore from... What
+ships is the enumeration... with the action disabled and the reason
+stated." Superficially this resembles v3-D194's exact shape — a stub
+whose stated blocking dependency (account adoption, v3-D153) has since
+landed, more than a dozen nights before this sweep. On investigation
+this is NOT the same shape: `hasHistory` needed one already-existing
+Eloquent relation read to become real; a genuinely safe "clear device"
+needs an actual clear-then-restore-from-server MECHANISM that does not
+exist anywhere in this codebase today. `lib/sync/pull.ts` can re-hydrate
+a signed-in account's SERVER-KNOWN events after a local clear, but
+nothing in this codebase has ever combined "delete every local IndexedDB
+row" with "then pull" into one operation, tested it against a real
+two-device scenario, or reasoned about what happens to unsynced events
+(genuinely lost, by the component's own honest accounting) versus synced
+ones during that sequence. `resetDbForTests()` is a test-only in-memory
+mock reset, not a real deletion path, and was correctly not treated as
+evidence of a real mechanism.
+
+Building that mechanism from scratch and wiring it to a real, live
+"delete this device's data" button is real, separate, and materially
+riskier scope than every other fix in this run's own class — it is the
+one candidate this build has ever found in this sweep pattern where
+implementing the "obvious" fix carelessly would itself BE a defect (data
+loss on a destructive control), not fix one. This is the same category
+of judgment call this codebase has already made for
+`EntitlementMachine::merge()` (real, zero-caller, but the surrounding
+account-adoption UI it needs doesn't exist as a safe, designed flow yet)
+and multi-surah enrollment (real gap, but a product/architecture
+decision, not a mechanical wiring fix). Left alone, deliberately, rather
+than shipped underdesigned.
+
+`git status --porcelain` was empty throughout this run (no source or
+test file touched); no `v1/**`/`v2/**` file was touched; no Arabic
+codepoint was introduced (nothing was written).
+
+Session start: `HEAD` and local `main` both already matched `origin/main`
+at `2f538c4` (v3-D194) — no stale-local-main trap this run. This entry
+was rebased onto a concurrent session's own v3-D195
+(`StripeField.setVia`, above) before pushing and renumbered from a
+colliding first draft of "v3-D195" to v3-D196; no file overlap with it
+(that fix touched only `StripeSettingsPanel.tsx` and its test; this run
+touched no source or test file at all).
+
+**NOT addressed, named so a future run doesn't re-discover them as new:**
+`components/home/DeviceReset.tsx`'s disabled "Clear this device" control
+(above — needs a real, safely-designed clear-then-restore mechanism, not
+a mechanical wiring fix) — every item on v3-D194's own "NOT addressed"
+list, unchanged: `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class / `permitsIssuance`/`permitsReview` (v3-D88, v3-D151); multi-surah
+enrollment; the operational mailer/7-night window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy drift (v3-D127); `packages/engine/src/placement.ts`
+(v3-D111/D113/D123); the late-arrival refold half of v3-D32;
+`AccountDeletionRequest::isDue()` (v3-D146); the `AdminRole::OPERATOR`/
+`MODERATOR` gating question (v3-D185); `MacroFacts.litany.rhymeLabel`
+(v3-D188); `lib/idb/writeLock.ts#useWriterStatus()` (v3-D190);
+`lib/plan/forecast.ts`'s `awayDays` (v3-D190); the spec/selection-engine
+subsystem's own lack of a learner-facing caller (v3-D190);
+`App\Models\AdminAudit::actor()` (v3-D191) — all unchanged.

@@ -56,6 +56,26 @@ make dev     # SPA :5273, API :8000
 make test    # 2650 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 371 v3/api + 118 corpus-compiler
              # + 420 engine + 61 fold-runner + 1378 apps/web. (v3-D195, 2026-09-10)
+             # NOTE (v3-D196, 2026-09-10): the "computed/shipped, zero reader" and
+             # "stale-justification stub" sweep came back empty this run — the
+             # widest single-run pass this bug class has had since v3-D95's own
+             # original empty sweep (every controller, every model relation,
+             # every engine/fold-runner export, every apps/web/lib export
+             # function-by-function). Documentation-only; test/build numbers
+             # unchanged (this run's sweep was dispatched, and reported empty,
+             # before v3-D195's own StripeField.setVia fix landed concurrently
+             # from a different session — renumbered from a collision at
+             # v3-D195 to v3-D196 on rebase). One candidate investigated and
+             # deliberately left: `components/home/DeviceReset.tsx`'s
+             # permanently-disabled "Clear this device" button superficially
+             # resembles v3-D194's shape (its stated blocking dependency,
+             # account adoption, landed a dozen+ nights ago) but is NOT the
+             # same — no clear-then-restore-from-server mechanism exists
+             # anywhere in this codebase to wire up, and building one
+             # carelessly would itself be a data-loss defect, not a fix. Left
+             # alone deliberately, the same category of judgment call already
+             # made for `EntitlementMachine::merge()` and multi-surah
+             # enrollment. See DECISIONS.md v3-D196.
              # NOTE (v3-D195, 2026-09-10): `StripeField.setVia` — computed per
              # credential by `StripeSettingsController::index()`
              # (`$env.' in the API environment'`, distinct per field) and
