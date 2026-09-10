@@ -50,8 +50,50 @@ describe("fetchEntitlementSnapshot", () => {
       region: "MY",
       trialSurah: 67,
       trialStartedAt: 1_699_000_000_000,
+      currentPeriodEnd: null,
+      graceUntil: null,
       cachedAt: NOW,
     });
+  });
+
+  // `currentPeriodEnd`/`graceUntil` are genuinely written by the real
+  // webhook handler (`WebhookHandler::onSubscriptionUpdated`/
+  // `onPaymentFailed`) and, since the fix below, reach `GET /api/entitlement`
+  // — this proves the client actually reads them back, not merely that the
+  // server sends them. Two distinct non-null values, so neither assertion
+  // can pass by reading the other field.
+  it("carries currentPeriodEnd and graceUntil through when the server sends real values", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      respond(200, {
+        state: "grace",
+        tier: "monthly",
+        region: "MY",
+        trialSurah: null,
+        trialStartedAt: null,
+        currentPeriodEnd: 1_700_500_000_000,
+        graceUntil: 1_700_600_000_000,
+      }),
+    );
+
+    const snapshot = await fetchEntitlementSnapshot(NOW);
+
+    expect(snapshot?.currentPeriodEnd).toBe(1_700_500_000_000);
+    expect(snapshot?.graceUntil).toBe(1_700_600_000_000);
+  });
+
+  it("a non-numeric, non-null graceUntil degrades the whole snapshot to null", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      respond(200, {
+        state: "grace",
+        tier: "monthly",
+        region: "MY",
+        trialSurah: null,
+        trialStartedAt: null,
+        graceUntil: "soon",
+      }),
+    );
+
+    await expect(fetchEntitlementSnapshot(NOW)).resolves.toBeNull();
   });
 
   it("a null trialStartedAt round-trips as null (trial not yet started)", async () => {
@@ -137,6 +179,8 @@ describe("readEntitlementSnapshot / refreshEntitlementSnapshot", () => {
       region: "MY",
       trialSurah: 12,
       trialStartedAt: 1_699_000_000_000,
+      currentPeriodEnd: null,
+      graceUntil: null,
       cachedAt: NOW,
     });
   });

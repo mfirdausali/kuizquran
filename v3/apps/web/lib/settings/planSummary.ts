@@ -61,10 +61,25 @@ function trialSentence(snapshot: EntitlementSnapshot, now: number): string {
 export function buildPlanSummary(snapshot: EntitlementSnapshot, now: number): PlanSummary {
   const stateSentence: string = (() => {
     switch (snapshot.state) {
-      case "active":
-        return "Your plan is active.";
-      case "grace":
-        return "There was an issue with your last payment — you're in a short grace period. Review of everything you've learned stays open either way.";
+      case "active": {
+        const base = "Your plan is active.";
+        // `currentPeriodEnd` is null for a lifetime purchase (nothing to
+        // renew) and for any learner not yet on a paid subscription — the
+        // renewal clause only ever appears when the server has a real date.
+        return snapshot.currentPeriodEnd === null
+          ? base
+          : `${base} Renews ${new Date(snapshot.currentPeriodEnd).toISOString()}.`;
+      }
+      case "grace": {
+        const base =
+          "There was an issue with your last payment — you're in a short grace period. Review of everything you've learned stays open either way.";
+        // `graceUntil` is null when the server has not recorded a next
+        // payment attempt (a grace row not caused by a payment-failure
+        // webhook) — never a fabricated date.
+        return snapshot.graceUntil === null
+          ? base
+          : `${base} The next payment attempt is expected ${new Date(snapshot.graceUntil).toISOString()}.`;
+      }
       case "lapsed_review_only":
         return "Your plan has lapsed. Review of everything you've already learned stays open forever — new content needs a renewal.";
       case "trial":

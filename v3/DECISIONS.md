@@ -14938,3 +14938,100 @@ mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
 `packages/engine/src/placement.ts` (v3-D111/D113/D123); the late-arrival
 refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146); the
 `AdminRole::OPERATOR`/`MODERATOR` gating question (v3-D185) — all unchanged.
+
+### v3-D189 — `entitlements.current_period_end`/`.grace_until` were written by every subscription-webhook path since M7 shipped and reached no learner (2026-09-10)
+
+**Finding.** `WebhookHandler::onSubscriptionUpdated()`/`onPaymentFailed()`
+write real, non-synthetic values to `entitlements.current_period_end`
+(Stripe's own next-renewal date on an active monthly subscription) and
+`entitlements.grace_until` (Stripe's own next-payment-retry date once a
+charge fails) — both columns exist since the `entitlements` migration,
+both are cast integers on the `Entitlement` model, both are genuinely
+written by `EntitlementMachine::apply()`'s guarded transition path. But
+`EntitlementController::show()` — the ONLY read endpoint,
+`GET /api/entitlement`, consumed by `apps/web/lib/entitlement/sync.ts` and
+rendered by the new `/settings` "YOUR PLAN" card (v3-D182) — never put
+either field on the wire. A learner in `grace` (a failed card charge) had
+no way to see when Stripe would retry; an `active` monthly subscriber had
+no way to see when their plan renews. Same "written since the writer
+shipped, zero read surface" shape this build has closed ~90 times since
+v3-D82, here on two sibling fields of a table (`entitlements`) a prior run
+(v3-D182) already built a display card for, without carrying these two
+along.
+
+**Fixed**, read-only, no new column, no schema change: `show()`'s response
+map gains `currentPeriodEnd`/`graceUntil` (both already-cast integers,
+passed straight through — never re-derived); `EntitlementSnapshot`
+(`apps/web/lib/entitlement/types.ts`) gains matching optional-shaped
+fields, parsed defensively in `fetchEntitlementSnapshot()` (a
+non-null-non-number value degrades the WHOLE snapshot to `null`, the same
+total-failure discipline every other field in that parser already
+follows); `buildPlanSummary()`'s `active`/`grace` branches each gain one
+conditional trailing clause — "Renews {ISO}" / "The next payment attempt
+is expected {ISO}" — appended only when the server sent a real date,
+never fabricated for a lifetime purchase (`currentPeriodEnd` is null by
+construction — nothing to renew) or a `grace` row not caused by a
+payment-failure webhook.
+
+**Verified.** RED confirmed directly: `git stash` of the four production
+files alone (every test kept — 1 new PHPUnit case, plus new/strengthened
+vitest cases in `sync.test.ts`/`planSummary.test.ts`/
+`settings-plan-panel.test.tsx`, 2 lines of an existing fixture in
+`entitlement.test.ts`) failed exactly as predicted: the backend case on
+`assertJsonPath('currentPeriodEnd', 1_700_500_000_000)` reading `null`
+instead; the round-trip snapshot test on the object missing both new
+keys entirely; the two `planSummary` cases on the plain base sentence
+with no renewal/retry clause; the panel case on the rendered status text
+never containing the expected ISO string. Restored byte-identically
+(`git stash pop`, `git diff` empty), reran all four suites green: 7/7
+PHPUnit (was 6), and across apps/web — `sync.test.ts` 15/15, `planSummary
+.test.ts` 11/11, `settings-plan-panel.test.tsx` 7/7, `entitlement.test.ts`
+13/13. The `active` case seeds a monthly subscription with a
+`currentPeriodEnd` distinct from every other timestamp in its fixture, so
+the assertion cannot pass by reading an unrelated field; a companion
+seeds a `tier: lifetime` row and asserts NO renewal clause appears,
+proving the conditional is real rather than always-on.
+
+`TZ=UTC make test`: **2629 passing** (was 2623, +6 — v3/api 367 (was 366,
++1), apps/web 1361 (was 1356, +5); no other suite moved: 255 v2 vitest, 47
+v2/api, 118 corpus-compiler, 420 engine, 61 fold-runner). `check-test-
+floor.mjs`: OK, 2629 >= floor 1899 (+730 margin, unmoved, same discipline
+as every prior entry). `TZ=UTC make build`: exit 0, 30 routes (unchanged —
+no new route, edits inside the existing `/settings` PlanPanel's data path).
+`npm run gates`: all green (boundaries 305 files, unchanged count — no new
+production file, four existing files edited plus their four existing test
+files; fonts degraded-but-non-blocking, pre-existing; corpus-morphology
+362 words / corpus-glyphs 206 codepoints, both unchanged — no new corpus
+data). `npx tsc --noEmit` (via `next build`'s own TypeScript pass): clean.
+No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the suite was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2` empty
+immediately before committing). No Arabic codepoint (the full diff swept
+programmatically, in Python, over the Arabic, Arabic Supplement, Arabic
+Extended-A and both Presentation Forms Unicode blocks — zero matches;
+every new string is a wire field name, an ISO timestamp derived from a
+fixture integer, or a fixed English sentence fragment, never corpus text).
+
+Session start: fresh container, `make setup` run from scratch (no
+`node_modules`/`vendor` anywhere); the v3/api `composer install` step hit
+the same transient proxy timeout named at v3-D184/others cloning
+`laravel/framework` via git-mirror fallback — retried with
+`COMPOSER_PROCESS_TIMEOUT=900` and completed clean, no code or config
+change, then `make setup` was re-run to finish the remaining npm installs.
+`HEAD` and local `main` both matched `origin/main` at `38ff0c5` already
+(no stale-local-main trap this run — the discipline of checking before
+any implementation work, per v3-D77 onward, still applied and found
+nothing wrong this time).
+
+**NOT addressed, named so a future run doesn't re-discover them as new:**
+every item on v3-D188's own "NOT addressed" list, unchanged — `rhymeClassOf()`
+(v3-D136); `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148); `lib/pricing.ts#regionFromCountry()`
+(v3-D163); `PaywallGate` as a whole class / `permitsIssuance`/
+`permitsReview` (v3-D88, v3-D151); multi-surah enrollment; the operational
+mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123); the late-arrival
+refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146); the
+`AdminRole::OPERATOR`/`MODERATOR` gating question (v3-D185);
+`MacroFacts.litany.rhymeLabel` (v3-D188) — all unchanged.

@@ -18,6 +18,8 @@ function snap(over: Partial<EntitlementSnapshot> = {}): EntitlementSnapshot {
     region: "MY",
     trialSurah: null,
     trialStartedAt: null,
+    currentPeriodEnd: null,
+    graceUntil: null,
     cachedAt: NOW,
     ...over,
   };

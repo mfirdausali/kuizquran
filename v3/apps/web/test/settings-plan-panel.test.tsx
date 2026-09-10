@@ -112,6 +112,25 @@ describe("PlanPanel", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("a grace learner sees the next payment attempt date the server actually recorded", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      respond(200, {
+        state: "grace",
+        tier: "monthly",
+        region: "MY",
+        trialSurah: null,
+        trialStartedAt: null,
+        currentPeriodEnd: null,
+        graceUntil: 1_700_600_000_000,
+      }),
+    );
+
+    render(<PlanPanel />);
+
+    const status = await screen.findByRole("status");
+    expect(status.textContent).toContain(new Date(1_700_600_000_000).toISOString());
+  });
+
   it("a lapsed learner sees review-stays-open language, not a bare 'lapsed_review_only' literal", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       respond(200, {

@@ -89,6 +89,10 @@ export async function fetchEntitlementSnapshot(now: number): Promise<Entitlement
   if (!isEntitlementState(b.state) || !isEntitlementTier(b.tier) || !isRegion(b.region)) return null;
   if (b.trialSurah !== null && typeof b.trialSurah !== "number") return null;
   if (b.trialStartedAt !== null && typeof b.trialStartedAt !== "number") return null;
+  const currentPeriodEndRaw = (b.currentPeriodEnd as number | null | undefined) ?? null;
+  const graceUntilRaw = (b.graceUntil as number | null | undefined) ?? null;
+  if (currentPeriodEndRaw !== null && typeof currentPeriodEndRaw !== "number") return null;
+  if (graceUntilRaw !== null && typeof graceUntilRaw !== "number") return null;
 
   return {
     state: b.state,
@@ -96,6 +100,8 @@ export async function fetchEntitlementSnapshot(now: number): Promise<Entitlement
     region: b.region,
     trialSurah: (b.trialSurah as number | null) ?? null,
     trialStartedAt: (b.trialStartedAt as number | null) ?? null,
+    currentPeriodEnd: currentPeriodEndRaw,
+    graceUntil: graceUntilRaw,
     cachedAt: now,
   };
 }

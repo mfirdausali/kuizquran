@@ -31,6 +31,19 @@ export interface EntitlementSnapshot {
    * started yet. v3-D07's "OR 14 days" half needs this to compare against.
    */
   readonly trialStartedAt: number | null;
+  /**
+   * Epoch ms. `WebhookHandler::onSubscriptionUpdated`'s `current_period_end`
+   * — when a MONTHLY subscription next renews. Null for `tier: "lifetime"`
+   * (a one-time purchase never renews) and for any learner not yet on a
+   * paid subscription.
+   */
+  readonly currentPeriodEnd: number | null;
+  /**
+   * Epoch ms. `WebhookHandler::onPaymentFailed`'s `next_payment_attempt` —
+   * when Stripe will next retry a failed charge. Null outside `state:
+   * "grace"` (and for a grace row not caused by a payment-failure webhook).
+   */
+  readonly graceUntil: number | null;
   /** Epoch ms. When this snapshot was written locally. */
   readonly cachedAt: number;
 }

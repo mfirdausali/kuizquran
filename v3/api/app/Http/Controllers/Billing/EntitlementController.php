@@ -44,6 +44,8 @@ class EntitlementController extends Controller
                 'region' => 'INTL',
                 'trialSurah' => null,
                 'trialStartedAt' => null,
+                'currentPeriodEnd' => null,
+                'graceUntil' => null,
             ]);
         }
 
@@ -53,6 +55,14 @@ class EntitlementController extends Controller
             'region' => $entitlement->region,
             'trialSurah' => $entitlement->trial_surah,
             'trialStartedAt' => $entitlement->trial_started_at,
+            // `current_period_end`/`grace_until` are genuinely written by
+            // `WebhookHandler::onSubscriptionUpdated`/`onPaymentFailed` but,
+            // before this fix, never reached this endpoint — a learner in
+            // `grace` had no way to see when the next payment retry was
+            // expected, and an `active` monthly subscriber had no way to see
+            // when their plan renews.
+            'currentPeriodEnd' => $entitlement->current_period_end,
+            'graceUntil' => $entitlement->grace_until,
         ]);
     }
 }

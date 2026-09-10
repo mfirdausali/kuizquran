@@ -53,6 +53,8 @@ class EntitlementControllerTest extends TestCase
             'region' => 'INTL',
             'trialSurah' => null,
             'trialStartedAt' => null,
+            'currentPeriodEnd' => null,
+            'graceUntil' => null,
         ]);
     }
 
@@ -77,7 +79,39 @@ class EntitlementControllerTest extends TestCase
             'region' => 'MY',
             'trialSurah' => 67,
             'trialStartedAt' => 1_700_000_000_000,
+            'currentPeriodEnd' => null,
+            'graceUntil' => null,
         ]);
+    }
+
+    /**
+     * `current_period_end`/`grace_until` are genuinely written by
+     * `WebhookHandler` (`customer.subscription.updated`'s renewal date,
+     * `invoice.payment_failed`'s next retry) but, before this fix, never
+     * reached this endpoint at all — a learner in `grace` had no way to see
+     * WHEN the next retry was expected, and an `active` monthly subscriber
+     * had no way to see WHEN their plan renews. Two independent values (not
+     * the same number twice) so neither assertion can pass by reading the
+     * other field.
+     */
+    public function test_current_period_end_and_grace_until_reach_the_wire(): void
+    {
+        $user = User::factory()->create();
+        Entitlement::create([
+            'user_id' => $user->id,
+            'state' => EntitlementState::Grace->value,
+            'tier' => EntitlementTier::Monthly->value,
+            'region' => 'MY',
+            'current_period_end' => 1_700_500_000_000,
+            'grace_until' => 1_700_600_000_000,
+        ]);
+        Sanctum::actingAs($user);
+
+        $response = $this->getJson('/api/entitlement');
+
+        $response->assertOk()
+            ->assertJsonPath('currentPeriodEnd', 1_700_500_000_000)
+            ->assertJsonPath('graceUntil', 1_700_600_000_000);
     }
 
     /**

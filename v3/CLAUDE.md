@@ -53,9 +53,76 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2623 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 366 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1356 apps/web. (v3-D188, 2026-09-09)
+make test    # 2629 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 367 v3/api + 118 corpus-compiler
+             # + 420 engine + 61 fold-runner + 1361 apps/web. (v3-D189, 2026-09-10)
+             # NOTE (v3-D189, 2026-09-10): `entitlements.current_period_end`/
+             # `.grace_until` — written by `WebhookHandler::onSubscriptionUpdated()`/
+             # `onPaymentFailed()` since M7 shipped, real Stripe-sourced dates, not
+             # synthetic — reached no learner: `EntitlementController::show()`
+             # never put either on the wire, so the `/settings` "YOUR PLAN" card
+             # (v3-D182) could say a learner was `active` or in `grace` but never
+             # when a subscription renews or when a failed charge would next
+             # retry. Same "written since the writer shipped, zero read surface"
+             # shape this build has closed ~90 times since v3-D82, here on two
+             # sibling fields of a table a prior run already built a display card
+             # for. Fixed, read-only, no schema change: `show()` adds both fields
+             # verbatim; `EntitlementSnapshot` gains matching fields, parsed with
+             # the same total-degradation discipline every other field already
+             # uses; `buildPlanSummary()`'s `active`/`grace` branches each gain
+             # one conditional trailing clause, present only when the server sent
+             # a real date — never fabricated for a lifetime purchase or an
+             # unattributed grace row. RED confirmed directly: `git stash` of the
+             # four production files (tests kept) failed exactly as predicted —
+             # the backend case read `null` where a real epoch-ms value was
+             # expected; the frontend round-trip case was missing both new keys;
+             # both `planSummary` cases rendered the plain base sentence with no
+             # renewal/retry clause; the panel case's rendered text never
+             # contained the expected ISO string. Restored byte-identically,
+             # reran green: 7/7 PHPUnit (was 6), `sync.test.ts` 15/15,
+             # `planSummary.test.ts` 11/11, `settings-plan-panel.test.tsx` 7/7,
+             # `entitlement.test.ts` 13/13. `TZ=UTC make test`: 2629 passing (was
+             # 2623, +6 — v3/api 367 (+1), apps/web 1361 (+5); no other suite
+             # moved). `check-test-floor.mjs`: OK, 2629 >= floor 1899 (+730
+             # margin, unmoved, same discipline as every prior entry). `TZ=UTC
+             # make build`: exit 0, 30 routes (unchanged — no new route, edits
+             # inside the existing `/settings` PlanPanel data path). `npm run
+             # gates`: all green (boundaries 305 files, unchanged count — no new
+             # production file, four existing files edited plus their four
+             # existing test files; fonts degraded-but-non-blocking,
+             # pre-existing; corpus-morphology 362 words / corpus-glyphs 206
+             # codepoints, both unchanged — no new corpus data). `npx tsc
+             # --noEmit`: clean. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff produced by running the
+             # suite was reverted before committing, same discipline as every
+             # prior entry — `git status --porcelain -- v1 v2` empty immediately
+             # before committing). No Arabic codepoint (the full diff swept
+             # programmatically, in Python, over the Arabic, Arabic Supplement,
+             # Arabic Extended-A and both Presentation Forms Unicode blocks —
+             # zero matches; every new string is a wire field name, an ISO
+             # timestamp derived from a fixture integer, or a fixed English
+             # sentence fragment, never corpus text). Session start: fresh
+             # container, `make setup` run from scratch; v3/api's `composer
+             # install` hit the same transient proxy timeout named at prior
+             # entries cloning `laravel/framework` via git-mirror fallback —
+             # retried with `COMPOSER_PROCESS_TIMEOUT=900` and completed clean,
+             # no code/config change, then `make setup` re-run to finish the
+             # remaining npm installs. `HEAD` and local `main` both matched
+             # `origin/main` at `38ff0c5` already — no stale-local-main trap this
+             # run. NOT addressed: every item on v3-D188's own "NOT addressed"
+             # list, unchanged — `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+             # `App\Billing\TrialAttribution` (v3-D148);
+             # `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a
+             # whole class / `permitsIssuance`/`permitsReview` (v3-D88, v3-D151);
+             # multi-surah enrollment; the operational mailer/7-night window;
+             # PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+             # `packages/engine/src/placement.ts` (v3-D111/D113/D123); the
+             # late-arrival refold half of v3-D32; `AccountDeletionRequest
+             # ::isDue()` (v3-D146); the `AdminRole::OPERATOR`/`MODERATOR` gating
+             # question (v3-D185); `MacroFacts.litany.rhymeLabel` (v3-D188) — all
+             # unchanged. See DECISIONS.md v3-D189.
              # NOTE (v3-D188, 2026-09-09): `MacroFacts.reason` — the compiler's own
              # audit trail for WHICH v3-D21 rule fired ("ayahCount=3", "ruku=12",
              # "rhyme -uun 78%", "refrain x3", "default"), a required field, ships

@@ -16,6 +16,8 @@ function snapshot(overrides: Partial<EntitlementSnapshot>): EntitlementSnapshot 
     region: "MY",
     trialSurah: null,
     trialStartedAt: null,
+    currentPeriodEnd: null,
+    graceUntil: null,
     cachedAt: NOW,
     ...overrides,
   };
@@ -68,6 +70,41 @@ describe("buildPlanSummary", () => {
     const summary = buildPlanSummary(snapshot({ state: "grace" }), NOW);
     expect(summary.stateSentence).toMatch(/grace period/);
     expect(summary.stateSentence).toMatch(/review.*stays open/i);
+  });
+
+  // `grace_until` (`WebhookHandler::onPaymentFailed`'s `next_payment_attempt`)
+  // is genuinely written by the real webhook handler but, before this fix,
+  // never reached this sentence — a learner in grace could not tell WHEN the
+  // next retry was expected. Absent when the server has not recorded one yet
+  // (e.g. a grace row seeded by something other than a payment-failure
+  // webhook) — never a fabricated date.
+  it("grace names the next payment attempt when the server has recorded one", () => {
+    const withDate = buildPlanSummary(
+      snapshot({ state: "grace", graceUntil: 1_700_600_000_000 }),
+      NOW,
+    );
+    expect(withDate.stateSentence).toContain(new Date(1_700_600_000_000).toISOString());
+
+    const withoutDate = buildPlanSummary(snapshot({ state: "grace", graceUntil: null }), NOW);
+    expect(withoutDate.stateSentence).not.toMatch(/\d{4}-\d{2}-\d{2}/);
+  });
+
+  // `current_period_end` (`WebhookHandler::onSubscriptionUpdated`) is only
+  // ever set for a real subscription (never a one-time lifetime purchase —
+  // `checkout.session.completed`'s `mode: "payment"` branch never touches
+  // it), so an active LIFETIME learner must see no renewal date at all.
+  it("active names the renewal date for a subscription, never for a lifetime purchase", () => {
+    const monthly = buildPlanSummary(
+      snapshot({ state: "active", tier: "monthly", currentPeriodEnd: 1_700_800_000_000 }),
+      NOW,
+    );
+    expect(monthly.stateSentence).toContain(new Date(1_700_800_000_000).toISOString());
+
+    const lifetime = buildPlanSummary(
+      snapshot({ state: "active", tier: "lifetime", currentPeriodEnd: null }),
+      NOW,
+    );
+    expect(lifetime.stateSentence).not.toMatch(/\d{4}-\d{2}-\d{2}/);
   });
 
   it("lapsed_review_only says review stays open forever, new content needs renewal", () => {
