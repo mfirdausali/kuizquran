@@ -53,9 +53,43 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2629 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2631 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 367 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1361 apps/web. (v3-D189, 2026-09-10)
+             # + 420 engine + 61 fold-runner + 1363 apps/web. (v3-D190, 2026-09-10)
+             # NOTE (v3-D190, 2026-09-10): `SessionSummary.ayatRefs` — computed by
+             # `summarizeSession()` on every session (it's literally what
+             # `ayatCompleted` is the LENGTH of) — had exactly one read anywhere
+             # outside the engine: an assertion in `lib/session/run.test.ts`.
+             # `SessionIsland.tsx`'s summary block printed the ayat COUNT but
+             # never WHICH ayat a learner had just drilled. Fixed with one new
+             # summary line ("Ayah N completed." / "Ayat N, M completed."),
+             # rendered only when `ayatRefs.length > 0` — never fabricated for a
+             # session whose only work was a failed gate. RED confirmed directly:
+             # `git stash` of `SessionIsland.tsx` alone (2 new tests kept, 27
+             # pre-existing untouched) failed both on a missing testid node, not
+             # a text mismatch; restored, 29/29 green. `TZ=UTC make test`: 2631
+             # passing (was 2629, +2 — exactly this run's new tests; apps/web
+             # 1363, was 1361). `check-test-floor.mjs`: OK, 2631 >= floor 1899
+             # (+732 margin, unmoved). `TZ=UTC make build`: exit 0, 30 routes
+             # (unchanged). `npm run gates`: all green (boundaries 306 files,
+             # unchanged count). `npx tsc --noEmit`: clean. No `v1/**`/`v2/**`
+             # edit (stray `v2/tsconfig.tsbuildinfo` reverted before committing).
+             # No Arabic codepoint (full diff swept programmatically over every
+             # Arabic block plus both Presentation Forms blocks — zero matches;
+             # every new string is a fixed English sentence built from a
+             # fixture-derived ayah integer). Found by a dedicated fresh-sweep
+             # agent handed the full exclusion list through v3-D189. Two other
+             # real candidates surfaced and deliberately left:
+             # `lib/idb/writeLock.ts#useWriterStatus()` (zero-caller, but its
+             # behavior is already achieved via duplicated inline code — a reuse
+             # issue, not a learner-facing gap); `lib/plan/forecast.ts`'s
+             # `awayDays` (real WIREFRAME §629 gap, needs a new event type + a
+             # write path — larger scope). The spec/selection-engine subsystem
+             # (`selectFor`/`Spec`/`/api/specs`) is confirmed genuinely unwired
+             # into any learner-facing route, but closing it means
+             # re-architecting how the live session picks questions —
+             # PaywallGate-sized scope, not a nightly fix. See DECISIONS.md
+             # v3-D190.
              # NOTE (v3-D189, 2026-09-10): `entitlements.current_period_end`/
              # `.grace_until` — written by `WebhookHandler::onSubscriptionUpdated()`/
              # `onPaymentFailed()` since M7 shipped, real Stripe-sourced dates, not

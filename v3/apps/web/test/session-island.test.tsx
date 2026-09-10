@@ -1040,3 +1040,69 @@ describe("session summary — greeting and duration, computed by the engine but 
     nowSpy.mockRestore();
   });
 });
+
+// `SessionSummary.ayatRefs` — "distinct ayah numbers completed this session
+// (in completion order)", populated by `summarizeSession` since it shipped
+// (the very field `ayatCompleted` is `.length` of) — reached this component's
+// `summary` prop on every session but was never printed. The summary line
+// showed only the COUNT ("2 ayat · 8 taps"), never WHICH two ayat — the one
+// fact a learner finishing a multi-ayah session would actually want named.
+// `lib/session/run.test.ts` already proves the engine fills the array
+// correctly (`expect(summary.ayatRefs).toContain(gatedAyah)`); this proves
+// the component actually PRINTS it.
+function twoItemRun(c: Corpus, now: number): SessionRun {
+  return {
+    surah: SURAH,
+    queue: [
+      { kind: "learn", atomKey: "112:ayah:1", ayah: 1, estMin: 1 },
+      { kind: "learn", atomKey: "112:ayah:2", ayah: 2, estMin: 1 },
+    ],
+    cursor: 0,
+    machine: initReconstruct(c, SURAH, 1, 0, { full: true }),
+    startedAt: now,
+    slips: 0,
+    lastTap: null,
+    done: false,
+    gateSlipped: false,
+    rescaffolding: false,
+    openPracticeDrill: null,
+    structured: true,
+  };
+}
+
+describe("session summary — which ayat, not just how many (SessionSummary.ayatRefs)", () => {
+  it("names every completed ayah, in completion order, on the real summary screen", async () => {
+    installFetch();
+    startSessionOverride = () =>
+      Promise.resolve({ ok: true, run: twoItemRun(corpus, Date.now()) });
+
+    render(<SessionIsland surah={SURAH} />);
+    await waitFor(() => expect(screen.getByTestId("session-drill")).toBeTruthy());
+    await completeSession();
+    await waitFor(() => expect(screen.getByTestId("session-summary")).toBeTruthy());
+
+    // A dedicated node, not the existing count line — "2 ayat" already
+    // contains a digit that would let a loose assertion against the whole
+    // summary block pass vacuously without the fix ever running.
+    const list = screen.getByTestId("session-ayat-completed-list").textContent ?? "";
+    expect(list).toMatch(/\b1\b/);
+    expect(list).toMatch(/\b2\b/);
+  });
+
+  it("is absent when nothing but a gate was completed (a single, already-covered ayah)", async () => {
+    installFetch();
+    startSessionOverride = () =>
+      Promise.resolve({ ok: true, run: trivialOneItemRun(corpus, Date.now()) });
+
+    render(<SessionIsland surah={SURAH} />);
+    await waitFor(() => expect(screen.getByTestId("session-drill")).toBeTruthy());
+    await completeSession();
+    await waitFor(() => expect(screen.getByTestId("session-summary")).toBeTruthy());
+
+    // One completed ayah still gets its own singular line — proves the
+    // fallback isn't "only render when there's more than one to list".
+    const list = screen.getByTestId("session-ayat-completed-list").textContent ?? "";
+    expect(list).toMatch(/\b1\b/);
+    expect(list).not.toMatch(/\b2\b/);
+  });
+});

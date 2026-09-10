@@ -603,6 +603,18 @@ export function SessionIsland({
             : ""}
           {` · ${formatDuration(summary.durationMs)}`}
         </p>
+        {/* `summary.ayatRefs` — the ordered, deduped list `ayatCompleted` is
+            already the LENGTH of — named the count but never which ayat.
+            Null (nothing rendered) only when nothing genuinely completed
+            (e.g. a failed gate); a single ayah still gets its own sentence,
+            never held back for "only when there's more than one to list". */}
+        {summary.ayatRefs.length > 0 ? (
+          <p className="caption" data-testid="session-ayat-completed-list">
+            {summary.ayatRefs.length === 1
+              ? `Ayah ${summary.ayatRefs[0]} completed.`
+              : `Ayat ${summary.ayatRefs.join(", ")} completed.`}
+          </p>
+        ) : null}
         {/* FR6 Door 1: only ever shown once the engine itself grants it — this
             component never decides whether one more ayah fits the gate. */}
         {extraOffer?.granted && extraOffer.ayah !== null ? (

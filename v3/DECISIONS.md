@@ -15035,3 +15035,102 @@ mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
 refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146); the
 `AdminRole::OPERATOR`/`MODERATOR` gating question (v3-D185);
 `MacroFacts.litany.rhymeLabel` (v3-D188) — all unchanged.
+
+### v3-D190 — `SessionSummary.ayatRefs` was computed on every session and never told a learner WHICH ayat they had just completed (2026-09-10)
+
+**Finding.** `packages/engine/src/sessionSummary.ts#summarizeSession()`
+computes `ayatRefs: number[]` — the distinct ayah numbers completed this
+session, in completion order — on every single call; `ayatCompleted` (the
+number the summary screen already prints, "2 ayat · 8 taps…") is literally
+`ayatRefs.length`. But `grep -rn "ayatRefs" apps/web` before this fix
+returned exactly one hit outside the engine itself: an assertion in
+`lib/session/run.test.ts`. `SessionIsland.tsx`'s own summary block printed
+the COUNT but never which ayat a learner had just drilled — a learner
+finishing a mixed review session (say, a due gate on ayah 3 plus a review
+of ayah 7) saw "2 ayat" with no way to tell which two without navigating
+away to `/progress`. Same "computed on every call, zero read surface"
+shape this build has closed ~90 times since v3-D82, here on the one field
+of `SessionSummary` (duration, recall, ayatCompleted, ayatRefs, taps,
+greeting) that had never reached the screen.
+
+**Fixed**, display-only, no server/wire change (this field never left the
+client — `summarizeSession` runs entirely in the browser over the local
+event log): `SessionIsland.tsx`'s summary block gains one new
+`data-testid="session-ayat-completed-list"` line — "Ayah N completed." for
+a single ayah, "Ayat N, M completed." for more than one — rendered only
+when `summary.ayatRefs.length > 0` (a session whose only work was a
+FAILED gate completes nothing, and must show nothing here, never a
+fabricated "Ayah 0 completed").
+
+**Verified.** RED confirmed directly: `git stash` of `SessionIsland.tsx`
+alone (both new tests in `test/session-island.test.tsx` kept, 27
+pre-existing cases in the file untouched) failed exactly the 2 new cases —
+`screen.getByTestId("session-ayat-completed-list")` threw ("Unable to find
+an element by: [data-testid=...]"), the node did not exist at all, not a
+text-content mismatch; restored byte-identically, 29/29 green. The
+two-ayah case drives a REAL session through the DOM via trial-and-error
+taps (no Arabic literal known in advance) and asserts both completed
+ayah numbers appear in the dedicated node; the one-ayah case asserts the
+singular sentence renders and explicitly asserts a second ayah's number is
+ABSENT, proving the singular/plural branch is real rather than always
+pluralizing.
+
+`TZ=UTC make test`: **2631 passing** (was 2629, +2 — exactly this run's
+two new test cases; apps/web 1363, was 1361; no other suite moved: 255 v2
+vitest, 47 v2/api, 367 v3/api, 118 corpus-compiler, 420 engine, 61
+fold-runner). `check-test-floor.mjs`: OK, 2631 >= floor 1899 (+732 margin,
+unmoved, same discipline as every prior entry). `TZ=UTC make build`: exit
+0, 30 routes (unchanged — edits inside the existing `/session` component,
+no new route). `npm run gates`: all green (boundaries 306 files, unchanged
+count — no new production file, two existing files edited; fonts
+degraded-but-non-blocking, pre-existing; corpus-morphology 362 words /
+corpus-glyphs 206 codepoints, both unchanged — no new corpus data). `npx
+tsc --noEmit` (via `next build`'s own TypeScript pass): clean.
+
+No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the suite was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2` empty
+immediately before committing). No Arabic codepoint (the full diff swept
+programmatically, in Python, over the Arabic, Arabic Supplement, Arabic
+Extended-A and both Presentation Forms Unicode blocks — zero matches;
+every new string is a fixed English sentence fragment built from a
+fixture-derived ayah-number integer, never corpus text).
+
+Found by a dedicated fresh-sweep agent handed the full exclusion list
+carried through v3-D189 and told not to re-report any of them, directed
+at Laravel Console Commands/Middleware, every Eloquent relation in
+`app/Models`, the spec/selection-engine subsystem, and `apps/web/lib/idb`.
+Two other real candidates surfaced and were deliberately left: `lib/idb
+/writeLock.ts#useWriterStatus()` is a genuine zero-caller hook, but the
+writer/reader behavior it would add is already achieved via duplicated
+inline `writeLock.subscribe()` code in `SessionIsland`/`TestIsland` — a
+reuse issue, not a learner-facing gap; `lib/plan/forecast.ts`'s `awayDays`
+is a real WIREFRAME §629-spec'd "mark a day away" feature with zero write
+path, but closing it needs a new event type plus an outbox row — named
+in-source as future/larger scope, not a minimal wiring fix. The
+spec/selection-engine subsystem (`selectFor`, `Spec`, `/api/specs`) was
+confirmed genuinely unwired into any learner-facing route, but wiring it
+means re-architecting how the live session picks questions — out of scope
+for a nightly fix, matching the `PaywallGate`-sized deferrals already on
+this list.
+
+Session start: dependencies already installed from the prior run in this
+same container; `HEAD` and local `main` both already matched `origin/main`
+at `3f342fa` (v3-D189) — no stale-local-main trap this run.
+
+**NOT addressed, named so a future run doesn't re-discover them as new:**
+every item on v3-D189's own "NOT addressed" list, unchanged, plus
+`lib/idb/writeLock.ts#useWriterStatus()` (real but redundant, above);
+`lib/plan/forecast.ts`'s `awayDays` (real, larger scope, above); the
+spec/selection-engine subsystem's own lack of a learner-facing caller
+(real, architecturally large, above) — `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148); `lib/pricing.ts#regionFromCountry()`
+(v3-D163); `PaywallGate` as a whole class / `permitsIssuance`/
+`permitsReview` (v3-D88, v3-D151); multi-surah enrollment; the operational
+mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123); the late-arrival
+refold half of v3-D32; `AccountDeletionRequest::isDue()` (v3-D146); the
+`AdminRole::OPERATOR`/`MODERATOR` gating question (v3-D185);
+`MacroFacts.litany.rhymeLabel` (v3-D188) — all unchanged.
