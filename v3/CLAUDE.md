@@ -53,9 +53,53 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2639 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2641 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 367 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1371 apps/web. (v3-D192, 2026-09-10)
+             # + 420 engine + 61 fold-runner + 1373 apps/web. (v3-D193, 2026-09-10)
+             # NOTE (v3-D193, 2026-09-10): `CorpusMeta.droppedCollisions` — the
+             # compiler's own audit trail of authored distractor rows dropped at
+             # compile because they collided with their own target under the
+             # engine's grading equivalence (NFC + tatweel strip, DEFECTS.md#B6),
+             # required and shipped verbatim since build-plan step 3 — was never
+             # declared on the engine's own `Corpus["meta"]` type, so nothing
+             # could read it. Same "shipped, never declared" shape as
+             # `Corpus.lookalikes` (v3-D181), `CorpusWord.line` (v3-D191) and
+             # `CorpusMeta.distractorOrigin`/`.kernelYield` (v3-D192) — this is
+             # the exact sibling field v3-D192's own closing note named and left.
+             # A word named here shipped with FEWER distractors than authored, a
+             # fact `DistractorYieldPanel`'s histogram cannot distinguish from a
+             # word nobody authored more foils for. Verified against real data:
+             # surah 12's admin corpus carries 8 dropped coordinates; the frozen
+             # engine fixture independently carries 5, including `{ayah:4,
+             # position:1}` — a genuine pre-existing fixture fact. Fixed: `Corpus
+             # ["meta"]` gains optional `droppedCollisions?: LookAlikeWordRef[]`
+             # (reusing the existing coordinate type); new
+             # `DroppedCollisionsPanel.tsx` mirrors `LookAlikesPanel.tsx`'s
+             # per-ayah-filtered, read-only discipline, wired into
+             # `WorkbenchIsland.tsx` beside it. RED confirmed directly:
+             # reverting the two production files (new panel moved aside, its 2
+             # new tests kept, 40 pre-existing untouched) failed both on the
+             # panel's region never rendering; restored, 42/42 green. `TZ=UTC
+             # make test`: 2641 passing (was 2639, +2; apps/web 1373, was 1371).
+             # `check-test-floor.mjs`: OK, 2641 >= floor 1899 (+742 margin,
+             # unmoved). `TZ=UTC make build`: exit 0, 30 routes (unchanged).
+             # `npm run gates`: all green (boundaries 310 files, up from 309 —
+             # exactly the one new production file). `npx tsc --noEmit`, run
+             # separately across all four v3 node packages: clean in all four.
+             # No `v1/**`/`v2/**` edit (stray `v2/tsconfig.tsbuildinfo` reverted
+             # before committing). No Arabic codepoint (every new/changed file
+             # swept programmatically over every Arabic block plus both
+             # Presentation Forms blocks — zero matches; every new string is a
+             # fixture coordinate integer or a fixed English caption, never
+             # corpus text). Found by a dedicated fresh-sweep agent directed at
+             # the exact lead v3-D192 named and left. The agent also correctly
+             # rejected the other four sibling fields v3-D192 flagged
+             # (`hasMentalModel`/`hasGeometry`/`distractorsAuthored`/
+             # `schemaVersion`) as deliberate non-gaps, not merely deferred —
+             # each is either directly derivable from already-rendered data or
+             # (for `schemaVersion`) carries no reviewer-actionable content — so
+             # a future run should not re-open any of the four. See
+             # DECISIONS.md v3-D193.
              # NOTE (v3-D192, 2026-09-10): `CorpusMeta.distractorOrigin`/
              # `.kernelYield` — the compiler's own authored-vs-kernel row split
              # and its per-word foil-yield histogram, required fields computed on

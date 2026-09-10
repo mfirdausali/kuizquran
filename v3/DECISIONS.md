@@ -15348,3 +15348,120 @@ taxonomy drift (v3-D127); `packages/engine/src/placement.ts`
 (v3-D188); `lib/idb/writeLock.ts#useWriterStatus()` (v3-D190);
 `lib/plan/forecast.ts`'s `awayDays` (v3-D190); the spec/selection-engine
 subsystem's own lack of a learner-facing caller (v3-D190) — all unchanged.
+
+### v3-D193 — `CorpusMeta.droppedCollisions` (the compiler's own authored-row-dropped-at-compile audit trail) shipped since build-plan step 3, never declared on the engine's consuming type (2026-09-10)
+
+**Finding.** `corpus-compiler/src/foilKernels.ts#admitAuthored` routes
+every authored distractor row through the same grading-equivalence
+accumulator a learner is graded with (NFC + tatweel strip, DEFECTS.md#B6's
+own rule). A row that collides with its own target under that equivalence
+— e.g. a tatweel-only variant of the correct answer, byte-different but
+grade-identical — is dropped at compile rather than padded (Absolute B:
+never invent Arabic to fill the gap). `buildCorpus.ts` records every
+dropped coordinate on the compiled corpus's own `meta.droppedCollisions`
+(a required field there) since build-plan step 3, and it ships to the
+browser verbatim (`stage-corpus.mjs#slim()` passes `meta` through
+wholesale). But the engine's own `Corpus["meta"]` type never declared the
+field, so `grep -rn "droppedCollisions" apps/web` (excluding this run's
+new files) returned nothing — the same "shipped, never declared on the
+consuming type" shape as `Corpus.lookalikes` (v3-D181), `CorpusWord.line`
+(v3-D191) and `CorpusMeta.distractorOrigin`/`.kernelYield` (v3-D192),
+here on the sibling `CorpusMeta` field those two runs deliberately named
+and left for a future run.
+
+Concretely: a word named here shipped with FEWER distractors than were
+actually authored for it — a fact `DistractorYieldPanel`'s own histogram
+(v3-D192) cannot distinguish from a word that simply never had more than
+a few foils authored. A reviewer auditing a thin option set at one
+coordinate had no way to tell "the compiler dropped a redundant row here"
+from "nobody authored more" without reading `output/<surah>/corpus.json`
+by hand.
+
+Verified against real compiled data, not assumed: surah 12's admin
+corpus (`packages/corpus-compiler/output/12/corpus.json`) carries 8 real
+dropped-collision coordinates; the frozen engine test fixture
+(`packages/engine/test/fixtures/12.json`, the one `test/workbench-ui
+.test.tsx` already loads) independently carries 5 of them, including
+`{ayah:4, position:1}` — a genuine, pre-existing fixture fact, not
+fabricated for this fix.
+
+**Fixed**, display-only, additive type change: `Corpus["meta"]` gains
+optional `droppedCollisions?: LookAlikeWordRef[]` (reusing the existing
+`{ayah, position}` coordinate type `lookalikes` already established,
+rather than declaring a third shape for the identical two fields).
+New `components/workbench/DroppedCollisionsPanel.tsx` mirrors
+`LookAlikesPanel.tsx`'s own discipline exactly — per-ayah filtered,
+read-only, no write path — wired into `WorkbenchIsland.tsx` beside it.
+
+**Verified.** RED confirmed directly: the two production files
+(`types.ts`, `WorkbenchIsland.tsx`) reverted to their pre-fix content (the
+new `DroppedCollisionsPanel.tsx` moved aside too, the two new tests in
+`test/workbench-ui.test.tsx` kept, 40 pre-existing untouched) — both new
+cases failed on `findByRole("region", {name: /dropped collisions/i})`
+timing out; restored byte-identically, 42/42 green. The positive case
+opens ayah 4 (a real dropped-collision coordinate in the frozen fixture)
+and asserts the exact `12:4:1` coordinate string renders; the negative
+case reads the default-selected ayah 1 (zero dropped-collision rows in
+the same fixture) and asserts the honest "no dropped collisions recorded"
+fallback, never a fabricated absence claim for an ayah that might
+genuinely have one.
+
+`TZ=UTC make test`: **2641 passing** (was 2639, +2 — exactly this run's
+new tests; apps/web 1373, was 1371; no other suite moved: 255 v2 vitest,
+47 v2/api, 367 v3/api, 118 corpus-compiler, 420 engine, 61 fold-runner).
+`check-test-floor.mjs`: OK, 2641 >= floor 1899 (+742 margin, unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 30 routes
+(unchanged — edits inside the existing `/workbench` component tree, no
+new route). `npm run gates`: all green (boundaries 310 files, up from
+309 — exactly the one new production file, `DroppedCollisionsPanel.tsx`;
+fonts degraded-but-non-blocking, pre-existing; corpus-morphology 362
+words / corpus-glyphs 206 codepoints, both unchanged — no new corpus
+data, only a type field and a renderer for data already compiled). `npx
+tsc --noEmit`, run separately across all four v3 node packages: clean in
+all four.
+
+No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache
+diff produced by running the suite was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2` empty
+immediately before committing). No Arabic codepoint (all four
+new/changed files swept programmatically, in Python, over the Arabic,
+Arabic Supplement, Arabic Extended-A and both Presentation Forms Unicode
+blocks — zero matches; every new string is a fixture coordinate integer
+or a fixed English caption, never corpus text).
+
+Found by a dedicated fresh-sweep agent, directed at the exact lead
+v3-D192's own closing note named and deliberately left —
+`CorpusMeta.droppedCollisions`/`.hasMentalModel`/`.hasGeometry`/
+`.distractorsAuthored`/`.schemaVersion` — and told to verify each before
+picking one. The agent correctly rejected the other four as weaker
+candidates and did not fix them this run: `distractorsAuthored`/
+`hasMentalModel`/`hasGeometry` are each directly derivable from
+already-declared/rendered data (`distractorOrigin.authored > 0`,
+`sceneBeats.length > 0`, `CorpusWord.line`/`CorpusVerse.page` non-null
+respectively) — real but redundant, not a genuine second source of
+truth; `schemaVersion` is an internal compiler-migration counter with no
+reviewer-actionable content. This reasoning is recorded here so a future
+run does not re-open any of the four as if undecided.
+
+Session start: `HEAD` and local `main` both already matched `origin/main`
+at `8d814db` (v3-D192) — no stale-local-main trap this run.
+
+**NOT addressed, named so a future run doesn't re-discover them as new:**
+every item on v3-D192's own "NOT addressed" list is now resolved as
+follows — `droppedCollisions` closed above; `hasMentalModel`/
+`hasGeometry`/`distractorsAuthored`/`schemaVersion` are resolved as
+deliberate non-gaps (above), not merely deferred — `rhymeClassOf()`
+(v3-D136); `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148); `lib/pricing.ts
+#regionFromCountry()` (v3-D163); `PaywallGate` as a whole class /
+`permitsIssuance`/`permitsReview` (v3-D88, v3-D151); multi-surah
+enrollment; the operational mailer/7-night window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy drift (v3-D127); `packages/engine/src/placement.ts`
+(v3-D111/D113/D123); the late-arrival refold half of v3-D32;
+`AccountDeletionRequest::isDue()` (v3-D146); the `AdminRole::OPERATOR`/
+`MODERATOR` gating question (v3-D185); `MacroFacts.litany.rhymeLabel`
+(v3-D188); `lib/idb/writeLock.ts#useWriterStatus()` (v3-D190);
+`lib/plan/forecast.ts`'s `awayDays` (v3-D190); the spec/selection-engine
+subsystem's own lack of a learner-facing caller (v3-D190);
+`App\Models\AdminAudit::actor()` (v3-D191) — all unchanged.

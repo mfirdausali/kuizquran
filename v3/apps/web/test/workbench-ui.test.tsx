@@ -865,6 +865,59 @@ describe("WorkbenchIsland — the compiler's distractor-origin/yield summary rea
   });
 });
 
+describe("WorkbenchIsland — dropped-collision coordinates reach the reviewer (v3-D193)", () => {
+  // `corpus-compiler/src/foilKernels.ts#admitAuthored` drops an authored
+  // distractor row that collides with its own target under the ENGINE's
+  // grading equivalence (NFC + tatweel strip) — e.g. a tatweel-only variant
+  // of the correct answer. `buildCorpus.ts` records every dropped coordinate
+  // on `meta.droppedCollisions`, a required field shipped to the browser
+  // verbatim since build-plan step 3, but the engine's own `Corpus` type
+  // never declared it, so no component could reach it even by accident.
+  beforeEach(() => {
+    resetApiFetchForTests();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const readyFrontier = () =>
+    new Response(
+      JSON.stringify({
+        frontier: { "1": { qari: "verified", admin: "verified" } },
+        verifications: [],
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+
+  it("shows the open ayah's own dropped-collision coordinate, from the real compiled fixture", async () => {
+    globalThis.fetch = vi.fn(async () => readyFrontier()) as unknown as typeof fetch;
+
+    render(<WorkbenchIsland surah={12} corpus={corpus} macro={macroFactsFor(corpus)} />);
+
+    const ayahInput = screen.getByRole("spinbutton", { name: /ayah/i }) as HTMLInputElement;
+    // Ayah 4 carries exactly one dropped-collision row in the frozen
+    // fixture (verified directly against it, not assumed):
+    // {ayah:4, position:1}.
+    fireEvent.change(ayahInput, { target: { value: "4" } });
+
+    const section = await screen.findByRole("region", { name: /dropped collisions/i });
+    expect(within(section).getByText("12:4:1")).toBeTruthy();
+    expect(section.textContent).toMatch(/collided with the target at compile/);
+  });
+
+  it("says so honestly when the open ayah has no recorded dropped collision", async () => {
+    globalThis.fetch = vi.fn(async () => readyFrontier()) as unknown as typeof fetch;
+
+    render(<WorkbenchIsland surah={12} corpus={corpus} macro={macroFactsFor(corpus)} />);
+
+    // Ayah 1 (the default selection) carries zero dropped-collision rows in
+    // the fixture — verified directly against it, not assumed.
+    const section = await screen.findByRole("region", { name: /dropped collisions/i });
+    expect(section.textContent).toMatch(/no dropped collisions recorded/i);
+  });
+});
+
 describe("the workbench route reads the corpus through loadEffectiveCorpus (SSR override gap)", () => {
   // WorkbenchIsland's `explain(corpus, spec)` traces a spec against whatever
   // corpus it is handed — so an admin previewing a site must see the

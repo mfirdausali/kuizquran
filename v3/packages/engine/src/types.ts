@@ -121,6 +121,18 @@ export interface Corpus {
      *  here, rather than silently padded"). Optional for the same reason
      *  as `distractorOrigin` above. */
     kernelYield?: Record<number, number>;
+    /** Coordinates of authored distractor rows dropped at compile because
+     *  they collided with their own target under the ENGINE's grading
+     *  equivalence (NFC + tatweel strip, `foilKernels.ts#admitAuthored`) —
+     *  e.g. a tatweel-only variant of the correct answer, which would have
+     *  produced a two-correct-answer option set. Computed and shipped on
+     *  every compiled corpus's own `meta.droppedCollisions` since
+     *  build-plan step 3 (`corpus-compiler/src/buildCorpus.ts`); a word
+     *  named here shipped with FEWER distractors than authored, which is
+     *  exactly the fact `kernelYield` above cannot distinguish from an
+     *  honestly-thin word. Optional for the same reason `distractorOrigin`
+     *  is: an older corpus subset predates the field. */
+    droppedCollisions?: LookAlikeWordRef[];
   };
   verses: CorpusVerse[];
   words: CorpusWord[];

@@ -44,6 +44,7 @@ import { OverrideEditor } from "./OverrideEditor";
 import { LookAlikesPanel } from "./LookAlikesPanel";
 import { MacroClassificationPanel } from "./MacroClassificationPanel";
 import { DistractorYieldPanel } from "./DistractorYieldPanel";
+import { DroppedCollisionsPanel } from "./DroppedCollisionsPanel";
 
 /** The lanes this picker can select. `rc` is absent BY DESIGN — WIREFRAME's
  *  DATA/CODE table keeps reconstruct.ts's state machine as CODE permanently,
@@ -221,6 +222,12 @@ export function WorkbenchIsland({ surah, corpus, macro }: WorkbenchIslandProps) 
       />
 
       <LookAlikesPanel ayah={ayah} lookalikes={corpus.lookalikes ?? []} />
+
+      <DroppedCollisionsPanel
+        surah={surah}
+        ayah={ayah}
+        droppedCollisions={corpus.meta.droppedCollisions ?? []}
+      />
 
       <ExplainTrace explanation={explanation} surah={surah} />
     </div>
