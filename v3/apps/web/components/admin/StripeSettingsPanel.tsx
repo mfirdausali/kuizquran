@@ -148,6 +148,7 @@ export function StripeSettingsPanel() {
                   <div className="caption">
                     <code>{f.env}</code>
                   </div>
+                  <div className="caption">Set via {f.setVia}.</div>
                 </td>
                 <td>
                   {!f.present

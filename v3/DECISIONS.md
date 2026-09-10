@@ -15576,3 +15576,84 @@ taxonomy drift (v3-D127); `packages/engine/src/placement.ts`
 `lib/plan/forecast.ts`'s `awayDays` (v3-D190); the spec/selection-engine
 subsystem's own lack of a learner-facing caller (v3-D190);
 `App\Models\AdminAudit::actor()` (v3-D191) — all unchanged.
+---
+
+## v3-D195 (2026-09-10) — `StripeField.setVia` reaches the console
+
+`StripeSettingsController::index()` computes a per-credential `setVia`
+string (`` $env.' in the API environment' ``, distinct for `STRIPE_KEY`/
+`STRIPE_SECRET`/`STRIPE_WEBHOOK_SECRET` since the controller shipped) and
+sends it on every `GET /api/admin/stripe` row; `StripeSettingsPanel.tsx`
+declared it as a *required* member of its own `StripeField` interface but
+never read `f.setVia` anywhere in the render — only `f.label`/`f.purpose`/
+`f.env`/`f.present`/`f.validPrefix`/`f.fingerprint` were printed. Same
+"fetched, typed, required, zero read surface" shape this build has closed
+~90+ times since v3-D82, here on the one field of this specific panel that
+would tell an operator, per row, exactly where a credential is set —
+material because this controller's own header explains a real env/DB
+split (secrets stay in the environment, `store()` refuses to persist them)
+that is documented only in source comments, never previously surfaced on
+screen.
+
+Fixed, display-only, no server/wire change: one new caption line under
+each row's existing `<code>{f.env}</code>` line — `Set via {f.setVia}.` —
+in the same `caption` convention this table already uses for `f.purpose`.
+
+RED confirmed directly: `git stash` of the one production file only (the
+new test kept, 4 pre-existing cases in `stripe-settings-panel.test.tsx`
+untouched) failed exactly the new case (`findByText` timed out on both
+expected substrings — the unfixed component renders no `setVia` text at
+all); restored byte-identically, 5/5 green. The test seeds two rows
+(`STRIPE_KEY`, `STRIPE_SECRET`) with two DIFFERENT `setVia` strings and
+asserts both render, so it cannot pass on a single hardcoded caption.
+
+`TZ=UTC make test`: **2650 passing** (was 2649, +1 — exactly this run's
+one new `it()` block; apps/web 1378, was 1377; no other suite moved: 255
+v2 vitest, 47 v2/api, 371 v3/api, 118 corpus-compiler, 420 engine, 61
+fold-runner). `check-test-floor.mjs`: OK, 2650 >= floor 1899 (+751
+margin, unmoved, same discipline as every prior entry). `TZ=UTC make
+build`: exit 0, 30 routes (unchanged — edit inside the existing
+`/settings/stripe` component, no new route). `npm run gates`: all green
+(boundaries 310 files, unchanged count — one existing production file
+edited plus its one existing test file, no new production file; fonts
+degraded-but-non-blocking, pre-existing; corpus-morphology 362 words /
+corpus-glyphs 206 codepoints, both unchanged — no new corpus data). `npx
+tsc --noEmit`, run separately across all four v3 node packages
+(`apps/web`, `packages/engine`, `packages/corpus-compiler`,
+`worker/fold-runner`): clean in all four.
+
+No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache
+diff produced by running the suite was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2` empty
+immediately before committing). No Arabic codepoint (both changed files
+swept programmatically over the Arabic, Arabic Supplement, Arabic
+Extended-A and both Presentation Forms Unicode blocks — zero matches;
+every new string is an env-var name, a fixed English caption, or a
+synthetic test fixture value, never corpus text).
+
+Found by a dedicated fresh-sweep agent handed the full exclusion list
+carried through v3-D192 and told not to re-report any of them, directed
+broadly at Console Commands/Middleware, Eloquent relations, `apps/web/lib`
+subdirectories, and exported functions with zero callers across the
+engine/corpus-compiler/fold-runner packages — running concurrently with
+two other sessions that landed v3-D193 (`CorpusMeta.droppedCollisions`)
+and v3-D194 (`AuthController` `hasHistory`); all three picked disjoint
+candidates in disjoint files and rebased cleanly onto each other in
+sequence. Its stronger secondary candidate — `ProbeResult.reason` on the
+same panel (fetched, typed, never read; only `probe.message` is
+rendered) — was deliberately left: `message` already covers the
+human-readable case for every branch, so the marginal value of also
+branching UI on the closed-set `reason` code is smaller and not clearly
+worth a second change in the same file the same night.
+
+Session start: `HEAD` and local `main` both already matched `origin/main`
+at `8d814db` (v3-D192) — no stale-local-main trap this run. Fresh
+container: `make setup` run from scratch (no `node_modules`/`vendor`
+anywhere). Rebased twice onto `origin/main` mid-run as two other
+concurrent sessions each landed their own commit (v3-D193, then
+v3-D194) — renumbered from a colliding first draft of "v3-D193" through
+"v3-D194" to v3-D195 before pushing; no file overlap with either.
+
+**NOT addressed, named so a future run doesn't re-discover it as new:**
+`ProbeResult.reason` (above); every item on v3-D194's own "NOT addressed"
+list, unchanged.

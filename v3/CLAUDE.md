@@ -53,9 +53,44 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2649 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2650 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 371 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1377 apps/web. (v3-D194, 2026-09-10)
+             # + 420 engine + 61 fold-runner + 1378 apps/web. (v3-D195, 2026-09-10)
+             # NOTE (v3-D195, 2026-09-10): `StripeField.setVia` — computed per
+             # credential by `StripeSettingsController::index()`
+             # (`$env.' in the API environment'`, distinct per field) and
+             # declared as a required member of the panel's own `StripeField`
+             # interface since the probe shipped — was never read anywhere in
+             # the render; only `f.label`/`f.purpose`/`f.env`/`f.present`/
+             # `f.validPrefix`/`f.fingerprint` were. Same "fetched, typed,
+             # required, zero read surface" shape this build has closed
+             # repeatedly elsewhere. Fixed with one new caption line per row,
+             # `Set via {f.setVia}.`, beneath the existing `<code>{f.env}</code>`
+             # line. RED confirmed directly: `git stash` of the one production
+             # file (the new test kept, 4 pre-existing cases untouched) failed
+             # exactly the new case; restored byte-identically, 5/5 green. The
+             # test seeds two rows with two DIFFERENT setVia strings, so it
+             # cannot pass on one hardcoded caption. `TZ=UTC make test`: 2650
+             # passing (was 2649, +1; apps/web 1378, was 1377). `check-test-
+             # floor.mjs`: OK, 2650 >= floor 1899 (+751 margin, unmoved).
+             # `TZ=UTC make build`: exit 0, 30 routes (unchanged). `npm run
+             # gates`: all green (boundaries 310 files, unchanged count — one
+             # existing production file edited plus its one existing test
+             # file). `npx tsc --noEmit`, run separately across all four v3
+             # node packages: clean in all four. No `v1/**`/`v2/**` edit. No
+             # Arabic codepoint (both changed files swept programmatically
+             # over every Arabic block plus both Presentation Forms blocks —
+             # zero matches; every new string is an env-var name or a fixed
+             # English caption, never corpus text). Found by a dedicated
+             # fresh-sweep agent handed the full exclusion list carried
+             # through v3-D192, running concurrently with two other sessions
+             # that landed v3-D193 (`CorpusMeta.droppedCollisions`) and
+             # v3-D194 (`AuthController` `hasHistory`) — all three picked
+             # disjoint candidates in disjoint files and rebased cleanly onto
+             # each other in sequence. Its stronger secondary candidate,
+             # `ProbeResult.reason` on the same panel, was left deliberately —
+             # `probe.message` already covers the human-readable case for
+             # every branch. See DECISIONS.md v3-D195.
              # NOTE (v3-D194, 2026-09-10): `AuthController::login()`/`me()` both
              # hardcoded `'hasHistory' => false` unconditionally, on a comment
              # blaming the events table not existing yet — a reason that expired

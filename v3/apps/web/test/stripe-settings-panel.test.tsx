@@ -152,3 +152,66 @@ describe("StripeSettingsPanel — warns when Stripe's own livemode disagrees wit
     expect(screen.queryByRole("alert")).toBeNull();
   });
 });
+
+// `StripeField.setVia` — computed per credential by
+// `StripeSettingsController::index()` (`$env.' in the API environment'`, a
+// distinct string per field since the controller shipped) and declared as a
+// required member of this component's own `StripeField` interface — was
+// never read anywhere in the render; only `f.label`/`f.purpose`/`f.env`/
+// `f.present`/`f.validPrefix`/`f.fingerprint` were. The same "fetched,
+// typed, required, zero read surface" shape this build has closed
+// repeatedly elsewhere, here on the one field that would tell an operator
+// exactly where each credential is set without them having to already know
+// this controller's own env/DB split (documented only in this file's and
+// the controller's own header comments, never on screen).
+describe("StripeSettingsPanel — each credential's own setVia reaches the console", () => {
+  const realFetch = globalThis.fetch;
+
+  beforeEach(() => resetApiFetchForTests());
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    vi.restoreAllMocks();
+  });
+
+  it("shows each field's own setVia string, not one shared placeholder", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          fields: [
+            {
+              env: "STRIPE_KEY",
+              label: "Publishable key",
+              purpose: "Sent to the browser to open Checkout. Safe to expose.",
+              present: true,
+              validPrefix: true,
+              fingerprint: "…abcd",
+              setVia: "STRIPE_KEY in the API environment",
+            },
+            {
+              env: "STRIPE_SECRET",
+              label: "Secret key",
+              purpose: "Server-side API calls. Never leaves the server.",
+              present: true,
+              validPrefix: true,
+              fingerprint: "…efgh",
+              setVia: "STRIPE_SECRET in the API environment",
+            },
+          ],
+          configured: true,
+          mode: "test",
+          mixedModes: false,
+          webhookUrl: "https://example.test/api/billing/stripe/webhook",
+          note: "",
+        }),
+        { status: 200 },
+      ),
+    ) as unknown as typeof fetch;
+
+    render(<StripeSettingsPanel />);
+
+    // Two DIFFERENT setVia strings on two DIFFERENT rows — cannot pass on a
+    // single hardcoded caption in the component.
+    await screen.findByText(/STRIPE_KEY in the API environment/);
+    await screen.findByText(/STRIPE_SECRET in the API environment/);
+  });
+});
