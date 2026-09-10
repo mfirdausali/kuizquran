@@ -15839,3 +15839,139 @@ subsystem's own lack of a learner-facing caller (v3-D190);
 `App\Models\AdminAudit::actor()` (v3-D191);
 `components/home/DeviceReset.tsx`'s disabled control (v3-D196) — all
 unchanged.
+
+### v3-D198 — the late-arrival refold, DEFECTS.md#E-07's sibling and v3-D32's other deferred half, closed (2026-09-10)
+
+Two consecutive nightly runs (v3-D196, v3-D197) swept the "computed/shipped,
+zero reader" wiring-gap class to exhaustion and both named the same list of
+what remained: architecturally larger items, human/calendar-gated content, or
+deliberate non-gaps. This run picked up the one item on that list that is
+neither human-gated nor a fraught product decision — DECISIONS.md's own
+recurring "NOT addressed" line, "the late-arrival refold half of v3-D32... no
+automatic refold-on-ingest pipeline exists yet — real, separate, larger
+scope" — and closed it.
+
+**The gap, verified directly, not assumed from the docblock.** `atom_cache`
+had exactly one writer anywhere in `v3/api`: `AtomCacheRebuilder::rebuild()`,
+called only from the admin's manual "rebuild atom cache" button
+(`SystemHealthController::rebuildAtomCache()`). `EventsController::store()` —
+the real ingestion path every sync cycle hits — inserted rows into `events`
+and returned, never touching `atom_cache` at all (`grep -n "atom_cache"
+app/Http/Controllers/EventsController.php` returned nothing before this fix).
+Concretely: a real learner's graded state went stale the moment they synced a
+new event and stayed stale until a human clicked rebuild. This silently
+defeated `DeterminismCheckCommand`'s own DB-sampling path — it re-folds a
+sampled learner's events fresh and byte-compares against `atom_cache`
+(`fold_determinism_check`'s whole reason to exist, DEFECTS.md/BUILD-PLAN §5);
+against a cache nothing kept current, every active learner would eventually
+read as a confirmed P1 divergence that is really just staleness, not a real
+invariant-#2 breach — the exact false-alarm risk BUILD-PLAN's own top-risks
+list (#6) warns would "train deafness before a real breach." It also left
+`/progress`/`/home`'s due-counts and the workbench frontier one admin click
+behind reality for any learner who had synced since the last rebuild.
+
+**Fixed by exposing existing, already-tested machinery, not writing a new
+code path.** `AtomCacheRebuilder::rebuildLocked()` already generalized over
+an arbitrary collection of user ids (`rebuild()`'s own body just happened to
+always pass "every user with events or a cache row"). `rebuild()` is now a
+thin wrapper over a new public `rebuildUsers(Collection $userIds)`, plus a
+`rebuildOne($userId)` convenience — no change to `rebuildLocked()`'s dead-
+letter quarantine (v3-D114/v3-D115), its per-user `PerUserFoldLock` (v3-D116),
+or its replace-never-merge semantics (WIREFRAME §16). `EventsController
+::store()` calls `rebuildOne($userId)` after any batch that actually writes
+new rows (`$accepted > 0` — an idempotent replay needs no refold, its state
+is already current), wrapped in try/catch: `events` is the append-only source
+of truth (invariant #2), `atom_cache` is a derived cache, and a refold
+failure (a crashed/unreachable fold-runner subprocess) must never reject or
+roll back an already-accepted event — only logged, so the log stays durable
+and the next admin rebuild or nightly check catches the cache up.
+
+**Synchronous, not queued — matching v3-D81/v3-D85's own established
+reasoning, not a new architectural choice.** `CorpusHashRecomputer`
+(`OverridesController::store()`) and `AtomCacheRebuilder`
+(`SystemHealthController::rebuildAtomCache()`) already both run their Node
+fold-runner subprocess call inline, in the request, because this deployment
+has no queue worker — a dispatched `ShouldQueue` job would silently do
+nothing forever, reproducing the exact "aspirational comment, no real effect"
+defect v3-D85 already fixed once. This is the third caller of that same
+established pattern, not a fourth architecture.
+
+**RED confirmed directly.** The new test file
+(`v3/api/tests/Feature/Events/EventsAtomCacheRefoldTest.php`, 4 cases) was run
+against the tree with `AtomCacheRebuilder.php`/`EventsController.php`
+reverted via `git stash` (the new test file itself kept, untouched): 3 of 4
+failed exactly as predicted — the positive case on `assertNotNull($row)`
+(`Failed asserting that null is not null`), the second-batch case on reading
+`reps` off a still-null row, the failure-durability case on the `Log::error`
+spy never having been called (nothing yet caught anything to log) — while the
+fourth, the idempotent-replay case, passed vacuously (it never depended on
+the fix, which is correct: a duplicate resubmission needs no refold either
+way). Restored (`git stash pop`), reran: 4/4 green. The load-bearing positive
+case drives a REAL `rung_complete` event through the REAL engine (the fold-
+runner subprocess, v3-D08 — PHP never folds) and asserts `reps=1` and
+`strength>0` on the resulting row, not merely that some row exists; a second
+case posts a SECOND graded event and asserts `reps` moves from 1 to 2,
+proving each ingest genuinely re-runs the whole-log fold rather than caching
+the first request's own result forever (replace-never-merge, WIREFRAME §16,
+carried down from `rebuild()`).
+
+**Full-suite verification, not just the new file.** `php artisan test`
+(v3/api, after `make compile-corpus` — the three `OverrideHashRecomputeTest`
+cases that need the real compiled artifact are otherwise the only failures,
+unrelated to this change and expected per v3-D77/v3-D82's own documented
+`compile-corpus`-before-tests dependency): **375 passing** (was 371, +4 —
+exactly this run's new tests; 2 incomplete by design, PAY-1, unchanged; 6
+skipped, unchanged). No other v3/api test file's count moved — in particular
+every existing test that posts to `/api/events` (`EventsIngestionTest`,
+`EventsPullTest`, `TokenRevocationTest`, `PaywallBoundaryTest`) still passes
+unchanged, proving the new synchronous refold is silent to every caller that
+does not inspect `atom_cache`. `TZ=UTC make test` (full monorepo, all seven
+suites): **2654 passing** (was 2650, +4; v3/api 375, was 371; no other suite
+moved — 255 v2 vitest, 47 v2/api, 118 corpus-compiler, 420 engine, 61
+fold-runner, 1378 apps/web, all unchanged). `check-test-floor.mjs`: OK, 2654
+>= floor 1899 (+755 margin, unmoved, same discipline as every prior entry).
+`TZ=UTC make build`: exit 0, 30 routes (unchanged — a backend-only fix, no
+apps/web file touched). `npm run gates`: all green (boundaries 310 files,
+unchanged count — no new apps/web production file; fonts degraded-but-
+non-blocking, pre-existing; corpus-morphology 362 words / corpus-glyphs 206
+codepoints, both unchanged). `./vendor/bin/pint --test` on both changed PHP
+files plus the new test file: `{"tool":"pint","result":"passed"}`. No
+`v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+reverted before committing, same discipline as every prior entry — `git
+status --porcelain -- v1 v2` empty immediately before committing). No Arabic
+codepoint (both changed files plus the new test file swept programmatically,
+in Python, over the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks — zero matches; every new string is a PHP
+identifier, a fixture coordinate integer, or a fixed English log message,
+never corpus text).
+
+Session start: fresh container, `make setup` run from scratch (no
+`node_modules`/`vendor` anywhere); `HEAD` and local `main` both matched
+`origin/main` at `6402a3c` (v3-D197) — no stale-local-main trap this run.
+
+**NOT addressed, named so a future run doesn't re-discover them as new:**
+`DeterminismCheckCommand`'s DB-sampling path still has never been run against
+a real production database with real traffic — this fix makes `atom_cache`
+worth comparing against, it does not itself stand up a staging host or feed
+it real learner traffic (C5/gate 20, unchanged, still infra+calendar); a
+refold that fails is only logged at `error` level, with no operator-facing
+surface (the existing `SystemHealthController` admin panel remains the way a
+human notices and re-runs a full rebuild by hand — building a dead-letter
+queue or alert specifically for a failed per-request refold is a smaller,
+separate follow-up, not done here); every item on v3-D197's own "NOT
+addressed" list, unchanged — `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148); `lib/pricing.ts
+#regionFromCountry()` (v3-D163); `PaywallGate` as a whole class /
+`permitsIssuance`/`permitsReview` (v3-D88, v3-D151); multi-surah enrollment;
+the operational mailer/7-night window; PAY-1's Stripe fixtures; surah 67's
+scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123);
+`AccountDeletionRequest::isDue()` (v3-D146); the `AdminRole::OPERATOR`/
+`MODERATOR` gating question (v3-D185); `MacroFacts.litany.rhymeLabel`
+(v3-D188); `lib/idb/writeLock.ts#useWriterStatus()` (v3-D190);
+`lib/plan/forecast.ts`'s `awayDays` (v3-D190); the spec/selection-engine
+subsystem's own lack of a learner-facing caller (v3-D190);
+`App\Models\AdminAudit::actor()` (v3-D191); `App\Flags\FlagService::enabled()`
+(v3-D197); `components/home/DeviceReset.tsx`'s disabled control (v3-D196) —
+all unchanged.

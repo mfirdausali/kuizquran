@@ -68,6 +68,23 @@ use Illuminate\Support\Facades\DB;
  * learners' `atom_cache` rows mid-rebuild. See that class's header for why
  * the lock is session-level (spans the external process call) rather than
  * transaction-scoped, and for the no-op-on-sqlite behavior in dev/test.
+ *
+ * ── `rebuildUsers()`/`rebuildOne()`: THE LATE-ARRIVAL REFOLD, v3-D32's OTHER
+ *    DEFERRED HALF ──
+ * `rebuild()` (above) is the admin's whole-database action. `EventsController
+ * ::store()` calls `rebuildOne()` for exactly the ingesting learner after a
+ * batch that actually wrote new rows — this build had NO automatic
+ * refold-on-ingest pipeline at all until this method existed: `atom_cache`
+ * was populated only by this class's admin-triggered `rebuild()`, so a real
+ * learner's cache went stale the moment they synced a new event and stayed
+ * stale until an admin clicked "rebuild atom cache" by hand. That silently
+ * defeated `DeterminismCheckCommand`'s DB-sampling path (it compares a fresh
+ * fold against `atom_cache` — a cache nothing kept current would read as a
+ * confirmed P1 divergence for every active learner, not a real invariant
+ * breach) and left `/progress`/`/home`'s own due-counts one full admin click
+ * behind reality for a returning learner. `rebuildLocked()` below already
+ * generalizes over an arbitrary user-id collection, so this is a thin public
+ * entry point onto existing, already-tested machinery — not a new code path.
  */
 class AtomCacheRebuilder
 {
@@ -79,6 +96,21 @@ class AtomCacheRebuilder
             ->unique()
             ->values();
 
+        return $this->rebuildUsers($userIds);
+    }
+
+    /** @param  Collection<int,mixed>  $userIds */
+    public function rebuildOne(mixed $userId): array
+    {
+        return $this->rebuildUsers(collect([$userId]));
+    }
+
+    /**
+     * @param  Collection<int,mixed>  $userIds
+     * @return array{usersProcessed:int, atomsWritten:int, deadLetters:list<array{userId:mixed,error:string}>}
+     */
+    public function rebuildUsers(Collection $userIds): array
+    {
         if ($userIds->isEmpty()) {
             // Genuinely nothing to rebuild — not an error (edge case #167's
             // "the failure path returns null, not zero" is about UNKNOWN vs

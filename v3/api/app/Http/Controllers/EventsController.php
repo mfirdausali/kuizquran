@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Event;
+use App\Support\AtomCacheRebuilder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -13,6 +14,18 @@ use Illuminate\Support\Facades\Log;
  * never resolves a rung, never re-implements engine logic. `user_id` NEVER
  * comes from the request body, only from the Sanctum-authenticated caller
  * (v2-D18's contract, carried forward).
+ *
+ * ── LATE-ARRIVAL REFOLD, v3-D32's OTHER DEFERRED HALF ──
+ * After a batch that actually writes new event rows, this refolds exactly
+ * the ingesting learner's `atom_cache` via `AtomCacheRebuilder::rebuildOne()`
+ * — synchronously, matching v3-D81's `CorpusHashRecomputer` and v3-D85's
+ * `AtomCacheRebuilder` precedent: this deployment runs no queue worker, so a
+ * dispatched job would silently do nothing forever, same as the defect those
+ * two entries already fixed. `events` is the append-only source of truth
+ * (invariant #2); `atom_cache` is a derived cache. A refold failure (a
+ * crashed fold-runner subprocess, a transient error) must therefore never
+ * reject or roll back an already-accepted event — the log stays durable and
+ * the next admin rebuild or nightly check catches the cache up. Only logged.
  */
 class EventsController extends Controller
 {
@@ -94,6 +107,17 @@ class EventsController extends Controller
         }
 
         $accepted = Event::insertOrIgnore($rows);
+
+        if ($accepted > 0) {
+            try {
+                app(AtomCacheRebuilder::class)->rebuildOne($userId);
+            } catch (\Throwable $e) {
+                Log::error('atom cache refold after ingest failed — event log is durable, cache will catch up at the next admin rebuild or nightly check', [
+                    'user_id' => $userId,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
 
         return response()->json([
             'accepted' => $accepted,

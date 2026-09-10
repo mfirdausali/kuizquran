@@ -53,9 +53,74 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2650 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 371 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1378 apps/web. (v3-D195, 2026-09-10)
+make test    # 2654 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 375 v3/api + 118 corpus-compiler
+             # + 420 engine + 61 fold-runner + 1378 apps/web. (v3-D198, 2026-09-10)
+             # NOTE (v3-D198, 2026-09-10): the late-arrival refold — v3-D32's
+             # other deferred half, and the one item on v3-D196/D197's own
+             # repeated "NOT addressed" list that was neither human/calendar-
+             # gated nor a fraught product decision. `atom_cache` had exactly
+             # one writer anywhere: the admin's manual "rebuild atom cache"
+             # button. `EventsController::store()` — the real sync-cycle
+             # ingestion path — wrote to `events` and never touched
+             # `atom_cache` at all, so a real learner's cache went stale the
+             # instant they synced a new event and stayed stale until a human
+             # clicked rebuild. This silently defeated
+             # `DeterminismCheckCommand`'s DB-sampling path (it byte-compares
+             # a fresh fold against `atom_cache` — a cache nothing kept
+             # current would eventually read every active learner as a
+             # confirmed P1, the exact false-alarm/deafness risk BUILD-PLAN's
+             # own top-risk #6 names) and left `/progress`/`/home`/the
+             # workbench frontier one admin click behind reality. Fixed by
+             # exposing existing, already-tested machinery rather than a new
+             # code path: `AtomCacheRebuilder::rebuild()` is now a thin
+             # wrapper over a new public `rebuildUsers()`/`rebuildOne()`, and
+             # `EventsController::store()` calls `rebuildOne($userId)` after
+             # any batch that writes new rows — synchronously, matching
+             # v3-D81/v3-D85's own established "no queue worker on this
+             # deployment" reasoning, not a new architectural choice — wrapped
+             # in try/catch so a refold failure (events is truth, atom_cache
+             # is a derived cache) never rejects or rolls back an
+             # already-accepted event, only logs. RED confirmed directly:
+             # `git stash` of the two production files (the new 4-case test
+             # file kept) failed 3 of 4 exactly as predicted (the positive
+             # case, the second-batch-advances case, the failure-durability
+             # case; the idempotent-replay case passed vacuously, correctly —
+             # it never depended on the fix); restored byte-identically, 4/4
+             # green. The load-bearing case drives a real `rung_complete`
+             # event through the real engine (the fold-runner subprocess,
+             # v3-D08) and asserts `reps=1`/`strength>0` on the resulting row,
+             # not merely that some row exists; a second case posts a SECOND
+             # graded event and asserts `reps` moves 1→2, proving each ingest
+             # re-runs the whole-log fold rather than caching the first
+             # request's result forever. `php artisan test` (v3/api, after
+             # `make compile-corpus`): 375 passing (was 371, +4; 2 incomplete
+             # by design/PAY-1 and 6 skipped, both unchanged) — every
+             # pre-existing test that posts to `/api/events`
+             # (`EventsIngestionTest`, `EventsPullTest`,
+             # `TokenRevocationTest`, `PaywallBoundaryTest`) still passes
+             # unchanged. `TZ=UTC make test`: 2654 passing (was 2650, +4; no
+             # other suite moved). `check-test-floor.mjs`: OK, 2654 >= floor
+             # 1899 (+755 margin, unmoved). `TZ=UTC make build`: exit 0, 30
+             # routes (unchanged — backend-only fix, no apps/web file
+             # touched). `npm run gates`: all green (boundaries 310 files,
+             # unchanged count; fonts degraded-but-non-blocking,
+             # pre-existing; corpus-morphology/corpus-glyphs unchanged).
+             # `./vendor/bin/pint --test`: passed. No `v1/**`/`v2/**` edit (a
+             # stray `v2/tsconfig.tsbuildinfo` build-cache diff reverted
+             # before committing, same discipline as every prior entry). No
+             # Arabic codepoint (both changed PHP files plus the new test
+             # file swept programmatically, in Python, over the Arabic,
+             # Arabic Supplement, Arabic Extended-A and both Presentation
+             # Forms Unicode blocks — zero matches; every new string is a PHP
+             # identifier, a fixture coordinate integer, or a fixed English
+             # log message, never corpus text). NOT addressed: this fix makes
+             # `atom_cache` worth comparing against but does not itself stand
+             # up a staging host or feed it real traffic (C5/gate 20,
+             # unchanged); a per-request refold failure is only logged, with
+             # no dedicated operator-facing alert (the existing admin health
+             # panel remains the human fallback); every item on v3-D197's own
+             # "NOT addressed" list, unchanged. See DECISIONS.md v3-D198.
              # NOTE (v3-D197, 2026-09-10): second consecutive empty sweep — after
              # v3-D196, a fresh pass over `lib/session/run.ts` (28 exports),
              # `components/quiz/*`/`macro/*`/`progress/*`/`onboarding/*`
