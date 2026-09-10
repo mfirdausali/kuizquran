@@ -58,6 +58,46 @@ describe("AccountAuthPanel", () => {
     expect(screen.queryByRole("button", { name: /create an account/i })).toBeNull();
   });
 
+  /**
+   * `AuthController::me()`'s `hasHistory` used to be a permanent `false`
+   * stub — real, but never a genuine read of `events`. This proves the
+   * PANEL actually renders the true case, not merely that `checkAccountSession`
+   * parses it (already proven in `lib/account/auth.test.ts`).
+   */
+  it("a named account WITH prior history: says so", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse({
+        signedIn: true,
+        email: "learner@example.com",
+        isAnonymous: false,
+        emailVerified: true,
+        hasHistory: true,
+      }),
+    ) as unknown as typeof fetch;
+
+    render(<AccountAuthPanel />);
+
+    await waitFor(() => expect(screen.getByText(/learner@example\.com/)).toBeTruthy());
+    expect(screen.getByText(/existing history/i)).toBeTruthy();
+  });
+
+  it("a named account with NO history yet: never fabricates the history line", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse({
+        signedIn: true,
+        email: "learner@example.com",
+        isAnonymous: false,
+        emailVerified: true,
+        hasHistory: false,
+      }),
+    ) as unknown as typeof fetch;
+
+    render(<AccountAuthPanel />);
+
+    await waitFor(() => expect(screen.getByText(/learner@example\.com/)).toBeTruthy());
+    expect(screen.queryByText(/existing history/i)).toBeNull();
+  });
+
   it("a named, UNVERIFIED account: offers to resend the verification email", async () => {
     globalThis.fetch = vi.fn(async () =>
       jsonResponse({ signedIn: true, email: "learner@example.com", isAnonymous: false, emailVerified: false }),

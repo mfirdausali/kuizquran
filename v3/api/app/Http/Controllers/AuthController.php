@@ -107,10 +107,13 @@ class AuthController extends Controller
             'token' => $token,
             'isAnonymous' => (bool) $user->is_anonymous,
             'anchorHour' => $user->anchor_hour,
-            // Events table lands at build-plan step 14 (ingestion) — this
-            // controller predates it, so hasHistory is honestly false for
-            // every user until then, never a guess.
-            'hasHistory' => false,
+            // A real read of `events`, not the permanent stub this used to
+            // be (see this controller's class docblock). This is the exact
+            // moment `login()`'s own signature warns about — signing THIS
+            // device into a DIFFERENT identity — so it is the one place a
+            // learner most needs to know whether the account has anything
+            // in it at all before their device's view is replaced.
+            'hasHistory' => $user->events()->exists(),
         ]);
     }
 
@@ -135,10 +138,9 @@ class AuthController extends Controller
             'signedIn' => true,
             'email' => $user->email,
             'anchorHour' => $user->anchor_hour,
-            // Events table lands at build-plan step 14 (ingestion) — this
-            // controller predates it, so hasHistory is honestly false for
-            // every user until then, never a guess.
-            'hasHistory' => false,
+            // See login()'s own comment: a real read of `events`, not the
+            // permanent `false` stub this used to be.
+            'hasHistory' => $user->events()->exists(),
             'isAnonymous' => (bool) $user->is_anonymous,
             'emailVerified' => $user->hasVerifiedEmail(),
         ]);

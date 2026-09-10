@@ -58,7 +58,14 @@ export function AccountAuthPanel() {
   }
 
   if (!session.identity.isAnonymous) {
-    return <NamedAccountView email={session.identity.email} emailVerified={session.identity.emailVerified} onSignedOut={refresh} />;
+    return (
+      <NamedAccountView
+        email={session.identity.email}
+        emailVerified={session.identity.emailVerified}
+        hasHistory={session.identity.hasHistory}
+        onSignedOut={refresh}
+      />
+    );
   }
 
   return <AnonymousAccountView onSucceeded={refresh} />;
@@ -67,10 +74,12 @@ export function AccountAuthPanel() {
 function NamedAccountView({
   email,
   emailVerified,
+  hasHistory,
   onSignedOut,
 }: {
   email: string | null;
   emailVerified: boolean;
+  hasHistory: boolean;
   onSignedOut: () => void;
 }) {
   const [resendState, setResendState] = useState<"idle" | "sending" | "sent" | "error">("idle");
@@ -98,6 +107,9 @@ function NamedAccountView({
       <p className="caption">
         Signed in as <span className="ltr-island">{email}</span>.
       </p>
+      {hasHistory ? (
+        <p className="caption">This account has existing history from a previous session.</p>
+      ) : null}
       {emailVerified ? (
         <p className="caption">Email verified.</p>
       ) : (

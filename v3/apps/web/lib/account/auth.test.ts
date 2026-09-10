@@ -49,17 +49,63 @@ describe("checkAccountSession", () => {
   it("returns `ready` with an anonymous identity for a fresh device", async () => {
     setToken("some-token", "some-token");
     globalThis.fetch = vi.fn(async () =>
-      jsonResponse({ signedIn: true, email: null, isAnonymous: true, emailVerified: false }),
+      jsonResponse({ signedIn: true, email: null, isAnonymous: true, emailVerified: false, hasHistory: false }),
     ) as unknown as typeof fetch;
 
     const result = await checkAccountSession();
     expect(result).toEqual({
       state: "ready",
-      identity: { email: null, isAnonymous: true, emailVerified: false },
+      identity: { email: null, isAnonymous: true, emailVerified: false, hasHistory: false },
     });
   });
 
   it("returns `ready` with a named, verified identity", async () => {
+    setToken("some-token", "some-token");
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse({
+        signedIn: true,
+        email: "learner@example.com",
+        isAnonymous: false,
+        emailVerified: true,
+        hasHistory: false,
+      }),
+    ) as unknown as typeof fetch;
+
+    const result = await checkAccountSession();
+    expect(result).toEqual({
+      state: "ready",
+      identity: { email: "learner@example.com", isAnonymous: false, emailVerified: true, hasHistory: false },
+    });
+  });
+
+  /**
+   * `AuthController::me()`'s `hasHistory` used to be hardcoded `false`
+   * unconditionally (a stale placeholder, fixed server-side). This proves
+   * the CLIENT actually carries a real `true` through — `AccountIdentity`
+   * declaring the field is not enough on its own, the same "declared,
+   * never actually read into the value the component renders" shape this
+   * codebase has caught repeatedly on other wire fields.
+   */
+  it("carries a real hasHistory:true through to the identity", async () => {
+    setToken("some-token", "some-token");
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse({
+        signedIn: true,
+        email: "learner@example.com",
+        isAnonymous: false,
+        emailVerified: true,
+        hasHistory: true,
+      }),
+    ) as unknown as typeof fetch;
+
+    const result = await checkAccountSession();
+    expect(result).toEqual({
+      state: "ready",
+      identity: { email: "learner@example.com", isAnonymous: false, emailVerified: true, hasHistory: true },
+    });
+  });
+
+  it("degrades a missing/malformed hasHistory to false, never a crash", async () => {
     setToken("some-token", "some-token");
     globalThis.fetch = vi.fn(async () =>
       jsonResponse({ signedIn: true, email: "learner@example.com", isAnonymous: false, emailVerified: true }),
@@ -68,7 +114,7 @@ describe("checkAccountSession", () => {
     const result = await checkAccountSession();
     expect(result).toEqual({
       state: "ready",
-      identity: { email: "learner@example.com", isAnonymous: false, emailVerified: true },
+      identity: { email: "learner@example.com", isAnonymous: false, emailVerified: true, hasHistory: false },
     });
   });
 

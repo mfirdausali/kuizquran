@@ -53,9 +53,60 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2641 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 367 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1373 apps/web. (v3-D193, 2026-09-10)
+make test    # 2649 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 371 v3/api + 118 corpus-compiler
+             # + 420 engine + 61 fold-runner + 1377 apps/web. (v3-D194, 2026-09-10)
+             # NOTE (v3-D194, 2026-09-10): `AuthController::login()`/`me()` both
+             # hardcoded `'hasHistory' => false` unconditionally, on a comment
+             # blaming the events table not existing yet — a reason that expired
+             # dozens of nights ago (events landed at build-plan step 14). Unlike
+             # this build's usual "computed and shipped, never read" shape, the
+             # SERVER itself never computed a real value at all —
+             # `AccountIdentity` (the type `AccountAuthPanel.tsx` actually
+             # renders from) never even parsed `hasHistory`. Matters exactly at
+             # the moment `login()`'s own docblock warns about: switching this
+             # device to a different account "replaces what this device shows,
+             # it does not merge it" — a learner had no way to know beforehand
+             # whether that account held any history at all. Fixed: both
+             # endpoints now compute `$user->events()->exists()`, a real
+             # per-account read of the already-declared `events()` relation;
+             # `AccountIdentity` gains a required `hasHistory: boolean`
+             # (degrade-to-false on anything but a literal `true`, same
+             # discipline as `emailVerified`); `AccountAuthPanel.tsx` renders
+             # "This account has existing history from a previous session." only
+             # when true. RED confirmed at both layers independently, each
+             # reverted and restored byte-identically: backend — 2 of 4 new
+             # PHPUnit cases failed genuinely (the two `false` cases pass
+             # vacuously against the stub, as expected — not the load-bearing
+             # half); restored, 12/12 green (was 8). Frontend — 5 of 32 failed
+             # (missing key, degrade case, both component cases); restored,
+             # 32/32 green (was 28). `TZ=UTC make test`: 2649 passing (was 2641,
+             # +8: 4 PHPUnit + 2 + 2 vitest; v3/api 371, was 367; apps/web 1377,
+             # was 1373). `check-test-floor.mjs`: OK, 2649 >= floor 1899 (+750
+             # margin, unmoved). `TZ=UTC make build`: exit 0, 30 routes
+             # (unchanged). `npm run gates`: all green (boundaries 310 files,
+             # unchanged count — no new production file, three existing files
+             # edited). `npx tsc --noEmit`: clean. No `v1/**`/`v2/**` edit (stray
+             # `v2/tsconfig.tsbuildinfo` reverted before committing). No Arabic
+             # codepoint (full diff swept programmatically over every Arabic
+             # block plus both Presentation Forms blocks — zero matches; every
+             # new string is a wire field name, a fixed English sentence, or a
+             # synthetic test placeholder, never corpus text). Found by a
+             # dedicated fresh-sweep agent told the entire `Corpus`/
+             # `CorpusMeta`/`CorpusWord`/`CorpusDistractor` type family was now
+             # exhausted (five prior runs) and directed instead at Laravel model
+             # relations/fields and several `apps/web/lib` subdirectories.
+             # Several real candidates checked and rejected as false positives
+             # or already-excluded: `lib/library/rows.ts`'s `STATUS_*`
+             # constants (feed a rendered `status` field); `lib/admin
+             # /contentFreeze.ts`'s `allMet` (deliberately redundant with the
+             # server's own `bookable` field); `lib/workbench/explain.ts`'s
+             # `optionCount`/`rejectedBy` (feed a rendered `note` string); the
+             # engine's `CorpusVerse.line` (declared but never populated by the
+             # compiler at all — a dead field, a different shape from the
+             # target bug class); `CorpusWord.act`/`.sceneImage` (consumed only
+             # by the already-deferred `placement.ts`). See DECISIONS.md
+             # v3-D194.
              # NOTE (v3-D193, 2026-09-10): `CorpusMeta.droppedCollisions` — the
              # compiler's own audit trail of authored distractor rows dropped at
              # compile because they collided with their own target under the

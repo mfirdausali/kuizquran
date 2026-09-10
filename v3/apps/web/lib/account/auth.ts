@@ -51,6 +51,11 @@ export interface AccountIdentity {
   email: string | null;
   isAnonymous: boolean;
   emailVerified: boolean;
+  /** `AuthController::me()`'s own real read of `events` — was hardcoded
+   *  `false` unconditionally until it was fixed to actually check. A
+   *  missing/non-boolean value degrades to `false`, never a guess, same
+   *  discipline as `emailVerified` below. */
+  hasHistory: boolean;
 }
 
 export type AccountSession =
@@ -95,6 +100,7 @@ export async function checkAccountSession(): Promise<AccountSession> {
       email: typeof b.email === "string" ? b.email : null,
       isAnonymous: b.isAnonymous,
       emailVerified: b.emailVerified === true,
+      hasHistory: b.hasHistory === true,
     },
   };
 }

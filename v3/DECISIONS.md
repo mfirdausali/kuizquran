@@ -15465,3 +15465,114 @@ taxonomy drift (v3-D127); `packages/engine/src/placement.ts`
 `lib/plan/forecast.ts`'s `awayDays` (v3-D190); the spec/selection-engine
 subsystem's own lack of a learner-facing caller (v3-D190);
 `App\Models\AdminAudit::actor()` (v3-D191) — all unchanged.
+
+### v3-D194 — `AuthController::login()`/`me()`'s own `hasHistory` field was hardcoded `false` on a stale comment, silently for dozens of nights after the reason expired (2026-09-10)
+
+**Finding.** `login()`/`me()` both returned `'hasHistory' => false`
+unconditionally, with a comment blaming a dependency that no longer
+existed: "events table lands at build-plan step 14 (ingestion) — this
+controller predates it, so hasHistory is honestly false for every user
+until then, never a guess." The events table has existed and been read
+by dozens of other controllers since step 14 landed, many nights before
+this fix — the comment's own justification expired long ago and nothing
+ever revisited it. `hasHistory` was declared on the client's
+`AnonymousIdentity` type (`lib/sync/apiFetch.ts`) but `lib/account
+/auth.ts`'s `AccountIdentity` — the type `AccountAuthPanel.tsx` actually
+renders from — never even parsed the field; `grep -rn "hasHistory"
+apps/web` before this fix returned only type declarations and test
+fixtures, never a rendered value.
+
+This is materially different from this build's usual "computed, shipped,
+never read" shape: here the SERVER itself never computed a real value at
+all, so the bug was live on both sides at once. It matters concretely at
+the exact moment `login()`'s own docblock warns about: signing this
+device into a different account "does not touch the caller's prior
+identity... any not-yet-synced local events simply sync under whichever
+account is signed in" — `SignInForm`'s own UI copy repeats the warning
+that switching accounts "replaces what this device shows, it does not
+merge it" — but a learner had no way to know, before committing to that
+switch, whether the account they were switching into held any history at
+all versus being genuinely empty.
+
+**Fixed:** `login()`/`me()` now compute `'hasHistory' =>
+$user->events()->exists()` — a real per-account read of the already-
+declared `User::events()` relation, replacing the permanent stub;
+`AccountIdentity` gains a required `hasHistory: boolean`, parsed with the
+same `=== true` degrade-to-false discipline `emailVerified` already
+uses; `AccountAuthPanel.tsx`'s `NamedAccountView` renders "This account
+has existing history from a previous session." only when true, never a
+fabricated claim for an account genuinely empty.
+
+**Verified.** RED confirmed at both layers, independently, each reverted
+and restored byte-identically: backend (`AuthController.php` alone
+reverted, both new PHPUnit cases per endpoint kept) — the two
+prior-events cases failed genuinely (`'hasHistory' => false` where `true`
+was expected), the two no-events cases passed vacuously against the
+stub (both stub and real logic agree on `false` for an empty account —
+expected, and not the load-bearing half of the proof); restored, 12/12
+green (was 8). Frontend (`auth.ts`/`AccountAuthPanel.tsx` reverted, all
+new/strengthened tests kept) — 5 of 32 failed: the parser round-trip
+case (missing key), the degrade-to-false case, and both component
+cases (`getByText(/existing history/i)` found nothing); restored,
+32/32 green (was 28).
+
+`TZ=UTC make test`: **2649 passing** (was 2641, +8 — exactly this run's
+new tests: 4 PHPUnit + 2 + 2 vitest; v3/api 371, was 367; apps/web 1377,
+was 1373; no other suite moved: 255 v2 vitest, 47 v2/api, 118
+corpus-compiler, 420 engine, 61 fold-runner). `check-test-floor.mjs`: OK,
+2649 >= floor 1899 (+750 margin, unmoved, same discipline as every prior
+entry). `TZ=UTC make build`: exit 0, 30 routes (unchanged — no new route,
+edits inside the existing `/settings` account panel and its backend
+controller). `npm run gates`: all green (boundaries 310 files, unchanged
+count — no new production file, three existing files edited plus their
+three existing test files; fonts degraded-but-non-blocking, pre-existing;
+corpus-morphology 362 words / corpus-glyphs 206 codepoints, both
+unchanged — no corpus data touched). `npx tsc --noEmit`: clean.
+
+No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache
+diff produced by running the suite was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2`
+empty immediately before committing). No Arabic codepoint (the full diff
+swept programmatically, in Python, over the Arabic, Arabic Supplement,
+Arabic Extended-A and both Presentation Forms Unicode blocks — zero
+matches; every new string is a wire field name, a fixed English sentence,
+or a synthetic email/password test placeholder, never corpus text).
+
+Found by a dedicated fresh-sweep agent handed the full exclusion list
+carried through v3-D193 and explicitly told the entire `Corpus`/
+`CorpusMeta`/`CorpusWord`/`CorpusDistractor` type family was now
+exhausted (five prior runs, v3-D181/D187/D191/D192/D193) — directed
+instead at Laravel model relations/fields, `worker/fold-runner/src`
+exported functions, and several `apps/web/lib` subdirectories not
+recently named. Several real candidates were checked and rejected as
+false positives or already-excluded: `lib/library/rows.ts`'s `STATUS_*`
+constants (feed an internally-computed `status` field that IS rendered);
+`lib/admin/contentFreeze.ts`'s `allMet` (the server deliberately sets
+`bookable = allMet` explicitly — genuinely redundant by design, not
+withheld information); `lib/workbench/explain.ts`'s `optionCount`/
+`rejectedBy` (feed a `note` string that IS rendered); the engine's
+`CorpusVerse.line` field (declared on the wire type but the compiler
+never populates it at all — a dead, never-produced field, a different
+shape from the target bug class entirely, not "shipped but unread");
+`CorpusWord.act`/`.sceneImage` (real, but consumed only by
+`placement.ts`, already an excluded/deferred module, v3-D111/D113/D123).
+
+Session start: `HEAD` and local `main` both already matched `origin/main`
+at `c81587c` (v3-D193) — no stale-local-main trap this run.
+
+**NOT addressed, named so a future run doesn't re-discover them as new:**
+every item on v3-D193's own "NOT addressed" list, unchanged —
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class / `permitsIssuance`/`permitsReview` (v3-D88, v3-D151); multi-surah
+enrollment; the operational mailer/7-night window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy drift (v3-D127); `packages/engine/src/placement.ts`
+(v3-D111/D113/D123); the late-arrival refold half of v3-D32;
+`AccountDeletionRequest::isDue()` (v3-D146); the `AdminRole::OPERATOR`/
+`MODERATOR` gating question (v3-D185); `MacroFacts.litany.rhymeLabel`
+(v3-D188); `lib/idb/writeLock.ts#useWriterStatus()` (v3-D190);
+`lib/plan/forecast.ts`'s `awayDays` (v3-D190); the spec/selection-engine
+subsystem's own lack of a learner-facing caller (v3-D190);
+`App\Models\AdminAudit::actor()` (v3-D191) — all unchanged.
