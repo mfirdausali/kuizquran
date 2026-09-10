@@ -53,9 +53,52 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2636 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2639 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 367 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1368 apps/web. (v3-D191, 2026-09-10)
+             # + 420 engine + 61 fold-runner + 1371 apps/web. (v3-D192, 2026-09-10)
+             # NOTE (v3-D192, 2026-09-10): `CorpusMeta.distractorOrigin`/
+             # `.kernelYield` — the compiler's own authored-vs-kernel row split
+             # and its per-word foil-yield histogram, required fields computed on
+             # every compile since build-plan step 3 and shipped to the browser
+             # verbatim (`stage-corpus.mjs#slim()` passes `meta` through
+             # wholesale) — were never declared on the engine's own `Corpus`
+             # type, so nothing could read either even by accident. Same
+             # "shipped, never declared on the consuming type" shape as
+             # `Corpus.lookalikes` (v3-D181), `CorpusDistractor.origin`
+             # (v3-D187) and `CorpusWord.line` (v3-D191), here on two sibling
+             # `CorpusMeta` fields none of those runs touched. Verified against
+             # the real compiled corpora: surah 12 reports `{authored:8877,
+             # kernel:0}`; surah 67 reports `{authored:0, kernel:1665}` —
+             # genuinely different data, not a constant. Fixed: `Corpus["meta"]`
+             # gains optional `distractorOrigin`/`kernelYield`; new
+             # `DistractorYieldPanel.tsx` (mirrors `LookAlikesPanel.tsx`/
+             # `MacroClassificationPanel.tsx`'s read-only discipline) renders
+             # both on `/workbench`, wired into `WorkbenchIsland.tsx`. RED
+             # confirmed directly: reverting the two production files (new
+             # panel moved aside, its 3 new tests kept, 37 pre-existing
+             # untouched) failed all 3 on the panel's region never rendering;
+             # restored, 40/40 green. `TZ=UTC make test`: 2639 passing (was
+             # 2636, +3; apps/web 1371, was 1368). `check-test-floor.mjs`: OK,
+             # 2639 >= floor 1899 (+740 margin, unmoved). `TZ=UTC make build`:
+             # exit 0, 30 routes (unchanged). `npm run gates`: all green
+             # (boundaries 309 files, up from 308 — exactly the one new
+             # production file). `npx tsc --noEmit`, run separately across all
+             # four v3 node packages: clean in all four. No `v1/**`/`v2/**` edit
+             # (stray `v2/tsconfig.tsbuildinfo` reverted before committing). No
+             # Arabic codepoint (every new/changed file swept programmatically
+             # over every Arabic block plus both Presentation Forms blocks —
+             # zero matches; every new string is a wire field name, an integer,
+             # or a fixed English label, never corpus text). Found by a
+             # dedicated fresh-sweep agent handed the full exclusion list
+             # through v3-D191, directed at `packages/engine/src/types.ts`'s
+             # own wire fields with zero renders — specifically `Corpus.meta`'s
+             # own sibling fields, never checked field-by-field before. NOT
+             # addressed, named so a future run doesn't re-discover them as new:
+             # `CorpusMeta.droppedCollisions`/`.hasMentalModel`/`.hasGeometry`/
+             # `.distractorsAuthored`/`.schemaVersion` share the identical
+             # shipped-but-undeclared shape — real, same class, deliberately
+             # left to avoid over-scoping a single night's fix past two closely
+             # related fields. See DECISIONS.md v3-D192.
              # NOTE (v3-D191, 2026-09-10): `CorpusWord.line` — a real, non-null
              # mushaf line number computed for every word of all four launch
              # surahs since the compiler's geometry merge (M1), shipped to the

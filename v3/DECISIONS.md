@@ -15241,3 +15241,110 @@ taxonomy drift (v3-D127); `packages/engine/src/placement.ts`
 (v3-D188); `lib/idb/writeLock.ts#useWriterStatus()` (v3-D190);
 `lib/plan/forecast.ts`'s `awayDays` (v3-D190); the spec/selection-engine
 subsystem's own lack of a learner-facing caller (v3-D190) — all unchanged.
+
+### v3-D192 — `CorpusMeta.distractorOrigin`/`.kernelYield` (the compiler's own authored-vs-kernel split and per-word foil-yield histogram) shipped since build-plan step 3, never declared on the engine's consuming type, zero readers anywhere (2026-09-10)
+
+Same "shipped, never declared on the consuming type" shape as `Corpus
+.lookalikes` (v3-D181), `CorpusDistractor.origin` (v3-D187) and
+`CorpusWord.line` (v3-D191) — here on two sibling `CorpusMeta` fields
+neither of those runs touched. `corpus-compiler/src/buildCorpus.ts`
+computes both as REQUIRED fields on every compile: `distractorOrigin`
+(how many of a surah's distractor rows are hand-authored vs. derived by
+the foil kernels) and `kernelYield` (a histogram of foils-per-word — the
+compiler's own honest-degradation record, its docblock's own words: "a
+surah whose words only reach 2 or 3 foils shows up here... rather than
+silently padded"). Both reach the browser verbatim on every real corpus:
+`stage-corpus.mjs#slim()`'s `meta: corpus.meta` line passes the whole meta
+object through wholesale (unlike the QAC-morphology fields it does strip,
+v3-D24), and `lib/corpus/load.ts#loadCorpus` reads the compiled JSON
+directly. But `packages/engine/src/types.ts`'s `Corpus["meta"]` declared
+only `{surah, ayahCount, wordCount}`, so no component could reach either
+field even by accident — `grep -rn "distractorOrigin\|kernelYield"
+apps/web` (excluding this run's new files) returned nothing.
+
+Verified against the real compiled corpora, not assumed: surah 12
+(authored) reports `{authored: 8877, kernel: 0}` with `kernelYield: {"4":
+8, "5": 1769}`; surah 67 (kernel-only) reports `{authored: 0, kernel:
+1665}` with `kernelYield: {"5": 333}` — genuinely different data per
+surah, not a constant.
+
+**Fixed**, display-only, additive type change: `Corpus["meta"]` gains
+optional `distractorOrigin?: {authored: number; kernel: number}` and
+`kernelYield?: Record<number, number>` (optional for the same reason
+`lookalikes`/`sceneBeats` are — the engine's own frozen test fixture
+predates both fields). New `components/workbench/DistractorYieldPanel.tsx`
+mirrors `LookAlikesPanel.tsx`/`MacroClassificationPanel.tsx`'s own
+discipline exactly — read-only, no write path — and is wired into
+`WorkbenchIsland.tsx` beside them, reading `corpus.meta` directly (no
+server-side fallback classifier needed, unlike `macroFactsFor`, since both
+fields are unconditionally computed by the compiler already).
+
+**Verified.** RED confirmed directly: the two production files
+(`types.ts`, `WorkbenchIsland.tsx`) reverted to their pre-fix content (the
+new `DistractorYieldPanel.tsx` moved aside too, the three new tests in
+`test/workbench-ui.test.tsx` kept, 37 pre-existing untouched) — all 3 new
+cases failed on `findByRole("region", {name: /distractor yield/i})`
+finding nothing; restored byte-identically, 40/40 green. The positive
+cases seed two DIFFERENT real-shaped splits (kernel-heavy vs.
+authored-heavy) so neither can pass on a hardcoded string; the negative
+case renders the frozen fixture (which genuinely lacks both fields) and
+asserts the honest "no ... for this corpus subset" fallback text, never a
+fabricated "0 authored, 0 kernel-derived."
+
+`TZ=UTC make test`: **2639 passing** (was 2636, +3 — exactly this run's
+new tests; apps/web 1371, was 1368; no other suite moved: 255 v2 vitest,
+47 v2/api, 367 v3/api, 118 corpus-compiler, 420 engine, 61 fold-runner).
+`check-test-floor.mjs`: OK, 2639 >= floor 1899 (+740 margin, unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 30 routes
+(unchanged — edits inside the existing `/workbench` component tree, no
+new route). `npm run gates`: all green (boundaries 309 files, up from 308
+— exactly the one new production file, `DistractorYieldPanel.tsx`; fonts
+degraded-but-non-blocking, pre-existing; corpus-morphology 362 words /
+corpus-glyphs 206 codepoints, both unchanged — no new corpus data, only a
+type field and a renderer for data already compiled). `npx tsc --noEmit`,
+run separately across all four v3 node packages (`apps/web`,
+`packages/engine`, `packages/corpus-compiler`, `worker/fold-runner`):
+clean in all four.
+
+No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache
+diff produced by running the suite was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2` empty
+immediately before committing). No Arabic codepoint (all four
+new/changed files swept programmatically, in Python, over the Arabic,
+Arabic Supplement, Arabic Extended-A and both Presentation Forms Unicode
+blocks — zero matches; every new string is a wire field name, an integer,
+or a fixed English label, never corpus text).
+
+Found by a dedicated fresh-sweep agent handed the full exclusion list
+carried through v3-D191 and told not to re-report any of them, directed
+at `packages/engine/src/types.ts`'s own wire fields with zero renders — a
+targeted extension of `Corpus["meta"]` itself (the CorpusMeta fields the
+compiler emits — `droppedCollisions`, `hasMentalModel`, `hasGeometry`,
+`distractorsAuthored`, `schemaVersion` — beyond the two fixed here), never
+checked field-by-field before. One candidate found and deliberately NOT
+fixed this run, named so a future run doesn't re-discover it as new:
+`CorpusMeta.droppedCollisions`/`.hasMentalModel`/`.hasGeometry`/
+`.distractorsAuthored`/`.schemaVersion` share the identical
+shipped-but-undeclared shape — real, same class, left for a future run to
+avoid over-scoping a single night's fix past two closely-related fields.
+
+Session start: `HEAD` and local `main` both already matched `origin/main`
+at `34c1700` (v3-D191) — no stale-local-main trap this run.
+
+**NOT addressed, named so a future run doesn't re-discover them as new:**
+every item on v3-D191's own "NOT addressed" list, unchanged, plus
+`CorpusMeta.droppedCollisions`/`.hasMentalModel`/`.hasGeometry`/
+`.distractorsAuthored`/`.schemaVersion` (above) — `rhymeClassOf()`
+(v3-D136); `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148); `lib/pricing.ts
+#regionFromCountry()` (v3-D163); `PaywallGate` as a whole class /
+`permitsIssuance`/`permitsReview` (v3-D88, v3-D151); multi-surah
+enrollment; the operational mailer/7-night window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy drift (v3-D127); `packages/engine/src/placement.ts`
+(v3-D111/D113/D123); the late-arrival refold half of v3-D32;
+`AccountDeletionRequest::isDue()` (v3-D146); the `AdminRole::OPERATOR`/
+`MODERATOR` gating question (v3-D185); `MacroFacts.litany.rhymeLabel`
+(v3-D188); `lib/idb/writeLock.ts#useWriterStatus()` (v3-D190);
+`lib/plan/forecast.ts`'s `awayDays` (v3-D190); the spec/selection-engine
+subsystem's own lack of a learner-facing caller (v3-D190) — all unchanged.

@@ -788,6 +788,83 @@ describe("WorkbenchIsland — the macro classification's own reason reaches the 
   });
 });
 
+describe("WorkbenchIsland — the compiler's distractor-origin/yield summary reaches the reviewer", () => {
+  // `corpus-compiler/src/buildCorpus.ts` computes `meta.distractorOrigin`
+  // (authored vs. kernel-derived row counts) and `meta.kernelYield` (a
+  // foils-per-word histogram) for every compiled corpus — required fields,
+  // shipped to the browser verbatim since build-plan step 3 — but the
+  // engine's own `Corpus` type never declared either, so no component could
+  // reach them even by accident.
+  beforeEach(() => {
+    resetApiFetchForTests();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const readyFrontier = () =>
+    new Response(
+      JSON.stringify({
+        frontier: { "1": { qari: "verified", admin: "verified" } },
+        verifications: [],
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+
+  it("renders a kernel-heavy surah's real origin split and yield histogram", async () => {
+    globalThis.fetch = vi.fn(async () => readyFrontier()) as unknown as typeof fetch;
+    // Mirrors surah 67's own real compiled meta — mostly kernel-derived,
+    // with a handful of words that only reached 4 foils rather than 5.
+    const kernelHeavy: Corpus = {
+      ...corpus,
+      meta: { ...corpus.meta, distractorOrigin: { authored: 0, kernel: 1665 }, kernelYield: { 4: 8, 5: 333 } },
+    };
+
+    render(<WorkbenchIsland surah={12} corpus={kernelHeavy} macro={macroFactsFor(corpus)} />);
+
+    const section = await screen.findByRole("region", { name: /distractor yield/i });
+    expect(within(section).getByText("1665")).toBeTruthy();
+    expect(section.textContent).toMatch(/kernel-derived/);
+    expect(section.textContent).toMatch(/8 words got 4 foils/);
+    expect(section.textContent).toMatch(/333 words got 5 foils/);
+  });
+
+  it("renders a different, authored-heavy split — proves it is not a hardcoded string", async () => {
+    globalThis.fetch = vi.fn(async () => readyFrontier()) as unknown as typeof fetch;
+    // Mirrors surah 12's own real compiled meta — fully authored, no
+    // kernel-derived rows at all.
+    const authored: Corpus = {
+      ...corpus,
+      meta: { ...corpus.meta, distractorOrigin: { authored: 8877, kernel: 0 }, kernelYield: { 5: 1769 } },
+    };
+
+    render(<WorkbenchIsland surah={12} corpus={authored} macro={macroFactsFor(corpus)} />);
+
+    const section = await screen.findByRole("region", { name: /distractor yield/i });
+    expect(within(section).getByText("8877")).toBeTruthy();
+    expect(within(section).getByText("0")).toBeTruthy();
+    expect(section.textContent).not.toMatch(/8 words got 4 foils/);
+    expect(section.textContent).toMatch(/1769 words got 5 foils/);
+  });
+
+  it("says so honestly for an older corpus subset that predates the field, never fabricating a zero", async () => {
+    globalThis.fetch = vi.fn(async () => readyFrontier()) as unknown as typeof fetch;
+    // The frozen engine fixture predates both fields entirely.
+    expect(corpus.meta.distractorOrigin).toBeUndefined();
+    expect(corpus.meta.kernelYield).toBeUndefined();
+
+    render(<WorkbenchIsland surah={12} corpus={corpus} macro={macroFactsFor(corpus)} />);
+
+    const section = await screen.findByRole("region", { name: /distractor yield/i });
+    expect(section.textContent).toMatch(/no distractor-origin summary/i);
+    expect(section.textContent).toMatch(/no distractor yield histogram/i);
+    // Never a fabricated "0 authored, 0 kernel-derived" — that would read
+    // as a real, measured fact about this corpus rather than an absent one.
+    expect(section.textContent).not.toMatch(/kernel-derived/);
+  });
+});
+
 describe("the workbench route reads the corpus through loadEffectiveCorpus (SSR override gap)", () => {
   // WorkbenchIsland's `explain(corpus, spec)` traces a spec against whatever
   // corpus it is handed — so an admin previewing a site must see the

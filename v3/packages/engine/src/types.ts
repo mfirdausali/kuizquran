@@ -103,7 +103,25 @@ export interface CorpusSceneBeat {
 }
 
 export interface Corpus {
-  meta: { surah: number; ayahCount: number; wordCount: number };
+  meta: {
+    surah: number;
+    ayahCount: number;
+    wordCount: number;
+    /** Per-origin distractor row counts across the WHOLE surah —
+     *  `corpus-compiler/src/buildCorpus.ts`'s provenance summary, computed
+     *  and shipped on every compiled corpus's own `meta.distractorOrigin`
+     *  since build-plan step 3. Optional here for the same reason
+     *  `lookalikes`/`sceneBeats` are: an older corpus subset (e.g. the
+     *  engine's own frozen test fixture) predates the field. */
+    distractorOrigin?: { authored: number; kernel: number };
+    /** Histogram of foils-per-word: `kernelYield[n]` = number of words in
+     *  this surah that ended up with exactly n distractors —
+     *  `corpus-compiler/src/buildCorpus.ts`'s own honest-degradation
+     *  record ("a surah whose words only reach 2 or 3 foils shows up
+     *  here, rather than silently padded"). Optional for the same reason
+     *  as `distractorOrigin` above. */
+    kernelYield?: Record<number, number>;
+  };
   verses: CorpusVerse[];
   words: CorpusWord[];
   distractors: CorpusDistractor[];
