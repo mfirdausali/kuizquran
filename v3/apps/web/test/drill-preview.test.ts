@@ -226,6 +226,32 @@ describe("partial pages — skipped is not failed", () => {
     );
   });
 
+  // The seam-side sibling of "names WHICH ayat were skipped" (v3-D199) —
+  // `skippedSeamCount` has the identical aggregate-only shape `skippedAyahCount`
+  // had before that fix: it cannot distinguish "the joint after ayah 5" from
+  // "the joint after ayah 9". A seam has no single ayah number of its own
+  // (this file's own header), so the honest granular answer is its FROM ayah —
+  // `site.ayah` for a seam site, matching `skipReason: "seam-not-reached"`'s
+  // own definition of what a seam site's `ayah` field means.
+  it("names WHICH joints were skipped, by their FROM ayah, ascending", () => {
+    const span2 = { page: 236, firstAyah: 5, lastAyah: 14, sharedWithOtherSurah: false };
+    const pageSites = sitesForPage(SURAH, span2, COUNT);
+    const atoms = atomsFor(pageSites, learned); // 7 of 10 ayat, every seam present
+    // Delete two seams out of ASCENDING order, so a passing test cannot be
+    // reading insertion order rather than sorting.
+    atoms.delete(siteToAtomKey({ kind: "seam", surah: SURAH, ayah: 6 }));
+    atoms.delete(siteToAtomKey({ kind: "seam", surah: SURAH, ayah: 5 }));
+
+    const p = buildDrillPreview({ sites: pageSites, atoms, mode: "graded" });
+    expect(p.skippedSeamFromAyahs).toEqual([5, 6]);
+  });
+
+  it("reports no skipped joints when every seam in range is present", () => {
+    const p = buildDrillPreview({ sites, atoms: atomsFor(sites, learned), mode: "graded" });
+    expect(p.skippedSeamCount).toBe(0);
+    expect(p.skippedSeamFromAyahs).toEqual([]);
+  });
+
   it("keeps the page's boundary seam among the drilled sites", () => {
     const all = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
     const p = buildDrillPreview({ sites, atoms: atomsFor(sites, all), mode: "graded" });

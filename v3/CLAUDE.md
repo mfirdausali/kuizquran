@@ -53,9 +53,69 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2658 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2663 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 375 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1382 apps/web. (v3-D199, 2026-09-10)
+             # + 420 engine + 61 fold-runner + 1387 apps/web. (v3-D200, 2026-09-11)
+             # NOTE (v3-D200, 2026-09-11): the seam-side sibling of v3-D199's
+             # own fix, named and deliberately left by that entry's own
+             # closing note. `lib/drill/preview.ts#buildDrillPreview()`
+             # already computed each skipped seam's own FROM ayah
+             # (`site.ayah`, `skipReason: "seam-not-reached"`) alongside the
+             # ayah data v3-D199 wired up, but `DrillPreview` exposed only
+             # the AGGREGATE `skippedSeamCount` and `DrillPicker.tsx`'s
+             # `DrillSummary` rendered only the combined `partialNotice`
+             # sentence — a learner watching the joint count drop had no way
+             # to tell WHICH joint was unreached. Fixed, additive, no
+             # engine/wire change: `DrillPreview` gains
+             # `skippedSeamFromAyahs: number[]` (ascending, the FROM ayah of
+             # each seam whose connection atom does not exist yet — a seam
+             # has no ayah number of its own, this file's own established
+             # reasoning); `DrillSummary` gains one new paragraph, present
+             # only when non-empty: `Not yet reached: joint after ayah 5.`
+             # singular, `Not yet reached: joints after ayat 2, 3, 5.`
+             # plural — mirroring v3-D199's own singular/plural convention on
+             # the sibling ayah field. RED confirmed independently at both
+             # layers, each reverted via `git stash` and restored
+             # byte-identically: library level, both new cases failed on
+             # `expected undefined to deeply equal [...]`, 20/20 green after
+             # (was 18, +2); component level, 2 of 3 new cases failed on
+             # `getByText` finding nothing (the negative "says nothing when
+             # every joint is reached" case passed vacuously, correctly — it
+             # never depended on the fix), 17/17 green after (was 14, +3).
+             # The load-bearing component case borns the seams after ayah 1
+             # and ayah 4 of the default 1..6 range (out of ascending order,
+             # so a pass cannot be reading insertion order) and asserts the
+             # exact string `"Not yet reached: joints after ayat 2, 3, 5."`,
+             # which cannot pass on a hardcoded placeholder or a bare count.
+             # `TZ=UTC make test`: 2663 passing (was 2658, +5; apps/web 1387,
+             # was 1382; no other suite moved). `check-test-floor.mjs`: OK,
+             # 2663 >= floor 1899 (+764 margin, unmoved). `TZ=UTC make
+             # build`: exit 0, 30 routes (unchanged — edits inside the
+             # existing `/drill` component tree, no new route). `npm run
+             # gates`: all green (boundaries 310 files, unchanged count — no
+             # new production file; fonts degraded-but-non-blocking,
+             # pre-existing; corpus-morphology 362 words / corpus-glyphs 206
+             # codepoints, both unchanged). `npx tsc --noEmit`: clean,
+             # `Version 5.9.3` confirmed. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted before
+             # committing, same discipline as every prior entry). No Arabic
+             # codepoint (all four changed files swept programmatically, in
+             # Python, over the Arabic, Arabic Supplement, Arabic
+             # Extended-A and both Presentation Forms Unicode blocks, plus a
+             # `\u06xx`-escape and `fromCharCode` sweep — zero matches;
+             # every new string is a fixed English sentence built from a
+             # fixture ayah integer, never corpus text). Session start:
+             # fresh container, `make setup` run from scratch; `HEAD` was
+             # found detached at `1a36245`, the same commit `origin/main`
+             # was already at, on a stale LOCAL `main` branch ref 13 commits
+             # behind (`4be9924`, v3-D174) — the recurring "stale local
+             # main" trap v3-D77/D91/D127/D138/D159/D167/D170/D172/D174–D199
+             # each independently hit, caught before any implementation
+             # work via `git fetch` + `git checkout main && git merge
+             # --ff-only origin/main`, no work lost or at risk. NOT
+             # addressed: every item on v3-D199's own "NOT addressed" list,
+             # unchanged — see DECISIONS.md v3-D200 for the full
+             # enumeration. See DECISIONS.md v3-D200.
              # NOTE (v3-D199, 2026-09-10): `lib/drill/preview.ts`'s own
              # `buildDrillPreview()` computed a `PreviewSite` per site since
              # the picker shipped (build-plan step 20), each carrying its own

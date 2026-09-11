@@ -312,6 +312,18 @@ function DrillSummary({ preview }: { preview: DrillPreview }) {
         </p>
       ) : null}
 
+      {/* The seam-side sibling of the above: `site.ayah` names a skipped
+          seam's FROM ayah — its only honest coordinate (`preview.ts`'s own
+          header: a seam has no single ayah number of its own). Absent
+          entirely when no seam is skipped, matching the ayah list above. */}
+      {preview.skippedSeamFromAyahs.length > 0 ? (
+        <p className="drill-skipped-seams">
+          {preview.skippedSeamFromAyahs.length === 1
+            ? `Not yet reached: joint after ayah ${preview.skippedSeamFromAyahs[0]}.`
+            : `Not yet reached: joints after ayat ${preview.skippedSeamFromAyahs.join(", ")}.`}
+        </p>
+      ) : null}
+
       <p className="drill-consequence">{preview.consequenceLabel}</p>
 
       {preview.stepCount === 0 ? (

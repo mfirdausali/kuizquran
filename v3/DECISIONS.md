@@ -16090,3 +16090,99 @@ subsystem's own lack of a learner-facing caller (v3-D190);
 (v3-D197); `components/home/DeviceReset.tsx`'s disabled control (v3-D196);
 `DeterminismCheckCommand`'s DB-sampling path never having run against a real
 production database (C5/gate 20, infra+calendar) — all unchanged.
+
+### v3-D200 — the drill picker names WHICH joint is unreached, not just how many (2026-09-11)
+
+v3-D199's own closing note named this exactly and deliberately left it: the
+skipped-SEAM sibling of that fix. `skippedSeamCount` had the identical
+aggregate-only shape `skippedAyahCount` had before v3-D199 — a bare integer,
+with no way to tell a learner which joint to go complete first.
+
+**The gap, verified directly.** `lib/drill/preview.ts#buildDrillPreview()`
+already computes a `PreviewSite` per site, each carrying `skipReason:
+"seam-not-reached"` for an unbuilt connection atom and the seam's own
+`site.ayah` (its FROM ayah — a seam has no ayah number of its own, per this
+file's own existing reasoning). `DrillPreview` exposed only `skippedSeamCount`;
+`DrillSummary` rendered only the aggregate `partialNotice` sentence ("2 joints
+haven't been reached yet, so they're skipped too."). `grep -rn
+"skippedSeamFromAyahs" apps/web` returned nothing before this fix — the
+granular data was sitting right next to `skippedAyahNumbers` (v3-D199) in the
+same computation, unread.
+
+**Fixed, additive, no engine/wire change.** `DrillPreview` gains
+`skippedSeamFromAyahs: number[]` — the ascending FROM-ayah numbers of every
+`PreviewSite` with `skipReason === "seam-not-reached"`, a pure re-derivation
+of data already computed inline beside `skippedAyahNumbers`. `DrillSummary`
+gains one new paragraph, present only when the list is non-empty (the same
+"nothing to render rather than a reassuring no-op" rule `partialNotice` and
+v3-D199's own addition both follow): `Not yet reached: joint after ayah 5.`
+singular, `Not yet reached: joints after ayat 2, 3, 5.` plural — mirroring
+v3-D199's own singular/plural sentence construction on the sibling field.
+
+**RED confirmed independently at both layers, each reverted and restored
+byte-identically.** Library level (the two new cases in
+`test/drill-preview.test.ts` against the unmodified `preview.ts`): both
+failed on `expected undefined to deeply equal [...]` — the field did not
+exist yet; implemented, 20/20 green (was 18, +2). Component level (the three
+new cases in a dedicated `describe` block in `test/drill-picker.test.tsx`
+against the unmodified `DrillPicker.tsx`): 2 of 3 failed on `getByText`
+finding nothing (the plural and singular sentences); the third, the negative
+"says nothing when every joint is reached" case, passed vacuously — correct,
+it never depended on the fix, the same discipline v3-D199 and every prior
+negative case in this codebase follows. Implemented, 17/17 green (was 14,
++3). The positive component case borns the seams after ayah 1 and ayah 4 of
+the default 1..6 range (out of ascending order, so a passing assertion
+cannot be reading insertion order) and asserts the EXACT string `"Not yet
+reached: joints after ayat 2, 3, 5."`, which cannot pass on a hardcoded
+placeholder or a bare count.
+
+**Full verification.** `TZ=UTC make test` (full monorepo, all seven suites,
+fresh container — `make setup` run from scratch, no `node_modules`/`vendor`
+anywhere): **2663 passing** (was 2658, +5 — exactly this run's new tests: 2
+in `drill-preview.test.ts` + 3 in `drill-picker.test.tsx`; apps/web 1387, was
+1382; no other suite moved — 255 v2 vitest, 47 v2/api, 375 v3/api, 118
+corpus-compiler, 420 engine, 61 fold-runner). `check-test-floor.mjs`: OK,
+2663 >= floor 1899 (+764 margin, unmoved, same discipline as every prior
+entry). `TZ=UTC make build`: exit 0, 30 routes (unchanged — edits inside the
+existing `/drill` component tree, no new route). `npm run gates`: all green
+(boundaries 310 files, unchanged count — no new production file, two
+existing files edited plus their two existing test files; fonts
+degraded-but-non-blocking, pre-existing; corpus-morphology 362 words /
+corpus-glyphs 206 codepoints, both unchanged — no new corpus data). `npx tsc
+--noEmit` (`Version 5.9.3` confirmed): clean. No `v1/**`/`v2/**` edit (a
+stray `v2/tsconfig.tsbuildinfo` build-cache diff reverted before committing,
+same discipline as every prior entry — `git status --porcelain -- v1 v2`
+empty immediately before committing). No Arabic codepoint (all four changed
+files swept programmatically, in Python, over the Arabic, Arabic Supplement,
+Arabic Extended-A and both Presentation Forms Unicode blocks, plus a
+`\u06xx`-escape and `fromCharCode` sweep — zero matches; every new string is
+a fixed English sentence built from a fixture ayah integer, never corpus
+text).
+
+Session start: fresh container, `make setup` run from scratch; `HEAD` was
+found detached at `1a36245`, the same commit `origin/main` was already at, on
+a stale LOCAL `main` branch ref 13 commits behind (`4be9924`, v3-D174) — the
+recurring "stale local main" trap
+v3-D77/D91/D127/D138/D159/D167/D170/D172/D174–D199 each independently hit,
+caught before any implementation work via `git fetch` + `git checkout main
+&& git merge --ff-only origin/main`, no work lost or at risk.
+
+**NOT addressed, named so a future run doesn't re-discover it as new:** every
+item on v3-D199's own "NOT addressed" list, unchanged and not re-copied here
+in full — see that entry — including `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148); `lib/pricing.ts
+#regionFromCountry()` (v3-D163); `PaywallGate` as a whole class /
+`permitsIssuance`/`permitsReview` (v3-D88, v3-D151); multi-surah enrollment;
+the operational mailer/7-night window; PAY-1's Stripe fixtures; surah 67's
+scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123);
+`AccountDeletionRequest::isDue()` (v3-D146); the `AdminRole::OPERATOR`/
+`MODERATOR` gating question (v3-D185); `MacroFacts.litany.rhymeLabel`
+(v3-D188); `lib/idb/writeLock.ts#useWriterStatus()` (v3-D190);
+`lib/plan/forecast.ts`'s `awayDays` (v3-D190); the spec/selection-engine
+subsystem's own lack of a learner-facing caller (v3-D190);
+`App\Models\AdminAudit::actor()` (v3-D191); `App\Flags\FlagService::enabled()`
+(v3-D197); `components/home/DeviceReset.tsx`'s disabled control (v3-D196);
+`DeterminismCheckCommand`'s DB-sampling path never having run against a real
+production database (C5/gate 20, infra+calendar) — all unchanged.

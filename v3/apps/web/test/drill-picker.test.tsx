@@ -166,6 +166,63 @@ describe("the skipped ayat are named, not just counted", () => {
   });
 });
 
+// The seam-side sibling of the above (v3-D199's own named leftover): a
+// learner watching the joint count drop had no way to tell WHICH joint was
+// unreached, only how many. These pin the actual FROM-ayah numbers on screen,
+// the same way the ayat above are named rather than merely counted.
+function bornConnection(fromAyah: number): DrillEvent {
+  return {
+    type: "connection_born",
+    ts: 1,
+    surah: 12,
+    ayah: fromAyah,
+    to: fromAyah + 1,
+    rung: "S4",
+  } as DrillEvent;
+}
+
+describe("the skipped joints are named, not just counted", () => {
+  it("lists which joints in the default range are not yet reached", () => {
+    // Default range is 1..6 (seams 1-2, 2-3, 3-4, 4-5, 5-6). Encode every
+    // ayah so only the seams are the story; born the seams after ayah 1 and
+    // ayah 4, leaving 2, 3, 5 unreached.
+    logState = {
+      status: "ready",
+      data: [
+        encoded(1), encoded(2), encoded(3), encoded(4), encoded(5), encoded(6),
+        bornConnection(1), bornConnection(4),
+      ],
+    };
+    render(<DrillPicker corpus={WITH_GEOMETRY} now={0} />);
+    expect(screen.getByText("Not yet reached: joints after ayat 2, 3, 5.")).toBeDefined();
+  });
+
+  it("uses the singular sentence for exactly one skipped joint", () => {
+    // Born every seam except the one after ayah 5.
+    logState = {
+      status: "ready",
+      data: [
+        encoded(1), encoded(2), encoded(3), encoded(4), encoded(5), encoded(6),
+        bornConnection(1), bornConnection(2), bornConnection(3), bornConnection(4),
+      ],
+    };
+    render(<DrillPicker corpus={WITH_GEOMETRY} now={0} />);
+    expect(screen.getByText("Not yet reached: joint after ayah 5.")).toBeDefined();
+  });
+
+  it("says nothing when every joint in the range is reached", () => {
+    logState = {
+      status: "ready",
+      data: [
+        encoded(1), encoded(2), encoded(3), encoded(4), encoded(5), encoded(6),
+        bornConnection(1), bornConnection(2), bornConnection(3), bornConnection(4), bornConnection(5),
+      ],
+    };
+    render(<DrillPicker corpus={WITH_GEOMETRY} now={0} />);
+    expect(screen.queryByText(/Not yet reached/)).toBeNull();
+  });
+});
+
 describe("log states", () => {
   // Edge case #73: a pending read must never paint a number.
   it("paints no counts while the log is still loading", () => {
