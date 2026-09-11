@@ -918,6 +918,83 @@ describe("WorkbenchIsland — dropped-collision coordinates reach the reviewer (
   });
 });
 
+describe("WorkbenchIsland — a scene beat's own emotional register reaches the reviewer (v3-D201)", () => {
+  // `corpus-compiler/src/sceneBeats.ts#buildSceneBeats` computes one row per
+  // narrative act on every compile where a mental model is authored (surah
+  // 12's own 19), shipped on the compiled corpus's own `sceneBeats` field —
+  // but no reviewer-facing surface ever read any of it (grep-confirmed: the
+  // only production reference to `corpus.sceneBeats` anywhere in apps/web is
+  // a comment in OnboardingFlow.tsx explaining why `placement.ts` cannot
+  // honestly use it for a 4-ayah surah, never a real render). Sharpest
+  // instance: `RawAct.emotionalBeat`, a one-line emotional-register
+  // description hand-authored for all 19 of surah 12's acts, was parsed from
+  // the raw mental-model file on every compile and then silently dropped —
+  // `buildSceneBeats()` never copied it through, and the engine's own
+  // `CorpusSceneBeat` type never declared it.
+  beforeEach(() => {
+    resetApiFetchForTests();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const readyFrontier = () =>
+    new Response(
+      JSON.stringify({
+        frontier: { "1": { qari: "verified", admin: "verified" } },
+        verifications: [],
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+
+  it("renders the open ayah's own scene beat, including its emotional register", async () => {
+    globalThis.fetch = vi.fn(async () => readyFrontier()) as unknown as typeof fetch;
+    // The frozen fixture's own act 1 (ayat 1-3, covering the default open
+    // ayah 1) predates emotionalBeat entirely — attach a real, distinct
+    // value so this cannot pass on a hardcoded string.
+    const withEmotionalBeat: Corpus = {
+      ...corpus,
+      sceneBeats: corpus.sceneBeats!.map((sb) =>
+        sb.act === 1 ? { ...sb, emotionalBeat: "fixture anticipation, before anything happens" } : sb,
+      ),
+    };
+
+    render(<WorkbenchIsland surah={12} corpus={withEmotionalBeat} macro={macroFactsFor(corpus)} />);
+
+    const section = await screen.findByRole("region", { name: /scene beat/i });
+    expect(section.textContent).toMatch(/fixture anticipation, before anything happens/);
+    expect(section.textContent).toMatch(/Overture: The Best of Stories/);
+  });
+
+  it("says so honestly when the open ayah has no recorded scene beat", async () => {
+    globalThis.fetch = vi.fn(async () => readyFrontier()) as unknown as typeof fetch;
+    const noBeats: Corpus = { ...corpus, sceneBeats: [] };
+
+    render(<WorkbenchIsland surah={12} corpus={noBeats} macro={macroFactsFor(corpus)} />);
+
+    const section = await screen.findByRole("region", { name: /scene beat/i });
+    expect(section.textContent).toMatch(/no scene beat recorded/i);
+  });
+
+  it("never fabricates an emotional register when the field is absent on an older corpus subset", async () => {
+    globalThis.fetch = vi.fn(async () => readyFrontier()) as unknown as typeof fetch;
+    // Real fixture: act 1 carries no emotionalBeat at all — verified
+    // directly against it, not assumed.
+    const [firstBeat] = corpus.sceneBeats ?? [];
+    if (firstBeat === undefined) {
+      throw new Error("expected the frozen fixture to carry at least one scene beat");
+    }
+    expect(firstBeat.emotionalBeat).toBeUndefined();
+
+    render(<WorkbenchIsland surah={12} corpus={corpus} macro={macroFactsFor(corpus)} />);
+
+    const section = await screen.findByRole("region", { name: /scene beat/i });
+    expect(section.textContent).toMatch(/Overture: The Best of Stories/);
+    expect(section.textContent).not.toMatch(/emotional register/i);
+  });
+});
+
 describe("the workbench route reads the corpus through loadEffectiveCorpus (SSR override gap)", () => {
   // WorkbenchIsland's `explain(corpus, spec)` traces a spec against whatever
   // corpus it is handed — so an admin previewing a site must see the

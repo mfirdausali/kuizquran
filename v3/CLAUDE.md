@@ -53,9 +53,87 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2663 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 375 v3/api + 118 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1387 apps/web. (v3-D200, 2026-09-11)
+make test    # 2667 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 375 v3/api + 119 corpus-compiler
+             # + 420 engine + 61 fold-runner + 1390 apps/web. (v3-D201, 2026-09-11)
+             # NOTE (v3-D201, 2026-09-11): a scene beat's own emotional
+             # register — `RawAct.emotionalBeat`, hand-authored and vendored
+             # in `data/raw/12-mental-model.json` for all 19 of surah 12's
+             # acts alongside `sceneImage`, distinct from the human-only
+             # interpretive `label` — was parsed on every compile and
+             # silently dropped: `sceneBeats.ts#buildSceneBeats()` never
+             # copied it through, and the engine's own `CorpusSceneBeat`
+             # type never declared it. More broadly `corpus.sceneBeats` as a
+             # whole had zero production readers in apps/web (the only
+             # reference outside tests was a comment in OnboardingFlow.tsx
+             # explaining why placement.ts, FR10, cannot honestly use it for
+             # a 4-ayah surah). Verified safe against the qari hash first:
+             # `hash.ts#ayahQariHash` takes only `sceneBeatLabel: string |
+             # null` as a scalar, and `manifest.ts#buildAyahHashTable`
+             # extracts only `sb.label` — no new field can touch the hash.
+             # Fixed, additive, diagnostic-only: `SceneBeat`/
+             # `CorpusSceneBeat` gain optional `emotionalBeat?: string`;
+             # `buildSceneBeats()` copies it through (undefined when
+             # unauthored, never fabricated); new `SceneBeatsPanel.tsx`
+             # mirrors `LookAlikesPanel.tsx`'s own per-ayah-filtered,
+             # read-only precedent, wired into `WorkbenchIsland.tsx` —
+             # rendering the open ayah's whole previously-unreachable act
+             # (number, range, source name, label) plus the emotional
+             # register when present. RED confirmed independently at both
+             # layers, each reverted and restored byte-identically: compiler
+             # level, the module's first-ever positive-path scene-beat test
+             # failed on `expected undefined to be '...'`, 119/119 green
+             # after (was 118, +1); component level, all 3 new cases failed
+             # on `findByRole("region", ...)` timing out (no such region
+             # existed), 45/45 green after (was 42, +3). The positive case
+             # attaches a real emotional-register string to the frozen
+             # fixture's own act 1 (which predates the field entirely, so it
+             # cannot pass on a hardcoded string); the degrade case proves
+             # the frozen fixture's genuinely-absent field never fabricates
+             # an "emotional register" line. `TZ=UTC make test` (run twice,
+             # after a fresh `make setup` from scratch — both `v2/api` and
+             # `v3/api` composer installs needed one retry with
+             # `COMPOSER_PROCESS_TIMEOUT=900` after the documented transient
+             # proxy timeout cloning `laravel/framework` via git-mirror
+             # fallback; the interrupted first `make setup` had also
+             # silently skipped `corpus-compiler`'s own `npm install`,
+             # caught and fixed; `typecheck-v3` then caught two genuine
+             # `noUncheckedIndexedAccess` errors in the new tests' own raw
+             # index reads, fixed with explicit `undefined`-narrowing, never
+             # a non-null assertion, v3-D158's own discipline): 2667 passing
+             # (was 2663, +4; corpus-compiler 119, was 118; apps/web 1390,
+             # was 1387; no other suite moved). `check-test-floor.mjs`: OK,
+             # 2667 >= floor 1899 (+768 margin, unmoved). `TZ=UTC make
+             # build`: exit 0, 30 routes (unchanged — edits inside the
+             # existing `/workbench` component tree, no new route;
+             # corpus-morphology/corpus-glyphs both unchanged, 206
+             # codepoints — `emotionalBeat` is fixed English vendored text,
+             # never a new corpus codepoint). `npm run gates`: all green
+             # (boundaries 310 files, up from 309 — exactly the one new
+             # apps/web production file; fonts degraded-but-non-blocking,
+             # pre-existing). `npx tsc --noEmit`, run separately across all
+             # four v3 node packages: clean in all four. No
+             # `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff reverted before committing, same discipline
+             # as every prior entry). No Arabic codepoint (every new/changed
+             # file plus the full diff swept programmatically, in Python,
+             # over the Arabic, Arabic Supplement, Arabic Extended-A and
+             # both Presentation Forms Unicode blocks, plus a `\u06xx`/
+             # `\u08xx`/`\uFBxx`/`\uFExx` escape and `fromCharCode` sweep —
+             # zero matches; every new string is a fixture coordinate
+             # integer, a wire field name, or the compiler's own vendored
+             # English editorial text from a committed raw data file, never
+             # generated, never Quranic Arabic). Session start: `HEAD` was
+             # found detached at `585b531`, the same commit `origin/main`
+             # was already at, on a stale LOCAL `main` branch ref 27 commits
+             # behind (`4be9924`, v3-D174) — the recurring "stale local
+             # main" trap v3-D77/D91/D127/D138/D159/D167/D170/D172/D174–D200
+             # each independently hit, caught before any implementation
+             # work via `git fetch` + `git checkout main && git merge
+             # --ff-only origin/main`, no work lost or at risk. NOT
+             # addressed: every item on v3-D200's own "NOT addressed" list,
+             # unchanged — see DECISIONS.md v3-D201. See DECISIONS.md
+             # v3-D201.
              # NOTE (v3-D200, 2026-09-11): the seam-side sibling of v3-D199's
              # own fix, named and deliberately left by that entry's own
              # closing note. `lib/drill/preview.ts#buildDrillPreview()`

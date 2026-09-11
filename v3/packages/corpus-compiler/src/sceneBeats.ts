@@ -94,6 +94,7 @@ export function buildSceneBeats(
     ayahs: expandRange(a.ayahRange),
     label: labels[a.act] ?? `TODO: author scene-beat label for act ${a.act} (${a.name})`,
     sourceName: a.name,
+    emotionalBeat: a.emotionalBeat,
   }));
 }
 

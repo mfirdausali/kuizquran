@@ -100,6 +100,10 @@ export interface CorpusSceneBeat {
   ayahs: number[];
   label: string;
   sourceName: string;
+  /** One-line description of the act's emotional register, vendored
+   *  alongside the act's own sceneImage; optional, not every act carries
+   *  one. Reviewer diagnostic only — never rendered to a learner. */
+  emotionalBeat?: string;
 }
 
 export interface Corpus {

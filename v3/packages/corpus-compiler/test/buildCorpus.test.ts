@@ -65,6 +65,45 @@ describe("buildCorpus — surah-parameterized (build-plan step 3)", () => {
     expect(corpus.words.every((w) => w.act === null && w.sceneImage === null)).toBe(true);
   });
 
+  it("carries an act's own emotionalBeat through from mentalModel into the compiled scene beat", () => {
+    const corpus = buildCorpus({
+      surah: 112,
+      verses: fixtureVerses(4, 3),
+      mcqItems: [],
+      morph: new Map(),
+      generatedFrom: ["fixture"],
+      mentalModel: {
+        title: "fixture spine",
+        oneLineSpine: "fixture",
+        acts: [
+          {
+            act: 1,
+            name: "fixture act one",
+            ayahRange: "1-2",
+            summary: "fixture summary one",
+            emotionalBeat: "fixture anticipation, before anything happens",
+          },
+          {
+            act: 2,
+            name: "fixture act two",
+            ayahRange: "3-4",
+            summary: "fixture summary two",
+            // no emotionalBeat authored for this act — must not be fabricated.
+          },
+        ],
+        memoryHooks: [],
+        pairingStrategy: "fixture",
+      },
+    });
+    expect(corpus.sceneBeats).toHaveLength(2);
+    const [first, second] = corpus.sceneBeats;
+    if (first === undefined || second === undefined) {
+      throw new Error("expected two scene beats");
+    }
+    expect(first.emotionalBeat).toBe("fixture anticipation, before anything happens");
+    expect(second.emotionalBeat).toBeUndefined();
+  });
+
   it("word count matches the verse source exactly", () => {
     const corpus = buildCorpus({
       surah: 12,

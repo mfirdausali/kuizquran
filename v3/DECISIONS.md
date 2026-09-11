@@ -16186,3 +16186,146 @@ subsystem's own lack of a learner-facing caller (v3-D190);
 (v3-D197); `components/home/DeviceReset.tsx`'s disabled control (v3-D196);
 `DeterminismCheckCommand`'s DB-sampling path never having run against a real
 production database (C5/gate 20, infra+calendar) — all unchanged.
+
+### v3-D201 — a scene beat's own emotional register reaches the reviewer, vendored since M1, never rendered (2026-09-11)
+
+A dedicated fresh-sweep agent, handed the full exclusion list carried through
+v3-D200 and told not to re-report any of them, was pointed at corners the
+last several nights' sweeps had not named explicitly: `v3/api`'s Console
+Commands/Jobs/Policies/Events, `worker/fold-runner/src` exports not yet
+cross-referenced against real callers, `packages/corpus-compiler/src`
+exports, and any `apps/web/lib` subdirectory not already named. It found one
+real instance of this build's recurring "computed by real production code,
+never read back" shape, verified directly rather than assumed.
+
+**The gap.** `packages/corpus-compiler/src/types.ts`'s `RawAct.emotionalBeat`
+— a one-line description of a narrative act's emotional register, distinct
+from the act's own `sceneImage` and from the human-only interpretive `label`
+`sceneBeats.ts`'s own header names — is hand-authored and vendored in the
+raw mental-model file for all 19 of surah 12's acts (e.g. "Cold dread — love
+turned to murderous envy; the chilling calm with which brothers debate a
+sibling's death.", confirmed directly against
+`data/raw/12-mental-model.json`, not assumed), parsed into memory on every
+compile, and then silently dropped: `sceneBeats.ts#buildSceneBeats()` copied
+`act`/`ayahRange`/`sourceName` and the separately-authored `label` through,
+never `emotionalBeat`, and the engine's own `CorpusSceneBeat` type never
+declared it at all. A repo-wide grep for `emotionalBeat` before this fix
+returned exactly one hit — the type declaration itself. More broadly,
+`corpus.sceneBeats` as a WHOLE had zero production readers anywhere in
+`apps/web`: the only reference outside tests was a comment in
+`OnboardingFlow.tsx` explaining why `placement.ts` (FR10, already a named
+non-gap, v3-D111/D113/D123) cannot honestly use it for a 4-ayah surah —
+never a real render. A reviewer authoring or checking a surah's scene-beat
+LABEL — the human-only work this exact module exists to support — had no
+way to see the emotional context that was already written specifically to
+inform that authoring, short of reading the raw JSON by hand.
+
+**Verified safe against the qari hash before touching anything.** BUILD-PLAN's
+"qari tier = text+glosses+beats" makes a scene beat's `label` part of the
+tiered verification hash — `hash.ts#ayahQariHash` takes `sceneBeatLabel:
+string | null` as an explicit scalar parameter, and `manifest.ts
+#buildAyahHashTable` extracts only `sb.label` from each `SceneBeat` before
+calling it (`sceneBeatByAyah.set(ayah, sb.label)`). Confirmed directly by
+reading both call sites: adding a new field to the `SceneBeat`/
+`CorpusSceneBeat` struct cannot touch the hash computation, since nothing
+ever passes the struct itself through — only its `.label` string. No
+DEFECTS.md#B3 risk, no amber.
+
+**Fixed, additive, diagnostic-only, no wire-format or hash change.**
+`SceneBeat` (compiler) and `CorpusSceneBeat` (engine) both gain an optional
+`emotionalBeat?: string`; `buildSceneBeats()` now copies `a.emotionalBeat`
+through unconditionally (`undefined` when an act was never authored one —
+never fabricated). New `SceneBeatsPanel.tsx` mirrors `LookAlikesPanel.tsx`'s
+own precedent exactly: per-ayah filtered, read-only, writes nothing, wired
+into `WorkbenchIsland.tsx` beside it. It renders the open ayah's own act
+number, ayah range, source name and label (the whole previously-unreachable
+`sceneBeats` structure, not only the new field, since none of it had a
+reader) plus the emotional register when present — never fabricated when
+absent, matching this codebase's total-degradation convention for every
+optional field it has closed before.
+
+**RED confirmed independently at both layers, each reverted and restored
+byte-identically.** Compiler level: a new positive-path test in
+`buildCorpus.test.ts` (the module's ONLY positive-path scene-beat test
+before this — the pre-existing coverage was the empty/no-mentalModel case
+only) seeds two acts, one with `emotionalBeat` authored and one without,
+against the unmodified `buildSceneBeats()` — failed on `expected undefined
+to be 'fixture anticipation...'`; implemented, 119/119 green (was 118, +1).
+Component level (`git stash` of `WorkbenchIsland.tsx` alone, the new
+`SceneBeatsPanel.tsx` moved aside, all 3 new cases in a dedicated `describe`
+block in `workbench-ui.test.tsx` kept, 42 pre-existing cases untouched): all
+3 failed on `findByRole("region", {name: /scene beat/i})` timing out — no
+such region existed; restored byte-identically, 45/45 green (was 42, +3).
+The positive case attaches a real, distinct emotional-register string to the
+frozen fixture's own act 1 (which predates the field entirely, so it cannot
+pass on a hardcoded string) and asserts both the new string and the act's
+pre-existing `sourceName` render together; the negative case proves the
+empty-ayah fallback is real; the degrade case proves the frozen fixture's
+own act 1 — genuinely absent the field — never fabricates an "emotional
+register" line while still rendering its real label/sourceName.
+
+**Full verification.** `TZ=UTC make test` (full monorepo, all seven suites,
+run twice after a fresh `make setup` from scratch — `v2/api` and `v3/api`
+composer installs both needed one retry with `COMPOSER_PROCESS_TIMEOUT=900`
+after the documented transient proxy timeout cloning `laravel/framework`
+via git-mirror fallback, no code/config change; a first full run also
+surfaced that `packages/corpus-compiler`'s own `npm install` had silently
+never run at all during the interrupted `make setup` — fixed, then
+`typecheck-v3` caught two genuine `noUncheckedIndexedAccess` strict-mode
+errors in the new tests' own raw index reads, fixed with explicit
+`undefined`-narrowing before any assertion, never a non-null assertion,
+matching this codebase's own established discipline, v3-D158): **2667
+passing** (was 2663, +4 — exactly this run's new tests: 1 corpus-compiler +
+3 apps/web; corpus-compiler 119, was 118; apps/web 1390, was 1387; no other
+suite moved — 255 v2 vitest, 47 v2/api, 375 v3/api, 420 engine, 61
+fold-runner, all unchanged). `check-test-floor.mjs`: OK, 2667 >= floor 1899
+(+768 margin, unmoved, same discipline as every prior entry). `TZ=UTC make
+build`: exit 0, 30 routes (unchanged — edits inside the existing
+`/workbench` component tree, no new route; `corpus-morphology`/
+`corpus-glyphs` both unchanged, 206 codepoints — `emotionalBeat` is fixed
+English vendored text, never a new corpus codepoint). `npm run gates` (via
+`prebuild`): all green (boundaries 310 files, unchanged count — one new
+apps/web production file, two existing files edited plus their two existing
+test files; fonts degraded-but-non-blocking, pre-existing). `npx tsc
+--noEmit`, run separately across all four v3 node packages (`apps/web`,
+`packages/engine`, `packages/corpus-compiler`, `worker/fold-runner` —
+widening a shared engine type can silently break a sibling package's own
+typecheck without touching its source): clean in all four. No
+`v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+reverted before committing, same discipline as every prior entry — `git
+status --porcelain -- v1 v2` empty immediately before committing). No
+Arabic codepoint (every new/changed file, plus the full diff, swept
+programmatically, in Python, over the Arabic, Arabic Supplement, Arabic
+Extended-A and both Presentation Forms Unicode blocks, plus a `\u06xx`/
+`\u08xx`/`\uFBxx`/`\uFExx` escape and `fromCharCode` sweep — zero matches;
+every new string is a fixture coordinate integer, a wire field name, or the
+compiler's own vendored English editorial text from a committed raw data
+file — never generated, never Quranic Arabic).
+
+Session start: `HEAD` was found detached at `585b531`, the same commit
+`origin/main` was already at, on a stale LOCAL `main` branch ref 27 commits
+behind (`4be9924`, v3-D174) — the recurring "stale local main" trap
+v3-D77/D91/D127/D138/D159/D167/D170/D172/D174–D200 each independently hit,
+caught before any implementation work via `git fetch` + `git checkout main
+&& git merge --ff-only origin/main`, no work lost or at risk.
+
+**NOT addressed, named so a future run doesn't re-discover it as new:**
+every item on v3-D200's own "NOT addressed" list, unchanged — see that entry
+— including `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class / `permitsIssuance`/`permitsReview` (v3-D88, v3-D151); multi-surah
+enrollment; the operational mailer/7-night window; PAY-1's Stripe fixtures;
+surah 67's scene beats (the human-only LABEL authoring itself, still
+unstarted — this fix surfaces context for that authoring, it does not do
+any of it); `worker/fold-runner/src/severity.ts`'s taxonomy drift
+(v3-D127); `packages/engine/src/placement.ts` (v3-D111/D113/D123);
+`AccountDeletionRequest::isDue()` (v3-D146); the `AdminRole::OPERATOR`/
+`MODERATOR` gating question (v3-D185); `MacroFacts.litany.rhymeLabel`
+(v3-D188); `lib/idb/writeLock.ts#useWriterStatus()` (v3-D190);
+`lib/plan/forecast.ts`'s `awayDays` (v3-D190); the spec/selection-engine
+subsystem's own lack of a learner-facing caller (v3-D190);
+`App\Models\AdminAudit::actor()` (v3-D191); `App\Flags\FlagService::enabled()`
+(v3-D197); `components/home/DeviceReset.tsx`'s disabled control (v3-D196);
+`DeterminismCheckCommand`'s DB-sampling path never having run against a real
+production database (C5/gate 20, infra+calendar) — all unchanged.

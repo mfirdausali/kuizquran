@@ -119,6 +119,11 @@ export interface SceneBeat {
   label: string;
   /** The act's authored name, kept for context while labels are TODO. */
   sourceName: string;
+  /** One-line description of the act's emotional register, vendored
+   *  alongside `sceneImage` in the raw mental-model file — distinct from
+   *  `label`, which is the human-only interpretive scene-beat LABEL
+   *  (`sceneBeats.ts`'s own header). Optional: not every act carries one. */
+  emotionalBeat?: string;
 }
 
 export interface CorpusMeta {

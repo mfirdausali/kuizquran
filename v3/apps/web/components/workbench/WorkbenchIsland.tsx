@@ -42,6 +42,7 @@ import { ExplainTrace } from "./ExplainTrace";
 import { QariMode } from "./QariMode";
 import { OverrideEditor } from "./OverrideEditor";
 import { LookAlikesPanel } from "./LookAlikesPanel";
+import { SceneBeatsPanel } from "./SceneBeatsPanel";
 import { MacroClassificationPanel } from "./MacroClassificationPanel";
 import { DistractorYieldPanel } from "./DistractorYieldPanel";
 import { DroppedCollisionsPanel } from "./DroppedCollisionsPanel";
@@ -222,6 +223,8 @@ export function WorkbenchIsland({ surah, corpus, macro }: WorkbenchIslandProps) 
       />
 
       <LookAlikesPanel ayah={ayah} lookalikes={corpus.lookalikes ?? []} />
+
+      <SceneBeatsPanel ayah={ayah} sceneBeats={corpus.sceneBeats ?? []} />
 
       <DroppedCollisionsPanel
         surah={surah}
