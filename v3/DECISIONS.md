@@ -16552,3 +16552,177 @@ v3-D192/D193 already ruled deliberate non-gaps ("directly derivable from
 already-rendered data"), and this run's own budget went to the sharper,
 independently-found `mentalModel` gap instead. A future run should verify
 directly rather than assume either way before touching it.
+
+---
+
+## v3-D203, 2026-09-11: a webhook's own refusal reason was computed and then
+discarded before reaching the one journal column already built to show it
+
+`App\Billing\EntitlementMachine::apply()` — the ONE guarded transition path
+every real webhook goes through — has computed a real, per-event explanation
+for a refused transition since M7 shipped: `TransitionResult::ignoredStale()`
+carries a `$detail` string, and one of its two call sites
+(`EntitlementMachine.php:81-83`, edge case #118's ordering-precedence guard)
+is genuinely dynamic — it names the two ACTUAL timestamps that raced
+(`"provider event at {providerCreatedAt} is older than the last applied at
+{last_provider_event_at}"`), not a static string. `WebhookHandler::process()`
+discarded it at the one place it was ever read:
+`$result === null ? 'ignored_unhandled' : ($result->wasApplied() ? 'applied'
+: $result->outcome)` — only the closed-set `outcome` string survived;
+`$result->detail` never left the function. `grep -rn "->detail\b" api/app
+api/tests` returned nothing before this fix — not in `WebhookHandler`, not in
+`AdminBillingController` (reads `entitlement_transitions`, a table this
+refusal branch never writes a row to, by design — nothing is a "transition"
+if nothing transitioned), not in `BillingEventsController`/
+`BillingEventsPanel.tsx` (which already render `billing_events.error`
+verbatim, under an honest `"—"` fallback, but that column was populated only
+by the exception-catch branch's `$e->getMessage()`), and not even in
+`EntitlementStateMachineTest.php`'s own dedicated test for this exact branch
+(`test_out_of_order_event_is_ignored_never_last_write_wins`, which asserted
+only the outcome string, never the detail).
+
+Same "computed, zero read surface" shape this build has closed roughly ninety
+times since v3-D82 — here on a value object's own field rather than a
+database column, and one layer subtler: `billing_events.error` was already a
+wired, rendered wire field (unlike most of this bug class, which needed a new
+type field or a new panel) — it was simply never POPULATED for this branch.
+Consequence: an operator on `/settings/billing`'s Billing Events panel saw a
+real webhook delivery reading `outcome: ignored_stale` with no way to tell
+whether the entitlement row had vanished mid-transaction or — the ordering
+race edge case #118 exists specifically to guard against — which two
+timestamps actually lost the race, despite the machine having already
+computed exactly that, per event.
+
+**Fixed**, backend-only, no wire/schema change (`billing_events.error` was
+already nullable text, already selected by `BillingEventsController::index()`,
+already rendered by `BillingEventsPanel.tsx`'s existing "Error" column):
+`WebhookHandler::process()` now returns `?TransitionResult` instead of
+collapsing to a string internally; `ingest()` derives the outcome string
+exactly as before (byte-identical mapping) and separately writes
+`'error' => $result?->detail` alongside it. For `applied`/`conflict`/
+`ignored_unhandled`, `detail` is always null (`TransitionResult::applied()`/
+`::conflict()` never set it, and `process()` returning `null` for an
+unhandled type or unresolved entitlement carries no detail either) — so
+`error` stays null for those exactly as before, verified directly by the
+existing `test_an_unhandled_event_type_still_journals_with_no_subject` case,
+unmodified and still green. Only the `ignored_stale` branch newly populates
+`error` with a real string.
+`apps/web/lib/admin/billingEvents.ts`'s own docblock ("Set only when `outcome
+=== "error"`.") was stale the moment this landed — widened to name both
+branches that now populate it. No panel/component edit was needed — the
+render path (`{e.error ?? "—"}`) was already correct for any nullable string,
+whatever populates it.
+
+**RED confirmed directly**: `git stash` of `WebhookHandler.php` alone (the
+strengthened test kept, its two pre-existing assertions on this test
+untouched) failed exactly the new assertion — `expected null to be 'provider
+event at 1700000000000 is older than the last applied at 1700005000000'` —
+against the unmodified handler; restored byte-identically (`git diff` empty),
+reran: 85/85 green in `EntitlementStateMachineTest.php` (was 84 passed + the
+2 PAY-1 incomplete, unchanged — this is a strengthened EXISTING test, +0 net
+test count, net +1 assertion). The assertion names both real timestamps from
+the seeded events (`created: 1_700_005_000` for the newer event, `created:
+1_700_000_000` for the older one, each ×1000 for `provider_created_at`'s
+millisecond unit) rather than asserting only non-null, so it cannot pass on a
+placeholder string.
+
+**Full verification:**
+- `php artisan test --filter=Billing` (v3/api): 84 passed + 2 incomplete
+  (PAY-1, unchanged), 246 assertions. `php artisan test --filter=
+  BillingEventsTest`: 9/9 green, unchanged — including
+  `test_an_unhandled_event_type_still_journals_with_no_subject`'s own
+  `assertNull($entries[0]['error'])`, proving the fix did not widen `error`
+  beyond the one branch it targets.
+- `TZ=UTC make build`: exit 0, 30 routes (unchanged — backend-only fix, no
+  apps/web production file touched beyond one docblock comment).
+- `TZ=UTC make test` (full monorepo, all seven suites, from a fresh `make
+  setup` on a clean container — composer installs for both `v2/api` and
+  `v3/api` completed via the documented git-mirror fallback, no code/config
+  change needed): **2670 passing** (unchanged from v3-D202's own count — no
+  new test file or case, a strengthened existing test carries no separate
+  count; 255 v2 vitest, 47 v2/api, 375 v3/api, 120 corpus-compiler, 420
+  engine, 61 fold-runner, 1392 apps/web, all unchanged). `check-test-
+  floor.mjs`: OK, 2670 >= floor 1899 (+771 margin, unmoved). `npm run gates`
+  (via `prebuild`): all green — locked-css OK; fonts 2/6 degraded-but-non-
+  blocking, pre-existing; boundaries OK, 311 files, unchanged count (no new
+  production file — one existing backend file, one existing test file, one
+  existing frontend lib file, the last a comment-only change); corpus-
+  morphology and corpus-glyphs both unchanged.
+- `npx tsc --noEmit` (apps/web): clean — the one touched frontend file is a
+  docblock comment only, no type surface changed.
+- `./vendor/bin/pint --test` (v3/api): `WebhookHandler.php` reports the same
+  five style-fixer findings (`unary_operator_spaces`, `braces_position`,
+  `no_unused_imports`, `not_operator_with_successor_space`,
+  `single_line_empty_body`) both BEFORE and AFTER this change — verified
+  directly by running pint against the file with this diff stashed out, byte-
+  identical fixer list — confirming pre-existing repo-wide pint drift (shared
+  by ~17 other unrelated files in the same run) rather than anything this fix
+  introduced; left untouched, matching the "don't fix unrelated things"
+  discipline.
+- No `v1/**`/`v2/**` edit — a stray `v2/tsconfig.tsbuildinfo` build-cache
+  diff produced by running the suite was reverted before committing, same
+  discipline as every prior entry; `git status --porcelain -- v1 v2` empty
+  immediately before committing.
+- No Arabic codepoint — all three changed files swept programmatically, in
+  Python, over the Arabic, Arabic Supplement, Arabic Extended-A and both
+  Presentation Forms Unicode blocks, plus a `\u06xx`/`\u08xx`/`\uFBxx`/
+  `\uFExx` escape and `fromCharCode` sweep — zero matches; every new/changed
+  line is a PHP identifier, a millisecond timestamp derived from a test
+  fixture integer, a wire field name, or a fixed English docblock sentence,
+  never corpus text.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/`.env` anywhere
+— `make setup` run from scratch (composer installs for `v2/api` then `v3/api`
+each resolved via git-mirror clones of individual packages, slow but no
+retry needed this run); `HEAD` was found detached at `433803d`, the same
+commit `origin/main` was already at, on a stale LOCAL `main` branch ref one
+commit behind (`26cc664`, v3-D201) — the recurring "stale local main" trap
+this file has recorded roughly forty times since v3-D77 — caught before any
+implementation work via `git fetch` + `git checkout main && git merge
+--ff-only origin/main`, no work lost or at risk.
+
+**Candidate search:** a dedicated sweep agent was given the full exclusion
+list carried through v3-D202 and told not to re-report any of it. It checked
+and rejected as already-covered or non-gaps: the `Corpus`/`CorpusMeta`/
+`CorpusWord`/`CorpusDistractor`/`CorpusSceneBeat`/`MacroFacts`/`LookAlike`
+type family (confirmed exhausted — every field now has a renderer); nine
+Eloquent `belongsTo`/`hasMany` relations in `api/app/Models` (each either
+already wired or a plain FK matching the deliberate pseudonymize-don't-
+relate pattern `AdminAudit::actor()` already established, v3-D191); every
+admin controller/panel pair it checked field-by-field
+(`AdminBillingController`/`BillingAuditPanel`, `AdminRevealController`/
+`PrivacyPanel`, `PurgeLedgerController`/`PurgeLedgerPanel` — each renders
+every field it sends); `corpus-compiler/src/manifest.ts`'s `ManifestEntry`
+fields (the one weaker candidate v3-D202 flagged and left) — checked
+directly and confirmed genuinely build-tooling-only, its real consumers
+(`content-freeze.mjs`, `distractor-qa.mjs`) using only `corpusHash`/
+`ayahCount`, with no natural admin/learner home for the rest; not pursued,
+matching v3-D202's own warning that it sits close to an already-ruled
+deliberate non-gap. `TransitionResult::$detail` was the one candidate that
+survived direct verification (grep-confirmed at every claimed step, not
+trusted from the agent's report alone) before implementing.
+
+**NOT addressed, named so a future run doesn't re-discover them as new:**
+every item on v3-D202's own "NOT addressed" enumeration, unchanged —
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class / `permitsIssuance`/`permitsReview` (v3-D88, v3-D151); multi-surah
+enrollment; the operational mailer/7-night window; PAY-1's Stripe fixtures;
+surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy
+drift (v3-D127); `packages/engine/src/placement.ts` (v3-D111/D113/D123);
+`AccountDeletionRequest::isDue()` (v3-D146); the `AdminRole::OPERATOR`/
+`MODERATOR` gating question (v3-D185); `MacroFacts.litany.rhymeLabel`
+(v3-D188); `lib/idb/writeLock.ts#useWriterStatus()` (v3-D190);
+`lib/plan/forecast.ts`'s `awayDays` (v3-D190); the spec/selection-engine
+subsystem's own lack of a learner-facing caller (v3-D190);
+`App\Models\AdminAudit::actor()` (v3-D191); `App\Flags\FlagService::enabled()`
+(v3-D197); `components/home/DeviceReset.tsx`'s disabled control (v3-D196);
+`DeterminismCheckCommand`'s DB-sampling path never having run against a real
+production database (C5/gate 20, infra+calendar); `StreakState.atRisk`/
+`.pausedOnMiss`/`.makeupAvailable` (v3-D97, M11 social scope); pint's ~17
+pre-existing unrelated style findings across the repo (not this build's
+scope to fix opportunistically) — all unchanged. `TransitionResult::conflict()`
+carries no `$detail` at all (the optimistic-lock-retry case has no per-event
+explanation to compute — "the caller may retry" is already the complete
+story) — considered and correctly left alone, not a parallel gap.

@@ -35,7 +35,10 @@ export interface BillingEventEntry {
   /** applied | ignored_duplicate | ignored_stale | ignored_unhandled | error — the
    *  server's own closed set, rendered verbatim, never re-derived here. */
   outcome: string | null;
-  /** Set only when `outcome === "error"`. */
+  /** Set when `outcome === "error"` (the exception message) OR when
+   *  `outcome === "ignored_stale"` (the state machine's own real, per-event
+   *  refusal reason — e.g. which two timestamps raced, edge case #118).
+   *  `null` for every other outcome. */
   error: string | null;
   /** The server's own HMAC pseudonym, or `null` for a delivery that never
    *  resolved to a learner. */

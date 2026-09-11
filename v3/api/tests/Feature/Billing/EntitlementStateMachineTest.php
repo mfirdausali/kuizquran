@@ -342,6 +342,18 @@ class EntitlementStateMachineTest extends TestCase
             $e->state,
             'an older event arriving later must NOT win (#118)',
         );
+
+        // `EntitlementMachine::apply()` computes a real, per-event refusal reason
+        // (`TransitionResult::$detail`) naming the two actual timestamps that
+        // raced — it must reach the journal row's own `error` column, the field
+        // `BillingEventsPanel.tsx` already renders verbatim, rather than being
+        // discarded at `WebhookHandler::process()`'s string-collapsing return.
+        $journalRow = BillingEvent::where('provider_event_id', 'evt_old')->first();
+        $this->assertSame(
+            'provider event at 1700000000000 is older than the last applied at 1700005000000',
+            $journalRow->error,
+            'the refusal reason must reach the journal, not just the outcome string',
+        );
     }
 
     // ───────────────────────── #113 — the account merge ────────────────────────

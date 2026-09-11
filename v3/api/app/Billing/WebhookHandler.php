@@ -96,29 +96,40 @@ class WebhookHandler
         $entitlement = $this->resolveEntitlement($event);
 
         try {
-            $outcome = $this->process($event, $type, $eventId, $providerCreatedAt, $now, $entitlement);
+            $result = $this->process($event, $type, $eventId, $providerCreatedAt, $now, $entitlement);
         } catch (\Throwable $e) {
             $row->update(['outcome' => 'error', 'error' => $e->getMessage(), 'processed_at' => $now, 'user_id' => $entitlement?->user_id]);
 
             throw $e;
         }
 
-        $row->update(['outcome' => $outcome, 'processed_at' => $now, 'user_id' => $entitlement?->user_id]);
+        $outcome = $result === null ? 'ignored_unhandled' : ($result->wasApplied() ? 'applied' : $result->outcome);
+
+        // `$result->detail` is `EntitlementMachine::apply()`'s own real, per-event
+        // explanation of WHY a transition was refused (e.g. "provider event at
+        // {ts} is older than the last applied at {ts}", edge case #118) — it used
+        // to be computed and then discarded here, never reaching the journal.
+        // `BillingEventsPanel.tsx`'s "Error" column already renders this column
+        // verbatim; only `outcome: "error"` (the exception-catch branch above)
+        // ever populated it, so `outcome: "ignored_stale"` gave an operator no
+        // way to tell which of the two `ignoredStale()` call sites fired, or —
+        // for the ordering-precedence one — which two timestamps actually raced.
+        $row->update(['outcome' => $outcome, 'error' => $result?->detail, 'processed_at' => $now, 'user_id' => $entitlement?->user_id]);
 
         return $outcome;
     }
 
-    private function process(array $event, string $type, string $eventId, ?int $providerCreatedAt, int $now, ?Entitlement $entitlement): string
+    private function process(array $event, string $type, string $eventId, ?int $providerCreatedAt, int $now, ?Entitlement $entitlement): ?TransitionResult
     {
         if (! in_array($type, self::HANDLED, true)) {
-            return 'ignored_unhandled';
+            return null;
         }
 
         if (! $entitlement) {
-            return 'ignored_unhandled';
+            return null;
         }
 
-        $result = match ($type) {
+        return match ($type) {
             'checkout.session.completed' => $this->onCheckoutCompleted($event, $entitlement, $eventId, $providerCreatedAt, $now),
             'invoice.paid' => $this->onInvoicePaid($entitlement, $eventId, $providerCreatedAt, $now),
             'invoice.payment_failed' => $this->onPaymentFailed($event, $entitlement, $eventId, $providerCreatedAt, $now),
@@ -128,8 +139,6 @@ class WebhookHandler
             'charge.dispute.created' => $this->onDisputeCreated($entitlement, $eventId, $providerCreatedAt, $now),
             'charge.dispute.closed' => $this->onDisputeClosed($event, $entitlement, $eventId, $providerCreatedAt, $now),
         };
-
-        return $result === null ? 'ignored_unhandled' : ($result->wasApplied() ? 'applied' : $result->outcome);
     }
 
     /** Resolve by provider customer id — the only stable join Stripe gives us. */
