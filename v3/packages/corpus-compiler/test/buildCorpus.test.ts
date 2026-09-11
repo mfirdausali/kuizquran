@@ -63,6 +63,34 @@ describe("buildCorpus — surah-parameterized (build-plan step 3)", () => {
     expect(corpus.meta.hasMentalModel).toBe(false);
     // and every word's act/sceneImage is null, never fabricated
     expect(corpus.words.every((w) => w.act === null && w.sceneImage === null)).toBe(true);
+    // the surah-level mental-model summary is absent too, never a fabricated
+    // empty shell
+    expect(corpus.meta.mentalModel).toBeUndefined();
+  });
+
+  it("carries the mental model's own surah-level summary through into meta.mentalModel", () => {
+    const corpus = buildCorpus({
+      surah: 112,
+      verses: fixtureVerses(4, 3),
+      mcqItems: [],
+      morph: new Map(),
+      generatedFrom: ["fixture"],
+      mentalModel: {
+        title: "fixture title",
+        oneLineSpine: "fixture one-line spine",
+        acts: [
+          { act: 1, name: "fixture act one", ayahRange: "1-4", summary: "fixture summary" },
+        ],
+        memoryHooks: ["fixture hook one", "fixture hook two"],
+        pairingStrategy: "fixture pairing strategy",
+      },
+    });
+    expect(corpus.meta.mentalModel).toEqual({
+      title: "fixture title",
+      oneLineSpine: "fixture one-line spine",
+      memoryHooks: ["fixture hook one", "fixture hook two"],
+      pairingStrategy: "fixture pairing strategy",
+    });
   });
 
   it("carries an act's own emotionalBeat through from mentalModel into the compiled scene beat", () => {

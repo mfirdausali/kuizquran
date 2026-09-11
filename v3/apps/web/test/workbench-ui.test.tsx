@@ -995,6 +995,73 @@ describe("WorkbenchIsland — a scene beat's own emotional register reaches the 
   });
 });
 
+describe("WorkbenchIsland — a surah's own mental-model summary reaches the reviewer", () => {
+  // `corpus-compiler/src/buildCorpus.ts` reads a surah's whole raw
+  // `<surah>-mental-model.json` (`title`/`oneLineSpine`/`acts`/
+  // `memoryHooks`/`pairingStrategy`) on every compile, but only `acts` ever
+  // left that function — it became `sceneBeats`/`meta.hasMentalModel`. The
+  // other four fields were parsed into memory and discarded: grep-confirmed
+  // zero reads of `oneLineSpine`/`memoryHooks`/`pairingStrategy` anywhere in
+  // `buildCorpus.ts` before this fix, and the engine's own `Corpus["meta"]`
+  // never even declared a place for them to land. The frozen fixture used
+  // throughout this file predates `meta.mentalModel` entirely (it predates
+  // `meta.macro` too), so these cases attach a real summary directly rather
+  // than assuming the fixture carries one.
+  beforeEach(() => {
+    resetApiFetchForTests();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const readyFrontier = () =>
+    new Response(
+      JSON.stringify({
+        frontier: { "1": { qari: "verified", admin: "verified" } },
+        verifications: [],
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+
+  it("renders the surah's own title, spine, memory hooks and pairing strategy", async () => {
+    globalThis.fetch = vi.fn(async () => readyFrontier()) as unknown as typeof fetch;
+    const withMentalModel: Corpus = {
+      ...corpus,
+      meta: {
+        ...corpus.meta,
+        mentalModel: {
+          title: "fixture title, never authored elsewhere",
+          oneLineSpine: "fixture one-line narrative spine",
+          memoryHooks: ["fixture memory hook one", "fixture memory hook two"],
+          pairingStrategy: "fixture pairing strategy",
+        },
+      },
+    };
+
+    render(<WorkbenchIsland surah={12} corpus={withMentalModel} macro={macroFactsFor(corpus)} />);
+
+    const section = await screen.findByRole("region", { name: /mental model/i });
+    expect(section.textContent).toMatch(/fixture title, never authored elsewhere/);
+    expect(section.textContent).toMatch(/fixture one-line narrative spine/);
+    expect(section.textContent).toMatch(/fixture memory hook one/);
+    expect(section.textContent).toMatch(/fixture memory hook two/);
+    expect(section.textContent).toMatch(/fixture pairing strategy/);
+  });
+
+  it("says so honestly when the corpus subset carries no mental-model summary", async () => {
+    globalThis.fetch = vi.fn(async () => readyFrontier()) as unknown as typeof fetch;
+    // The frozen fixture genuinely has no `meta.mentalModel` — verified
+    // directly, not assumed.
+    expect(corpus.meta.mentalModel).toBeUndefined();
+
+    render(<WorkbenchIsland surah={12} corpus={corpus} macro={macroFactsFor(corpus)} />);
+
+    const section = await screen.findByRole("region", { name: /mental model/i });
+    expect(section.textContent).toMatch(/no mental model authored/i);
+  });
+});
+
 describe("the workbench route reads the corpus through loadEffectiveCorpus (SSR override gap)", () => {
   // WorkbenchIsland's `explain(corpus, spec)` traces a spec against whatever
   // corpus it is handed — so an admin previewing a site must see the

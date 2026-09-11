@@ -289,6 +289,14 @@ export function buildCorpus(inp: BuildInputs): CorpusJson {
       distractorOrigin: { authored: authoredRows, kernel: kernelRows },
       kernelYield,
       hasMentalModel: mentalModel !== undefined,
+      mentalModel: mentalModel
+        ? {
+            title: mentalModel.title,
+            oneLineSpine: mentalModel.oneLineSpine,
+            memoryHooks: mentalModel.memoryHooks,
+            pairingStrategy: mentalModel.pairingStrategy,
+          }
+        : undefined,
       hasGeometry,
       schemaVersion: SCHEMA_VERSION,
       hashSpecVersion: HASH_SPEC_VERSION,

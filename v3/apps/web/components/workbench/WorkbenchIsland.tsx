@@ -44,6 +44,7 @@ import { OverrideEditor } from "./OverrideEditor";
 import { LookAlikesPanel } from "./LookAlikesPanel";
 import { SceneBeatsPanel } from "./SceneBeatsPanel";
 import { MacroClassificationPanel } from "./MacroClassificationPanel";
+import { MentalModelPanel } from "./MentalModelPanel";
 import { DistractorYieldPanel } from "./DistractorYieldPanel";
 import { DroppedCollisionsPanel } from "./DroppedCollisionsPanel";
 
@@ -150,6 +151,8 @@ export function WorkbenchIsland({ surah, corpus, macro }: WorkbenchIslandProps) 
       <MacroClassificationPanel facts={macro} />
 
       <DistractorYieldPanel meta={corpus.meta} />
+
+      <MentalModelPanel mentalModel={corpus.meta.mentalModel} />
 
       <section className="card" aria-labelledby="spec-h">
         <div className="card-header">

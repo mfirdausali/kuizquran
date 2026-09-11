@@ -137,6 +137,20 @@ export interface Corpus {
      *  honestly-thin word. Optional for the same reason `distractorOrigin`
      *  is: an older corpus subset predates the field. */
     droppedCollisions?: LookAlikeWordRef[];
+    /** The SURAH-LEVEL half of an authored mental model — title, one-line
+     *  narrative spine, memory hooks, pairing strategy — distinct from
+     *  `sceneBeats` (the PER-ACT half, keyed by ayah). Computed and shipped
+     *  on every compiled corpus's own `meta.mentalModel` since build-plan
+     *  step 3 (`corpus-compiler/src/buildCorpus.ts`). Optional: present
+     *  only when this surah has an authored mental model, and absent (never
+     *  fabricated) for an older corpus subset that predates the field.
+     *  Reviewer diagnostic only — never rendered to a learner. */
+    mentalModel?: {
+      title: string;
+      oneLineSpine: string;
+      memoryHooks: string[];
+      pairingStrategy: string;
+    };
   };
   verses: CorpusVerse[];
   words: CorpusWord[];

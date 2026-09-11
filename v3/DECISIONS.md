@@ -16329,3 +16329,226 @@ subsystem's own lack of a learner-facing caller (v3-D190);
 (v3-D197); `components/home/DeviceReset.tsx`'s disabled control (v3-D196);
 `DeterminismCheckCommand`'s DB-sampling path never having run against a real
 production database (C5/gate 20, infra+calendar) — all unchanged.
+
+---
+
+### v3-D202 — a surah's own mental-model summary (title/spine/memory hooks/pairing strategy) reaches the reviewer, vendored since M1, never compiled in (2026-09-11)
+
+Session start: fresh container, `TZ=UTC make setup` run from scratch (no
+`node_modules`/`vendor` anywhere) — clean, no composer/npm retries needed.
+`git status` clean; `HEAD` and local `main` both matched `origin/main` at
+`26cc664` (v3-D201) — no stale-local-main trap this run.
+
+A dedicated fresh-sweep agent, handed the full exclusion list carried through
+v3-D198 (the standing enumeration of already-known/deferred items) and told
+not to re-report any of them, was pointed at `worker/fold-runner/src` and
+`packages/corpus-compiler/src` (both confirmed this run to have been read
+file-by-file, not merely grepped) plus several `apps/web/lib` subdirectories.
+It reported one candidate as its strongest finding —
+`packages/engine/src/streak.ts#StreakState.makeupAvailable` — with a second,
+weaker candidate in `corpus-compiler/src/manifest.ts`'s `ManifestEntry`.
+
+**The proposed candidate was investigated and REJECTED before any code was
+written.** The agent's own report argued `makeupAvailable` "looks like an
+oversight, not a scoped-out decision" because `lib/home/queue.ts`'s docblock
+reasons about `atRisk`/`pausedOnMiss` by name but never mentions
+`makeupAvailable`. Direct verification against this file's own running
+history disproved that: v3-D97 (`2026-08-17`), the entry that built the
+quiet streak pill in the first place, closes with an explicit "Explicitly
+NOT done" note — *"`atRisk`/`pausedOnMiss`/`makeupAvailable` are computed by
+`computeStreak()` but not surfaced anywhere — deliberately... a future run
+building the real streak-freeze/make-up UI should treat that as v3-D06's
+flag-gated social scope, not an extension of tonight's quiet pill."*
+`docs/WIREFRAME.md`'s own "Social & motivation (§19 learner · §20 admin)"
+section independently confirms the grouping, introducing `computeStreak()`'s
+full return shape (`{ length, atRisk, pausedOnMiss, makeupAvailable,
+lastActiveDay }`) as one of the primitives the flagged, post-launch M11
+streak-calendar/freeze-token feature set would build on — not as three
+separate decisions. Sharper still: that same WIREFRAME section's own "six
+guardrails" list names guardrail #3 as *"No dark patterns — no loss-framed
+pushes, no pay-to-win, no shaming"* and guardrail #4 as *"Streak idolatry
+brake — as streaks grow the UI shrinks the number and elevates
+ayat-retained instead."* Any UI copy for `makeupAvailable` that reads
+naturally — "your streak needs a session today," "keep your streak alive"
+— is loss-framed by construction; there is no honest way to surface "you
+are one missed day away from your streak's paused length no longer
+counting" without threat-framing it, which is exactly the product's own
+written ethics rule this would trip. This was a known, already-decided
+non-gap that the sweep agent missed by not searching far enough back into
+`DECISIONS.md`'s own history (16,000+ lines by this point) — not a fresh
+finding — caught by re-deriving from the repo's own record per NIGHTLY.md's
+rule rather than trusting the agent's report at face value ("trust but
+verify," restated in this session's own operating instructions).
+
+**A second, independent search — this session's own, not the dispatched
+agent's — found the real gap.** `packages/corpus-compiler/src/sceneBeats.ts
+#buildSceneBeats()` (v3-D201's own subject, the previous night) maps over
+`mentalModel.acts` only. Reading `RawMentalModel`'s full shape
+(`corpus-compiler/src/types.ts:221-227`) shows four sibling fields
+`buildCorpus.ts` never touches at all: `title`, `oneLineSpine`,
+`memoryHooks: string[]`, `pairingStrategy` — the SURAH-LEVEL half of an
+authored mental model, as opposed to `sceneBeats`/`acts` (the PER-ACT half,
+already surfaced by v3-D201's own `SceneBeatsPanel.tsx`, one night prior).
+Grep-confirmed before writing any code: `grep -rln "oneLineSpine\|
+memoryHooks\|pairingStrategy" v3 --include=*.ts --include=*.tsx --include=
+*.php --include=*.md` returned only `corpus-compiler/src/types.ts` (the
+type declaration) and its own `buildCorpus.test.ts` — zero production
+readers, and, sharper than v3-D201's own finding, zero production WRITERS
+either: `packages/corpus-compiler/src/buildCorpus.ts`'s final `return`
+object never referenced any of the three (`io.ts#readInputs` parses the
+whole raw file into `inp.mentalModel`, but only `.acts` ever leaves
+`buildCorpus()`). This is not "computed and shipped, never rendered" (this
+build's usual shape, ~100 instances since v3-D82) — it is "vendored,
+human-authored content that never reaches the compiled artifact at all."
+Verified against the real vendored data, not assumed: `data/raw/
+12-mental-model.json` carries a real title ("The Movie of Surah Yusuf: From
+the Pit to the Throne"), a one-line narrative spine, and 9 memory hooks —
+exactly the per-surah "mental model" authored content BUILD-PLAN's own Q13
+("Who authors macro-panel mental models per surah... may a surah ever ship
+with a generic fallback panel — or is authored content a per-surah launch
+requirement?") and edge case #22 name — and none of it had ever reached a
+single reviewer screen since the compiler first read the file at M1.
+
+**Verified safe against the qari hash first**, following v3-D201's own
+established discipline: `manifest.ts#buildAyahHashTable`/
+`buildAyahHashTableWithOverrides` read only `sb.label` off `corpus.sceneBeats`
+per ayah and never touch `meta` at all (grep-confirmed against both
+functions) — a new `meta.mentalModel` field cannot touch the tiered
+verification hash (DEFECTS.md#B3), the same conclusion v3-D201 reached for
+`emotionalBeat`.
+
+**Fixed, additive, diagnostic-only, no `SCHEMA_VERSION` bump** — the same
+precedent v3-D201 set for its own optional field, since this is additive and
+never changes what an existing corpus subset serves:
+- `corpus-compiler/src/types.ts` gains `MentalModelSummary` (`title`,
+  `oneLineSpine`, `memoryHooks`, `pairingStrategy` — `RawMentalModel` minus
+  `acts`) and `CorpusMeta.mentalModel?: MentalModelSummary`.
+- `buildCorpus.ts`'s `meta` object gains `mentalModel: mentalModel ? {...} :
+  undefined` alongside the existing `hasMentalModel` boolean — present only
+  when a mental model is genuinely authored, never a fabricated empty shell
+  for a surah that has none (surah 67 has draft scene-beat LABELS in code
+  but no vendored `67-mental-model.json` file at all, so it correctly stays
+  `undefined`, verified directly against the real compiled output below).
+- `packages/engine/src/types.ts`'s `Corpus["meta"]` gains the matching
+  optional field.
+- New `apps/web/components/workbench/MentalModelPanel.tsx` mirrors
+  `DistractorYieldPanel.tsx`'s own discipline exactly — SURAH-LEVEL (not
+  per-ayah, unlike `SceneBeatsPanel`/`LookAlikesPanel`), read-only, writes
+  nothing — wired into `WorkbenchIsland.tsx` beside `DistractorYieldPanel`.
+  Deliberately admin-diagnostic only, never wired into the learner-facing
+  `components/macro/MacroPanel.tsx`: this narrative content sits in the
+  identical "authored interpretation of scripture" category as a scene-beat
+  `label`, and designing a learner-facing surface for it is real, separate,
+  larger-scope product work (the same category of judgment call v3-D96 made
+  for `EntitlementMachine::merge()` and multi-surah enrollment) — not
+  something to fold into a one-night wiring fix.
+
+**RED confirmed independently at both layers, each reverted and restored
+byte-identically:**
+- Compiler level: both new `buildCorpus.test.ts` cases were run against the
+  tree BEFORE `buildCorpus.ts` was touched (only the RawMentalModel/
+  CorpusMeta type additions were in place). The "degrades gracefully with no
+  mentalModel" test's new `expect(corpus.meta.mentalModel).toBeUndefined()`
+  assertion passed vacuously — correctly, since it never depended on the
+  fix — while the new positive case failed genuinely: `AssertionError:
+  expected undefined to deeply equal {...}`. Implemented, reran: 8/8 green
+  in that describe block (was 7, net +1 — one assertion added to an
+  existing test, one wholly new test).
+- Component level: `git stash` of the two production files
+  (`MentalModelPanel.tsx` moved aside via `mv` since it was untracked,
+  `WorkbenchIsland.tsx`'s wiring reverted via `git stash`, both new
+  `workbench-ui.test.tsx` cases kept, 45 pre-existing cases in that file
+  untouched) failed both new cases on `findByRole("region", {name: /mental
+  model/i})` timing out — no such region existed at all. Restored
+  byte-identically (`git stash pop` + `mv` back; `git diff` empty
+  afterward), reran: 47/47 green (was 45, +2).
+
+The positive component case attaches a real, distinct mental-model summary
+(`title`/`oneLineSpine`/two `memoryHooks`/`pairingStrategy`, each a unique
+fixture string) to the frozen engine fixture (`packages/engine/test/
+fixtures/12.json`), which predates `meta.mentalModel` entirely — verified
+directly (`corpus.meta.mentalModel` asserted `undefined` before the spread)
+rather than assumed — so the case cannot pass on a hardcoded string. The
+negative case confirms the same frozen fixture genuinely carries no
+`meta.mentalModel` and that the panel says so honestly ("No mental model
+authored for this surah") rather than rendering an empty shell.
+
+**Verified end to end against the REAL compiled corpus, not only
+fixtures** — the same discipline v3-D188's macro-classification fix and
+v3-D193's dropped-collisions fix both applied: after `make build` compiled
+all four launch surahs fresh, `packages/corpus-compiler/output/12/
+corpus.json`'s own `meta.mentalModel` carries surah 12's real vendored
+title, one-line spine, all 9 memory hooks, and its pairing strategy —
+content that had never reached a compiled artifact before this fix, not
+merely never rendered. `output/67/corpus.json` correctly reports
+`hasMentalModel: false, mentalModel: null` — surah 67 has no vendored
+`67-mental-model.json` (only in-code draft scene-beat labels, a smaller,
+separate artifact), so nothing is fabricated for it.
+
+**Full verification:**
+- `TZ=UTC make test` (full monorepo, all seven suites, from the fresh
+  `make setup` above): **2670 passing** (was 2667, +3 — exactly this run's
+  new tests: 1 corpus-compiler + 2 apps/web; corpus-compiler 120, was 119;
+  apps/web 1392, was 1390; no other suite moved — 255 v2 vitest, 47 v2/api,
+  375 v3/api, 420 engine, 61 fold-runner, all unchanged).
+  `check-test-floor.mjs`: OK, 2670 >= floor 1899 (+771 margin, unmoved, same
+  discipline as every prior entry).
+- `TZ=UTC make build`: exit 0, 30 routes (unchanged — edits inside the
+  existing `/workbench` component tree, no new route). `npm run gates`
+  (invoked as part of `prebuild`): all green — locked-css OK (1 documented
+  hunk, 294 v1 lines byte-identical); fonts 2/6, degraded-but-non-blocking,
+  pre-existing and unrelated; boundaries OK, 311 files, up from 310 —
+  exactly the one new apps/web production file, no violation; corpus-
+  morphology OK, 362 words, no QAC field reachable from a browser;
+  corpus-glyphs OK, 206 codepoints, all four launch surahs, both unchanged
+  from before this fix — the new field is fixed English editorial text
+  vendored from a committed raw data file, never a new corpus codepoint.
+- `npx tsc --noEmit`, run separately across all four v3 node packages
+  (`apps/web`, `packages/engine`, `packages/corpus-compiler`,
+  `worker/fold-runner` — widening a shared type can silently break a
+  sibling package's own typecheck without touching its source): clean in
+  all four.
+- No `v1/**`/`v2/**` edit — a stray `v2/tsconfig.tsbuildinfo` build-cache
+  diff produced by running the suite was reverted before committing, same
+  discipline as every prior entry; `git status --porcelain -- v1 v2` empty
+  immediately before committing.
+- No Arabic codepoint — every new/changed file (both production files, both
+  test files, the two `types.ts` files) swept programmatically, in Python,
+  over the Arabic, Arabic Supplement, Arabic Extended-A and both
+  Presentation Forms Unicode blocks, plus a `\u06xx`/`\u08xx`/`\uFBxx`/
+  `\uFExx` escape and `fromCharCode` sweep — zero matches; every new string
+  is a wire field name, a fixture coordinate integer, or the compiler's own
+  vendored English editorial text read from an already-committed raw data
+  file, never generated and never Quranic Arabic.
+
+**NOT addressed, named so a future run doesn't re-discover them as new:**
+every item on v3-D198's own "NOT addressed" enumeration, unchanged —
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class / `permitsIssuance`/`permitsReview` (v3-D88, v3-D151); multi-surah
+enrollment; the operational mailer/7-night window; PAY-1's Stripe fixtures;
+surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy
+drift (v3-D127); `packages/engine/src/placement.ts` (v3-D111/D113/D123);
+`AccountDeletionRequest::isDue()` (v3-D146); the `AdminRole::OPERATOR`/
+`MODERATOR` gating question (v3-D185); `MacroFacts.litany.rhymeLabel`
+(v3-D188); `lib/idb/writeLock.ts#useWriterStatus()` (v3-D190);
+`lib/plan/forecast.ts`'s `awayDays` (v3-D190); the spec/selection-engine
+subsystem's own lack of a learner-facing caller (v3-D190);
+`App\Models\AdminAudit::actor()` (v3-D191); `App\Flags\FlagService::enabled()`
+(v3-D197); `components/home/DeviceReset.tsx`'s disabled control (v3-D196);
+`DeterminismCheckCommand`'s DB-sampling path never having run against a real
+production database (C5/gate 20, infra+calendar) — all unchanged. Newly
+confirmed rather than newly found: `StreakState.atRisk`/`.pausedOnMiss`/
+`.makeupAvailable` remain deliberately unsurfaced (v3-D97, M11 social scope
+per WIREFRAME §19/§20 and the product's own no-loss-framing guardrail),
+re-verified this run rather than re-opened. The weaker second candidate the
+sweep agent named — `corpus-compiler/src/manifest.ts`'s `ManifestEntry`
+fields (`hasGeometry`/`distractorsAuthored`/`hasMentalModel`/
+`generatedFrom`/`wordCount`/`schemaVersion`) consumed only partially by
+`scripts/content-freeze.mjs`/`scripts/distractor-qa.mjs` — was not pursued
+this run: it is structurally close to the sibling `CorpusMeta` fields
+v3-D192/D193 already ruled deliberate non-gaps ("directly derivable from
+already-rendered data"), and this run's own budget went to the sharper,
+independently-found `mentalModel` gap instead. A future run should verify
+directly rather than assume either way before touching it.

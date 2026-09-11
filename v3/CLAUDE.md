@@ -53,9 +53,120 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2667 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 375 v3/api + 119 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1390 apps/web. (v3-D201, 2026-09-11)
+make test    # 2670 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 375 v3/api + 120 corpus-compiler
+             # + 420 engine + 61 fold-runner + 1392 apps/web. (v3-D202, 2026-09-11)
+             # NOTE (v3-D202, 2026-09-11): a surah's own mental-model summary
+             # (title / one-line narrative spine / memory hooks / pairing
+             # strategy) — the SURAH-LEVEL half of `RawMentalModel`, vendored
+             # in `data/raw/<surah>-mental-model.json` alongside `acts` since
+             # M1 — was parsed into memory on every compile
+             # (`corpus-compiler/src/io.ts`'s `readInputs`) and then silently
+             # discarded: `buildCorpus.ts` read only `mentalModel.acts` (via
+             # `ayahToAct`/`buildSceneBeats`), never `.title`/`.oneLineSpine`/
+             # `.memoryHooks`/`.pairingStrategy`, and `meta` carried only a
+             # boolean `hasMentalModel`, never the content itself. Unlike
+             # v3-D201's sibling fix (the PER-ACT `emotionalBeat`, which at
+             # least reached `buildSceneBeats()`'s input), these four fields
+             # never left `buildCorpus()` at all — not merely unrendered, but
+             # absent from the compiled artifact entirely. Verified against
+             # real vendored data, not assumed: surah 12's own
+             # `data/raw/12-mental-model.json` carries a real title, a
+             # one-line spine and 9 memory hooks — authored content BUILD-
+             # PLAN's own Q13/edge-case #22 name as a per-surah macro-panel
+             # requirement — and none of it ever reached a reviewer. Verified
+             # safe against the qari hash first: `manifest.ts
+             # #buildAyahHashTable` reads only `sb.label` off `sceneBeats`
+             # and never touches `meta` at all, so a new `meta.mentalModel`
+             # field cannot touch the tiered verification hash (DEFECTS.md
+             # #B3). Fixed, additive, diagnostic-only, no SCHEMA_VERSION bump
+             # (same precedent as v3-D201's own optional field): `CorpusMeta`
+             # gains `mentalModel?: MentalModelSummary`; `buildCorpus()`
+             # copies the four fields through (never fabricated when no
+             # mental model is authored — `meta.mentalModel` stays `undefined`
+             # exactly when `hasMentalModel` is `false`); the engine's own
+             # `Corpus["meta"]` gains the matching optional field; new
+             # `MentalModelPanel.tsx` mirrors `DistractorYieldPanel.tsx`'s own
+             # surah-level (not per-ayah), read-only, writes-nothing
+             # discipline, wired into `WorkbenchIsland.tsx` beside it.
+             # Deliberately admin-diagnostic only, not learner-facing or
+             # wired into the learner's own `MacroPanel` — this content sits
+             # in the identical "authored narrative interpretation of
+             # scripture" category as a scene-beat `label`, and inventing a
+             # new learner-facing surface for it is real, separate,
+             # larger-scope product work, not a one-night wiring fix. RED
+             # confirmed independently at both layers, each reverted and
+             # restored byte-identically: compiler level, both new
+             # `buildCorpus.test.ts` cases run against the tree before the
+             # fix — the "no mentalModel" case's own `meta.mentalModel`
+             # assertion passed vacuously (correctly: it never depended on
+             # the fix), the positive case failed on `expected undefined to
+             # deeply equal {...}` — 8/8 green after (was 7, +1 net: one
+             # assertion added to an existing test, one new test); component
+             # level, both new `workbench-ui.test.tsx` cases failed on
+             # `findByRole("region", {name: /mental model/i})` timing out (no
+             # such region existed) — 47/47 green after (was 45, +2). The
+             # positive case attaches a real, distinct mental-model summary
+             # to the frozen engine fixture (which predates the field
+             # entirely, so it cannot pass on a hardcoded string); the
+             # negative case confirms the frozen fixture genuinely carries no
+             # `meta.mentalModel` (asserted directly, not assumed) and that
+             # the panel says so honestly rather than rendering an empty
+             # shell. A dedicated sweep agent first proposed a DIFFERENT
+             # candidate this run — `packages/engine/src/streak.ts
+             # #StreakState.makeupAvailable` — which was investigated and
+             # REJECTED before any code was written: v3-D97's own "NOT
+             # addressed" note already names `atRisk`/`pausedOnMiss`/
+             # `makeupAvailable` as DELIBERATELY unsurfaced (WIREFRAME's own
+             # "Social & motivation" §19/§20 section groups all three under
+             # v3-D06's flag-gated, post-launch M11 social scope), and
+             # surfacing `makeupAvailable` with any "keep your streak" framing
+             # would trip the product's own explicit "no loss-framed pushes"
+             # guardrail (`docs/WIREFRAME.md`'s six-guardrail list) — this was
+             # a known, already-decided non-gap the sweep agent missed by not
+             # searching far enough back in DECISIONS.md's own history, not a
+             # fresh finding; caught by re-deriving from the repo per
+             # NIGHTLY.md's own rule rather than trusting the agent's report.
+             # `TZ=UTC make setup` run from scratch on a fresh container (no
+             # `node_modules`/`vendor` anywhere) — clean, no retries needed.
+             # `TZ=UTC make test`: 2670 passing (was 2667, +3: 1 corpus-
+             # compiler + 2 apps/web; no other suite moved).
+             # `check-test-floor.mjs`: OK, 2670 >= floor 1899 (+771 margin,
+             # unmoved, same discipline as every prior entry). `TZ=UTC make
+             # build`: exit 0, 30 routes (unchanged — edits inside the
+             # existing `/workbench` component tree, no new route). `npm run
+             # gates`: all green (boundaries 311 files, up from 310 — exactly
+             # the one new apps/web production file; fonts degraded-but-
+             # non-blocking, pre-existing; corpus-morphology 362 words /
+             # corpus-glyphs 206 codepoints, both unchanged — the new field is
+             # English editorial text, not a corpus codepoint). `npx tsc
+             # --noEmit`, run separately across all four v3 node packages:
+             # clean in all four. Verified end to end against the REAL
+             # compiled corpus, not only fixtures: `packages/corpus-compiler/
+             # output/12/corpus.json`'s own `meta.mentalModel` now carries
+             # surah 12's real vendored title/spine/9 memory hooks/pairing
+             # strategy; surah 67's own `output/67/corpus.json` correctly
+             # shows `hasMentalModel: false, mentalModel: null` (no vendored
+             # `67-mental-model.json` file exists, only draft scene-beat
+             # labels) — no fabrication for a surah that genuinely has none.
+             # No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff reverted before committing, same discipline
+             # as every prior entry). No Arabic codepoint (every new/changed
+             # file swept programmatically, in Python, over the Arabic,
+             # Arabic Supplement, Arabic Extended-A and both Presentation
+             # Forms Unicode blocks, plus a `\u06xx`/`\u08xx`/`\uFBxx`/
+             # `\uFExx` escape and `fromCharCode` sweep — zero matches; every
+             # new string is a wire field name, a fixture coordinate, or the
+             # compiler's own vendored English editorial text from a
+             # committed raw data file, never generated, never Quranic
+             # Arabic). Session start: fresh container, `git status` clean,
+             # `HEAD` and local `main` both matched `origin/main` at
+             # `26cc664` (v3-D201) — no stale-local-main trap this run. NOT
+             # addressed: every item on v3-D201's own "NOT addressed" list,
+             # unchanged; `StreakState.atRisk`/`.pausedOnMiss`/
+             # `.makeupAvailable` remain deliberately unsurfaced (v3-D97,
+             # M11 social scope, re-confirmed this run) — see DECISIONS.md
+             # v3-D202.
              # NOTE (v3-D201, 2026-09-11): a scene beat's own emotional
              # register — `RawAct.emotionalBeat`, hand-authored and vendored
              # in `data/raw/12-mental-model.json` for all 19 of surah 12's

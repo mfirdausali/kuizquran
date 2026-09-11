@@ -155,6 +155,12 @@ export interface CorpusMeta {
   kernelYield: Record<number, number>;
   /** True when this surah has an authored mental model (acts / scene beats). */
   hasMentalModel: boolean;
+  /** The SURAH-LEVEL half of the authored mental model — `RawMentalModel`'s
+   *  own `title`/`oneLineSpine`/`memoryHooks`/`pairingStrategy`, distinct
+   *  from `sceneBeats` (the PER-ACT half, keyed by ayah). Vendored
+   *  alongside `acts` in the same raw file; present only when
+   *  `hasMentalModel` is true, never fabricated otherwise. */
+  mentalModel?: MentalModelSummary;
   /** True when vendored mushaf geometry (page/line) exists for this surah —
    * build-plan step 4. A surah without it compiles with page/line all null
    * rather than crashing (edge case #63: "geometry missing for new surah"). */
@@ -222,6 +228,15 @@ export interface RawMentalModel {
   title: string;
   oneLineSpine: string;
   acts: RawAct[];
+  memoryHooks: string[];
+  pairingStrategy: string;
+}
+
+/** The compiled, surah-level half of an authored mental model — everything
+ *  in `RawMentalModel` except `acts`, which becomes `sceneBeats` instead. */
+export interface MentalModelSummary {
+  title: string;
+  oneLineSpine: string;
   memoryHooks: string[];
   pairingStrategy: string;
 }
