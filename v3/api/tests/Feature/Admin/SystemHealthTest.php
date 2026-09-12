@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Admin;
 
+use App\Http\Controllers\Admin\Pseudonymizer;
 use App\Http\Controllers\Admin\SystemHealthController;
 use App\Models\AdminAudit;
 use App\Models\Event;
@@ -209,6 +210,16 @@ class SystemHealthTest extends TestCase
      * MUTATION: revert to encoding the whole `$users` batch in one
      * `json_encode()` call. This test goes back to `started: false` for the
      * WHOLE request (the clean learner's row is never written either).
+     *
+     * v3-D204: `deadLetters` carried the RAW `user_id` on the wire —
+     * `AtomCacheRebuilder::rebuildLocked()`'s own docblock types it
+     * `list<array{userId:mixed,error:string}>` and every OTHER admin
+     * audit/finding surface on this console (`AdminBillingController`,
+     * `NightlyWindowController`) pseudonymizes a learner id before it ever
+     * reaches the browser — this was the one that didn't. So this test now
+     * also asserts the RAW id never appears in the response body and that
+     * the pseudonym matches the SAME `Pseudonymizer` HMAC every sibling
+     * surface uses, not merely that some string is present.
      */
     public function test_a_poisoned_learner_is_dead_lettered_and_their_existing_cache_is_never_wiped(): void
     {
@@ -246,7 +257,21 @@ class SystemHealthTest extends TestCase
         $this->assertTrue($response->json('started'));
         $this->assertSame(1, $response->json('usersProcessed'), 'only the clean learner is actually rebuilt');
         $this->assertCount(1, $response->json('deadLetters'), 'exactly the poisoned learner is quarantined');
-        $this->assertSame($poisoned->id, $response->json('deadLetters.0.userId'));
+        $this->assertArrayNotHasKey(
+            'userId',
+            $response->json('deadLetters.0'),
+            'the raw user_id field must never reach the wire — only a pseudonym',
+        );
+        $this->assertSame(
+            app(Pseudonymizer::class)->for($poisoned->id),
+            $response->json('deadLetters.0.subjectPseudonym'),
+            'the same HMAC pseudonym every other admin surface uses, not a raw id',
+        );
+        $this->assertStringContainsString(
+            'unencodable event data',
+            $response->json('deadLetters.0.error'),
+            'the real reason, not merely a count',
+        );
 
         $cleanRow = DB::table('atom_cache')->where('user_id', $clean->id)->where('surah', 112)->first();
         $this->assertNotNull($cleanRow, 'the clean learner was rebuilt despite the poisoned learner sharing the batch');

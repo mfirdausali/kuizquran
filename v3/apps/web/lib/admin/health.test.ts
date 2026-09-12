@@ -177,7 +177,7 @@ describe("rebuildAtomCache — the #168 mutex outcomes, distinguishable", () => 
           queued: false,
           usersProcessed: 4,
           atomsWritten: 9,
-          deadLetters: [{ userId: 7, error: "unencodable event data" }],
+          deadLetters: [{ subjectPseudonym: "u_abc123", error: "unencodable event data" }],
         }),
         { status: 200 },
       ),
@@ -186,6 +186,66 @@ describe("rebuildAtomCache — the #168 mutex outcomes, distinguishable", () => 
     const outcome = await rebuildAtomCache();
     expect(outcome.ok).toBe(true);
     expect(outcome.deadLetterCount).toBe(1);
+  });
+
+  /**
+   * v3-D204: `AtomCacheRebuilder`'s own `deadLetters` carries WHICH learner
+   * (as a pseudonym, since v3-D204's backend fix) and WHY, on every rebuild
+   * — but the client previously reduced the whole array to a bare count
+   * (`deadLetterCount`), discarding both fields. An admin who saw "2
+   * learner(s) skipped" had no way to find out which two or what actually
+   * went wrong, even though the server had already computed exactly that.
+   * This proves the full per-entry detail survives parsing, not just the
+   * length.
+   */
+  it("carries each dead letter's own pseudonym and reason, not just a count", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          started: true,
+          queued: false,
+          usersProcessed: 4,
+          atomsWritten: 9,
+          deadLetters: [
+            { subjectPseudonym: "u_aaa111", error: "unencodable event data — Malformed UTF-8 characters" },
+            { subjectPseudonym: "u_bbb222", error: "unencodable event data — Inf and NaN cannot be JSON encoded" },
+          ],
+        }),
+        { status: 200 },
+      ),
+    ) as unknown as typeof fetch;
+
+    const outcome = await rebuildAtomCache();
+    expect(outcome.deadLetterCount).toBe(2);
+    expect(outcome.deadLetters).toEqual([
+      { subjectPseudonym: "u_aaa111", error: "unencodable event data — Malformed UTF-8 characters" },
+      { subjectPseudonym: "u_bbb222", error: "unencodable event data — Inf and NaN cannot be JSON encoded" },
+    ]);
+  });
+
+  it("a malformed dead-letter entry is dropped rather than fabricated", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          started: true,
+          queued: false,
+          usersProcessed: 4,
+          atomsWritten: 9,
+          deadLetters: [
+            { subjectPseudonym: "u_ok0001", error: "unencodable event data" },
+            { subjectPseudonym: 42, error: "not a string pseudonym" },
+            { error: "no pseudonym at all" },
+          ],
+        }),
+        { status: 200 },
+      ),
+    ) as unknown as typeof fetch;
+
+    const outcome = await rebuildAtomCache();
+    // The count still reflects what the server reported...
+    expect(outcome.deadLetterCount).toBe(3);
+    // ...but the detail list only ever carries entries it can trust.
+    expect(outcome.deadLetters).toEqual([{ subjectPseudonym: "u_ok0001", error: "unencodable event data" }]);
   });
 
   it("a completed rebuild with an empty dead-letter list reports a genuine zero", async () => {

@@ -176,7 +176,7 @@ describe("SystemHealthPanel — the rebuild button, edge case #168", () => {
           queued: false,
           usersProcessed: 5,
           atomsWritten: 12,
-          deadLetters: [{ userId: 7, error: "unencodable event data" }],
+          deadLetters: [{ subjectPseudonym: "u_abc12345", error: "unencodable event data" }],
         }),
         { status: 200 },
       ),
@@ -187,6 +187,42 @@ describe("SystemHealthPanel — the rebuild button, edge case #168", () => {
     fireEvent.click(button);
 
     await waitFor(() => expect(screen.getByText(/1 learner\(s\) skipped/i)).toBeTruthy());
+  });
+
+  /**
+   * v3-D204: the server has always computed WHICH learner was quarantined
+   * and WHY (`AtomCacheRebuilder`'s own `deadLetters`, pseudonymized on the
+   * wire since this fix) — but the panel collapsed the whole array to a
+   * bare count. An admin investigating a skipped learner had no lead at
+   * all. This proves the pseudonym and the real reason both reach the
+   * screen, for EACH entry, not just the total.
+   */
+  it("names each skipped learner's own pseudonym and reason, not only a count", async () => {
+    stubHealthThenRebuild(
+      new Response(
+        JSON.stringify({
+          started: true,
+          queued: false,
+          usersProcessed: 5,
+          atomsWritten: 12,
+          deadLetters: [
+            { subjectPseudonym: "u_aaa11111", error: "unencodable event data — Malformed UTF-8 characters" },
+            { subjectPseudonym: "u_bbb22222", error: "unencodable event data — Inf and NaN cannot be JSON encoded" },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    render(<SystemHealthPanel />);
+    const button = await screen.findByRole("button", { name: /rebuild/i });
+    fireEvent.click(button);
+
+    await waitFor(() => expect(screen.getByText(/2 learner\(s\) skipped/i)).toBeTruthy());
+    expect(screen.getByText(/u_aaa11111/)).toBeTruthy();
+    expect(screen.getByText(/Malformed UTF-8 characters/)).toBeTruthy();
+    expect(screen.getByText(/u_bbb22222/)).toBeTruthy();
+    expect(screen.getByText(/Inf and NaN cannot be JSON encoded/)).toBeTruthy();
   });
 
   it("a completed rebuild with no dead letters never mentions skipped learners", async () => {

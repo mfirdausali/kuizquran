@@ -53,9 +53,84 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2670 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2673 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 375 v3/api + 120 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1392 apps/web. (v3-D203, 2026-09-11)
+             # + 420 engine + 61 fold-runner + 1395 apps/web. (v3-D204, 2026-09-12)
+             # NOTE (v3-D204, 2026-09-12): `AtomCacheRebuilder::rebuildLocked()`'s
+             # own dead-letter quarantine (edge case #130, closed at
+             # v3-D114/v3-D115) computes a real per-learner `{userId, error}`
+             # pair on every rebuild, but `SystemHealthController
+             # ::rebuildAtomCache()` sent it straight to the wire — the ONE
+             # admin surface that put a RAW, unpseudonymized learner id in a
+             # response, where every sibling finding list
+             # (`AdminBillingController`, `NightlyWindowController`, v3-D178)
+             # runs a learner id through `Pseudonymizer` first — and the client
+             # then collapsed the whole array to a bare `deadLetterCount`,
+             # discarding `userId`/`error` entirely. An admin who saw "2
+             # learner(s) skipped (unencodable data)" had no way to find out
+             # WHICH learner or WHY, despite the server already knowing both.
+             # Fixed: `SystemHealthController` now constructor-injects
+             # `Pseudonymizer` and maps each dead letter to
+             # `{subjectPseudonym, error}` before responding;
+             # `lib/admin/health.ts`'s `RebuildOutcome` gains a matching
+             # `deadLetters?: DeadLetterEntry[]` (malformed entries dropped,
+             # never fabricated); `SystemHealthPanel.tsx` renders one line per
+             # skipped learner beneath the existing summary sentence. RED
+             # confirmed at all three layers: the existing
+             # `test_a_poisoned_learner_is_dead_lettered...` PHPUnit case was
+             # strengthened to assert `deadLetters.0` has no `userId` key and
+             # its `subjectPseudonym` matches `Pseudonymizer::for()` —
+             # failed exactly that assertion against the unmodified
+             # controller, 9/9 green after (was 9, +0 net — a strengthened
+             # existing case). Two new `health.test.ts` cases (full detail
+             # parsed; a malformed entry dropped without corrupting the
+             # count) both failed on `expected undefined to deeply equal
+             # [...]` against the unmodified lib — 16/16 green after (was
+             # 14, +2). One new `system-health-panel.test.tsx` case (two
+             # entries with DIFFERENT pseudonyms/errors, both must render)
+             # failed on `getByText` finding nothing — 10/10 green after
+             # (was 9, +1). `TZ=UTC make test`: 2673 passing (was 2670, +3;
+             # apps/web 1395, was 1392; v3/api 375 unchanged — a strengthened
+             # test carries no separate count; no other suite moved).
+             # `check-test-floor.mjs`: OK, 2673 >= floor 1899 (+774 margin,
+             # unmoved). `TZ=UTC make build`: exit 0, 30 routes (unchanged —
+             # edits inside the existing `/settings/health` component, no
+             # new route). `npm run gates`: all green (boundaries 312 files;
+             # fonts degraded-but-non-blocking, pre-existing;
+             # corpus-morphology/corpus-glyphs unchanged). `npx tsc
+             # --noEmit` (apps/web): clean. `./vendor/bin/pint --test` on
+             # both changed PHP files: passed. No `v1/**`/`v2/**` edit (a
+             # stray `v2/tsconfig.tsbuildinfo` build-cache diff reverted
+             # before committing, same discipline as every prior entry). No
+             # Arabic codepoint (all six changed files swept
+             # programmatically, in Python, over the Arabic, Arabic
+             # Supplement, Arabic Extended-A and both Presentation Forms
+             # Unicode blocks, plus a `\u06xx`/`\u08xx`/`\uFBxx`/`\uFExx`
+             # escape and `fromCharCode` sweep — zero matches; every new
+             # string is a PHP identifier, a synthetic pseudonym/error test
+             # fixture, or a fixed English caption, never corpus text).
+             # Session start: fresh container, `TZ=UTC make setup` run from
+             # scratch (from the repo root — this repo's Makefile lives at
+             # `/home/user/kuizquran/Makefile`, not inside `v3/`) with no
+             # retries needed; `HEAD` and local `main` both already matched
+             # `origin/main` at `f66b0b6` (v3-D203) — no stale-local-main
+             # trap this run. Found by a dedicated fresh sweep across
+             # `apps/web/lib` (every subdirectory), `packages/engine/src`,
+             # `packages/corpus-compiler/src`, `worker/fold-runner/src`,
+             # `api/app/Http/Controllers`, `api/app/Console`, config files,
+             # and roughly a dozen admin controller/panel pairs — most came
+             # back clean or re-confirmed an already-excluded item; this was
+             # the one genuine, previously-undocumented instance, verified
+             # directly against both the PHP source and the TS parser
+             # before writing any test. One candidate investigated and
+             # deliberately left: `StripeField.editable` on
+             # `/settings/stripe`'s wire response is always the literal
+             # `false` for every field, never dynamically computed — a
+             # documentation constant, not a genuinely computed value in
+             # this bug class's sense. NOT addressed: every item on
+             # v3-D203's own "NOT addressed" list, unchanged — see
+             # DECISIONS.md v3-D204 for the full enumeration. See
+             # DECISIONS.md v3-D204.
              # NOTE (v3-D203, 2026-09-11): a webhook's own refusal reason —
              # `App\Billing\EntitlementMachine::apply()`'s
              # `TransitionResult::ignoredStale($detail)`, real and dynamic for

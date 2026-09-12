@@ -29,9 +29,27 @@ use Illuminate\Support\Facades\Log;
  * streak leaderboard, no session-count hero." The metric registry below is a
  * CLOSED set and `dau`/`sessions_today`/`streak_rank` are not members —
  * `SystemHealthTest` asserts that, so the prohibition is mechanical.
+ *
+ * ══════════════════════════════════════════════════════════════════════════════
+ * v3-D204 — `rebuildAtomCache()`'s own `deadLetters` carried the RAW `user_id`
+ *
+ * `AtomCacheRebuilder::rebuildLocked()` computes, per quarantined learner, a
+ * real `{userId, error}` pair (edge case #130's dead-letter mechanism, closed
+ * at v3-D114/v3-D115) and this endpoint sent it straight through — the ONE
+ * admin surface on this console that put a raw learner id on the wire
+ * unpseudonymized. Every sibling finding list (`AdminBillingController
+ * ::toWire()`'s `subjectPseudonym`, `NightlyWindowController::foldFindings()`)
+ * runs a diverging/quarantined learner id through `Pseudonymizer` first. Fixed
+ * here: `$this->pseudonymizer->for()` replaces the raw id before the response
+ * leaves this method; the `error` string (never learner-identifying — it
+ * names a UTF-8/JSON encoding failure, not the data itself) passes through
+ * verbatim.
+ * ══════════════════════════════════════════════════════════════════════════════
  */
 class SystemHealthController extends Controller
 {
+    public function __construct(private readonly Pseudonymizer $pseudonymizer) {}
+
     /**
      * The CLOSED metric registry. North star is P(recall @ 10y).
      *
@@ -194,7 +212,23 @@ class SystemHealthController extends Controller
             'queued' => false,
             'usersProcessed' => $result['usersProcessed'],
             'atomsWritten' => $result['atomsWritten'],
-            'deadLetters' => $result['deadLetters'],
+            'deadLetters' => $this->pseudonymizedDeadLetters($result['deadLetters']),
         ]);
+    }
+
+    /**
+     * v3-D204: never the raw `user_id` — every quarantined learner is named
+     * only by the same HMAC `Pseudonymizer` every other admin finding list
+     * on this console uses.
+     *
+     * @param  list<array{userId:mixed,error:string}>  $deadLetters
+     * @return list<array{subjectPseudonym:string,error:string}>
+     */
+    private function pseudonymizedDeadLetters(array $deadLetters): array
+    {
+        return array_values(array_map(fn (array $d) => [
+            'subjectPseudonym' => $this->pseudonymizer->for((int) $d['userId']),
+            'error' => (string) $d['error'],
+        ], $deadLetters));
     }
 }

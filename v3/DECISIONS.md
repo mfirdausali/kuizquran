@@ -16726,3 +16726,135 @@ scope to fix opportunistically) — all unchanged. `TransitionResult::conflict()
 carries no `$detail` at all (the optimistic-lock-retry case has no per-event
 explanation to compute — "the caller may retry" is already the complete
 story) — considered and correctly left alone, not a parallel gap.
+
+## v3-D204, 2026-09-12: a rebuilt cache's own dead-letter detail was computed and sent, then thrown away down to a bare count
+
+**Found:** `App\Support\AtomCacheRebuilder::rebuildLocked()` (edge case
+#130's dead-letter quarantine, closed at v3-D114/v3-D115) computes a real,
+per-learner `{userId, error}` pair for every learner whose event data
+cannot be `json_encode()`'d — a genuine diagnostic fact, not a stub, and the
+one thing an admin actually needs to go investigate a skipped learner.
+`Admin\SystemHealthController::rebuildAtomCache()` put this array straight
+on the wire verbatim (`'deadLetters' => $result['deadLetters']`), including
+the **raw, unpseudonymized `user_id`** — the one admin-console surface that
+did, where every sibling finding list (`AdminBillingController::toWire()`'s
+`subjectPseudonym`, `NightlyWindowController::foldFindings()`, v3-D178)
+runs a learner id through `Pseudonymizer` first. On the client,
+`lib/admin/health.ts#rebuildAtomCache()` then collapsed the whole array to
+`deadLetterCount: number`, discarding `userId`/`error` entirely, and
+`SystemHealthPanel.tsx` printed only "N learner(s) skipped (unencodable
+data)" — an admin who saw that sentence had no way to find out WHICH
+learner or WHAT the actual encoding failure was, even though the server
+had already computed exactly that, on every rebuild, since v3-D115.
+
+This is the same "computed, shipped, zero reader" shape this build has
+closed roughly 90 times since v3-D82, here on `AtomCacheRebuilder`'s own
+diagnostic output rather than a database audit column — plus a smaller,
+independent privacy gap (the unpseudonymized id) uncovered while fixing it.
+
+**Fixed, two parts:**
+1. **Backend:** `SystemHealthController` now constructor-injects
+   `Pseudonymizer` (the same one `AdminAuthController`/`AdminBillingController`/
+   `NightlyWindowController` already use) and a new private
+   `pseudonymizedDeadLetters()` maps each `{userId, error}` to
+   `{subjectPseudonym, error}` before the response leaves the method. No
+   change to `AtomCacheRebuilder` itself — it stays learner-identity-neutral
+   at the domain layer; pseudonymization happens at the one HTTP boundary
+   that needs it, matching `NightlyWindowController`'s own precedent
+   exactly.
+2. **Frontend:** `lib/admin/health.ts`'s `RebuildOutcome` gains a new
+   `deadLetters?: DeadLetterEntry[]` field (`{subjectPseudonym, error}`,
+   parsed with a type-guard that drops any malformed entry rather than
+   fabricating one — `deadLetterCount` still reflects the server's own
+   reported total even if one entry is dropped, so the two never silently
+   disagree in a way that hides a listing bug). `deadLetterCount` itself is
+   unchanged, still derived from the raw array's length. `SystemHealthPanel.tsx`
+   renders a new `<ul aria-label="Skipped learners">` beneath the existing
+   summary sentence, one `<li>` per entry (`<code>{pseudonym}</code> —
+   {error}`), present only when the list is non-empty.
+
+**RED confirmed at every layer, each independently, before implementing:**
+- Backend: the existing `test_a_poisoned_learner_is_dead_lettered_and_their_existing_cache_is_never_wiped`
+  test was strengthened (not a new test — a stricter existing one) to
+  assert `deadLetters.0` has no `userId` key at all and that
+  `deadLetters.0.subjectPseudonym` equals `app(Pseudonymizer::class)->for($poisoned->id)`
+  — run directly against the unmodified controller, it failed exactly on
+  `assertArrayNotHasKey('userId', ...)` (the raw key was present). Fixed,
+  reran: 9/9 green in `SystemHealthTest.php` (was 9, +0 net — a
+  strengthened existing case, not a new one).
+- Frontend lib: two new cases in `lib/admin/health.test.ts` ("carries each
+  dead letter's own pseudonym and reason, not just a count" and "a
+  malformed dead-letter entry is dropped rather than fabricated") both
+  failed against the unmodified `health.ts` on `expected undefined to
+  deeply equal [...]` — the field did not exist at all. Implemented, reran:
+  16/16 green (was 14, +2).
+- Frontend panel: one new case in `test/system-health-panel.test.tsx`
+  ("names each skipped learner's own pseudonym and reason, not only a
+  count") failed on `getByText(/u_aaa11111/)` finding nothing — the panel
+  rendered only the count sentence. Implemented, reran: 10/10 green (was 9,
+  +1).
+
+The load-bearing frontend case seeds TWO dead-letter entries with
+DIFFERENT pseudonyms and DIFFERENT error strings and asserts both render
+in full, so neither test can pass on a single hardcoded placeholder line;
+the malformed-entry case seeds one valid entry plus two invalid ones (a
+non-string pseudonym, a missing pseudonym) and asserts the count still
+reports the server's real total (3) while the detail list carries only the
+one trustworthy entry — proving the drop is real, not merely that
+`deadLetterCount` and `deadLetters.length` happen to agree.
+
+**Verified:**
+`TZ=UTC make test`: 2673 passing (was 2670, +3 — apps/web 1395, was 1392;
+v3/api 375, unchanged — the backend fix was proven by strengthening an
+existing test, so its file carries no separate count; no other suite
+moved). `check-test-floor.mjs`: OK, 2673 >= floor 1899 (+774 margin,
+unmoved, same discipline as every prior entry). `TZ=UTC make build`: exit
+0, 30 routes (unchanged — edits inside the existing `/settings/health`
+component, no new route). `npm run gates`: all green (boundaries 312
+files; fonts degraded-but-non-blocking, pre-existing; corpus-morphology
+and corpus-glyphs unchanged — no corpus data touched). `npx tsc --noEmit`
+(apps/web): clean. `./vendor/bin/pint --test` on both changed PHP files:
+passed. No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff produced by running the suite was reverted before
+committing, same discipline as every prior entry — `git status
+--porcelain -- v1 v2` empty immediately before committing). No Arabic
+codepoint (all six changed files swept programmatically, in Python, over
+the Arabic, Arabic Supplement, Arabic Extended-A and both Presentation
+Forms Unicode blocks, plus a `\u06xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape and
+`fromCharCode` sweep — zero matches; every new string is a PHP identifier,
+a synthetic pseudonym/error test fixture, or a fixed English caption,
+never corpus text).
+
+**Session start:** fresh container, no `node_modules`/`vendor`/`.env`
+anywhere; `TZ=UTC make setup` run from scratch (from the repo root — this
+run's Makefile lives at `/home/user/kuizquran/Makefile`, not inside `v3/`)
+with no retries needed. `HEAD` and local `main` both already matched
+`origin/main` at `f66b0b6` (v3-D203) — no stale-local-main trap this run,
+confirmed directly before any work began.
+
+Found by a dedicated fresh sweep of the "computed/shipped, zero reader"
+bug class after an extensive manual audit across `apps/web/lib` (every
+subdirectory), `packages/engine/src`, `packages/corpus-compiler/src`,
+`worker/fold-runner/src`, `api/app/Http/Controllers`, `api/app/Console`,
+config files, and roughly a dozen admin controller/panel pairs came back
+clean or re-confirmed an already-excluded item — this was the one genuine,
+previously-undocumented instance that survived direct verification (the
+wire field checked against both the PHP source and the TS parser before
+writing any test).
+
+**NOT addressed**, named so a future run doesn't re-discover it as new:
+every item on v3-D203's own "NOT addressed" list, unchanged —
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class / `permitsIssuance`/`permitsReview` (v3-D88, v3-D151); multi-surah
+enrollment; the operational mailer/7-night window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy drift (v3-D127); `packages/engine/src/placement.ts`
+(v3-D111/D113/D123); `lib/plan/forecast.ts`'s `awayDays` (v3-D190, needs a
+new event type + write path); `MacroFacts.litany.rhymeLabel` (v3-D188,
+unreachable until `rhymeClassOf()` exists); `StripeField.editable` on
+`/settings/stripe` (checked this run — always the literal `false` for
+every field, never dynamically computed, so it is a documentation constant
+rather than a genuinely computed value in this bug class's sense; left
+alone) — all unchanged.

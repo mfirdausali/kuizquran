@@ -105,6 +105,19 @@ export async function loadHealth(): Promise<HealthLoad> {
   return { state: "ready", report: { checks: b.checks, rebuildRunning: b.rebuildRunning } };
 }
 
+/** One quarantined learner, as v3-D204's fix reports it — pseudonymized by
+ *  the server, never a raw id. */
+export interface DeadLetterEntry {
+  subjectPseudonym: string;
+  error: string;
+}
+
+function isDeadLetterEntry(v: unknown): v is DeadLetterEntry {
+  if (typeof v !== "object" || v === null) return false;
+  const d = v as Record<string, unknown>;
+  return typeof d.subjectPseudonym === "string" && typeof d.error === "string";
+}
+
 export interface RebuildOutcome {
   ok: boolean;
   /** True only for #168's "already running, queued rather than run" case. */
@@ -116,6 +129,11 @@ export interface RebuildOutcome {
    *  encoded for the fold-runner. Their EXISTING atom_cache rows are left
    *  untouched, never wiped — see AtomCacheRebuilder's own header. */
   deadLetterCount?: number;
+  /** v3-D204: WHICH learner (a pseudonym) and WHY, for each entry the
+   *  server actually reported — not merely how many. A malformed entry is
+   *  dropped from this list rather than fabricated; `deadLetterCount` still
+   *  reflects the server's own reported total either way. */
+  deadLetters?: DeadLetterEntry[];
 }
 
 /**
@@ -169,5 +187,6 @@ export async function rebuildAtomCache(): Promise<RebuildOutcome> {
     usersProcessed: typeof b.usersProcessed === "number" ? b.usersProcessed : undefined,
     atomsWritten: typeof b.atomsWritten === "number" ? b.atomsWritten : undefined,
     deadLetterCount: Array.isArray(b.deadLetters) ? b.deadLetters.length : undefined,
+    deadLetters: Array.isArray(b.deadLetters) ? b.deadLetters.filter(isDeadLetterEntry) : undefined,
   };
 }

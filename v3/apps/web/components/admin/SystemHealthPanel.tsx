@@ -159,6 +159,19 @@ export function SystemHealthPanel() {
               : outcome.message}
           </p>
         ) : null}
+        {/* v3-D204: the count alone tells an admin THAT something was
+            skipped, never WHICH learner or WHY — even though the server
+            already computed both. Named per entry so a real quarantine is
+            actionable, not merely visible. */}
+        {outcome?.deadLetters && outcome.deadLetters.length > 0 ? (
+          <ul className="caption" aria-label="Skipped learners">
+            {outcome.deadLetters.map((d) => (
+              <li key={d.subjectPseudonym}>
+                <code>{d.subjectPseudonym}</code> — {d.error}
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </section>
     </div>
   );
