@@ -2387,3 +2387,153 @@ describe("v3-D138 — pace mode reaches the real session assembly, not just Inde
     );
   });
 });
+
+// v3-D206 — `DrillEvent.corpusHash` (step 10's own frozen wire field,
+// `@engine/types.ts`) has been fully plumbed through `lib/idb/append.ts`
+// (`AppendContext.corpusHash`) and `@engine/events.ts#makeEvent` since the
+// wire froze, on a docblock naming its purpose in full: "pins provenance so
+// a later corpus recompile can never retroactively reinterpret a historical
+// event under different content." But `grep -rn "corpusHash" lib/session`
+// returned nothing before this fix — `run.ts`, the one module that actually
+// commits a real learner's events, never read `Corpus["meta"].corpusHash`
+// (itself newly declared — the field did not previously exist even to read)
+// and never passed a value through the `ctx` it builds at every `append()`
+// call site. Every real `SessionIsland.tsx` caller builds its ctx as plain
+// `{ now: Date.now(), tz: currentTz() }` — confirmed directly, `corpusHash`
+// appears nowhere in that component either — so even a learner drilling a
+// fully-compiled, fully-staged corpus had every event committed with no
+// provenance pin at all, silently defeating the protection the field's own
+// docblock describes. `stage-corpus.mjs` had the matching gap one layer
+// up: it never mirrored `output/manifest.json`'s own `ManifestEntry
+// .corpusHash` into the staged client payload, so even a `run.ts` that
+// faithfully read `c.meta.corpusHash` would have read `undefined` for
+// every real corpus a learner ever drills.
+//
+// Fixed at both ends: `stage-corpus.mjs#slim()` now mirrors the manifest's
+// `corpusHash` into `meta.corpusHash` (never recomputed — recomputing over
+// the SLIMMED bytes would disagree with the manifest's own value, since
+// slimming changes the bytes being hashed); `SessionRun` gains a
+// `corpusHash` field, resolved ONCE in `startFromQueue` (so a session
+// cannot silently disagree with its own `session_start` mid-way through)
+// and stamped on every event `run.ts` commits — `session_start`,
+// `reconstruct_tap`, `ayah_produced` (both the ordinary path and the
+// rescaffold warm-up), `gate_result`, `gate_demote`, and the adoption pair
+// (`ayah_produced` + `adoption`).
+//
+// These tests build a corpus CLONE carrying a synthetic `meta.corpusHash`
+// (never a fabricated corpus.json on disk) so the positive case cannot pass
+// on a value nothing computed — the frozen/compiled fixtures this file
+// otherwise reads predate the field entirely and always resolve it to
+// `undefined`, which the degrade case below asserts directly.
+describe("v3-D206 — DrillEvent.corpusHash reaches the real session loop", () => {
+  const TEST_HASH = "deadbeefcafef00d";
+
+  function corpusWithHash(hash: string | undefined): Corpus {
+    const base = corpus();
+    return { ...base, meta: { ...base.meta, corpusHash: hash } };
+  }
+
+  it("stamps session_start, reconstruct_tap and ayah_produced with the corpus's own corpusHash", async () => {
+    const c = corpusWithHash(TEST_HASH);
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+    await playThrough(started.run, c);
+
+    const events = await getAllEvents();
+    const relevant = events.filter((e) =>
+      ["session_start", "reconstruct_tap", "ayah_produced"].includes(e.type),
+    );
+    // At least one of each kind actually landed — otherwise the assertion
+    // below would pass vacuously over an empty filtered set.
+    expect(relevant.filter((e) => e.type === "session_start").length).toBe(1);
+    expect(relevant.filter((e) => e.type === "reconstruct_tap").length).toBeGreaterThan(0);
+    expect(relevant.filter((e) => e.type === "ayah_produced").length).toBeGreaterThan(0);
+    for (const e of relevant) expect(e.corpusHash).toBe(TEST_HASH);
+  });
+
+  it("never fabricates a corpusHash — a corpus with none stamps events with none", async () => {
+    const c = corpusWithHash(undefined);
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+    await playThrough(started.run, c);
+
+    const events = await getAllEvents();
+    expect(events.length).toBeGreaterThan(0);
+    expect(events.every((e) => e.corpusHash === undefined)).toBe(true);
+  });
+
+  it("a session started against one corpusHash keeps stamping it even if a LATER corpus object disagrees", async () => {
+    // `run.corpusHash` is resolved ONCE at session start, not re-read per
+    // event — the same "resolve a provenance fact once" discipline
+    // `structured`/`openPracticeDrill` already use. A caller that (by a
+    // bug, or a mid-session recompile) passes a DIFFERENT corpus object
+    // into a later `answerCurrent` must not silently re-pin history to it.
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, corpusWithHash(TEST_HASH));
+    if (!started.ok) throw new Error("session must start");
+    const drifted = corpusWithHash("a-different-hash-entirely");
+
+    const cur = currentItem(started.run, drifted);
+    expect(cur).not.toBeNull();
+    await answerCurrent(started.run, drifted, correctIndexFor(started.run, drifted), {
+      now: T0 + 500,
+      tz: TZ,
+    });
+
+    const events = await getAllEvents();
+    const tap = events.find((e) => e.type === "reconstruct_tap");
+    expect(tap?.corpusHash).toBe(TEST_HASH);
+  });
+
+  it("acceptGateDemote's gate_demote event carries the run's own corpusHash", async () => {
+    const c = corpusWithHash(TEST_HASH);
+    const gatedAyah = 1;
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah: gatedAyah, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+    for (let day = 1; day <= DEMOTE_OFFER_AFTER_FAILS; day++) {
+      await append(
+        {
+          type: "gate_result",
+          ts: T0 + day * 86_400_000,
+          tz: TZ,
+          surah: SURAH,
+          ayah: gatedAyah,
+          rung: "S3",
+          correct: false,
+          structured: true,
+        } as DrillEvent,
+        { now: T0 + day * 86_400_000, tz: TZ },
+      );
+    }
+    const dueDay = T0 + (DEMOTE_OFFER_AFTER_FAILS + 1) * 86_400_000;
+    const started = await startSession({ surah: SURAH, now: dueDay, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+    expect(started.run.queue[0]?.kind).toBe("gate");
+
+    await acceptGateDemote(started.run, c, { now: dueDay + 500, tz: TZ });
+
+    const events = await getAllEvents();
+    const demote = events.find((e) => e.type === "gate_demote");
+    expect(demote?.corpusHash).toBe(TEST_HASH);
+  });
+
+  it("acceptAdoption stamps its ayah_produced AND adoption events with the run's own corpusHash", async () => {
+    const c = corpusWithHash(TEST_HASH);
+    const ayah = 2;
+    const started = await startOpenPractice({ surah: SURAH, now: T0, tz: TZ, ayah, drill: "S3" }, c);
+    if (!started.ok) throw new Error("open practice must start");
+    const { run } = await playThrough(started.run, c);
+    const before = await getAllEvents();
+    const beforeIds = new Set(before.map((e) => e.id));
+
+    await acceptAdoption(run, { now: T0 + 100_000, tz: TZ });
+
+    const after = await getAllEvents();
+    const fresh = after.filter((e) => !beforeIds.has(e.id));
+    const produced = fresh.find((e) => e.type === "ayah_produced" && e.ayah === ayah);
+    const adopted = fresh.find((e) => e.type === "adoption" && e.ayah === ayah);
+    expect(produced?.corpusHash).toBe(TEST_HASH);
+    expect(adopted?.corpusHash).toBe(TEST_HASH);
+  });
+});

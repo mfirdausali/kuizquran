@@ -17009,3 +17009,213 @@ remain draft/unauthored — this fix changes nothing about that gate);
 `packages/engine/src/placement.ts` (v3-D111/D113/D123); `lib/plan/forecast.ts`'s
 `awayDays` (v3-D190); `MacroFacts.litany.rhymeLabel` (v3-D188);
 `StripeField.editable` (v3-D204, a documentation constant) — all unchanged.
+
+## v3-D206, 2026-09-12: `DrillEvent.corpusHash` — step 10's own frozen provenance-pinning field — never reached a real learner's session, at BOTH ends of the pipe
+
+**Found:** a fresh sweep of `apps/web/lib/session/run.ts` — the one module
+that actually commits a real learner's events, and the direct site of
+B2/B10/B11/B12 — against the full field-by-field shape of `DrillEvent`
+(`packages/engine/src/types.ts`) rather than a function-name grep. Every
+other optional wire field on that type either has a real production
+producer or is a documented, deliberately-deferred M4/M6 seam (`specSnapshot`,
+`gradeClass`, `deviceId`/`deviceSeq`, all wired). `corpusHash` was the one
+exception: `grep -rn "corpusHash" apps/web/lib/session apps/web/components`
+returned nothing outside `AppendContext`'s own type declaration
+(`lib/idb/append.ts`) before this fix.
+
+The field's own docblock states its purpose in full: "pins provenance so a
+later corpus recompile can never retroactively reinterpret a historical
+event under different content" — the exact B3-shaped protection this build
+takes seriously everywhere else (the tiered verification hash, the
+content-freeze gate, `CorpusHashRecomputer`'s synchronous override
+recompute). `lib/idb/append.ts#append()` and `@engine/events.ts#makeEvent()`
+have supported `ctx.corpusHash`/`a.corpusHash` since the wire froze (step 10)
+— the STORAGE half was real and already tested — but two independent gaps on
+the PRODUCER side meant no real event ever carried a value:
+
+1. **Every real caller built its `ctx` as bare `{ now, tz }`.** Confirmed
+   directly against `components/session/SessionIsland.tsx`: all six call
+   sites that build an `AppendContext` (`startSession`/`startFloorSession`/
+   `startDrillSession`/`startOpenPractice`/`answerCurrent`/`acceptAdoption`/
+   `acceptGateDemote`) omit `corpusHash` entirely. `lib/session/run.ts`
+   itself never read `Corpus["meta"].corpusHash` at any of its 8 event-
+   emission sites — because that field did not exist to read: `Corpus["meta"]`
+   (`packages/engine/src/types.ts`) had never declared it at all.
+2. **Even a `run.ts` that read it faithfully would have read `undefined` for
+   every real corpus.** `output/manifest.json`'s own `ManifestEntry.corpusHash`
+   (`corpus-compiler/src/manifest.ts#corpusContentHash16`) is the compiler's
+   real, deterministic content hash — computed on every compile and already
+   consumed by `content-freeze.mjs`/`distractor-qa.mjs`'s own gates — but
+   `stage-corpus.mjs#slim()`, the ONE boundary where a compiled corpus
+   crosses into a browser, never mirrored it into the staged client payload.
+   `meta: corpus.meta` was copied straight through, and `corpus.meta` itself
+   has no `corpusHash` field at the compiler level BY DESIGN: embedding a
+   hash of the corpus's own bytes inside those same bytes is circular (the
+   manifest's `corpusHash` is why the hash lives in a SEPARATE file).
+
+⇒ Every event a real learner has ever committed through the shipped session
+loop — `session_start`, `reconstruct_tap`, `ayah_produced`, `gate_result`,
+`gate_demote`, `adoption` — carries no corpus-content pin at all, silently
+defeating the one protection this exact field exists to provide. Concretely:
+after a recompile that changes a surah's content (this build does this
+routinely — v3-D136's `meta.macro` addition, v3-D188..D205's own field
+additions, each changed every launch surah's `corpusHash`), nothing on the
+event itself lets a human or a future tool tell which corpus content a
+historical tap was actually answered against.
+
+**Fixed at both ends, minimally, on the exact shape the field's own docblock
+already describes:**
+
+- `packages/engine/src/types.ts`: `Corpus["meta"]` gains an optional
+  `corpusHash?: string`, documented as mirroring the manifest's value, never
+  self-computed by the client (that would hash the wrong bytes).
+- `apps/web/scripts/stage-corpus.mjs`: reads `output/manifest.json` ONCE,
+  and `slim()` now takes the surah's own `ManifestEntry` and spreads
+  `corpusHash` into the staged `meta` — never recomputed, and absent (not
+  fabricated) when no manifest entry exists for that surah.
+- `apps/web/lib/session/run.ts`: `SessionRun` gains an optional
+  `corpusHash?: string`, resolved ONCE in `startFromQueue` from
+  `c.meta.corpusHash` — the same "resolve a provenance fact once, carry it
+  on the run" shape `structured`/`openPracticeDrill` already establish, so a
+  session cannot silently re-pin its own history mid-way through if a later
+  caller (by bug, or a mid-session recompile) passes a different corpus
+  object into `answerCurrent`. Every one of the 8 event-literal sites in
+  `run.ts` — `session_start` (reads `c.meta.corpusHash` directly, before
+  `run` exists), `reconstruct_tap`, both `ayah_produced` branches (ordinary
+  and the rescaffold warm-up), `gate_result`, `gate_demote`, and the
+  adoption pair (`ayah_produced` + `adoption`) — now stamps
+  `corpusHash: run.corpusHash`, mirroring the file's own existing
+  `tz: ctx.tz` convention of stamping an optional field directly rather than
+  relying on `append()`'s own fallback merge.
+
+No new function parameter was needed anywhere outside `run.ts` itself:
+because every session entry point (`startSession`/`startFloorSession`/
+`startDrillSession`/`startOpenPractice`) already funnels through the shared
+`startFromQueue`, and every subsequent event-emitting function already
+takes `run: SessionRun` (several, like `acceptAdoption`, do not even take
+`c: Corpus`), threading the value through `SessionRun` reached every call
+site without touching `SessionIsland.tsx` or any public function signature.
+
+**RED confirmed directly:** `git stash` of `lib/session/run.ts` alone (the
+new test file, the `types.ts` type declaration, and `stage-corpus.mjs` all
+kept — the type declaration is inert without the implementation reading it)
+and rerunning the 5 new `run.test.ts` cases: 4 of 5 failed exactly as
+predicted, each on `expected undefined to be 'deadbeefcafef00d'` (the
+positive full-playthrough case, the mid-session-drift case, the
+`acceptGateDemote` case, and the `acceptAdoption` case) — the 5th, the
+never-fabricates-a-hash degrade case, passed vacuously, correctly, since it
+never depended on the fix. Restored byte-identically (`git diff` empty),
+reran: 73/73 green in the file (was 68, +5). The positive case builds a
+CLONED corpus carrying a synthetic `meta.corpusHash` (never a fabricated
+`corpus.json` on disk — the frozen/compiled fixtures this file otherwise
+reads predate the field entirely and always resolve to `undefined`, which
+the negative case asserts directly) and plays a full session through it,
+asserting every `session_start`/`reconstruct_tap`/`ayah_produced` carries
+the exact value; the mid-session-drift case proves the value is resolved
+ONCE at session start, not re-read per event, by passing a SECOND corpus
+object with a DIFFERENT hash into a later `answerCurrent` call and asserting
+the ORIGINAL hash still lands.
+
+**Verified end-to-end against the REAL compiled + staged corpus, not only
+the synthetic test fixture** — this build's own repeated caution against
+vacuous verification (v3-D38/D45/D49/D50/D53 et al.) applies directly here,
+since a fix that only worked against a hand-built test corpus while leaving
+`corpus.meta.corpusHash` permanently `undefined` in production would be the
+exact shape of that failure: `make compile-corpus` (fresh container, ran
+before any implementation) produced `output/manifest.json` with real,
+distinct 16-hex hashes per surah (`112: 908ca9edbd2ab2e4`, `103:
+123c6212cc1d074d`, `67: 77722a2b8b1b6aae`, `12: 6d04e4f9fd466905`); `npm run
+stage-corpus` (rerun after the `stage-corpus.mjs` fix) produced
+`public/corpus/112.json` whose own `meta.corpusHash` is confirmed
+byte-identical to the manifest's `112` entry, verified directly by parsing
+the staged JSON — not merely trusted from the script's own console output.
+
+**`TZ=UTC make test`** (fresh container, `make setup` completed from
+scratch with no retries needed, `make compile-corpus` run once before any
+test relying on the real 112/12 corpora): 2680 passing (was 2675, +5 —
+exactly this run's new tests; apps/web 1402, was 1397; no other suite
+moved: 255 v2 vitest, 47 v2/api, 375 v3/api, 120 corpus-compiler, 420
+engine, 61 fold-runner). `check-test-floor.mjs` (run as part of `make
+test`): OK, 2680 >= floor 1899 (+781 margin, `TEST-FLOOR` left unmoved,
+same discipline as every prior entry). `TZ=UTC make build`: exit 0, 30
+routes (unchanged — no route touched, this is a `lib/`+compiler-tooling+
+engine-type fix). `npm run gates` (via `prebuild`, the canonical
+invocation — boundaries runs BEFORE `stage-corpus` in that chain, so it
+reflects the tree as committed, not a `next-env.d.ts` artifact a later
+`next build` creates): all green — boundaries 311 files, unchanged count (no
+new production file — `stage-corpus.mjs` lives under `scripts/`, which
+`check-boundaries.mjs` skips by name; the two other edited files are
+existing production files, not new ones); fonts degraded-but-non-blocking,
+pre-existing; corpus-morphology 362 words / corpus-glyphs 206 codepoints,
+both unchanged — `corpusHash` is a 16-hex string, never a new corpus
+codepoint. (A standalone, later `npm run gates` invocation — run AFTER
+`next build` had already created the gitignored, untracked
+`next-env.d.ts` in this fresh container — reported 312; that file is not
+part of this diff, confirmed via `git status --porcelain`, and is a
+pre-existing Next.js bootstrap artifact of a clean checkout, not something
+this fix introduced.) `npx tsc --noEmit`, run separately across all four v3
+node packages (`apps/web`, `packages/engine`, `packages/corpus-compiler`,
+`worker/fold-runner` — widening a shared engine type can silently break a
+sibling package's own typecheck without touching its source): clean in all
+four. `packages/engine`'s own `npm test`: 420/420, unchanged (no engine
+test file touched — the new field is optional and additive).
+`corpus-compiler`'s own `npm test`: 120/120, unchanged (no compiler source
+touched — only its OUTPUT is read, by a script outside the package). No
+`v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the suites was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2` empty
+immediately before committing). No Arabic codepoint (all four changed files
+swept programmatically, in Python, over the Arabic, Arabic Supplement,
+Arabic Extended-A and both Presentation Forms Unicode blocks, plus a
+`\u06xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape and `fromCharCode`/
+`fromCodePoint` sweep — zero matches; every new string is a wire field
+name, a synthetic 16-hex test-fixture placeholder ("deadbeefcafef00d",
+"a-different-hash-entirely"), or a real 16-hex content hash the compiler
+itself computed, never corpus text).
+
+**Session start:** fresh container, no `node_modules`/`vendor`/`.env`/
+compiled corpus output anywhere; local `main` and `origin/main` both
+already agreed at `3d952a5` (v3-D205) — no stale-local-main trap this
+session, the recurring hazard this file has recorded roughly forty times
+since v3-D77. `make setup` run from scratch (all composer/npm installs
+completed cleanly, no `COMPOSER_PROCESS_TIMEOUT` retry needed);
+`make compile-corpus` run once before any implementation, since a fresh
+container has no `output/` at all (gitignored, v3-D52) and this fix's own
+verification depends on a real `manifest.json` existing.
+
+**Candidate search:** a Laravel model-relation sweep (`AccountDeletionRequest
+::user()`, `AdminAudit::actor()`, and the rest of `app/Models/*.php`'s
+declared `BelongsTo`/`HasMany` relations) came back matching the
+already-known, deliberately-left shape (a raw FK query used instead of the
+relation, e.g. `PurgeDueAccountsCommand`'s `$request->user_id` +
+`User::find()`, and `AccountDeletionRequest::isDue()`, v3-D146's own
+already-excluded zero-caller convenience method) rather than a fresh
+instance of this bug class — not pursued further. The genuine find came
+from a field-by-field pass over `DrillEvent`/`Corpus["meta"]` in
+`packages/engine/src/types.ts` against `lib/session/run.ts`'s actual
+event-construction sites, the two engine wire types this build's many
+`Corpus.meta`-field sweeps (v3-D191..D205) had not yet checked against the
+EVENT type on the opposite side of the same pipe.
+
+**NOT addressed**, named so a future run doesn't re-discover it as new:
+`corpusHash` is stamped by the session loop but still has ZERO fold-side
+consumer — `packages/engine/src/selection.ts#replaySelection`'s own
+docblock already names this as a deliberate, pre-existing deferral ("a real
+fold would resolve this via the event's own `corpusHash`, once a corpus
+store exists — out of scope here; single-corpus-per-surah is assumed"),
+unrelated to and unwidened by this fix, which only closes the PRODUCER
+half; `lib/test/build.ts`/`components/test/TestIsland.tsx`'s `test_*`
+events (the read-only Test self-quiz mirror, invariant #5) still build
+their own `ctx` without `corpusHash` — deliberately out of scope, since
+those events are never folded and the provenance-pinning need is
+correspondingly weaker; every item on v3-D205's own "NOT addressed" list —
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class / `permitsIssuance`/`permitsReview` (v3-D88, v3-D151); multi-surah
+enrollment; the operational mailer/7-night window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy drift (v3-D127); `packages/engine/src/placement.ts`
+(v3-D111/D113/D123); `lib/plan/forecast.ts`'s `awayDays` (v3-D190);
+`MacroFacts.litany.rhymeLabel` (v3-D188); `StripeField.editable` (v3-D204,
+a documentation constant) — all unchanged.

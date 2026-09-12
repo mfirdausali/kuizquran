@@ -235,6 +235,21 @@ export interface SessionRun {
    * `acceptAdoption` (below) are its only readers.
    */
   readonly openPracticeDrill: OpenPracticeDrill | null;
+  /**
+   * `c.meta.corpusHash` (`@engine/types.ts`), captured ONCE at
+   * `startFromQueue` and carried on every event this session commits — the
+   * same "resolve a provenance fact once, stamp it on every emit" shape
+   * `structured`/`openPracticeDrill` already establish, here for
+   * `DrillEvent.corpusHash`'s own documented purpose: pinning WHICH corpus
+   * content an event was answered against, so a later recompile can never
+   * retroactively reinterpret a historical event under different content.
+   * `undefined` for a corpus subset with no manifest entry (a frozen test
+   * fixture, or a build predating `stage-corpus.mjs`'s own mirroring of
+   * it) — never fabricated, and never re-derived per event, which could let
+   * a mid-session corpus swap silently disagree with `session_start`'s own
+   * stamp.
+   */
+  readonly corpusHash?: string;
 }
 
 export type StartResult =
@@ -681,6 +696,7 @@ async function startFromQueue(
         surah,
         ayah: queue[0]!.ayah,
         rung: gradeClassToWire("rc"),
+        corpusHash: c.meta.corpusHash,
       } as DrillEvent,
       { now, tz },
     );
@@ -707,6 +723,7 @@ async function startFromQueue(
       rescaffolding,
       structured,
       openPracticeDrill,
+      corpusHash: c.meta.corpusHash,
     },
   };
 }
@@ -865,6 +882,7 @@ export async function answerCurrent(
     // (`update.ts:71`) never lets it cost strength. `true` (== graded) for
     // every ordinary session, so nothing about the normal grading path moves.
     structured: run.structured,
+    corpusHash: run.corpusHash,
   } as DrillEvent;
 
   // ---- COMMIT ---------------------------------------------------------------
@@ -905,6 +923,7 @@ async function answerAfterTap(
         ayah: cur.ayah,
         rung: gradeClassToWire(adv.full ? "s3_full" : "s2_partial"),
         structured: true,
+        corpusHash: run.corpusHash,
       } as DrillEvent;
       return commitThenContinue(warmupEvent, ctx, null, () =>
         settleRescaffoldWarmup(run, c, cur, optionIndex),
@@ -939,6 +958,7 @@ async function answerAfterTap(
           // is the memory of every earlier tap in THIS pass.
           correct: !run.gateSlipped,
           structured: true,
+          corpusHash: run.corpusHash,
         } as DrillEvent)
       : ({
           type: "ayah_produced",
@@ -954,6 +974,7 @@ async function answerAfterTap(
           // is evidence the fold records but never grades (nothing damaged).
           // `true` for every ordinary review — the graded path is unchanged.
           structured: run.structured,
+          corpusHash: run.corpusHash,
         } as DrillEvent);
 
     return commitThenContinue(ayahEvent, ctx, null, () =>
@@ -1325,6 +1346,7 @@ export async function acceptGateDemote(
     // DEFECTS.md#B2: never a literal Rung. `gate_demote` is always S3 by
     // gate.ts's own contract ("gates only ever apply to S3-encoded ayat").
     rung: gradeClassToWire("gate"),
+    corpusHash: run.corpusHash,
   } as DrillEvent;
 
   return commitThenContinue(demoteEvent, ctx, null, () => advancePastCurrent(run, c));
@@ -1446,6 +1468,7 @@ export async function acceptAdoption(
     rung: gradeClassToWire("s3_full"),
     correct: true,
     structured: true,
+    corpusHash: run.corpusHash,
   } as DrillEvent;
 
   return commitThenContinue(encodeEvent, ctx, null, () => {
@@ -1456,6 +1479,7 @@ export async function acceptAdoption(
       surah: run.surah,
       ayah: q.ayah,
       rung: gradeClassToWire("s3_full"),
+      corpusHash: run.corpusHash,
     } as DrillEvent;
     return commitThenContinue(adoptionEvent, ctx, null, () => Promise.resolve(run));
   });

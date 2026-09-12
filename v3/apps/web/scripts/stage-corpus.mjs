@@ -72,10 +72,26 @@ const CLIENT_SURAHS = [112, 103, 67];
 /** The engine reads exactly these fields (types.ts#Corpus). Everything else the
  *  compiler emits — connections, lookalikes, per-ayah hashes — is server or
  *  admin concern and is NOT shipped to a browser. Narrowing here keeps the
- *  payload honest about what the client actually consumes. */
-function slim(corpus) {
+ *  payload honest about what the client actually consumes.
+ *
+ *  `corpusHash` is the one exception to "narrow, never add": it mirrors
+ *  `output/manifest.json`'s own `ManifestEntry.corpusHash` for this surah —
+ *  never recomputed here, which would hash the SLIMMED bytes and disagree
+ *  with the manifest's own content-freeze gate. `DrillEvent.corpusHash`
+ *  (`@engine/types.ts`) exists to carry this value per event, so a learner's
+ *  session loop can pin which corpus content it answered against; before
+ *  this field reached the staged payload, nothing in the browser could ever
+ *  learn it, so `lib/session/run.ts` had no value to stamp regardless of how
+ *  faithfully it read `c.meta.corpusHash`. `manifestEntry` is `undefined` on
+ *  a checkout that compiled a surah but has not yet regenerated
+ *  `manifest.json` at all — degrades to leaving `meta.corpusHash` absent
+ *  exactly as it already was, never a fabricated value. */
+function slim(corpus, manifestEntry) {
   return {
-    meta: corpus.meta,
+    meta: {
+      ...corpus.meta,
+      ...(manifestEntry?.corpusHash ? { corpusHash: manifestEntry.corpusHash } : {}),
+    },
     verses: corpus.verses,
     words: (corpus.words ?? []).map(stripMorphology),
     distractors: corpus.distractors,
@@ -128,6 +144,14 @@ const stagedSurahs = [];
 
 mkdirSync(PUBLIC_CORPUS, { recursive: true });
 
+// Read once, up front — same file `content-freeze.mjs`/`distractor-qa.mjs`
+// already treat as the one place a corpus's own content hash lives. Absent
+// on a checkout that has compiled a surah's `corpus.json` by hand without
+// ever running the full `compile.ts` (which always writes it alongside), or
+// on any checkout that predates this field.
+const manifestPath = path.join(OUTPUT_ROOT, "manifest.json");
+const manifest = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, "utf8")) : { surahs: {} };
+
 for (const surah of CLIENT_SURAHS) {
   const src = path.join(OUTPUT_ROOT, String(surah), "corpus.json");
   if (!existsSync(src)) {
@@ -151,9 +175,13 @@ for (const surah of CLIENT_SURAHS) {
     continue;
   }
 
-  const payload = slim(parsed);
+  const manifestEntry = manifest.surahs?.[String(surah)];
+  const payload = slim(parsed, manifestEntry);
   writeFileSync(path.join(PUBLIC_CORPUS, `${surah}.json`), JSON.stringify(payload));
-  staged.push(`${surah} (${verses} ayat, ${words} words, ${payload.distractors?.length ?? 0} distractors)`);
+  staged.push(
+    `${surah} (${verses} ayat, ${words} words, ${payload.distractors?.length ?? 0} distractors` +
+      `${payload.meta.corpusHash ? `, corpusHash ${payload.meta.corpusHash}` : ""})`,
+  );
   stagedSurahs.push(surah);
 }
 

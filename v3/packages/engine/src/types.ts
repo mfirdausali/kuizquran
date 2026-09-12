@@ -157,6 +157,19 @@ export interface Corpus {
       memoryHooks: string[];
       pairingStrategy: string;
     };
+    /** The 16-hex content hash `corpus-compiler/src/manifest.ts
+     *  #corpusContentHash16` computes for this surah's own FULL (unslimmed)
+     *  compiler output, mirrored from `output/manifest.json`'s own
+     *  `ManifestEntry.corpusHash` into the STAGED client payload by
+     *  `stage-corpus.mjs` — never recomputed client-side, and never a
+     *  self-hash of this slimmed subset (that would be circular: the hash
+     *  names the bytes it is embedded inside). This is the value
+     *  `DrillEvent.corpusHash` exists to carry, per-event, so a later
+     *  recompile can never retroactively reinterpret a historical event
+     *  under different content. Optional: absent for a corpus subset
+     *  staged before this field existed, or one with no manifest entry
+     *  (e.g. a frozen test fixture) — never fabricated. */
+    corpusHash?: string;
   };
   verses: CorpusVerse[];
   words: CorpusWord[];
