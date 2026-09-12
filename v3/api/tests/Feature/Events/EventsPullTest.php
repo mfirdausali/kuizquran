@@ -116,6 +116,29 @@ class EventsPullTest extends TestCase
         $this->assertSame($cursor, $second->json('nextCursor'));
     }
 
+    public function test_a_day_marked_away_event_round_trips_its_two_new_fields_on_pull(): void
+    {
+        // v3-D207: the same round-trip guarantee every v3-D10 wire field
+        // gets, for a genuinely new field pair added after the freeze.
+        [, $token] = $this->actingUser();
+        $headers = ['Authorization' => 'Bearer '.$token];
+        $this->postJson('/api/events', ['events' => [[
+            'id' => 'away-pull-1',
+            'type' => 'day_marked_away',
+            'ts' => 1000,
+            'surah' => 12,
+            'ayah' => 0,
+            'rung' => 'S4',
+            'awayDayIndex' => 20345,
+            'away' => true,
+        ]]], $headers)->assertOk();
+
+        $response = $this->getJson('/api/events', $headers)->assertOk();
+        $event = $response->json('events.0');
+        $this->assertSame(20345, $event['awayDayIndex']);
+        $this->assertTrue($event['away']);
+    }
+
     public function test_limit_caps_the_page_and_reports_has_more(): void
     {
         [, $token] = $this->actingUser();

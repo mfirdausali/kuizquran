@@ -42,6 +42,8 @@ export interface MakeEventArgs {
   locale?: GlossLang;
   specSnapshot?: Record<string, unknown>;
   gradeClass?: GradeClass;
+  awayDayIndex?: number;
+  away?: boolean;
 }
 
 export function makeEvent(a: MakeEventArgs): DrillEvent {
@@ -75,5 +77,7 @@ export function makeEvent(a: MakeEventArgs): DrillEvent {
   if (a.locale !== undefined) e.locale = a.locale;
   if (a.specSnapshot !== undefined) e.specSnapshot = a.specSnapshot;
   if (a.gradeClass !== undefined) e.gradeClass = a.gradeClass;
+  if (a.awayDayIndex !== undefined) e.awayDayIndex = a.awayDayIndex;
+  if (a.away !== undefined) e.away = a.away;
   return e;
 }

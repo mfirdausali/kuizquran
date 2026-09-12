@@ -33,8 +33,8 @@
 // `now` is FROZEN. A calendar test against the real clock is a test that fails
 // once a quarter for reasons no one can reproduce.
 
-import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 
 import { splitBudget } from "@engine/multiSurah.ts";
 import { buildForecast, CONCRETE_THROUGH_DAY, ESTIMATED_THROUGH_DAY } from "@/lib/plan/forecast";
@@ -206,6 +206,54 @@ describe("planned absences (§14)", () => {
     // Marking a far day away must not promote it to concrete.
     const f = forecast({ awayDays: [9] });
     expect(f.days.find((d) => d.offset === 9)?.zone).toBe("estimated");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 3b. PLANNED ABSENCES — THE TOGGLE (v3-D207: the write path DECISIONS.md
+// v3-D190 named as missing)
+// ---------------------------------------------------------------------------
+
+describe("marking/unmarking a day away, when a handler is provided", () => {
+  it("offers no toggle for TODAY — WIREFRAME §14 says any FUTURE day", () => {
+    const onToggleAway = vi.fn();
+    render(<PlanCalendar forecast={forecast()} onToggleAway={onToggleAway} />);
+    const today = screen.getByTestId("zone-concrete").querySelector('[data-day-row]');
+    expect(today).toBeTruthy();
+    expect(within(today as HTMLElement).queryByRole("button", { name: /away/i })).toBeNull();
+  });
+
+  it("offers a 'mark away' control on a future concrete day, wired to the handler", () => {
+    const onToggleAway = vi.fn();
+    const { container } = render(<PlanCalendar forecast={forecast()} onToggleAway={onToggleAway} />);
+    const row = container.querySelector('[data-day-row][data-offset="1"]') as HTMLElement;
+    const btn = within(row).getByRole("button", { name: /mark.*away/i });
+    fireEvent.click(btn);
+    expect(onToggleAway).toHaveBeenCalledWith(1, true);
+  });
+
+  it("offers an 'unmark' control on an already-away day, wired to the handler", () => {
+    const onToggleAway = vi.fn();
+    const f = forecast({ awayDays: [2] });
+    const { container } = render(<PlanCalendar forecast={f} onToggleAway={onToggleAway} />);
+    const row = container.querySelector('[data-day-row][data-offset="2"]') as HTMLElement;
+    const btn = within(row).getByRole("button", { name: /unmark|back|no longer away/i });
+    fireEvent.click(btn);
+    expect(onToggleAway).toHaveBeenCalledWith(2, false);
+  });
+
+  it("offers a toggle in the estimated zone too, not only the concrete one", () => {
+    const onToggleAway = vi.fn();
+    render(<PlanCalendar forecast={forecast()} onToggleAway={onToggleAway} />);
+    const estimated = screen.getByTestId("zone-estimated");
+    const btn = within(estimated).getAllByRole("button", { name: /mark.*away/i })[0]!;
+    fireEvent.click(btn);
+    expect(onToggleAway).toHaveBeenCalled();
+  });
+
+  it("renders no toggle at all when no handler is given — a read-only render stays read-only", () => {
+    render(<PlanCalendar forecast={forecast()} />);
+    expect(screen.queryByRole("button", { name: /mark.*away/i })).toBeNull();
   });
 });
 

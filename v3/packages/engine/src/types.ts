@@ -324,8 +324,15 @@ export type EventType =
   | "test_answer" // v2 Phase 4: one Test item answered — `testKind` names the
   // sub-type, `correct` the verdict. Read-only mirror (v2-D14): never folded by
   // rebuild.ts, so it carries no strength/due-date signal (structured:false).
-  | "test_result"; // v2 Phase 4: a Test finished — `score`/`total` summarize it;
+  | "test_result" // v2 Phase 4: a Test finished — `score`/`total` summarize it;
   // `sentToReviews` records whether the optional nudge (v2-D14) was accepted.
+  | "day_marked_away"; // WIREFRAME §14 "Planned absences" (v3-D207): a
+  // learner toggles a future PLAN CALENDAR day away/back. `awayDayIndex` +
+  // `away` carry the toggle. A read-only mirror, exactly like `test_*` —
+  // `rebuild.ts` has no branch for it (invariant #5's structural-absence
+  // discipline), so marking a day away can never move a strength or a due
+  // date; only `awayDays.ts#awayDayOffsets()` (read straight off the log)
+  // and, through it, `lib/plan/forecast.ts`'s own display ever see it.
 
 export interface DrillEvent {
   /** Stable client-generated id (uuid), assigned at creation. Idempotency key for
@@ -417,4 +424,13 @@ export interface DrillEvent {
    *  resolved from, via `gradeClassToWire()` — carried alongside the
    *  already-resolved `rung`, never instead of it. */
   gradeClass?: GradeClass;
+  /** `day_marked_away` only: the absolute calendar-day index
+   *  (`awayDays.ts#dayIndexOf()`) of the day being toggled — an ABSOLUTE
+   *  day, never an offset, so a toggle written today still resolves to the
+   *  correct day once `now` has moved on. */
+  awayDayIndex?: number;
+  /** `day_marked_away` only: true marks the day away, false clears an
+   *  earlier mark. A later event for the same `awayDayIndex` always wins
+   *  (append-only toggle, never edited in place). */
+  away?: boolean;
 }

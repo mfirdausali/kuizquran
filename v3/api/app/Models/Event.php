@@ -22,6 +22,7 @@ class Event extends Model
         'score', 'total', 'sent_to_reviews',
         'site_key', 'visit_ordinal', 'device_id', 'device_seq', 'tz',
         'corpus_hash', 'locale', 'spec_snapshot', 'grade_class',
+        'away_day_index', 'away',
         'received_at',
     ];
 
@@ -33,6 +34,7 @@ class Event extends Model
             'structured' => 'boolean',
             'sent_to_reviews' => 'boolean',
             'spec_snapshot' => 'array',
+            'away' => 'boolean',
         ];
     }
 

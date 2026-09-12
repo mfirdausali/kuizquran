@@ -75,6 +75,34 @@ class EventsIngestionTest extends TestCase
         ]);
     }
 
+    public function test_a_day_marked_away_event_stores_the_absolute_day_index_and_the_toggle(): void
+    {
+        // v3-D207: WIREFRAME §14 "Planned absences" — a genuinely new event
+        // type, not a field on an existing one. `awayDayIndex`/`away` did
+        // not exist in the original v3-D10 wire freeze at all.
+        $this->actingUser();
+
+        $this->postJson('/api/events', [
+            'events' => [[
+                'id' => 'away-1',
+                'type' => 'day_marked_away',
+                'ts' => 1000,
+                'surah' => 12,
+                'ayah' => 0,
+                'rung' => 'S4',
+                'awayDayIndex' => 20345,
+                'away' => true,
+            ]],
+        ])->assertOk()->assertJson(['accepted' => 1, 'ignored' => 0]);
+
+        $this->assertDatabaseHas('events', [
+            'uuid' => 'away-1',
+            'type' => 'day_marked_away',
+            'away_day_index' => 20345,
+            'away' => true,
+        ]);
+    }
+
     public function test_user_id_is_never_taken_from_the_request_body(): void
     {
         $me = $this->actingUser();

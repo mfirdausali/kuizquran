@@ -13,14 +13,16 @@
 // finish date. All of that is `lib/plan/forecast.ts`. This file folds the log
 // into atoms, counts what is left, and hands the numbers over.
 
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import type { Corpus } from "@engine/types.ts";
 import type { AtomState } from "@engine/atom.ts";
 import { rebuild } from "@engine/rebuild.ts";
 import { atomKey } from "@engine/atom.ts";
 import { currentBand } from "@engine/strength.ts";
-import { getEventsForSurah, useLogState } from "@/lib/idb";
+import { awayDayOffsets, dayIndexOf } from "@engine/awayDays.ts";
+import { currentTz, getEventsForSurah, useLogState } from "@/lib/idb";
 import type { LocalEventRow } from "@/lib/idb";
+import { setDayAway } from "@/lib/plan/awayDay";
 import { buildForecast, type EnrolledSurah } from "@/lib/plan/forecast";
 import { PlanCalendar } from "./PlanCalendar";
 
@@ -37,7 +39,24 @@ export function PlanIsland({ corpus, now, tz, minutesPerDay }: PlanIslandProps) 
   const surah = corpus.meta.surah;
   const selector = useCallback(() => getEventsForSurah(surah), [surah]);
   const isEmpty = useCallback((rows: LocalEventRow[]) => rows.length === 0, []);
-  const state = useLogState<LocalEventRow[]>(selector, isEmpty, [surah]);
+  // Bumped after a successful away-day toggle so `useLogState` re-reads the
+  // log — its own effect only re-runs on a `deps` change, never on a write
+  // it has no way to know happened (it holds no live subscription).
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const state = useLogState<LocalEventRow[]>(selector, isEmpty, [surah, refreshNonce]);
+
+  // WIREFRAME §14 "Planned absences": commits through the SAME
+  // commit-before-paint `append()` every other event uses, then forces the
+  // log re-read above. `offset` is resolved against THIS render's own `now`
+  // — the same `now` `awayDayOffsets` below reads it back against — so a
+  // toggle written now always lands on the day currently shown at `offset`.
+  const handleToggleAway = useCallback(
+    async (offset: number, away: boolean) => {
+      await setDayAway(surah, dayIndexOf(now) + offset, away, { now: Date.now(), tz: currentTz() });
+      setRefreshNonce((n) => n + 1);
+    },
+    [surah, now],
+  );
 
   switch (state.status) {
     case "pending":
@@ -72,11 +91,11 @@ export function PlanIsland({ corpus, now, tz, minutesPerDay }: PlanIslandProps) 
             minutesPerDay,
             enrolled: [enrolmentOf(corpus, atoms, now)],
             dueToday: dueToday(corpus, atoms, now),
-            // Marking a day away is a WRITE, and the write path (an event
-            // type, an outbox row) is M6's. The forecast already redistributes
-            // around away days — the mechanism is here, the control is not.
-            awayDays: [],
+            // v3-D207: read straight off the same log this island already
+            // holds — the day_marked_away toggle `handleToggleAway` writes.
+            awayDays: awayDayOffsets(state.data, now),
           })}
+          onToggleAway={handleToggleAway}
         />
       );
     }

@@ -43,16 +43,19 @@ class EventsController extends Controller
         'corpusHash' => 'corpus_hash',
         'specSnapshot' => 'spec_snapshot',
         'gradeClass' => 'grade_class',
+        'awayDayIndex' => 'away_day_index',
     ];
 
     /** Every DrillEvent field beyond {id, type, ts} — the full frozen wire
-     *  shape (v3-D10), stored as-is, nullable when absent. */
+     *  shape (v3-D10), plus every field added since (v3-D207's
+     *  `awayDayIndex`/`away`) — stored as-is, nullable when absent. */
     private const NULLABLE_FIELDS = [
         'surah', 'ayah', 'rung', 'position', 'choice', 'correct', 'pretest',
         'to', 'stepKind', 'structured', 'latency', 'resume', 'testKind',
         'score', 'total', 'sentToReviews',
         'siteKey', 'visitOrdinal', 'deviceId', 'deviceSeq', 'tz',
         'corpusHash', 'locale', 'specSnapshot', 'gradeClass',
+        'awayDayIndex', 'away',
     ];
 
     public function store(Request $request): JsonResponse

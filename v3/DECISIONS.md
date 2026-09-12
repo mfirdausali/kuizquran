@@ -17219,3 +17219,174 @@ taxonomy drift (v3-D127); `packages/engine/src/placement.ts`
 (v3-D111/D113/D123); `lib/plan/forecast.ts`'s `awayDays` (v3-D190);
 `MacroFacts.litany.rhymeLabel` (v3-D188); `StripeField.editable` (v3-D204,
 a documentation constant) — all unchanged.
+
+## v3-D207, 2026-09-12: WIREFRAME §14 "Planned absences" — the "mark a day away" write path, named and deferred since v3-D190, built end to end
+
+**Background.** `lib/plan/forecast.ts#buildForecast()` (build-plan step 19)
+has accepted an `awayDays: number[]` input since it was written, and
+`PlanCalendar.tsx`'s own `AwayDay` component has rendered "Away — no review
+expected" for an away day since the same commit — but `PlanIsland.tsx`
+hardcoded `awayDays: []` with a comment naming exactly why: "marking a day
+away is a WRITE, and the write path (an event type, an outbox row) is M6's."
+v3-D190's own fresh-sweep note found this again and deliberately left it,
+scoped as "real, larger scope, not a minimal wiring fix" — the SAME item
+then repeated unchanged on eighteen consecutive nightly "NOT addressed"
+lists (v3-D190 through v3-D206). This run picked it up as this session's one
+step: a genuine, self-contained, non-human/non-infra-blocked feature, unlike
+the other long-deferred items on that list (`rhymeClassOf()` needs vendored
+rhyme data; `TrialAttribution`/`PaywallGate` need a live Stripe checkout
+flow that does not exist; the 7-night window needs a live host).
+
+**Design.** A `day_marked_away` event is a new, genuinely new `EventType` —
+not a field bolted onto an existing type — carrying two new optional
+`DrillEvent` fields: `awayDayIndex` (the ABSOLUTE calendar-day index,
+`packages/engine/src/awayDays.ts#dayIndexOf(epochMs) = Math.floor(epochMs /
+86_400_000)` — deliberately the SAME plain arithmetic `forecast.ts` already
+uses for its own day offsets, not `daybound.ts`'s tz-explicit learning-day
+boundary, to avoid mixing two definitions of "day" in one feature) and
+`away` (the toggle: true marks, false clears — a later event for the same
+day always wins, append-only, never edited in place, the same "toggle
+log, latest wins" shape `disable`/`re-enable` overrides already establish).
+
+It is evidence-only by construction, exactly like `test_*`: `rebuild.ts`
+gets **no new branch at all** — the type is simply never checked, the same
+structural-absence discipline invariant #5 already requires for
+`session_start`/`interruption`/`test_answer`. Marking a day away can
+therefore never move a strength or a due date; a dedicated unit test proves
+`rebuild([dayMarkedAwayEvent]).size === 0`.
+
+**The read side** (`packages/engine/src/awayDays.ts#awayDayOffsets`) mirrors
+`heatmap.ts#testHistory`/`growthCurve`'s own "component never computes, it
+only prints" split: a pure function reading the raw log directly, trusting
+the caller's log order for latest-wins (never re-sorting), and dropping any
+day already in the past by `now` — the forecast has nothing left to
+redistribute for a day that already happened.
+
+**The write side** (`apps/web/lib/plan/awayDay.ts#setDayAway`) commits
+through the SAME commit-before-paint `append()` every other event uses
+(edge case #76: a tab killed mid-toggle loses nothing) — no new storage
+mechanism, no new sync path; B5's own "no omit list at all" merge and the
+pull's existing `NULLABLE_FIELDS` loop both carry the two new fields
+through automatically once registered.
+
+**Wiring**, both ends real:
+- `PlanIsland.tsx` now computes `awayDayOffsets(state.data, now)` instead of
+  the hardcoded `[]`, and passes a new `onToggleAway` handler down to
+  `PlanCalendar`. A local `refreshNonce` state, bumped after a successful
+  toggle, is threaded into `useLogState`'s own `deps` array — `useLogState`
+  holds no live subscription (its effect only re-runs on a `deps` change),
+  so without this a write would commit but the screen would never reflect
+  it until an unrelated remount.
+- `PlanCalendar.tsx` gains an optional `onToggleAway?: (offset, away) =>
+  void` prop. Genuinely optional, matching its own header's promise ("this
+  file decides nothing"): omitted, the component renders exactly as before
+  — no button, no affordance it cannot honour. Present, each future day
+  (offset ≥ 1 only — WIREFRAME's own wording is "any FUTURE day"; TODAY
+  never gets the control) gets a "Mark this day away" / "I'm back — unmark
+  this day" button, reusing the existing locked `.btn`/`.btn--ghost`
+  classes rather than inventing new CSS.
+- `EventsController.php` gains `awayDayIndex`/`away` in both `FIELD_MAP`
+  and `NULLABLE_FIELDS` — the two arrays that decide what an ingest/pull
+  round-trips — plus a new migration adding real `away_day_index`/`away`
+  columns to `events` (the first ALTER on that table since the v3-D10
+  freeze; every prior post-freeze field addition was TypeScript-only and
+  needed no Laravel column). `Event.php` gains both in `$fillable`, `away`
+  cast to boolean. `EventWireCodec.php` (the fold-runner/determinism-check
+  path) is DELIBERATELY left untouched, matching `specSnapshot`'s own
+  precedent: the fold never reads either field (no `rebuild.ts` branch
+  exists to consume them), so there is nothing for the fold-runner to gain
+  from carrying them.
+
+**RED confirmed independently at every layer, each reverted and restored
+byte-identically:**
+- Engine: `test/awayDays.test.ts` (10 cases) failed on `Cannot find module
+  '../src/awayDays.ts'` before the file existed; 10/10 green after.
+- `lib/plan/awayDay.test.ts` (4 cases, fake-indexeddb, the real `append()`
+  path) failed on module resolution before `awayDay.ts` existed; 4/4 green
+  after.
+- `test/plan-calendar.test.tsx`: 5 new toggle-button cases (mark, unmark,
+  no-control-on-today, offered in the estimated zone too, no button at all
+  without a handler) — 3 of 5 failed genuinely against the unmodified
+  component (`getByRole("button", ...)` finding nothing), the other 2
+  passing vacuously as expected (no button existed either way); 25/25 green
+  after wiring `onToggleAway` through `ConcreteDay`/`EstimatedDay`/`AwayDay`.
+- `test/plan-island.test.tsx` (3 cases, new file, the REAL `PlanIsland`
+  component against a real compiled surah-112 corpus): all 3 failed against
+  the hardcoded `awayDays: []` and missing `onToggleAway` prop before the
+  wiring landed — the first case (a day already marked away in the log
+  before render) failed because nothing ever produced a non-empty
+  `awayDays` array; the click-driven cases failed because no button existed
+  to click. 3/3 green after.
+- Backend: one new case each in `EventsIngestionTest.php` (stores
+  `away_day_index`/`away` on ingest) and `EventsPullTest.php` (round-trips
+  `awayDayIndex`/`away` on pull) — both failed genuinely against the
+  unmodified controller/migration (`Undefined array key "awayDayIndex"` on
+  the pull side, an `assertDatabaseHas` mismatch on the ingest side) before
+  the migration/FIELD_MAP/NULLABLE_FIELDS changes landed; 2/2 green after.
+
+**Full verification.** `TZ=UTC make setup` from a fresh container (no
+`node_modules`/`vendor` anywhere), no retries needed. `TZ=UTC make test`:
+**2704 passing** (was 2680, +24 — exactly this run's new tests: 10 engine +
+4 + 3 + 5 apps/web (12 net-new apps/web test files/cases) + 2 v3/api; no
+other suite moved: 255 v2 vitest, 47 v2/api, 120 corpus-compiler, 61
+fold-runner all unchanged). `check-test-floor.mjs`: OK, 2704 >= floor 1899
+(+805 margin, unmoved, same discipline as every prior entry). `TZ=UTC make
+build`: exit 0, 30 routes (unchanged — no new route; the toggle lives inside
+the existing `/plan` component tree). `npm run gates`: all green —
+boundaries 314 files, up from 311 (exactly the three new non-test
+production files: `packages/engine/src/awayDays.ts`, `apps/web/lib/plan
+/awayDay.ts`, the migration); fonts degraded-but-non-blocking, pre-existing;
+corpus-morphology/corpus-glyphs unchanged (no new corpus data — this is a
+plain calendar toggle, never corpus text). `npx tsc --noEmit`, run
+separately across all four v3 node packages: clean in all four.
+`packages/engine`'s own suite: 430/430 (was 420, +10). `worker/fold-runner`'s
+own suite: 61/61, unchanged (it imports `rebuild()` directly from
+`packages/engine`, so the new no-op event type needed no fold-runner-side
+change). `corpus-compiler`'s own suite: 120/120, unchanged (unrelated).
+`php artisan test` (v3/api): 377 passing (was 375, +2), 2 incomplete + 6
+skipped unchanged. `./vendor/bin/pint --test` on every changed PHP file:
+passed. No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff reverted before committing, same discipline as every prior
+entry — `git status --porcelain -- v1 v2` empty immediately before
+committing). No Arabic codepoint (every new/changed file swept
+programmatically, in Python, over the Arabic, Arabic Supplement, Arabic
+Extended-A and both Presentation Forms Unicode blocks, plus a `\u06xx`/
+`\u08xx`/`\uFBxx`/`\uFExx` escape and `fromCharCode`/`fromCodePoint` sweep —
+zero matches; every new string is a wire field name, an ISO/day-index
+integer, a plain English button label, or a synthetic test fixture value,
+never corpus text).
+
+**Session start:** fresh container, no `node_modules`/`vendor`/`.env`/
+compiled corpus anywhere; `HEAD` was found detached at `c769f86`, the same
+commit `origin/main` was already at, on a stale LOCAL `main` branch ref five
+commits behind (`26cc664`, v3-D201) — the recurring "stale local main" trap
+this file has recorded roughly forty times since v3-D77 — caught before any
+implementation work via `git fetch` + `git checkout main && git merge
+--ff-only origin/main`, no work lost or at risk. `make setup` then `make
+compile-corpus` both run from scratch, no retries needed.
+
+**Scope, deliberate:** the "empty" log state (`PlanIsland.tsx`'s own
+zero-state, "Nothing recorded yet") still shows no calendar and therefore no
+away-day control at all — a learner who has not yet completed a first
+session cannot pre-mark a future travel date away. Redesigning that
+zero-state to build a forecast (and therefore a calendar to mark days on)
+from zero events is real, separate, larger UX scope, not part of tonight's
+fix; `awayDayOffsets`'s own docblock and this entry name it so a future run
+does not read it as an oversight. `EventWireCodec.php` (above) is
+deliberately unchanged, matching `specSnapshot`'s own established
+precedent. `daybound.ts`'s tz-explicit learning-day boundary was
+deliberately NOT reused for the away-day index — see "Design" above.
+
+**NOT addressed**, named so a future run doesn't re-discover it as new:
+`lib/plan/forecast.ts`'s `awayDays` is now CLOSED — remove it from future
+"NOT addressed" lists. The empty-state gap above (real, separate, smaller);
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class / `permitsIssuance`/`permitsReview` (v3-D88, v3-D151); multi-surah
+enrollment; the operational mailer/7-night window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy drift (v3-D127); `packages/engine/src/placement.ts`
+(v3-D111/D113/D123); `MacroFacts.litany.rhymeLabel` (v3-D188);
+`StripeField.editable` (v3-D204, a documentation constant);
+`corpusHash`'s own zero fold-side consumer (v3-D206) — all unchanged.

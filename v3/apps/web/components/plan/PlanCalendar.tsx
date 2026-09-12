@@ -47,9 +47,15 @@ import type { DayForecast, Forecast } from "@/lib/plan/forecast";
 
 interface PlanCalendarProps {
   forecast: Forecast;
+  /** WIREFRAME §14 "Planned absences": "Any future day can be marked away —
+   *  travel, exams, illness." Present only when the caller can actually
+   *  commit the toggle (PlanIsland, which owns the log) — omitted, this
+   *  component stays a pure read-only render, exactly as its own header
+   *  promises ("this file decides nothing"): no button, no affordance. */
+  onToggleAway?: (offset: number, away: boolean) => void;
 }
 
-export function PlanCalendar({ forecast }: PlanCalendarProps) {
+export function PlanCalendar({ forecast, onToggleAway }: PlanCalendarProps) {
   const concrete = forecast.days.filter((d) => d.zone === "concrete");
   const estimated = forecast.days.filter((d) => d.zone === "estimated");
 
@@ -62,7 +68,7 @@ export function PlanCalendar({ forecast }: PlanCalendarProps) {
         </h3>
         <div className="stack stack--tight">
           {concrete.map((day) => (
-            <ConcreteDay key={day.offset} day={day} />
+            <ConcreteDay key={day.offset} day={day} onToggleAway={onToggleAway} />
           ))}
         </div>
       </section>
@@ -83,7 +89,7 @@ export function PlanCalendar({ forecast }: PlanCalendarProps) {
         </p>
         <div className="stack stack--tight">
           {estimated.map((day) => (
-            <EstimatedDay key={day.offset} day={day} />
+            <EstimatedDay key={day.offset} day={day} onToggleAway={onToggleAway} />
           ))}
         </div>
       </section>
@@ -116,11 +122,16 @@ export function PlanCalendar({ forecast }: PlanCalendarProps) {
   );
 }
 
+interface DayProps {
+  day: DayForecast;
+  onToggleAway?: (offset: number, away: boolean) => void;
+}
+
 /** A concrete day: real items, exact counts, a list you could act on. */
-function ConcreteDay({ day }: { day: DayForecast }) {
-  if (day.away) return <AwayDay day={day} />;
+function ConcreteDay({ day, onToggleAway }: DayProps) {
+  if (day.away) return <AwayDay day={day} onToggleAway={onToggleAway} />;
   return (
-    <div className="day-row" data-day-row data-zone="concrete">
+    <div className="day-row" data-day-row data-zone="concrete" data-offset={day.offset}>
       <div className="day-row__head">
         <strong>{day.dateLabel}</strong>
         {/* Exact. No tilde on a number we actually know. */}
@@ -131,15 +142,16 @@ function ConcreteDay({ day }: { day: DayForecast }) {
           <li key={`${item.kind}-${i}`}>{item.label}</li>
         ))}
       </ul>
+      <MarkAwayButton day={day} onToggleAway={onToggleAway} />
     </div>
   );
 }
 
 /** An estimated day: ONE LINE. No list, nothing to open, no ayah named. */
-function EstimatedDay({ day }: { day: DayForecast }) {
-  if (day.away) return <AwayDay day={day} />;
+function EstimatedDay({ day, onToggleAway }: DayProps) {
+  if (day.away) return <AwayDay day={day} onToggleAway={onToggleAway} />;
   return (
-    <div className="day-row day-row--quiet" data-day-row data-zone="estimated">
+    <div className="day-row day-row--quiet" data-day-row data-zone="estimated" data-offset={day.offset}>
       <div className="day-row__head">
         <strong>{day.dateLabel}</strong>
         <span className="caption">{day.loadLabel}</span>
@@ -147,7 +159,25 @@ function EstimatedDay({ day }: { day: DayForecast }) {
       {/* Kinds without counts. "2 gates · 9 reviews" would be the invented
           precision; "gates · reviews" is what we actually know. */}
       <p className="caption day-row__kinds">{day.kindsLabel}</p>
+      <MarkAwayButton day={day} onToggleAway={onToggleAway} />
     </div>
+  );
+}
+
+/** WIREFRAME §14: "Any future day can be marked away." Never rendered for
+ *  TODAY (offset 0) — a day already underway is not a planned absence — and
+ *  never rendered at all without a handler, so a read-only render (no
+ *  `onToggleAway` given) offers no affordance it cannot honour. */
+function MarkAwayButton({ day, onToggleAway }: DayProps) {
+  if (!onToggleAway || day.offset === 0) return null;
+  return (
+    <button
+      type="button"
+      className="btn btn--ghost day-row__away-toggle"
+      onClick={() => onToggleAway(day.offset, true)}
+    >
+      Mark this day away
+    </button>
   );
 }
 
@@ -160,13 +190,22 @@ function EstimatedDay({ day }: { day: DayForecast }) {
  * semantics — an away day is neither a streak nor a break in one). It reuses
  * the muted register instead.
  */
-function AwayDay({ day }: { day: DayForecast }) {
+function AwayDay({ day, onToggleAway }: DayProps) {
   return (
-    <div className="day-row day-row--away" data-day-row data-away="true" data-zone={day.zone}>
+    <div className="day-row day-row--away" data-day-row data-away="true" data-zone={day.zone} data-offset={day.offset}>
       <div className="day-row__head">
         <strong>{day.dateLabel}</strong>
         <span className="caption">Away — no review expected</span>
       </div>
+      {onToggleAway && (
+        <button
+          type="button"
+          className="btn btn--ghost day-row__away-toggle"
+          onClick={() => onToggleAway(day.offset, false)}
+        >
+          I&rsquo;m back — unmark this day
+        </button>
+      )}
     </div>
   );
 }
