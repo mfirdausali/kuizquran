@@ -53,9 +53,82 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2673 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2675 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 375 v3/api + 120 corpus-compiler
-             # + 420 engine + 61 fold-runner + 1395 apps/web. (v3-D204, 2026-09-12)
+             # + 420 engine + 61 fold-runner + 1397 apps/web. (v3-D205, 2026-09-12)
+             # NOTE (v3-D205, 2026-09-12): `RawAct.summary` — an act's own
+             # authored narrative PARAGRAPH, vendored alongside `emotionalBeat`/
+             # `sceneImage` since the mental model shipped, and the direct
+             # sibling of the field v3-D201 fixed one entry earlier on the same
+             # `buildSceneBeats()` function — was parsed into memory on every
+             # compile and silently dropped: never copied into the compiled
+             # `SceneBeat`, never declared on the engine's own `CorpusSceneBeat`
+             # type, so `SceneBeatsPanel.tsx` (v3-D201's own new panel) could
+             # not render it even though it already renders the sibling
+             # `emotionalBeat` field. A reviewer checking whether a surah's
+             # human-authored one-line scene-beat `label` genuinely captures
+             # its act had the act's name and emotional register but not the
+             # paragraph the label is meant to distill. Fixed: `SceneBeat`/
+             # `CorpusSceneBeat` gain an optional `summary?: string`;
+             # `buildSceneBeats()` copies `summary: a.summary` through;
+             # `SceneBeatsPanel.tsx` renders it in a new conditional clause,
+             # mirroring the existing `emotionalBeat` clause exactly, never
+             # fabricated for the many older/frozen fixtures that predate the
+             # field. RED confirmed independently at both layers, each
+             # reverted and restored byte-identically: compiler level, the
+             # existing emotionalBeat test in `buildCorpus.test.ts` (whose own
+             # fixture already seeds two acts with DISTINCT summary strings,
+             # unused until now) was strengthened with two new assertions —
+             # failed exactly `expected undefined to be 'fixture summary
+             # one'` against the unmodified `sceneBeats.ts`; 8/8 green after
+             # (was 8, +0 net — a strengthened existing test). Component
+             # level, two new cases in `workbench-ui.test.tsx` (mirroring
+             # v3-D201's own two emotionalBeat cases exactly — a positive case
+             # attaching a real, distinct summary to the frozen fixture's act
+             # 1, which predates the field entirely; a negative case
+             # confirming the frozen fixture genuinely carries none and the
+             # panel never fabricates one) both failed against the unmodified
+             # panel; 49/49 green after (was 47, +2). `TZ=UTC make test`: 2675
+             # passing (was 2673, +2; apps/web 1397, was 1395; corpus-compiler
+             # 120 unchanged — a strengthened test carries no separate count;
+             # no other suite moved). `check-test-floor.mjs`: OK, 2675 >=
+             # floor 1899 (+776 margin, unmoved). `TZ=UTC make build`: exit 0,
+             # 30 routes (unchanged — edits inside the existing `/workbench`
+             # component tree, no new route). `npm run gates`: all green
+             # (boundaries 311 files, unchanged count — no new production
+             # file, one existing component edited plus its test, plus three
+             # existing type/logic files; fonts degraded-but-non-blocking,
+             # pre-existing; corpus-morphology/corpus-glyphs unchanged — the
+             # new field is fixed English editorial text vendored from an
+             # already-committed raw data file, never a new corpus
+             # codepoint). `npx tsc --noEmit`, run separately across
+             # `apps/web`/`packages/engine`/`packages/corpus-compiler`: clean
+             # in all three. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted before
+             # committing, same discipline as every prior entry). No Arabic
+             # codepoint (every changed file swept programmatically, in
+             # Python, over the Arabic, Arabic Supplement, Arabic Extended-A
+             # and both Presentation Forms Unicode blocks, plus a
+             # `\u06xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape and `fromCharCode`
+             # sweep — zero matches; every new string is a wire field name or
+             # a synthetic English test-fixture placeholder, never Quranic
+             # Arabic). Session start: fresh container, `HEAD` was found
+             # detached at `ed42ee1`, the same commit `origin/main` was
+             # already at, on a stale LOCAL `main` branch ref three commits
+             # behind (`26cc664`, v3-D201) — the recurring "stale local main"
+             # trap this file has recorded roughly forty times since v3-D77 —
+             # caught before any implementation work via `git fetch` + `git
+             # checkout main && git merge --ff-only origin/main`, no work
+             # lost or at risk; `make setup` then run from scratch, no
+             # retries needed. Found by re-reading v3-D201's own fix against
+             # `RawAct`'s full declared shape field by field, rather than
+             # trusting that fixing one field on a struct closes every field
+             # on it — `summary` was the one field `buildSceneBeats()` still
+             # dropped after v3-D201; `name`/`ayahRange` were already carried
+             # through and `sceneImage` is separately consumed by
+             # `ayahToAct()` for `CorpusWord.sceneImage` (already wired, v3-D191).
+             # NOT addressed: every item on v3-D204's own "NOT addressed"
+             # list, unchanged. See DECISIONS.md v3-D205.
              # NOTE (v3-D204, 2026-09-12): `AtomCacheRebuilder::rebuildLocked()`'s
              # own dead-letter quarantine (edge case #130, closed at
              # v3-D114/v3-D115) computes a real per-learner `{userId, error}`

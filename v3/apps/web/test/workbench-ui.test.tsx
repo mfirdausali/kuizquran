@@ -993,6 +993,43 @@ describe("WorkbenchIsland — a scene beat's own emotional register reaches the 
     expect(section.textContent).toMatch(/Overture: The Best of Stories/);
     expect(section.textContent).not.toMatch(/emotional register/i);
   });
+
+  // `RawAct.summary` — the act's own authored narrative paragraph, the raw
+  // material the human-only scene-beat `label` is a reader's one-line
+  // distillation OF — is the direct sibling gap `emotionalBeat` above named
+  // and closed: `buildSceneBeats()` never copied it through either, and
+  // `CorpusSceneBeat` never declared it. Same discipline: the frozen fixture
+  // predates the field entirely, so a positive case must attach a real,
+  // distinct value to prove the render is wired, not a hardcoded string.
+  it("renders the open ayah's own scene beat, including its authored narrative summary", async () => {
+    globalThis.fetch = vi.fn(async () => readyFrontier()) as unknown as typeof fetch;
+    const withSummary: Corpus = {
+      ...corpus,
+      sceneBeats: corpus.sceneBeats!.map((sb) =>
+        sb.act === 1 ? { ...sb, summary: "fixture narrative summary of act one" } : sb,
+      ),
+    };
+
+    render(<WorkbenchIsland surah={12} corpus={withSummary} macro={macroFactsFor(corpus)} />);
+
+    const section = await screen.findByRole("region", { name: /scene beat/i });
+    expect(section.textContent).toMatch(/fixture narrative summary of act one/);
+  });
+
+  it("never fabricates a narrative summary when the field is absent on an older corpus subset", async () => {
+    globalThis.fetch = vi.fn(async () => readyFrontier()) as unknown as typeof fetch;
+    const [firstBeat] = corpus.sceneBeats ?? [];
+    if (firstBeat === undefined) {
+      throw new Error("expected the frozen fixture to carry at least one scene beat");
+    }
+    expect(firstBeat.summary).toBeUndefined();
+
+    render(<WorkbenchIsland surah={12} corpus={corpus} macro={macroFactsFor(corpus)} />);
+
+    const section = await screen.findByRole("region", { name: /scene beat/i });
+    expect(section.textContent).toMatch(/Overture: The Best of Stories/);
+    expect(section.textContent).not.toMatch(/fixture narrative summary/i);
+  });
 });
 
 describe("WorkbenchIsland — a surah's own mental-model summary reaches the reviewer", () => {

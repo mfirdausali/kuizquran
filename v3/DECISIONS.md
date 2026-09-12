@@ -16858,3 +16858,154 @@ unreachable until `rhymeClassOf()` exists); `StripeField.editable` on
 every field, never dynamically computed, so it is a documentation constant
 rather than a genuinely computed value in this bug class's sense; left
 alone) — all unchanged.
+
+## v3-D205, 2026-09-12: an act's own authored narrative paragraph was parsed on every compile and discarded — the direct sibling of v3-D201's `emotionalBeat` fix, on the same pipeline
+
+**Found:** `RawAct.summary` (`packages/corpus-compiler/src/types.ts`) is a
+required field on every authored act — a real, substantial narrative
+PARAGRAPH describing what happens in that act (e.g. surah 12 act 2's own
+`summary`: "Young Yusuf tells his father Yaqub: 'O my father, I saw eleven
+stars, the sun and the moon — I saw them prostrating to me.' Yaqub warns him
+not to tell his brothers..."), vendored in `data/raw/<surah>-mental-model.json`
+alongside `name`/`ayahRange`/`emotionalBeat`/`sceneImage` since the mental
+model shipped. It is the raw material the human-only scene-beat `label`
+(`sceneBeats.ts`'s own header: "Author-facing placeholder... a one-line
+HUMAN reading of what a passage of scripture MEANS") is a reviewer's
+one-line DISTILLATION of.
+
+`buildSceneBeats()` was parsing `RawAct` into memory on every compile
+(confirmed directly: surah 12's own `data/raw/12-mental-model.json` carries a
+real, distinct, non-empty `summary` string for all 19 of its acts) and never
+copying `summary` through into the compiled `SceneBeat` — the exact same
+omission v3-D201 found and fixed for the sibling field `emotionalBeat` one
+entry earlier, on the identical function, in the identical raw-to-compiled
+mapping (`grep -n "summary" packages/corpus-compiler/src/sceneBeats.ts`
+returned nothing before this fix). The engine's own `CorpusSceneBeat` type
+never declared a `summary` field either, so no client could read it even by
+accident — nor could `SceneBeatsPanel.tsx` (v3-D201's own new panel,
+one release old) render it, since it was built for exactly the sibling field
+and stopped there.
+
+Consequence: a reviewer opening `SceneBeatsPanel.tsx` to check whether a
+surah's human-authored one-line scene-beat `label` genuinely captures its
+act had the act's NAME and the act's one-line emotional register (v3-D201)
+but not the paragraph the label is supposed to be summarizing — the one
+piece of context that would let them judge the label's own accuracy.
+
+**Fixed**, mirroring v3-D201's own fix on the sibling field exactly, no wire
+schema version bump (same precedent — additive, diagnostic-only):
+`SceneBeat` (`corpus-compiler/src/types.ts`) and `CorpusSceneBeat`
+(`engine/src/types.ts`) each gain an optional `summary?: string`.
+`buildSceneBeats()` now copies `summary: a.summary` through alongside
+`emotionalBeat`. Declared OPTIONAL, not required, even though `RawAct.summary`
+itself is required at the raw-authoring level — the frozen engine test
+fixture (`packages/engine/test/fixtures/12.json`) and any older compiled
+corpus subset predate this field entirely, and the established convention
+(`emotionalBeat`, `mentalModel`) is to degrade honestly on an older artifact
+rather than the client acting as if a required field must always be present.
+`SceneBeatsPanel.tsx` gains one new conditional clause, `— summary:
+{sb.summary}`, rendered only when present, alongside the existing
+`emotionalBeat` clause — never fabricated for the many older/frozen fixtures
+that carry no `summary` at all.
+
+**RED confirmed independently at both layers, each reverted and restored
+byte-identically:**
+- Compiler level: the existing
+  `test_carries an act's own emotionalBeat through from mentalModel into the
+  compiled scene beat` test in `buildCorpus.test.ts` was strengthened (not a
+  new test — its own fixture already seeds two acts with DISTINCT
+  `summary: "fixture summary one"` / `"fixture summary two"` values, unused
+  by any prior assertion) with two new assertions. Run against the
+  unmodified `sceneBeats.ts`, it failed exactly as predicted: `expected
+  undefined to be 'fixture summary one'`. Implemented, reran: 8/8 green in
+  `buildCorpus.test.ts` (was 8, +0 net — a strengthened existing test, no
+  new test file or case).
+- Component level: two new cases in `apps/web/test/workbench-ui.test.tsx`
+  (mirroring v3-D201's own two `emotionalBeat` cases exactly — a positive
+  case attaching a real, distinct summary to the frozen fixture's act 1,
+  which predates the field entirely; a negative case confirming the frozen
+  fixture genuinely carries no `summary` and the panel never fabricates one)
+  both failed against the unmodified `SceneBeatsPanel.tsx`: the positive
+  case on `expected '...' to match /fixture narrative summary of act one/`
+  (the field never reached the render at all). Implemented, reran: 49/49
+  green in `workbench-ui.test.tsx` (was 47, +2).
+
+The positive component case attaches `summary: "fixture narrative summary of
+act one"` to the frozen fixture's own act 1 (which — like `emotionalBeat`
+before it — predates the field entirely, verified directly, not assumed),
+so it cannot pass on a hardcoded string; the negative case asserts the
+frozen fixture's `summary` is genuinely `undefined` before asserting the
+panel says nothing fabricated.
+
+**Full verification:**
+- `TZ=UTC make test` (full monorepo, all seven suites, from a fresh `make
+  setup` on a clean container — composer installs for both `v2/api` and
+  `v3/api`, and all four `v3` npm installs, completed cleanly with no retry
+  needed): **2675 passing** (was 2673, +2 — apps/web 1397, was 1395;
+  corpus-compiler 120, unchanged — the compiler-level RED was carried by
+  strengthening an existing test, so it adds no separate count; 255 v2
+  vitest, 47 v2/api, 375 v3/api, 420 engine, 61 fold-runner, all unchanged).
+  `check-test-floor.mjs`: OK, 2675 >= floor 1899 (+776 margin, unmoved, same
+  discipline as every prior entry).
+- `TZ=UTC make build`: exit 0, 30 routes (unchanged — edits inside the
+  existing `/workbench` component tree, no new route). `npm run gates` (via
+  `prebuild`): all green — locked-css OK (1 documented hunk, 294 v1 lines
+  byte-identical); fonts 2/6, degraded-but-non-blocking, pre-existing;
+  boundaries OK, 311 files, unchanged count (no new production file — one
+  existing component edited plus its one existing test file, plus three
+  existing type/logic files); corpus-morphology OK, 362 words; corpus-glyphs
+  OK, 206 codepoints, both unchanged from before this fix — the new field is
+  fixed English editorial text vendored from an already-committed raw data
+  file, never a new corpus codepoint.
+- `npx tsc --noEmit`, run separately across all three touched v3 node
+  packages (`apps/web`, `packages/engine`, `packages/corpus-compiler` —
+  widening a shared engine type can silently break a sibling package's own
+  typecheck without touching its source): clean in all three.
+- No `v1/**`/`v2/**` edit — a stray `v2/tsconfig.tsbuildinfo` build-cache
+  diff produced by running the suite was reverted before committing, same
+  discipline as every prior entry; `git status --porcelain -- v1 v2` empty
+  immediately before committing.
+- No Arabic codepoint — every changed file swept programmatically, in
+  Python, over the Arabic, Arabic Supplement, Arabic Extended-A and both
+  Presentation Forms Unicode blocks, plus a `\u06xx`/`\u08xx`/`\uFBxx`/
+  `\uFExx` escape and `fromCharCode` sweep — zero matches; every new string
+  is a wire field name or a synthetic English test-fixture placeholder
+  ("fixture narrative summary of act one," matching this file's own
+  established convention), never Quranic Arabic — the real vendored
+  `summary` text this fix wires through is itself English editorial prose
+  from an already-committed raw data file, not generated by this run.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/`.env`
+anywhere; `HEAD` was found detached at `ed42ee1`, the same commit
+`origin/main` was already at, on a stale LOCAL `main` branch ref three
+commits behind (`26cc664`, v3-D201) — the recurring "stale local main" trap
+this file has recorded roughly forty times since v3-D77 — caught before any
+implementation work via `git fetch` + `git checkout main && git merge
+--ff-only origin/main`, no work lost or at risk. `make setup` then run from
+scratch, completing cleanly with no retries needed.
+
+**Candidate search:** found by re-reading v3-D201's own fix (the direct
+predecessor in the same file, same function, same pipeline) field by field
+against `RawAct`'s full declared shape — `act`/`name`/`ayahRange`/`summary`/
+`emotionalBeat`/`sceneImage` — rather than trusting that fixing one field on
+a struct closes every field on it. `summary` was the one field `buildSceneBeats()`
+still dropped after v3-D201's fix; `name`/`ayahRange` were already carried
+through (as `sourceName`/`ayahRange`) and `sceneImage` is separately consumed
+by `ayahToAct()` for `CorpusWord.sceneImage` (a different, already-wired
+path, confirmed via `wordReference.ts`/v3-D191's own fix). No other
+candidate was pursued this run once this one was confirmed real and
+in-scope.
+
+**NOT addressed**, named so a future run doesn't re-discover it as new:
+every item on v3-D204's own "NOT addressed" list, unchanged —
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class / `permitsIssuance`/`permitsReview` (v3-D88, v3-D151); multi-surah
+enrollment; the operational mailer/7-night window; PAY-1's Stripe
+fixtures; surah 67's scene beats (`MULK_SCENE_BEAT_LABELS`'s own `label`s
+remain draft/unauthored — this fix changes nothing about that gate);
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123); `lib/plan/forecast.ts`'s
+`awayDays` (v3-D190); `MacroFacts.litany.rhymeLabel` (v3-D188);
+`StripeField.editable` (v3-D204, a documentation constant) — all unchanged.

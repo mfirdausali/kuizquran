@@ -124,6 +124,13 @@ export interface SceneBeat {
    *  `label`, which is the human-only interpretive scene-beat LABEL
    *  (`sceneBeats.ts`'s own header). Optional: not every act carries one. */
   emotionalBeat?: string;
+  /** The act's own authored narrative paragraph (`RawAct.summary`) — the raw
+   *  material the human-only scene-beat `label` is a reader's one-line
+   *  distillation OF. Always authored when an act exists (`RawAct.summary`
+   *  is required, unlike `emotionalBeat`), but kept optional here so an
+   *  older compiled corpus subset that predates this field degrades
+   *  honestly instead of the field appearing required-but-absent. */
+  summary?: string;
 }
 
 export interface CorpusMeta {

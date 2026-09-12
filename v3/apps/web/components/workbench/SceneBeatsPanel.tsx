@@ -23,6 +23,15 @@
 // names — had no way to see the emotional context already written
 // specifically to inform that authoring.
 //
+// Direct sibling gap, closed alongside it: `RawAct.summary` — the act's own
+// authored narrative PARAGRAPH (e.g. "Young Yusuf tells his father Yaqub:
+// 'O my father, I saw eleven stars...'"), the raw material the human-only
+// `label` is a reader's one-line DISTILLATION of — was parsed into memory
+// on every compile too, and dropped by the exact same omission: never
+// copied through `buildSceneBeats()`, never declared on `CorpusSceneBeat`.
+// A reviewer checking whether a one-line `label` actually captures its
+// act had no way to see the paragraph the label is supposed to summarize.
+//
 // This mirrors `LookAlikesPanel.tsx`'s own discipline exactly: per-ayah
 // filtered, read-only, no write path. Every string it renders is either a
 // fixture coordinate (surah/act/ayah, all integers) or the compiler's own
@@ -58,6 +67,7 @@ export function SceneBeatsPanel({ ayah, sceneBeats }: SceneBeatsPanelProps) {
               </span>{" "}
               — {sb.sourceName}: {sb.label}
               {sb.emotionalBeat ? <> — emotional register: {sb.emotionalBeat}</> : null}
+              {sb.summary ? <> — summary: {sb.summary}</> : null}
             </li>
           ))}
         </ul>

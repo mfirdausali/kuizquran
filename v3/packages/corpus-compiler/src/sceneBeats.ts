@@ -95,6 +95,7 @@ export function buildSceneBeats(
     label: labels[a.act] ?? `TODO: author scene-beat label for act ${a.act} (${a.name})`,
     sourceName: a.name,
     emotionalBeat: a.emotionalBeat,
+    summary: a.summary,
   }));
 }
 

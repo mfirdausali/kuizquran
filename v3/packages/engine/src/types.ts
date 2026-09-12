@@ -104,6 +104,12 @@ export interface CorpusSceneBeat {
    *  alongside the act's own sceneImage; optional, not every act carries
    *  one. Reviewer diagnostic only — never rendered to a learner. */
   emotionalBeat?: string;
+  /** The act's own authored narrative paragraph — the raw material the
+   *  human-only scene-beat `label` is a reader's one-line distillation OF.
+   *  Optional so a compiled corpus subset that predates this field degrades
+   *  honestly rather than reading as required-but-absent. Reviewer
+   *  diagnostic only — never rendered to a learner. */
+  summary?: string;
 }
 
 export interface Corpus {

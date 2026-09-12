@@ -130,6 +130,12 @@ describe("buildCorpus — surah-parameterized (build-plan step 3)", () => {
     }
     expect(first.emotionalBeat).toBe("fixture anticipation, before anything happens");
     expect(second.emotionalBeat).toBeUndefined();
+    // the act's own authored narrative summary — the paragraph the human-only
+    // scene-beat `label` is a reader's one-line distillation OF — must also
+    // reach the compiled scene beat, distinct per act, never dropped like
+    // `emotionalBeat` was before this same fix.
+    expect(first.summary).toBe("fixture summary one");
+    expect(second.summary).toBe("fixture summary two");
   });
 
   it("word count matches the verse source exactly", () => {
