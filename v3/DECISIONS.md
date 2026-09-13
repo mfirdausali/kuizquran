@@ -17662,3 +17662,133 @@ drift (v3-D127); `packages/engine/src/placement.ts` (v3-D111/D113/D123);
 a documentation constant); `corpusHash`'s own zero fold-side consumer
 (v3-D206); `lib/plan/forecast.ts`'s empty-log zero-state still shows no
 calendar (v3-D207) — all unchanged.
+
+---
+
+## v3-D210, 2026-09-13: `GraphNode.gate` — precomputed for every mark on the memory ring since the ring shipped (build-plan step 19), never named in its own documented accessible text alternative
+
+`apps/web/components/macro/graphNodes.ts`'s `nodeFor()` stamps `gate:
+GateState` on **every** mark `buildGraphNodes()` produces (`gateStateOf()`,
+lines 126-132) — a real, dynamic value: the day-1 cold gate (FR3) genuinely
+cycles `none -> armed -> due -> passed`/`failed` as a learner drills, exactly
+the mechanism DEFECTS.md#B11/#B12 wired into the real session loop. The
+field's own docblock names edge case #101 by number — "gate-pending lock
+opacity => learner confusion; gate-armed/due states + why-locked
+explanation" — and says it is "re-exported from the progress row builder so
+the ring and the table cannot drift into two different vocabularies for the
+same fact."
+
+But `RingDiagram.tsx`'s `labelFor()` — the function this file's own header
+and this build's `#87` tests (`test/macro-ring.test.tsx`) name as **the**
+documented text alternative for the whole SVG ("not aria-labels bolted onto
+`<circle>` elements... the progress list, linked visibly beneath the
+diagram") — built its string from `ref`, `stageLabel`, `encoded`/
+`strengthPct`, and the `current` flag only. `grep -n "\.gate\b"
+components/macro/*.tsx` (excluding tests) returned nothing before this fix:
+`GraphNodeMark.tsx` (the SVG paint) reads `stage`/`encoded`/`strengthPct`
+only; `graphNodes.ts#summarize()` (the `<desc>` aggregate) reads
+`stageLabel` only. Sibling table `lib/progress/rows.ts` — the file
+`graphNodes.ts` explicitly imports `GateState` FROM — does surface it via
+`nextWord()`'s "Gate due today"/"Gate in N days" captions, so the vocabulary
+existed; the ring itself just never used its own copy of it.
+
+Consequence, not hypothetical: `/progress` renders `MacroPanelIsland`
+**standalone** — `RetentionIsland`/`GrowthIsland` beside it are aggregate-only,
+and unlike `/surah/[surah]` (which has `SurahAyahListIsland`'s per-ayah list
+alongside the ring) or the ayah-detail page (which has `AyahStatsIsland`'s
+own `nextLabel`), `/progress`'s ring has no per-ayah sibling list at all. On
+that route the ring's own accessible link list is the **only** place a
+learner or a screen-reader user encounters per-mark state, and it silently
+omitted whether a mark's atom had a cold gate armed, due, or already failed
+— despite the data being computed for that exact mark already on screen.
+
+**Fixed, display-only, no engine/wire change** (the field was already
+computed and typed; only the render was missing): a small new
+`RingDiagram.tsx#gateWord()` maps `GateState` to one trailing clause —
+`"due"` → `", gate due"`, `"armed"` → `", gate armed"`, `"failed"` → `",
+gate check failed"`, `"none"`/`"passed"` → nothing (there is nothing pending
+to explain once a gate has cleared or was never scheduled) — appended inside
+`labelFor()`, before the existing `", you are here"` clause. Kept as its own
+clause rather than folded into `stageLabel`, since `stageLabel` is the exact
+five-word vocabulary `lib/progress/rows.ts` also prints and a `#87` test
+already pins byte-for-byte agreement between the two — widening it here
+would risk exactly the "ring and list drift into two vocabularies" failure
+the field's own docblock was written to prevent.
+
+**RED confirmed directly.** Two new `it()` blocks in a new `#101` describe
+block in `test/macro-ring.test.tsx`, run against the unmodified
+`RingDiagram.tsx` (31 pre-existing cases in the file untouched): a case
+seeding one atom with `gateDueAt <= now` and a SECOND, different atom with
+`gateDueAt` three days in the future (so one hardcoded gate word cannot
+satisfy both) failed exactly `expected 'Ayah 103:1, Learning, 0%' to match
+/gate due/i`; a second case seeding an atom with `gateFails: 1` failed
+identically on `/gate.*failed/i`. A third, negative case (a never-gated atom
+alongside an already-passed one, asserting neither mark's text contains the
+word "gate" at all) passed vacuously against the unfixed component,
+correctly — it never depended on the fix, and its purpose is only to prove
+the fix does not paint "gate" onto every mark indiscriminately. Restored
+byte-identically (`git diff` empty before implementing), then implemented;
+reran: 33/33 green in the file (was 30, +3).
+
+**Full verification.** Session start: fresh container, no
+`node_modules`/`vendor`/compiled corpus anywhere; `HEAD` was found detached
+at `92bbe54`, the same commit `origin/main` was already at, on a stale LOCAL
+`main` branch ref eight commits behind (`26cc664`, v3-D201) — the recurring
+"stale local main" trap this file has recorded roughly forty times since
+v3-D77 — caught before any implementation work via `git fetch` + `git
+checkout main && git merge --ff-only origin/main`, no work lost or at risk
+(a clean fast-forward, nothing to reconcile). `TZ=UTC make setup` then run
+from scratch, no retries needed; `TZ=UTC make compile-corpus` run once
+before any test relying on a real compiled corpus. `TZ=UTC npx vitest run
+test/macro-ring.test.tsx`: 33/33 green (was 30, +3). `TZ=UTC make test`:
+**2710 passing** (was 2707, +3 — exactly this run's three new `it()` blocks;
+apps/web 1420, was 1417; every other suite unchanged: 255 v2 vitest, 47
+v2/api, 377 v3/api, 120 corpus-compiler, 430 engine, 61 fold-runner).
+`check-test-floor.mjs`: OK, 2710 >= floor 1899 (+811 margin, unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 30 routes
+(unchanged — edits inside the existing `/progress` and `/surah/[surah]`
+component tree, no new route). `npm run gates`: all green (boundaries 315
+files, unchanged count from this diff's own two-file edit — no new
+production file, one existing component edited plus its one existing test
+file; the count differs from v3-D209's own "314" because that number
+predates this session's merge of eight upstream commits, several of which
+added files, not because this fix added one; fonts degraded-but-non-blocking
+— 2/6 UI fonts present, pre-existing and unrelated; corpus-morphology 362
+words / corpus-glyphs 206 codepoints, both unchanged — no new corpus data,
+only a caption over an already-computed field). `npx tsc --noEmit`
+(apps/web): clean, exit 0. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite was
+reverted before committing, same discipline as every prior entry — `git
+status --porcelain -- v1 v2` empty immediately before committing). No
+Arabic codepoint (both changed files swept programmatically, in Python,
+over the Arabic, Arabic Supplement, Arabic Extended-A and both Presentation
+Forms Unicode blocks, plus a `fromCharCode`/`fromCodePoint`/`\u06xx`/
+`\u08xx`/`\uFBxx`/`\uFExx` escape sweep — zero matches; every new string is
+a fixed English caption or a synthetic gate-state test fixture value, never
+corpus text).
+
+**Found by** a dedicated fresh-sweep agent handed the full exclusion list
+carried through v3-D209 and told not to re-report any of it, directed at
+under-swept corners rather than the by-now-exhausted `Corpus`/`CorpusMeta`/
+admin-controller/panel-pair territory; it independently re-confirmed those
+areas clean (every admin controller/panel pair it checked, the
+`entitlements`/`entitlement_transitions` migrations field-by-field,
+`apps/web/lib/{onboarding,library,home,plan}` field-by-field, and the
+engine's `SessionSummary`/`DrillPreview`/`PreviewSite`/`FloorItem`/
+`QueueItem` types all came back fully wired) before landing on this one,
+genuinely new instance in a file (`components/macro/*`) none of the prior
+~130 nights in this bug class had checked field-by-field.
+
+**NOT addressed**, named so a future run doesn't re-discover it as new: the
+streak/away-day day-space mismatch (v3-D209, real, needs design, deliberately
+deferred); `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class / `permitsIssuance`/`permitsReview` (v3-D88, v3-D151); multi-surah
+enrollment; the operational mailer/7-night window; PAY-1's Stripe fixtures;
+surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy
+drift (v3-D127); `packages/engine/src/placement.ts` (v3-D111/D113/D123);
+`MacroFacts.litany.rhymeLabel` (v3-D188); `StripeField.editable` (v3-D204,
+a documentation constant); `corpusHash`'s own zero fold-side consumer
+(v3-D206); `lib/plan/forecast.ts`'s empty-log zero-state still shows no
+calendar (v3-D207) — all unchanged.

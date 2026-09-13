@@ -375,6 +375,73 @@ describe("#87 — every stage carries a word and a number", () => {
 });
 
 // ===========================================================================
+// EDGE CASE #101 — "gate-armed/due states + why-locked explanation"
+// ===========================================================================
+//
+// graphNodes.ts stamps `gate: GateState` on EVERY mark (a real, dynamic value
+// — the day-1 cold gate genuinely cycles none -> armed -> due -> passed/failed
+// as a learner drills) and its own header names #101 by number as the reason
+// the field is re-exported from lib/progress/rows.ts's vocabulary. But
+// RingDiagram.tsx's labelFor() — the documented text alternative for the
+// whole SVG (this file's own #87 tests above) — never reads `node.gate` at
+// all. On /progress, MacroPanelIsland renders standalone with no per-ayah
+// list beside it, so this accessible link list is the ONLY place a learner
+// encounters per-mark state — and it silently omits whether a mark's atom has
+// a cold gate armed, due, or failed, despite every mark on screen already
+// carrying that fact.
+
+describe("#101 — gate state is named in the ring's accessible label", () => {
+  function gateAtom(
+    surah: number,
+    ref: number,
+    overrides: Partial<Pick<AtomState, "gateDueAt" | "gatePassed" | "gateFails">>,
+  ): AtomState {
+    return { ...initAtom(surah, "ayah", ref), encoded: true, ...overrides };
+  }
+
+  it("a DUE gate and an ARMED gate are named, distinctly, in the same graph", () => {
+    // Two different atoms so one hardcoded word cannot satisfy both.
+    const atoms = atomsOf(
+      gateAtom(103, 1, { gateDueAt: NOW }), // due: gateDueAt <= now
+      gateAtom(103, 2, { gateDueAt: NOW + 3 * 86_400_000 }), // armed: in the future
+    );
+    const nodes = buildGraphNodes(103, 3, atoms, NOW);
+    render(<RingDiagram surah={103} nodes={nodes} layout="strip" />);
+    const nav = screen.getByRole("navigation", { name: /ayat and joints/i });
+    const textFor = (name: RegExp) =>
+      Array.from(nav.querySelectorAll("a")).find((a) => name.test(a.textContent ?? ""))?.textContent ?? "";
+
+    expect(textFor(/Ayah 103:1,/)).toMatch(/gate due/i);
+    expect(textFor(/Ayah 103:2,/)).toMatch(/gate armed/i);
+    // And they must not say the same thing as each other.
+    expect(textFor(/Ayah 103:1,/)).not.toMatch(/gate armed/i);
+    expect(textFor(/Ayah 103:2,/)).not.toMatch(/gate due/i);
+  });
+
+  it("a FAILED gate is named", () => {
+    const atoms = atomsOf(gateAtom(103, 1, { gateFails: 1 }));
+    const nodes = buildGraphNodes(103, 3, atoms, NOW);
+    render(<RingDiagram surah={103} nodes={nodes} layout="strip" />);
+    const nav = screen.getByRole("navigation", { name: /ayat and joints/i });
+    const text = Array.from(nav.querySelectorAll("a")).find((a) => /Ayah 103:1,/.test(a.textContent ?? ""))
+      ?.textContent;
+    expect(text).toMatch(/gate.*failed/i);
+  });
+
+  it("a mark with no gate scheduled, or an already-passed one, says nothing about a gate", () => {
+    const atoms = atomsOf(
+      strongAtom(103, "ayah", 1, 90), // never gated at all: gateDueAt stays null
+      gateAtom(103, 2, { gatePassed: true }),
+    );
+    const nodes = buildGraphNodes(103, 3, atoms, NOW);
+    render(<RingDiagram surah={103} nodes={nodes} layout="strip" />);
+    const nav = screen.getByRole("navigation", { name: /ayat and joints/i });
+    const texts = Array.from(nav.querySelectorAll("a")).map((a) => a.textContent ?? "");
+    for (const t of texts) expect(t).not.toMatch(/gate/i);
+  });
+});
+
+// ===========================================================================
 // v3-D21 — the panel itself
 // ===========================================================================
 

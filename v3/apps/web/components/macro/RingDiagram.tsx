@@ -27,7 +27,7 @@
 import Link from "next/link";
 import type { MacroLayout } from "./facts.ts";
 import { place } from "./geometry.ts";
-import { isHighlighted, summarize, type GraphNode, type HighlightRef } from "./graphNodes.ts";
+import { isHighlighted, summarize, type GateState, type GraphNode, type HighlightRef } from "./graphNodes.ts";
 import { GraphNodeMark } from "./GraphNodeMark.tsx";
 
 export interface RingDiagramProps {
@@ -140,6 +140,24 @@ function hrefFor(node: GraphNode): string {
     : `/surah/${node.surah}/${node.ayah}`;
 }
 
+/** Edge case #101 ("gate-armed/due states + why-locked explanation"): a
+ *  pending cold gate is a distinct, actionable fact from the stage word
+ *  alone, so it gets its own clause — never folded into `stageLabel`, which
+ *  the progress table also reads and must not start meaning two things.
+ *  "none"/"passed" say nothing; there is nothing pending to explain. */
+function gateWord(gate: GateState): string {
+  switch (gate) {
+    case "due":
+      return ", gate due";
+    case "armed":
+      return ", gate armed";
+    case "failed":
+      return ", gate check failed";
+    default:
+      return "";
+  }
+}
+
 /** The accessible name of a mark. Carries the reference, the KIND AS A WORD,
  *  the stage AS A WORD and the number — never a colour.
  *
@@ -152,7 +170,7 @@ function labelFor(node: GraphNode, current = false): string {
       ? `Joint ${node.surah}:${node.from}→${node.to}`
       : `Ayah ${node.surah}:${node.ayah}`;
   const value = node.encoded ? `${node.strengthPct}%` : "not started";
-  return `${ref}, ${node.stageLabel}, ${value}${current ? ", you are here" : ""}`;
+  return `${ref}, ${node.stageLabel}, ${value}${gateWord(node.gate)}${current ? ", you are here" : ""}`;
 }
 
 /** A not-yet-started seam is drawn in the neutral border colour rather than

@@ -53,9 +53,100 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2707 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2710 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 377 v3/api + 120 corpus-compiler
-             # + 430 engine + 61 fold-runner + 1417 apps/web. (v3-D209, 2026-09-13)
+             # + 430 engine + 61 fold-runner + 1420 apps/web. (v3-D210, 2026-09-13)
+             # NOTE (v3-D210, 2026-09-13): `GraphNode.gate` — precomputed by
+             # `graphNodes.ts#gateStateOf()` for EVERY mark the memory ring
+             # renders since the ring shipped (build-plan step 19), a real,
+             # dynamic value (the day-1 cold gate genuinely cycles none ->
+             # armed -> due -> passed/failed as a learner drills) — but
+             # `RingDiagram.tsx#labelFor()`, the function this file's own
+             # header and the `#87` tests name as THE documented accessible
+             # text alternative for the whole SVG, never read `node.gate` at
+             # all. `grep -n "\.gate\b" components/macro/*.tsx` (excluding
+             # tests) returned nothing: `GraphNodeMark.tsx` (the SVG paint)
+             # reads stage/encoded/strengthPct only, `summarize()`'s `<desc>`
+             # aggregate reads `stageLabel` only. The field's own docblock
+             # names edge case #101 by number ("gate-armed/due states +
+             # why-locked explanation") and says it is "re-exported from the
+             # progress row builder so the ring and the table cannot drift
+             # into two different vocabularies for the same fact" — the
+             # vocabulary (`lib/progress/rows.ts#nextWord()`'s "Gate due
+             # today"/"Gate in N days") existed, the ring just never used its
+             # own copy of it. Consequence: `/progress` renders
+             # `MacroPanelIsland` STANDALONE — unlike `/surah/[surah]`
+             # (`SurahAyahListIsland` beside it) or the ayah-detail page
+             # (`AyahStatsIsland`'s own `nextLabel`), it has no per-ayah
+             # sibling list at all, so the ring's own link list is the ONLY
+             # place a learner or screen-reader user encounters per-mark
+             # state there, and it silently omitted whether a mark's atom had
+             # a cold gate armed, due, or already failed. Fixed,
+             # display-only, no engine/wire change: a new
+             # `RingDiagram.tsx#gateWord()` maps `GateState` to one trailing
+             # clause — "due" -> ", gate due", "armed" -> ", gate armed",
+             # "failed" -> ", gate check failed", "none"/"passed" -> nothing
+             # — appended inside `labelFor()` before the existing "you are
+             # here" clause; kept as ITS OWN clause rather than folded into
+             # `stageLabel`, since a `#87` test already pins `stageLabel`'s
+             # five-word vocabulary byte-for-byte against
+             # `lib/progress/rows.ts`, and widening it here would risk the
+             # exact "two vocabularies for one fact" drift the field's own
+             # docblock exists to prevent. RED confirmed directly: two new
+             # `it()` blocks in `test/macro-ring.test.tsx` (31 pre-existing
+             # cases untouched), run against the unmodified component — a
+             # case seeding two DIFFERENT atoms (one due, one armed 3 days
+             # out, so one hardcoded word cannot satisfy both) failed exactly
+             # `expected 'Ayah 103:1, Learning, 0%' to match /gate due/i`; a
+             # `gateFails: 1` case failed identically on `/gate.*failed/i`; a
+             # third, negative case (never-gated + already-passed, asserting
+             # neither text contains "gate") passed vacuously, correctly — it
+             # proves the fix doesn't paint "gate" onto every mark
+             # indiscriminately, not that the fix works. Restored
+             # byte-identically, then implemented; reran: 33/33 green in the
+             # file (was 30, +3). `TZ=UTC make test`: 2710 passing (was 2707,
+             # +3; apps/web 1420, was 1417; no other suite moved).
+             # `check-test-floor.mjs`: OK, 2710 >= floor 1899 (+811 margin,
+             # unmoved). `TZ=UTC make build`: exit 0, 30 routes (unchanged —
+             # edits inside the existing `/progress`/`/surah/[surah]`
+             # component tree, no new route). `npm run gates`: all green
+             # (boundaries 315 files — no new production file this diff, one
+             # existing component edited plus its one existing test file;
+             # the count differs from v3-D209's own "314" because this
+             # session's merge of eight upstream commits added files before
+             # this fix touched anything, not because of this fix; fonts
+             # degraded-but-non-blocking, pre-existing; corpus-morphology/
+             # corpus-glyphs unchanged — no new corpus data). `npx tsc
+             # --noEmit` (apps/web): clean. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted before
+             # committing, same discipline as every prior entry). No Arabic
+             # codepoint (both changed files swept programmatically, in
+             # Python, over the Arabic, Arabic Supplement, Arabic
+             # Extended-A and both Presentation Forms Unicode blocks, plus a
+             # `fromCharCode`/`fromCodePoint`/`\u06xx`/`\u08xx`/`\uFBxx`/
+             # `\uFExx` escape sweep — zero matches; every new string is a
+             # fixed English caption or a synthetic gate-state test fixture
+             # value, never corpus text). Session start: fresh container, no
+             # `node_modules`/`vendor`/compiled corpus anywhere; `HEAD` was
+             # found detached at `92bbe54`, the same commit `origin/main`
+             # was already at, on a stale LOCAL `main` branch ref eight
+             # commits behind (`26cc664`, v3-D201) — the recurring "stale
+             # local main" trap this file has recorded roughly forty times
+             # since v3-D77 — caught before any implementation work via `git
+             # fetch` + `git checkout main && git merge --ff-only
+             # origin/main`, a clean fast-forward, no work lost or at risk.
+             # `make setup` then `make compile-corpus` both run from
+             # scratch, no retries needed. Found by a dedicated fresh-sweep
+             # agent handed the full exclusion list carried through v3-D209
+             # and told not to re-report any of it, directed at under-swept
+             # corners rather than the by-now-exhausted `Corpus`/
+             # `CorpusMeta`/admin-controller/panel-pair territory — it
+             # independently re-confirmed those areas clean before landing
+             # on this genuinely new instance in `components/macro/*`, a
+             # file none of the prior ~130 nights in this bug class had
+             # checked field-by-field. NOT addressed: every item on
+             # v3-D209's own "NOT addressed" list, unchanged. See
+             # DECISIONS.md v3-D210.
              # NOTE (v3-D209, 2026-09-13): `FlagRow.ackAt` — stamped for real by
              # `FlagService::acknowledgeKill()` on every kill-banner
              # acknowledgement (and every 72h auto-waive) since the flag plane
