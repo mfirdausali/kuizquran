@@ -143,6 +143,20 @@ function nextWord(atom: AtomState | undefined, gate: GateState, now: number): st
     const d = daysUntil(atom.gateDueAt, now);
     return d === 0 ? "Gate due today" : `Gate in ${d} day${d === 1 ? "" : "s"}`;
   }
+  // A failed cold-gate check (gate.ts#applyGateResult) re-arms `gateDueAt` for
+  // the retry and is a genuinely different fact from an ordinary scheduled
+  // review — falling through to the half-life computation below would print
+  // the identical "in N days" a perfectly healthy atom shows, silently
+  // hiding that a gate check failed and a retry is pending. "gate check
+  // failed" mirrors RingDiagram.tsx#gateWord()'s own vocabulary for the same
+  // state, so the table and the ring do not drift onto two different words
+  // for one fact.
+  if (gate === "failed" && atom?.gateDueAt != null) {
+    const d = daysUntil(atom.gateDueAt, now);
+    return d === 0
+      ? "Gate check failed — retry today"
+      : `Gate check failed — retry in ${d} day${d === 1 ? "" : "s"}`;
+  }
   if (!atom || atom.lastRetrieval === null || atom.stability <= 0) return "Not scheduled";
   // Due when retrievability crosses the half-life — the same curve the
   // scheduler reads, so the date shown is the date used (§10).

@@ -17792,3 +17792,128 @@ drift (v3-D127); `packages/engine/src/placement.ts` (v3-D111/D113/D123);
 a documentation constant); `corpusHash`'s own zero fold-side consumer
 (v3-D206); `lib/plan/forecast.ts`'s empty-log zero-state still shows no
 calendar (v3-D207) — all unchanged.
+
+## v3-D211, 2026-09-13: `lib/progress/rows.ts#nextWord()` silently discarded a FAILED cold gate — the ONE column built to show "the number the scheduler uses" fell back to an ordinary half-life date instead
+
+`gateStateOf()` (`rows.ts:128-133`) has computed the real, reachable
+`"failed"` member of the `GateState` union since the forgiveness ladder
+shipped (`gate.ts#applyGateResult`, DEFECTS.md#B12/v3-D107): a failed
+cold-gate attempt sets `gateFails += 1` and re-arms `gateDueAt` for the next
+learning day, and nothing resets `gateFails` to 0 except a later pass or an
+explicit demote — so `"failed"` is a real, potentially multi-day-persistent
+state for any learner who fails a gate and has not yet retried or accepted
+the demote offer.
+
+But `nextWord()` (`rows.ts:140-153`), the function that decides the
+"Next"/`nextLabel` cell §10 documents as "the date shown is the date used",
+branched on `"due"` and `"armed"` only. For `"failed"` it fell straight
+through to the **ordinary half-life-based due-date computation** — the
+identical arithmetic a perfectly healthy atom uses — so a learner who failed
+their gate saw a plain "in N days", indistinguishable from a healthy review,
+on both real consumers of `ProgressRow.nextLabel`
+(`components/progress/ProgressTable.tsx` and
+`components/progress/AyahStatsIsland.tsx`, confirmed by `grep -rn
+"\.gate\b" apps/web/components/progress apps/web/lib/progress` returning
+only `rows.ts`'s own definition). The pre-existing regression test
+(`test/ayah-detail.test.tsx`, "prints a next review the scheduler would
+agree with") could not have caught this: its own assertion,
+`/^(Today|in \d+ days?|Gate .*)$/`, is an alternation, and the wrong
+"in N days" fallback satisfies the `in \d+ days?` branch just as well as the
+correct string would — the test was pinning a SHAPE, not the fact that a
+failed gate names itself as failed.
+
+**Fixed, display-only, no engine/wire change** (`GateState`/`gateFails`/
+`gateDueAt` all already existed and were already computed into `gate`):
+`nextWord()` gains one new branch, mirroring the existing `"armed"`
+branch's shape exactly — `gate === "failed"` reads the atom's own
+`gateDueAt` (the real retry date the forgiveness ladder set) and returns
+`"Gate check failed — retry today"` or `"Gate check failed — retry in N
+day(s)"`. The wording deliberately reuses `RingDiagram.tsx#gateWord()`'s own
+`"gate check failed"` vocabulary (v3-D210) rather than inventing a second
+phrase for the same fact — the exact "two vocabularies for one fact" drift
+`GateState`'s own docblock exists to prevent, and the reason this fix does
+not fold the new branch into `stageLabel`, which a `#87`-style test
+elsewhere already pins byte-for-byte.
+
+**RED confirmed directly.** Two new `it()` blocks added to the existing
+"how well you hold it" describe block in `test/ayah-detail.test.tsx` (44
+pre-existing cases in the file untouched): the load-bearing case builds an
+atom with `gateFails: 1` and a real future `gateDueAt` (2 days out) via
+`initAtom`+patch — the same hand-built-`AtomState` convention every other
+case in this file already uses — and asserts `row.gate === "failed"` (which
+passed even before the fix, proving `gateStateOf` was never the broken
+half) and `row.nextLabel` matches `/gate.*failed/i`; against the unmodified
+`rows.ts` this failed exactly `expected 'in 7 days' to match
+/gate.*failed/i` — the precise silent-fallback the entry above describes,
+not a hypothetical. A second, negative case (`rowsFixture()`'s existing,
+never-gated atom) asserts `row.nextLabel` never contains the word "failed",
+proving the fix does not paint it onto every row; this case passed
+vacuously against the unfixed code too, correctly, since it never depended
+on the fix. Restored byte-identically (`git diff` empty before
+implementing), then implemented; reran: 46/46 green in the file (was 44,
++2).
+
+**Full verification.** Session start: fresh container, no
+`node_modules`/`vendor`/compiled corpus anywhere; local `HEAD` and
+`origin/main` both already agreed at `b6bd205` (v3-D210) — no stale-local-
+main trap this run, confirmed directly via `git fetch origin main` before
+any exploration. `TZ=UTC make setup` run from scratch, no retries needed.
+`npx vitest run test/ayah-detail.test.tsx`: 46/46 green (was 44, +2).
+`npx vitest run test/progress-list.test.tsx`: 27/27 green, unchanged (the
+sibling `ProgressTable` consumer, confirming no regression on the ordinary
+due/armed/none paths). `TZ=UTC make test`: **2712 passing** (was 2710, +2 —
+exactly this run's two new `it()` blocks; apps/web 1422, was 1420; every
+other suite unchanged: 255 v2 vitest, 47 v2/api, 377 v3/api, 120
+corpus-compiler, 430 engine, 61 fold-runner). `check-test-floor.mjs`: OK,
+2712 >= floor 1899 (+813 margin, unmoved, same discipline as every prior
+entry). `TZ=UTC make build`: exit 0, 30 routes (unchanged — edits inside
+the existing `/progress`/`/progress/list`/ayah-detail component tree via a
+shared `lib/` function, no new route). `npm run gates`: all green
+(boundaries 315 files, unchanged count — one existing production file
+edited plus its one existing test file, no new production file; fonts
+degraded-but-non-blocking, pre-existing, 2/6 UI fonts present; corpus-
+morphology 362 words / corpus-glyphs 206 codepoints, both unchanged — no
+new corpus data, only a caption over an already-computed field). `npx tsc
+--noEmit` (apps/web): clean, exit 0. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite
+was reverted before committing, same discipline as every prior entry —
+`git status --porcelain -- v1 v2` empty immediately before committing). No
+Arabic codepoint (both changed files swept programmatically, in Python,
+over the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks, plus a `fromCharCode`/`fromCodePoint`/
+`\u06xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape sweep — zero matches; every new
+string is a fixed English caption or a synthetic gate-state test fixture
+value, never corpus text).
+
+**Found by** a dedicated fresh-sweep agent handed the full exclusion list
+carried through v3-D210 and told not to re-report any of it, directed away
+from `components/macro/*` (just exhaustively swept and fixed at v3-D210)
+toward sibling wire-type fields not yet checked field-by-field; it
+independently re-confirmed `lib/session/run.ts`'s full 28-export surface
+(all wired) and several Laravel `BelongsTo` relations
+(`AccountDeletionRequest::user()`, `BillingEvent::user()`,
+`EntitlementTransition::user()`, `Entitlement::user()`) as the
+already-known, deliberate "pseudonymize the raw FK instead" pattern before
+landing on this instance — independently verified by this run directly
+against `rows.ts` and both real consumers before any test was written,
+rather than trusted from the agent's report.
+
+**NOT addressed**, named so a future run doesn't re-discover it as new:
+`components/macro/graphNodes.ts#gateStateOf()` duplicates `rows.ts`'s own
+`gateStateOf()` logic in a second, unexported local copy rather than
+importing it (only `GateState` the TYPE is imported, not the function) —
+a real, smaller "two implementations of one decision" shape, distinct from
+the vocabulary-drift class v3-D210 closed, left alone this run to keep the
+fix to the one field genuinely reaching learners with wrong text; the
+streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class / `permitsIssuance`/`permitsReview` (v3-D88, v3-D151); multi-surah
+enrollment; the operational mailer/7-night window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy drift (v3-D127); `packages/engine/src/placement.ts`
+(v3-D111/D113/D123); `MacroFacts.litany.rhymeLabel` (v3-D188);
+`StripeField.editable` (v3-D204); `corpusHash`'s own zero fold-side
+consumer (v3-D206); `lib/plan/forecast.ts`'s empty-log zero-state
+(v3-D207) — all unchanged.

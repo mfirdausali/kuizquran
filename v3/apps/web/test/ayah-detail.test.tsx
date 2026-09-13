@@ -410,6 +410,49 @@ describe("how well you hold it (§10 + §15)", () => {
     expect(row.nextLabel).not.toBe("Not scheduled"); // this atom HAS been retrieved
   });
 
+  // REGRESSION. `gateStateOf` (rows.ts) has computed the real, reachable
+  // "failed" member of GateState since the forgiveness ladder shipped
+  // (v3-D107/gate.ts#applyGateResult: a failed cold-gate check sets
+  // `gateFails += 1` and re-arms `gateDueAt` for the next learning day) — but
+  // `nextWord()` branched only on "due"/"armed" and fell through to the
+  // ordinary half-life-based review date for every other gate value,
+  // including "failed". A learner who failed their gate saw the identical
+  // "in N days" a perfectly healthy atom would show, on the one column whose
+  // entire job is showing the number the scheduler actually uses (§10). The
+  // pre-existing assertion above cannot catch this: `/Gate .*/` in its
+  // regex is satisfied just as well by the wrong "in N days" fallback,
+  // since that alternation only requires ONE of the three shapes to match,
+  // and "in N days" is one of them.
+  it("says the gate FAILED, not merely 'in N days' — a failed gate is not an ordinary review (#101)", () => {
+    const failedAtom: AtomState = {
+      ...initAtom(SURAH, "ayah", AYAH),
+      encoded: true,
+      lastRetrieval: NOW - 60_000,
+      stability: 9,
+      strength: 88,
+      reps: 7,
+      gateFails: 1,
+      gateDueAt: NOW + 2 * DAY,
+      gatePassed: false,
+    };
+    const atoms = new Map([[atomKey(SURAH, "ayah", AYAH), failedAtom]]);
+    const rows = buildProgressRows({ corpus: windowCorpus(8), atoms, events: [], now: NOW });
+    const row = ayahRow(rows, AYAH)!;
+    expect(row.gate).toBe("failed");
+    expect(row.nextLabel).toMatch(/gate.*failed/i);
+    // Names the REAL retry date (2 days out) — not a fixed word, and not the
+    // half-life-derived date the bug used to print instead.
+    expect(row.nextLabel).toMatch(/2 days?/);
+  });
+
+  // The negative control: a clean atom that has never failed a gate must
+  // never print "failed" — the fix must not paint the word onto every row.
+  it("never says 'failed' for an atom that has never failed a gate (negative control)", () => {
+    const row = ayahRow(rowsFixture(), AYAH)!;
+    expect(row.gate).not.toBe("failed");
+    expect(row.nextLabel.toLowerCase()).not.toContain("failed");
+  });
+
   it("names the stage in a WORD and pairs it with a number (#87)", () => {
     const row = ayahRow(rowsFixture(), AYAH)!;
     expect(row.stageLabel).toBe("Carrying");

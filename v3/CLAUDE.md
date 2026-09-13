@@ -53,9 +53,91 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2710 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2712 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 377 v3/api + 120 corpus-compiler
-             # + 430 engine + 61 fold-runner + 1420 apps/web. (v3-D210, 2026-09-13)
+             # + 430 engine + 61 fold-runner + 1422 apps/web. (v3-D211, 2026-09-13)
+             # NOTE (v3-D211, 2026-09-13): `lib/progress/rows.ts#gateStateOf()`
+             # has computed the real, reachable "failed" member of `GateState`
+             # since the forgiveness ladder shipped (gate.ts#applyGateResult,
+             # DEFECTS.md#B12/v3-D107: a failed cold-gate attempt sets
+             # `gateFails += 1` and re-arms `gateDueAt` for the retry) — but
+             # the SAME file's own `nextWord()`, the function deciding the
+             # "Next"/`nextLabel` cell §10 documents as "the date shown is
+             # the date used", branched on "due"/"armed" only and fell
+             # through to the ordinary half-life-based due-date computation
+             # for "failed" — the identical arithmetic a perfectly healthy
+             # atom uses. A learner who failed their gate saw a plain "in N
+             # days", indistinguishable from a healthy review, on both real
+             # consumers (`ProgressTable.tsx`, `AyahStatsIsland.tsx`) —
+             # `grep -rn "\.gate\b" apps/web/components/progress
+             # apps/web/lib/progress` returned only `rows.ts`'s own
+             # definition. The pre-existing regression test's own assertion
+             # (`/^(Today|in \d+ days?|Gate .*)$/`) could not catch this: an
+             # alternation is satisfied by the WRONG "in N days" fallback
+             # just as well as the right string — it pinned a shape, not the
+             # fact. Fixed, display-only, no engine/wire change: `nextWord()`
+             # gains one branch, mirroring the existing "armed" branch's
+             # shape — reads the atom's own `gateDueAt` and returns "Gate
+             # check failed — retry today" / "Gate check failed — retry in
+             # N day(s)", reusing `RingDiagram.tsx#gateWord()`'s own "gate
+             # check failed" vocabulary (v3-D210) rather than inventing a
+             # second phrase for the same fact. RED confirmed directly: two
+             # new `it()` blocks in `test/ayah-detail.test.tsx` (44
+             # pre-existing cases untouched) — a case building an atom with
+             # `gateFails: 1` and a real future `gateDueAt` (2 days out)
+             # failed exactly `expected 'in 7 days' to match
+             # /gate.*failed/i` against the unmodified `rows.ts`; a negative
+             # case (the file's existing never-gated fixture) asserts
+             # `nextLabel` never contains "failed", passing vacuously
+             # against the unfixed code too, correctly — it proves the fix
+             # doesn't paint "failed" onto every row. Restored
+             # byte-identically, then implemented; reran: 46/46 green in the
+             # file (was 44, +2). `npx vitest run test/progress-list.test.tsx`:
+             # 27/27 green, unchanged (the sibling `ProgressTable` consumer,
+             # no regression on the ordinary due/armed/none paths). `TZ=UTC
+             # make test`: 2712 passing (was 2710, +2; apps/web 1422, was
+             # 1420; no other suite moved). `check-test-floor.mjs`: OK, 2712
+             # >= floor 1899 (+813 margin, unmoved). `TZ=UTC make build`:
+             # exit 0, 30 routes (unchanged — edits inside the existing
+             # `/progress`/`/progress/list`/ayah-detail component tree via a
+             # shared `lib/` function, no new route). `npm run gates`: all
+             # green (boundaries 315 files, unchanged count — one existing
+             # production file edited plus its one existing test file, no
+             # new production file; fonts degraded-but-non-blocking,
+             # pre-existing, 2/6 UI fonts present; corpus-morphology 362
+             # words / corpus-glyphs 206 codepoints, both unchanged — no new
+             # corpus data). `npx tsc --noEmit` (apps/web): clean, exit 0.
+             # No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff reverted before committing, same discipline
+             # as every prior entry). No Arabic codepoint (both changed
+             # files swept programmatically, in Python, over the Arabic,
+             # Arabic Supplement, Arabic Extended-A and both Presentation
+             # Forms Unicode blocks, plus a `fromCharCode`/`fromCodePoint`/
+             # `\u06xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape sweep — zero
+             # matches; every new string is a fixed English caption or a
+             # synthetic gate-state test fixture value, never corpus text).
+             # Session start: fresh container, no
+             # `node_modules`/`vendor`/compiled corpus anywhere; local `HEAD`
+             # and `origin/main` both already agreed at `b6bd205` (v3-D210)
+             # — no stale-local-main trap this run, confirmed directly via
+             # `git fetch origin main` before any exploration. Found by a
+             # dedicated fresh-sweep agent handed the full exclusion list
+             # carried through v3-D210 and told not to re-report any of it,
+             # directed away from `components/macro/*` (just exhaustively
+             # swept at v3-D210) toward sibling wire-type fields not yet
+             # checked field-by-field; it independently re-confirmed
+             # `lib/session/run.ts`'s full 28-export surface (all wired) and
+             # several Laravel `BelongsTo` relations as the already-known
+             # "pseudonymize the raw FK instead" pattern before landing on
+             # this instance — independently verified by this run directly
+             # against `rows.ts` and both real consumers before any test was
+             # written. NOT addressed:
+             # `components/macro/graphNodes.ts#gateStateOf()` duplicates
+             # `rows.ts`'s own `gateStateOf()` logic in a second, unexported
+             # local copy rather than importing it — a real, smaller "two
+             # implementations of one decision" shape, left alone this run
+             # to keep the fix to the one field genuinely reaching learners
+             # with wrong text. See DECISIONS.md v3-D211.
              # NOTE (v3-D210, 2026-09-13): `GraphNode.gate` — precomputed by
              # `graphNodes.ts#gateStateOf()` for EVERY mark the memory ring
              # renders since the ring shipped (build-plan step 19), a real,
