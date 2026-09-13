@@ -121,8 +121,10 @@ function FlagRowView({
         <div className="caption">{flag.description}</div>
         {flag.bannerVisible ? (
           <p className="caption" role="alert">
-            Killed{flag.killedAt ? ` at ${flag.killedAt}` : ""} — not yet acknowledged.
-            {flag.ackAutoWaived ? " (auto-waived after 72h)" : ""}
+            Killed{flag.killedAt ? ` at ${flag.killedAt}` : ""}
+            {flag.ackAt
+              ? ` — acknowledged at ${flag.ackAt}${flag.ackAutoWaived ? " (auto-waived after 72h)" : ""}.`
+              : " — not yet acknowledged."}
           </p>
         ) : null}
       </td>

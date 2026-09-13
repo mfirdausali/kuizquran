@@ -46,6 +46,24 @@ const killedFlag = {
   ackAutoWaived: false,
 };
 
+// #159: the banner (and its Acknowledge control) stays visible after an ack
+// — it clears only on a full re-enable ceremony, never on ack alone
+// (Flag::bannerVisible() reads killed_at only). So `bannerVisible: true` with
+// a non-null `ackAt` is a real, reachable state, not a hypothetical.
+const ackedFlag = {
+  ...killedFlag,
+  key: "social.leaderboard_v2",
+  ackAt: "2026-08-21T09:00:00Z",
+  ackAutoWaived: false,
+};
+
+const autoWaivedFlag = {
+  ...killedFlag,
+  key: "social.mutuals",
+  ackAt: "2026-08-23T04:00:00Z",
+  ackAutoWaived: true,
+};
+
 describe("FlagsPanel — three states, never two", () => {
   const realFetch = globalThis.fetch;
 
@@ -80,6 +98,32 @@ describe("FlagsPanel — three states, never two", () => {
     render(<FlagsPanel />);
     await waitFor(() => expect(screen.getByText("social.friends")).toBeTruthy());
     expect(screen.getByRole("button", { name: /acknowledge/i })).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toMatch(/not yet acknowledged/i);
+  });
+
+  // #159: acking a kill never clears `bannerVisible` — it stays up until a
+  // full re-enable. So the banner must stop CLAIMING "not yet acknowledged"
+  // once it genuinely has been, or the console is showing false information
+  // about its own audit trail. `ackAt` has been fetched and type-validated
+  // (`isFlagRow`) since the panel shipped but was never rendered anywhere —
+  // grep confirms the only prior hit was the type guard itself.
+  it("an ACKNOWLEDGED kill's banner says so, with when — never 'not yet acknowledged'", async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse({ flags: [ackedFlag] })) as unknown as typeof fetch;
+    render(<FlagsPanel />);
+    await waitFor(() => expect(screen.getByText("social.leaderboard_v2")).toBeTruthy());
+    const banner = screen.getByRole("alert").textContent ?? "";
+    expect(banner).toContain("2026-08-21T09:00:00Z");
+    expect(banner).not.toMatch(/not yet acknowledged/i);
+  });
+
+  it("an auto-waived ack still names the real acknowledged-at time, not just the waiver", async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse({ flags: [autoWaivedFlag] })) as unknown as typeof fetch;
+    render(<FlagsPanel />);
+    await waitFor(() => expect(screen.getByText("social.mutuals")).toBeTruthy());
+    const banner = screen.getByRole("alert").textContent ?? "";
+    expect(banner).toContain("2026-08-23T04:00:00Z");
+    expect(banner).toMatch(/auto-waived after 72h/i);
+    expect(banner).not.toMatch(/not yet acknowledged/i);
   });
 });
 

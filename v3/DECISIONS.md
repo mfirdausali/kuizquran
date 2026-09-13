@@ -17494,3 +17494,171 @@ taxonomy drift (v3-D127); `packages/engine/src/placement.ts`
 `corpusHash`'s own zero fold-side consumer (v3-D206); `lib/plan
 /forecast.ts`'s empty-log zero-state still shows no calendar (v3-D207) —
 all unchanged.
+
+---
+
+## v3-D209, 2026-09-13: `FlagRow.ackAt` fetched and typed since the flag plane shipped, never rendered — and its absence made the kill banner actively FALSE, not merely incomplete
+
+**The bug class.** The same recurring shape this build has closed ~130 times
+since v3-D82 — but sharper here: most instances are "computed and shipped,
+never rendered" (a missing fact). This one is "computed and shipped, never
+rendered, AND THE FIXED TEXT IN ITS PLACE IS WRONG once the missing fact is
+true" — the console was not merely silent, it was lying.
+
+**The write.** `v3/api/app/Flags/FlagService.php:176`,
+`acknowledgeKill()`:
+```php
+$row->update(['ack_at' => $now, 'ack_by' => (string) $adminId, 'ack_auto_waived' => $autoWaived]);
+```
+stamps a real epoch-ms timestamp on every kill-banner acknowledgement,
+including the scheduled 72-hour auto-waive (`autoWaiveDueKills()`,
+`routes/console.php`'s `AutoWaiveKillsCommand`, daily 04:00 UTC).
+
+**Reaches the wire.** `FlagController.php:41`: `'ackAt' => $row->ack_at ??
+null` — sent on every row of `GET /api/admin/flags`, and has been since the
+flag plane shipped (build-plan step 26/M8).
+
+**Reaches the frontend, typed and validated, never rendered.**
+`lib/admin/flags.ts`'s `FlagRow.ackAt: string | null`, required by
+`isFlagRow()`'s own runtime type guard. `grep -rn "\.ackAt\b" apps/web
+--include=*.ts --include=*.tsx` (excluding the type guard's own declaration)
+returned nothing before this fix — `FlagsPanel.tsx`'s kill banner rendered
+`killedAt` and `ackAutoWaived` but never `ackAt`.
+
+**Why this is worse than a missing field.** `App\Models\Flag::bannerVisible()`
+(`v3/api/app/Models/Flag.php:26`) reads `killed_at !== null` ONLY — its own
+comment names why: "#159: the banner persists after a kill until an explicit
+new ramp." So `bannerVisible` (and therefore the "Acknowledge" button and the
+caption) stay `true` for a flag that has ALREADY been acknowledged, right up
+until a full re-enable ceremony. The banner's fixed sentence, `"— not yet
+acknowledged."`, was therefore FALSE — not absent, false — for every flag an
+admin had genuinely already acknowledged (or that had auto-waived). The one
+console screen built to show "who saw this kill and when" (BUILD-PLAN M8's
+"nav homes for... audit viewer") was actively misreporting its own state on
+the one fact it exists to certify.
+
+**Found by** a dedicated fresh-sweep agent, handed the full exclusion list
+carried through v3-D208 (including a first candidate — `computeStreak()`
+bridging the `/home` streak pill over a `day_marked_away` day — that was
+investigated directly and deliberately deferred; see the "NOT addressed"
+section below and CLAUDE.md's own note for the day-index-space reasoning).
+This field was flagged once before, at v3-D170 ("`FlagRow.ackAt` in
+`FlagsPanel.tsx`... weaker — redundant with `FlagAuditPanel.tsx`") and
+repeated unchanged on several subsequent nights' "NOT addressed" lists
+through roughly v3-D177, then silently dropped without ever being fixed —
+re-verified directly against the current source rather than trusted from
+that seven-week-old characterization, which undersold it: `FlagAuditPanel.tsx`
+shows the historical `flag_ramp_audit` audit trail (every past action), a
+genuinely different question from "is THIS flag's CURRENT kill banner still
+honest right now" — not redundant.
+
+**Fixed, display-only, no server/wire change** (both fields were already
+required and already reaching the browser): the banner's single fixed
+sentence becomes a conditional — `flag.ackAt` present renders `"—
+acknowledged at {ackAt}"` (with the existing `ackAutoWaived` clause now
+attached to that TRUE branch, where it is only ever meaningful, instead of
+unconditionally appended after a sentence that could be either state);
+`flag.ackAt === null` renders the original `"— not yet acknowledged."`
+verbatim, so the pre-existing, still-accurate case is byte-identical, not
+coincidentally passing.
+
+**RED confirmed directly:** `git stash` of `FlagsPanel.tsx` alone (three
+new/strengthened assertions in `flags-panel.test.tsx` kept, 7 pre-existing
+cases untouched) — the pre-existing "a killed, unacknowledged flag shows its
+banner" case was strengthened first with an assertion that the banner says
+"not yet acknowledged" (passed vacuously against the unfixed component,
+correctly: that fixture's `ackAt` was already `null` and the sentence was
+already true, so this assertion alone proves nothing about the fix); two new
+cases — one acknowledged, one auto-waived, each with its OWN distinct
+`ackAt` timestamp and a distinct flag key so neither could pass by reading
+the other's fixture — both failed genuinely: `expected 'Killed at
+2026-08-20T03:00:00Z — not yet acknowledged.' to contain
+'2026-08-21T09:00:00Z'` and the equivalent for the auto-waived case, against
+the unmodified component. Restored byte-identically, `git diff` empty
+against the intended change; reran: 9/9 green (was 7, +2 net new).
+
+**Full verification.** `TZ=UTC make setup` from a fresh container (no
+`node_modules`/`vendor`/compiled corpus anywhere), no retries needed;
+`TZ=UTC make compile-corpus` run once before any test relying on the real
+compiled corpora. `TZ=UTC npx vitest run test/flags-panel.test.tsx`: 9/9
+green (was 7, +2). `TZ=UTC make test`: **2707 passing** (was 2705, +2 —
+exactly this run's two new `it()` blocks; apps/web 1417, was 1415; every
+other suite unchanged: 255 v2 vitest, 47 v2/api, 377 v3/api, 120
+corpus-compiler, 430 engine, 61 fold-runner). `check-test-floor.mjs`: OK,
+2707 >= floor 1899 (+808 margin, unmoved, same discipline as every prior
+entry). `TZ=UTC make build`: exit 0, 30 routes (unchanged — edits inside the
+existing `/settings/flags` component, no new route). `npm run gates` (via
+`prebuild`): all green — boundaries 314 files (no new production file, one
+existing file edited plus its one existing test file; fonts
+degraded-but-non-blocking, pre-existing — 2/6 UI fonts present, unrelated to
+this fix; corpus-morphology 362 words / corpus-glyphs 206 codepoints, both
+unchanged — no new corpus data, only a caption over two already-shipped wire
+fields). `npx tsc --noEmit` (apps/web, run separately): clean, exit 0. No
+`v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the suite was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2` empty
+immediately before committing). No Arabic codepoint (both changed files
+swept programmatically, in Python, over the Arabic, Arabic Supplement,
+Arabic Extended-A and both Presentation Forms Unicode blocks, plus a
+`fromCharCode`/`fromCodePoint`/`\u06xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape
+sweep — zero matches; every new string is a fixed English caption or a
+synthetic ISO-8601 test-fixture timestamp/flag-key placeholder, never
+corpus text).
+
+**Session start.** Fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; `HEAD` was found detached at `610f31d`, the same commit
+`origin/main` was already at, on a stale LOCAL `main` branch ref six commits
+behind (`26cc664`, v3-D201) — the recurring "stale local main" trap this
+file has recorded roughly forty times since v3-D77 — caught before any
+implementation work via `git fetch` + `git checkout main && git merge
+--ff-only origin/main`, no work lost or at risk.
+
+**A candidate investigated and deliberately NOT implemented this run:**
+`packages/engine/src/streak.ts#computeStreak()`/`completedDayIndices()`
+never account for a `day_marked_away` event (`packages/engine/src
+/awayDays.ts`, v3-D207/D208), so the `/home` streak pill's `length` still
+breaks its consecutive-day walk on a day a learner explicitly marked away —
+arguably in tension with WIREFRAME §14's "Planned absences" promise ("the
+forecast adjusts honestly instead of scoring it a miss... the alternative
+teaches learners that the calendar punishes life"). Investigated directly
+rather than implemented: `awayDayIndex` is computed in PLAIN UTC
+calendar-day arithmetic (`awayDays.ts#dayIndexOf(epochMs) =
+Math.floor(epochMs / 86_400_000)`, that module's own docblock naming this as
+a DELIBERATE choice, "not `daybound.ts`'s tz-explicit learning-day
+boundary... mixing two different definitions of 'day' across one feature is
+exactly the confusion GLOSSARY.md's own 'day' entry exists to prevent");
+`computeStreak`/`completedDayIndices` operate entirely in
+`daybound.ts#learningDayIndex` space — tz-explicit, a configurable rollover
+hour (`DEFAULT_DAY_CONFIG.rolloverHour: 4.5`, ~04:30). These two integer
+day-index spaces do not correspond 1:1: for a learner off UTC, or with any
+rollover hour other than exactly midnight UTC, a single `awayDayIndex`-wide
+UTC calendar day can straddle two different `learningDayIndex` values (the
+tz-explicit boundary falls somewhere inside it), so there is no sound
+context-free mapping from "this absolute day was marked away" to "this
+learning-day should be bridged." Correctly resolving this needs a real
+day-space-conversion design — and arguably a separate product decision,
+since WIREFRAME's own FR9 section already gives the streak its own, more
+lenient, deliberately-separate "a miss pauses, it never zeroes" model
+(`streak.ts`'s own header) that may have been intended to already cover this
+case on its own terms, distinct from the Plan calendar's forecast honesty
+promise. Forcing a same-night fix risked introducing exactly the kind of
+subtle timezone-conflation defect INVARIANTS.md's Absolute A and
+GLOSSARY.md's 'day' entry exist to prevent, for a benefit (a slightly higher
+streak number on an already-de-emphasized, never-punishing metric) genuinely
+smaller than that risk. Recorded here, not implemented, so a future run
+does not have to re-derive the day-space mismatch from scratch and does not
+attempt it as a quick render-only fix by mistake — it isn't one.
+
+**NOT addressed**, named so a future run doesn't re-discover it as new: the
+streak/away-day day-space mismatch above (real, needs design, deliberately
+deferred); `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class / `permitsIssuance`/`permitsReview` (v3-D88, v3-D151); multi-surah
+enrollment; the operational mailer/7-night window; PAY-1's Stripe fixtures;
+surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy
+drift (v3-D127); `packages/engine/src/placement.ts` (v3-D111/D113/D123);
+`MacroFacts.litany.rhymeLabel` (v3-D188); `StripeField.editable` (v3-D204,
+a documentation constant); `corpusHash`'s own zero fold-side consumer
+(v3-D206); `lib/plan/forecast.ts`'s empty-log zero-state still shows no
+calendar (v3-D207) — all unchanged.

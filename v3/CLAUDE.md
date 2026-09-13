@@ -53,9 +53,99 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2705 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2707 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 377 v3/api + 120 corpus-compiler
-             # + 430 engine + 61 fold-runner + 1415 apps/web. (v3-D208, 2026-09-13)
+             # + 430 engine + 61 fold-runner + 1417 apps/web. (v3-D209, 2026-09-13)
+             # NOTE (v3-D209, 2026-09-13): `FlagRow.ackAt` — stamped for real by
+             # `FlagService::acknowledgeKill()` on every kill-banner
+             # acknowledgement (and every 72h auto-waive) since the flag plane
+             # shipped, sent on the wire by `FlagController` since
+             # `lib/admin/flags.ts` first typed `FlagRow` — but
+             # `FlagsPanel.tsx`'s own kill banner never rendered it. Sharper
+             # than this build's usual "fetched, zero read surface" shape:
+             # `Flag::bannerVisible()` (`v3/api/app/Models/Flag.php`) reads
+             # `killed_at` ONLY — edge case #159's own docblock: "the banner
+             # persists after a kill until an explicit new ramp" — so the
+             # banner and its "Acknowledge" button stay up FOREVER after a
+             # real acknowledgement, not just before one. The caption's fixed
+             # text, "— not yet acknowledged.", was therefore actively FALSE
+             # for every flag an admin had already acknowledged: the one
+             # console screen built to show this audit trail was lying about
+             # its own state, not merely omitting a nice-to-have field. `grep
+             # -rn "\.ackAt\b" apps/web` (excluding tests) confirmed the only
+             # hit anywhere was `isFlagRow`'s own runtime type guard. Fixed
+             # with one conditional clause: `flag.ackAt` present renders
+             # "— acknowledged at {ackAt}" (plus the existing auto-waived
+             # clause, now attached to the true branch instead of always
+             # appended) in place of the false sentence; `flag.ackAt === null`
+             # renders the original, still-accurate "— not yet acknowledged."
+             # verbatim — the pre-existing case is unchanged, not merely
+             # coincidentally passing. RED confirmed directly: `git stash` of
+             # `FlagsPanel.tsx` alone (3 new/strengthened assertions kept, 7
+             # pre-existing cases untouched) — the pre-existing "not yet
+             # acknowledged" case's own assertion was strengthened first
+             # (passed vacuously, correctly, since that fixture's `ackAt` was
+             # already null and the sentence was already true) and two new
+             # cases (an acknowledged kill; an auto-waived one) both failed
+             # genuinely on `expected '...not yet acknowledged.' to contain
+             # '2026-08-21T09:00:00Z'` against the unmodified component;
+             # restored byte-identically, 9/9 green (was 7, +2 net new).
+             # `TZ=UTC make test`: 2707 passing (was 2705, +2; apps/web 1417,
+             # was 1415; no other suite moved). `check-test-floor.mjs`: OK,
+             # 2707 >= floor 1899 (+808 margin, unmoved, same discipline as
+             # every prior entry). `TZ=UTC make build`: exit 0, 30 routes
+             # (unchanged — edits inside the existing `/settings/flags`
+             # component, no new route). `npm run gates` (via `prebuild`):
+             # all green — boundaries 314 files (no new production file, one
+             # existing file edited plus its one existing test file; fonts
+             # degraded-but-non-blocking, pre-existing; corpus-morphology 362
+             # words / corpus-glyphs 206 codepoints, both unchanged — no new
+             # corpus data, only a caption over two already-shipped wire
+             # fields). `npx tsc --noEmit` (apps/web): clean. No
+             # `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff reverted before committing, same discipline
+             # as every prior entry — `git status --porcelain -- v1 v2` empty
+             # immediately before committing). No Arabic codepoint (both
+             # changed files swept programmatically, in Python, over the
+             # Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms Unicode blocks, plus a `fromCharCode`/
+             # `fromCodePoint`/`\u06xx`/`\u08xx`/`\uFBxx`/`\uFExx` sweep —
+             # zero matches; every new string is a fixed English caption or a
+             # synthetic ISO-timestamp test fixture, never corpus text).
+             # Session start: fresh container, no `node_modules`/`vendor`/
+             # compiled corpus anywhere; `HEAD` was found detached at
+             # `610f31d`, the same commit `origin/main` was already at, on a
+             # stale LOCAL `main` branch ref six commits behind (`26cc664`,
+             # v3-D201) — the recurring "stale local main" trap this file has
+             # recorded roughly forty times since v3-D77 — caught before any
+             # implementation work via `git fetch` + `git checkout main &&
+             # git merge --ff-only origin/main`, no work lost or at risk.
+             # `make setup` then `make compile-corpus` both run from scratch,
+             # no retries needed. Found by a dedicated fresh-sweep agent
+             # handed the full exclusion list carried through v3-D208 and
+             # told not to re-report any of it; a first candidate the same
+             # sweep surfaced — `computeStreak()`/`completedDayIndices()`
+             # (`packages/engine/src/streak.ts`) never bridging the `/home`
+             # streak pill over a `day_marked_away` event — was investigated
+             # directly and deliberately NOT implemented this run: an
+             # `awayDayIndex` is a PLAIN UTC calendar-day index
+             # (`awayDays.ts#dayIndexOf`, `Math.floor(epochMs/86_400_000)`)
+             # while `computeStreak`'s own walk operates in
+             # `daybound.ts#learningDayIndex` space — tz-explicit, a
+             # configurable rollover hour, DEFAULT_DAY_CONFIG's own
+             # `rolloverHour: 4.5` — and these two integer day-index spaces
+             # do not correspond 1:1 for a learner off UTC or off a
+             # midnight rollover; a single UTC calendar day can straddle two
+             # different learning-days. Bridging them correctly needs a real
+             # day-space-conversion design (and a decision on whether the
+             # streak should even honor away-marking at all, given FR9's own
+             # separate "a miss pauses, never zeroes" model), not a one-line
+             # render fix — exactly the kind of larger, judgment-carrying
+             # change this build's own discipline defers rather than forces
+             # into one night. Recorded here, not implemented, so a future
+             # run does not have to re-derive the day-space mismatch from
+             # scratch, and does not attempt it as a quick render-only fix
+             # by mistake.
              # NOTE (v3-D208, 2026-09-13): `HomeSurahRow.floorOffer.count` —
              # FR9's floor-session item count, computed by `floorOfferFor()`
              # off the real `floorQueue()`/`floorMinutes()` since v3-D108 —
