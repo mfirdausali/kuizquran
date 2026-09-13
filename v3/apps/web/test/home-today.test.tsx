@@ -360,6 +360,47 @@ describe("v3-D108 — the floor-session offer backs FR9's '2-minute floor sessio
     const link = await screen.findByRole("link", { name: /check-in/i });
     expect(link.getAttribute("href")).toBe("/session?mode=floor");
     expect(link.textContent).toMatch(new RegExp(`\\b${expected!.minutes}-minute`, "i"));
+    // `count` — `floorQueue`'s own item count, computed since v3-D108 and
+    // never rendered anywhere. Asserted from the SAME oracle as `minutes`
+    // above, never a number this test picked itself.
+    expect(link.textContent).toMatch(
+      new RegExp(`\\b${expected!.count} item${expected!.count === 1 ? "" : "s"}\\b`, "i"),
+    );
+  });
+
+  it("names the floor session's own item COUNT, not just its minutes — two due reviews read '2 items', never a hardcoded '1'", async () => {
+    await enroll(SURAH);
+    serveCorpus();
+
+    // Two DIFFERENT ayat, each carried through a real learn → gate-pass →
+    // long-idle cycle, so both land in floorQueue's "due review" branch
+    // (encoded && gatePassed, real forgetting risk) — never the single
+    // warm-up fallback the sibling test above already covers.
+    const now = Date.now();
+    const oldEnough = now - 20 * 24 * 60 * 60 * 1000;
+    for (const ayah of [1, 2]) {
+      await addEvent({ type: "ayah_produced", ts: oldEnough, surah: SURAH, ayah, rung: "S3" });
+      await addEvent({
+        type: "gate_result",
+        ts: oldEnough + 60_000,
+        surah: SURAH,
+        ayah,
+        rung: "S3",
+        correct: true,
+      });
+    }
+
+    const expected = await engineFloorOffer(SURAH, now);
+    // A guard on the oracle: this fixture must genuinely produce TWO items,
+    // or the assertion below would pass on a component that renders "1
+    // item" unconditionally.
+    expect(expected?.count).toBe(2);
+
+    render(<TodaySession />);
+    await waitFor(() => expect(screen.getByTestId("today-session")).toBeTruthy());
+    const link = await screen.findByRole("link", { name: /check-in/i });
+    expect(link.textContent).toMatch(/\b2 items\b/i);
+    expect(link.textContent).not.toMatch(/\b1 item\b/i);
   });
 
   it("keeps offering the floor session even when the ordinary due count has emptied out — 'short on time', not only 'nothing due'", async () => {

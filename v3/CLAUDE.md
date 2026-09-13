@@ -53,9 +53,62 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2704 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2705 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 377 v3/api + 120 corpus-compiler
-             # + 430 engine + 61 fold-runner + 1414 apps/web. (v3-D207, 2026-09-12)
+             # + 430 engine + 61 fold-runner + 1415 apps/web. (v3-D208, 2026-09-13)
+             # NOTE (v3-D208, 2026-09-13): `HomeSurahRow.floorOffer.count` —
+             # FR9's floor-session item count, computed by `floorOfferFor()`
+             # off the real `floorQueue()`/`floorMinutes()` since v3-D108 —
+             # had exactly one production reader, `TodaySession.tsx`'s "Short
+             # on time?" caption, and that reader rendered only the sibling
+             # `minutes` field, never `count`. Unlike a constant field, this
+             # one genuinely varies (1 or 2, per `floorQueue`'s own ≤2-minute
+             # cap), so a learner had no way to tell "one quick tap" from
+             # "two" before opening the floor session. Fixed with one caption
+             # clause: "Do a quick N-minute check-in (M items) instead",
+             # singular/plural per this codebase's own established
+             # `${n} item${n === 1 ? "" : "s"}` convention. RED confirmed
+             # twice: the pre-existing single-item fixture's assertion was
+             # strengthened onto the same oracle already used for `minutes`
+             # and failed genuinely; a NEW case (two different ayat each
+             # carried through a real learn → gate-pass → 20-day-idle cycle,
+             # landing in `floorQueue`'s "due review" branch rather than the
+             # sibling test's warm-up fallback) guards that its own fixture
+             # genuinely yields `count === 2` before asserting the rendered
+             # text contains "2 items" and NOT "1 item" — so the fix cannot
+             # pass by always printing either string. `TZ=UTC make test`:
+             # 2705 passing (was 2704, +1 — exactly this run's one new
+             # `it()`; apps/web 1415, was 1414; no other suite moved).
+             # `check-test-floor.mjs`: OK, 2705 >= floor 1899 (+806 margin,
+             # unmoved). `TZ=UTC make build`: exit 0, 30 routes (unchanged —
+             # edits inside the existing `/home` component tree, no new
+             # route). `npm run gates`: all green (boundaries 315 files, no
+             # new production file — one existing file edited plus its one
+             # existing test file; fonts degraded-but-non-blocking,
+             # pre-existing; corpus-morphology/corpus-glyphs unchanged — no
+             # new corpus data). `npx tsc --noEmit`: clean. No
+             # `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff reverted before committing, same discipline
+             # as every prior entry). No Arabic codepoint (both changed
+             # files swept programmatically, in Python, over the Arabic,
+             # Arabic Supplement, Arabic Extended-A and both Presentation
+             # Forms Unicode blocks, plus a `fromCharCode`/`fromCodePoint`/
+             # `\u06xx`/`\u08xx`/`\uFBxx`/`\uFExx` sweep — zero matches;
+             # every new string is the fixed English word "item"/"items" or
+             # a wire-derived integer, never corpus text). Session start:
+             # fresh container, `HEAD` was found detached at `df0e6c5`, the
+             # same commit `origin/main` was already at, on a stale LOCAL
+             # `main` branch ref six commits behind (`26cc664`, v3-D201) —
+             # the recurring "stale local main" trap this file has recorded
+             # roughly forty times since v3-D77 — caught before any
+             # implementation work via `git fetch` + `git checkout main &&
+             # git merge --ff-only origin/main`, no work lost or at risk.
+             # Found by a dedicated fresh-sweep agent handed the full
+             # exclusion list through v3-D207 and directed away from the
+             # exhausted `Corpus`/`CorpusMeta` type family toward
+             # `apps/web/lib/home/queue.ts`'s own local types instead. NOT
+             # addressed: every item on v3-D207's own "NOT addressed" list,
+             # unchanged. See DECISIONS.md v3-D208.
              # NOTE (v3-D207, 2026-09-12): WIREFRAME §14 "Planned absences" —
              # `lib/plan/forecast.ts#buildForecast()` has accepted an
              # `awayDays: number[]` input since build-plan step 19, and

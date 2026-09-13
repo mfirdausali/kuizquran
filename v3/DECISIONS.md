@@ -17390,3 +17390,107 @@ taxonomy drift (v3-D127); `packages/engine/src/placement.ts`
 (v3-D111/D113/D123); `MacroFacts.litany.rhymeLabel` (v3-D188);
 `StripeField.editable` (v3-D204, a documentation constant);
 `corpusHash`'s own zero fold-side consumer (v3-D206) — all unchanged.
+
+---
+
+## v3-D208, 2026-09-13: `HomeSurahRow.floorOffer.count` — FR9's floor-session item count, computed since v3-D108, never rendered next to its own sibling `minutes`
+
+**The bug class.** The same recurring shape this build has closed ~130 times
+since v3-D82: a real, non-constant value is computed by a real function and
+carried on a wire/local type, but the one screen that renders its sibling
+never renders it.
+
+**Found by a dedicated fresh-sweep agent** handed the full exclusion list
+carried through v3-D207 and told not to re-report any of it, directed away
+from the exhausted `Corpus`/`CorpusMeta`/`CorpusWord`/`CorpusDistractor`
+type family and toward `apps/web/lib/home/queue.ts`'s own local types
+instead. `HomeSurahRow.floorOffer` (`{ count: number; minutes: number } |
+null`, built by `floorOfferFor()` from the real engine's `floorQueue()`/
+`floorMinutes()` — FR9's "2-minute floor session," wired end to end at
+v3-D108) has exactly one production reader anywhere:
+`components/home/TodaySession.tsx`'s "Short on time?" caption, which
+rendered `row.floorOffer.minutes` but never `row.floorOffer.count`.
+`grep -rn "floorOffer" apps/web` (excluding tests) confirmed the single
+call site; `test/home-today.test.tsx`'s own `engineFloorOffer()` oracle
+already computed `count` and never asserted on it either.
+
+Unlike a constant like `StripeField.editable` (v3-D204) or an
+always-1-in-practice field, `floorQueue`'s own item count genuinely varies
+— 1 (a lone due gate, or the guaranteed-win warm-up on an otherwise-empty
+queue) or 2 (a gate plus a review, or two risky reviews that still fit the
+~2-minute cap) — so a learner offered the floor session had no way to tell
+"one quick tap" from "two" before committing to the link.
+
+**Fixed, display-only, no engine/wire change:** the caption now reads "Do a
+quick N-minute check-in (M items) instead", singular/plural exactly as this
+codebase's own established convention (`${n} item${n === 1 ? "" : "s"}`,
+matching `lib/plan/forecast.ts`/`lib/progress/rows.ts`/`OverrideEditor.tsx`
+et al.).
+
+**RED confirmed directly, twice, both load-bearing:**
+- The pre-existing single-event fixture (one `ayah_produced` three days
+  back, `count === 1`) was strengthened to assert on `expected!.count` via
+  the SAME oracle the pre-existing `minutes` assertion already used — failed
+  genuinely (`expected 'Do a quick 1-minute check-in instead' to match
+  /\b1 item\b/i`) against the unmodified component.
+- A NEW case seeds two DIFFERENT ayat, each carried through a real
+  `ayah_produced` (S3) → `gate_result` (correct) → 20-day idle cycle, so
+  both land in `floorQueue`'s "due review" branch (`encoded && gatePassed`,
+  real forgetting risk) rather than the single warm-up fallback the sibling
+  test already covers. A guard on the oracle (`expect(expected?.count).toBe(2)`)
+  proves the fixture genuinely produces two items before asserting the
+  rendered text — so the assertion cannot pass on a component that always
+  prints "1 item". Failed genuinely (`expected 'Do a quick 2-minute
+  check-in instead' to match /\b2 items\b/i`) against the unmodified
+  component; both green after the one-line caption change, and the new
+  case also asserts the singular string is ABSENT (`not.toMatch(/\b1
+  item\b/i)`), so a component that always prints "2 items" could not pass
+  either.
+
+**Full verification.** `TZ=UTC make compile-corpus` run once (fresh
+container, corpus output was not yet materialized this session).
+`TZ=UTC npx vitest run test/home-today.test.tsx`: 14/14 green (was 13 — one
+net-new `it()` block; the strengthened case carries no separate count).
+`TZ=UTC make test`: **2705 passing** (was 2704, +1 — exactly this run's one
+net-new test; apps/web 1415, was 1414; every other suite unchanged: 255 v2
+vitest, 47 v2/api, 377 v3/api, 120 corpus-compiler, 430 engine, 61
+fold-runner). `check-test-floor.mjs`: OK, 2705 >= floor 1899 (+806 margin,
+unmoved, same discipline as every prior entry). `TZ=UTC make build`: exit
+0, 30 routes (unchanged — edits inside the existing `/home` component tree,
+no new route). `npm run gates`: all green — boundaries 315 files (no new
+production file, one existing file edited plus its one existing test file;
+fonts degraded-but-non-blocking, pre-existing; corpus-morphology 362 words /
+corpus-glyphs 206 codepoints, both unchanged — no new corpus data, only a
+caption over an already-computed integer). `npx tsc --noEmit` (apps/web):
+clean. No `v1/**`/`v2/**` edit (`git status --porcelain -- v1 v2` empty
+immediately before committing — the recurring stray
+`v2/tsconfig.tsbuildinfo` build-cache diff was reverted first, same
+discipline as every prior entry). No Arabic codepoint (both changed files
+swept programmatically, in Python, over the Arabic, Arabic Supplement,
+Arabic Extended-A and both Presentation Forms Unicode blocks, plus a
+`fromCharCode`/`fromCodePoint`/`\u06xx`/`\u08xx`/`\uFBxx`/`\uFExx` sweep —
+zero matches; every new string is the fixed English word "item"/"items" or
+a wire-derived integer, never corpus text).
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; `HEAD` was found detached at `df0e6c5`, the same commit
+`origin/main` was already at, on a stale LOCAL `main` branch ref six
+commits behind (`26cc664`, v3-D201) — the recurring "stale local main" trap
+this file has recorded roughly forty times since v3-D77 — caught before any
+implementation work via `git fetch` + `git checkout main && git merge
+--ff-only origin/main`, no work lost or at risk. `make setup` then `make
+compile-corpus` both run from scratch, no retries needed.
+
+**NOT addressed**, named so a future run doesn't re-discover it as new:
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class / `permitsIssuance`/`permitsReview` (v3-D88, v3-D151); multi-surah
+enrollment; the operational mailer/7-night window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy drift (v3-D127); `packages/engine/src/placement.ts`
+(v3-D111/D113/D123); `MacroFacts.litany.rhymeLabel` (v3-D188);
+`StripeField.editable` (v3-D204, a documentation constant);
+`corpusHash`'s own zero fold-side consumer (v3-D206); `lib/plan
+/forecast.ts`'s empty-log zero-state still shows no calendar (v3-D207) —
+all unchanged.

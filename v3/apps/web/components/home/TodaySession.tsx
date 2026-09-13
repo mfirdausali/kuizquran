@@ -201,7 +201,8 @@ export function TodaySession() {
             <p className="caption">
               Short on time?{" "}
               <Link href={FLOOR_SESSION_HREF}>
-                Do a quick {row.floorOffer.minutes}-minute check-in instead
+                Do a quick {row.floorOffer.minutes}-minute check-in ({row.floorOffer.count} item
+                {row.floorOffer.count === 1 ? "" : "s"}) instead
               </Link>
             </p>
           ) : null}
