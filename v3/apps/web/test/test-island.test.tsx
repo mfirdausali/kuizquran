@@ -334,6 +334,47 @@ describe("TestIsland — the mixed self-check, end to end", () => {
     expect(answers.every((e) => e.ayah === 1 || e.testKind !== "reorder")).toBe(true);
   });
 
+  // v3-D214: `DrillEvent.locale` (v2-D27) is a generic field on every event
+  // type, not just the graded session loop's — v3-D213 wired it into
+  // `lib/session/run.ts` and explicitly named this file's own `test_start`/
+  // `test_answer`/`test_result` as the one sibling surface still left
+  // stamping none of them, despite this component already taking `glossLang`
+  // as a required prop (used to build every gloss item in the first place).
+  // "ms" is used here (every other test in this file passes "en") so this
+  // cannot pass by an accidental match against a hardcoded default.
+  it(
+    "v3-D214: stamps test_start, every test_answer, and test_result with the caller's glossLang",
+    async () => {
+      installFetch(corpus112);
+      render(<TestIsland surah={112} glossLang="ms" />);
+
+      await screen.findByTestId("test-range");
+      fireEvent.click(screen.getByRole("button", { name: /start test/i }));
+      await waitForRunning();
+
+      await completeTest();
+      await screen.findByTestId("test-result");
+      fireEvent.click(screen.getByRole("button", { name: /^done$/i }));
+      await waitFor(async () => {
+        const evs = await getAllEvents();
+        expect(evs.filter((e) => e.type === "test_result").length).toBe(1);
+      });
+
+      const events = await getAllEvents();
+      const testEvents = events.filter(
+        (e) => e.type === "test_start" || e.type === "test_answer" || e.type === "test_result",
+      );
+      // 1 test_start + 5 test_answer + 1 test_result for 112's full range,
+      // matching the earlier full-run test's own count — not a fixed literal
+      // here, so a change to that count elsewhere doesn't silently desync
+      // this assertion from reality.
+      expect(testEvents.length).toBeGreaterThan(0);
+      for (const e of testEvents) {
+        expect(e.locale).toBe("ms");
+      }
+    },
+  );
+
   // The seam-level proof for the disable override. `buildTestItems`' own unit
   // tests prove the FILTER; this proves the WIRING — that a row served by the
   // real `/api/overrides` read path actually reaches the real builder through

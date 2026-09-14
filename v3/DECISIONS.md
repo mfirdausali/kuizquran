@@ -18193,3 +18193,123 @@ deliberately read-only/ungraded, DEFECTS.md invariant #5) still carry no
 and the same "resolve once, stamp everywhere" fix would need its own
 threading through `lib/test/build.ts`, a smaller, separate, lower-stakes
 gap than the graded session loop this run closed.
+
+## v3-D214, 2026-09-14: `TestIsland.tsx`'s own `test_start`/`test_answer`/`test_result` events still carried no `locale`, even though `glossLang` was already sitting right there as a required prop
+
+v3-D213's own "NOT addressed" list named this exactly, in its closing
+sentence: `test.ts`/`TestIsland.tsx`'s `test_start`/`test_answer`/
+`test_result` events (v2 Phase 4, v2-D13..D16) still carried no `locale`
+either, "a different, deliberately read-only/ungraded event family
+(invariant #5), left alone this run as a smaller, separate, lower-stakes
+gap than the graded session loop this run closed." This run is that
+smaller follow-up.
+
+`DrillEvent.locale` (`packages/engine/src/types.ts`, docblock: "Gloss
+language active for this event (v2-D27)") is a GENERIC field on every
+event type, not scoped to the graded session loop — the same `events`
+table column (`Event.php`'s `$fillable`, `EventWireCodec.php`,
+`EventsController.php`) already accepts it on any `EventType`, `test_*`
+included, with no backend change needed for this or any other event
+family. `TestIsland.tsx` (the Test self-quiz feature, v3-D104) already
+takes `glossLang: GlossLang` as a REQUIRED prop and passes it straight into
+`buildTestItems()` on "Start Test" — the exact fact `locale` exists to pin
+was, just like v3-D213's finding one layer up, already sitting right there
+in the caller's own hands, unused for this. `grep -n "locale"
+apps/web/lib/test/build.ts apps/web/components/test/TestIsland.tsx`
+returned nothing before this fix: none of the three `DrillEvent` literals
+this component builds (`test_start` in `startTest()`, `test_answer` in
+`recordAnswer()`, `test_result` in `finishTest()`) carried a `locale`
+field at all.
+
+Consequence: for the MS-gloss rollout this build still keeps
+ratification-gated (v3-D15/D145), a Test taken with the Malay gloss
+showing left no durable trace of which language it was actually taken
+in — an operator later auditing Test outcomes for an MS-showing learner
+had no way to tell a Test answered against an EN item from one answered
+against an MS item, purely from the log, even though the very component
+that ran it already knew.
+
+**Fixed** by the same one-line pattern the graded session loop already
+uses (`run.ts`'s eight `locale: run.glossLang` sites, v3-D213): all three
+`DrillEvent` literals in `TestIsland.tsx` gain `locale: glossLang` — the
+component's own prop, never re-derived, never defaulted. No new state,
+no new prop, no engine or wire change (the field and its backend column
+already exist and already accept any `EventType`); `lib/test/build.ts`
+needed no change either — it already takes `glossLang` to build the
+gloss-bearing items themselves, this fix only carries the same value onto
+the event log alongside them.
+
+**RED confirmed directly.** One new case in
+`v3/apps/web/test/test-island.test.tsx`, added to the existing "TestIsland
+— the mixed self-check, end to end" describe block (5 pre-existing cases
+untouched): runs a full Test to completion with `glossLang="ms"`
+(deliberately NOT `"en"`, the value every other case in this file already
+uses, so the assertion cannot pass by accident against a hardcoded
+default), then asserts every `test_start`/`test_answer`/`test_result`
+event in the log has `locale === "ms"`. Run against the unmodified
+component (`git stash` of `TestIsland.tsx` alone, the new test kept, the
+other 5 cases in the file untouched): failed exactly as predicted —
+`expected undefined to be 'ms'` — on the very first event checked.
+Restored byte-identically (`git diff` empty before implementing), then
+implemented; reran: 6/6 green in the file (was 5, +1).
+
+**Full verification.** Session start: fresh container, no
+`node_modules`/`vendor`/compiled corpus anywhere; local `main` and
+`origin/main` both already agreed at `a0b7476` (v3-D213) — no
+stale-local-main trap this run, confirmed directly via `git fetch origin
+main` and `git log --oneline -3` before any exploration. `TZ=UTC make
+setup` run from scratch, no retries needed; `TZ=UTC make compile-corpus`
+run once before any test relying on the real 12/67/103/112 corpora.
+`TZ=UTC make test`: **2721 passing** (was 2720, +1 — exactly this run's
+one new test; apps/web 1431, was 1430; no other suite moved: 255 v2
+vitest, 47 v2/api, 377 v3/api (2 incomplete + 6 skipped, unchanged), 120
+corpus-compiler, 430 engine, 61 fold-runner). `check-test-floor.mjs`: OK,
+2721 >= floor 1899 (+822 margin, unmoved, same discipline as every prior
+entry). `TZ=UTC make build`: exit 0, 30 routes (unchanged — no route
+touched, edits inside the existing `/test` component). `npm run gates`
+(via `prebuild`, and again standalone): all green — boundaries 315 files
+via `make build`'s own `prebuild` chain (unchanged count — no new
+production file, one existing component edited plus one existing test
+file); a later standalone `npm run gates` reported 316, the same
+`next-env.d.ts` gitignored Next.js bootstrap artifact v3-D206's own entry
+already recorded as a pre-existing, diff-unrelated fluctuation, confirmed
+via `git status --porcelain`; fonts degraded-but-non-blocking,
+pre-existing, 2/6 UI fonts present; corpus-morphology 362 words /
+corpus-glyphs 206 codepoints, both unchanged — no new corpus data, only a
+wire field already carried by every other event family now carried by
+this one too. `npx tsc --noEmit` (run standalone, and again inside `next
+build`'s own TypeScript pass): clean, exit 0. No `v1/**`/`v2/**` edit (a
+stray `v2/tsconfig.tsbuildinfo` build-cache diff produced by running the
+suite was reverted before committing, same discipline as every prior
+entry — `git status --porcelain -- v1 v2` empty immediately before
+committing). No Arabic codepoint (both changed files swept
+programmatically, in Python, over the Arabic, Arabic Supplement, Arabic
+Extended-A and both Presentation Forms Unicode blocks, plus a
+`fromCharCode`/`fromCodePoint`/`\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx`
+escape sweep — zero matches; the only new literal string is the closed-set
+value `"ms"`, already used elsewhere in this same test file, never corpus
+text).
+
+**Found by** re-reading v3-D213's own "NOT addressed" list directly,
+which had already named this exact gap by file and field, rather than
+dispatching a fresh sweep agent — verified independently against the real
+source (`grep -n "locale" apps/web/lib/test/build.ts
+apps/web/components/test/TestIsland.tsx`, empty) before writing any test.
+
+**NOT addressed**, named so a future run doesn't re-discover it as new:
+every item on v3-D213's own "NOT addressed" list, unchanged — the
+streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class / `permitsIssuance`/`permitsReview` (v3-D88, v3-D151); multi-surah
+enrollment; the operational mailer/7-night window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy drift (v3-D127); `packages/engine/src/placement.ts`
+(v3-D111/D113/D123); `MacroFacts.litany.rhymeLabel` (v3-D188);
+`StripeField.editable` (v3-D204); `corpusHash`'s own zero fold-side
+consumer (v3-D206); `lib/plan/forecast.ts`'s empty-log zero-state
+(v3-D207) — all unchanged. With this, `DrillEvent.locale` is now stamped
+by every event-producing surface in `apps/web` — the graded session loop
+(v3-D213) and the read-only Test mirror (this run) alike; a future sweep
+should look elsewhere for the next instance of this bug class.

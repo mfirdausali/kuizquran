@@ -53,9 +53,89 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2720 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2721 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 377 v3/api + 120 corpus-compiler
-             # + 430 engine + 61 fold-runner + 1430 apps/web. (v3-D213, 2026-09-14)
+             # + 430 engine + 61 fold-runner + 1431 apps/web. (v3-D214, 2026-09-14)
+             # NOTE (v3-D214, 2026-09-14): `TestIsland.tsx`'s own `test_start`/
+             # `test_answer`/`test_result` events still carried no `locale` —
+             # v3-D213's own "NOT addressed" list named this exactly as its
+             # closing item, a smaller sibling of that fix: `DrillEvent.locale`
+             # is a generic field on every `EventType` (the backend column
+             # already accepts it for any event, no schema change needed), and
+             # `TestIsland.tsx` already takes `glossLang: GlossLang` as a
+             # REQUIRED prop — used to build every gloss-bearing Test item —
+             # but none of the three `DrillEvent` literals it builds
+             # (`test_start`, `test_answer`, `test_result`) ever stamped it.
+             # `grep -n "locale" apps/web/lib/test/build.ts
+             # apps/web/components/test/TestIsland.tsx` returned nothing
+             # before this fix. Fixed on the exact one-line pattern `run.ts`
+             # already established (v3-D213): all three literals gain
+             # `locale: glossLang` — the component's own prop, never
+             # re-derived, never defaulted; no engine/wire/backend change. RED
+             # confirmed directly: one new case in `test-island.test.tsx`
+             # (added to the existing describe block, 5 pre-existing cases
+             # untouched) runs a full Test with `glossLang="ms"` (every other
+             # case in the file uses "en", so this cannot pass by accident)
+             # and asserts every `test_start`/`test_answer`/`test_result`
+             # event carries `locale === "ms"` — against the unmodified
+             # component this failed exactly `expected undefined to be 'ms'`;
+             # restored byte-identically (`git stash` of `TestIsland.tsx`
+             # alone), reran: 6/6 green (was 5, +1). `TZ=UTC make test`: 2721
+             # passing (was 2720, +1 — exactly this run's one new test;
+             # apps/web 1431, was 1430; no other suite moved: 255 v2 vitest,
+             # 47 v2/api, 377 v3/api, 120 corpus-compiler, 430 engine, 61
+             # fold-runner). `check-test-floor.mjs`: OK, 2721 >= floor 1899
+             # (+822 margin, unmoved, same discipline as every prior entry).
+             # `TZ=UTC make build`: exit 0, 30 routes (unchanged — no route
+             # touched, edits inside the existing `/test` component). `npm run
+             # gates`: all green (boundaries 315 files via `make build`'s own
+             # `prebuild` chain, unchanged count — no new production file, one
+             # existing component edited plus one existing test file; a later
+             # standalone `npm run gates` reported 316, the same pre-existing
+             # gitignored `next-env.d.ts` Next.js bootstrap-artifact
+             # fluctuation v3-D206's own entry already recorded, confirmed via
+             # `git status --porcelain` to be no part of this diff; fonts
+             # degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+             # corpus-morphology 362 words / corpus-glyphs 206 codepoints,
+             # both unchanged — no new corpus data, only an already-existing
+             # wire field now carried by one more event family). `npx tsc
+             # --noEmit` (run standalone, and again inside `next build`'s own
+             # TypeScript pass): clean, exit 0. No `v1/**`/`v2/**` edit (a
+             # stray `v2/tsconfig.tsbuildinfo` build-cache diff produced by
+             # running the suite was reverted before committing, same
+             # discipline as every prior entry — `git status --porcelain --
+             # v1 v2` empty immediately before committing). No Arabic
+             # codepoint (both changed files swept programmatically, in
+             # Python, over the Arabic, Arabic Supplement, Arabic Extended-A
+             # and both Presentation Forms Unicode blocks, plus a
+             # `fromCharCode`/`fromCodePoint`/`\u06xx`/`\u07xx`/`\u08xx`/
+             # `\uFBxx`/`\uFExx` escape sweep — zero matches; the only new
+             # literal string is the closed-set value `"ms"`, already used
+             # elsewhere in this same test file, never corpus text). Session
+             # start: fresh container, no `node_modules`/`vendor`/compiled
+             # corpus anywhere; local `main` and `origin/main` both already
+             # agreed at `a0b7476` (v3-D213) — no stale-local-main trap this
+             # run, confirmed directly via `git fetch origin main` before any
+             # exploration. `make setup` then `make compile-corpus` both run
+             # from scratch, no retries needed. Found by re-reading v3-D213's
+             # own "NOT addressed" list directly (it already named this gap
+             # by file and field) rather than dispatching a fresh sweep agent
+             # — independently re-verified against the real source (the grep
+             # above) before writing any test. NOT addressed: every item on
+             # v3-D213's own "NOT addressed" list, unchanged (the
+             # streak/away-day day-space mismatch, v3-D209; `rhymeClassOf()`,
+             # v3-D136; `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution`;
+             # `lib/pricing.ts#regionFromCountry()`; `PaywallGate` as a whole
+             # class; multi-surah enrollment; the operational mailer/7-night
+             # window; PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift;
+             # `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel`; `StripeField.editable`;
+             # `corpusHash`'s own zero fold-side consumer; `lib/plan/
+             # forecast.ts`'s empty-log zero-state). With this,
+             # `DrillEvent.locale` is now stamped by every event-producing
+             # surface in `apps/web`. See DECISIONS.md v3-D214.
              # NOTE (v3-D213, 2026-09-14): `DrillEvent.locale` — frozen at
              # build-plan step 10 with a documented purpose ("Gloss language
              # active for this event", v2-D27) and round-tripped by

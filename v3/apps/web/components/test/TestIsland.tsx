@@ -270,6 +270,7 @@ export function TestIsland({ surah, glossLang }: TestIslandProps) {
         to: pool[pool.length - 1]!,
         rung: gradeClassToWire("ungraded"),
         structured: false,
+        locale: glossLang,
       };
       await append(event, { now: Date.now(), tz: currentTz() });
       setPhase({ kind: "running" });
@@ -299,6 +300,7 @@ export function TestIsland({ surah, glossLang }: TestIslandProps) {
         choice,
         correct,
         structured: false,
+        locale: glossLang,
       };
       await append(event, { now: Date.now(), tz: currentTz() });
       return true;
@@ -418,6 +420,7 @@ export function TestIsland({ surah, glossLang }: TestIslandProps) {
         total: results.length,
         structured: false,
         sentToReviews,
+        locale: glossLang,
       };
       await append(event, { now: Date.now(), tz: currentTz() });
       router.push("/progress");
