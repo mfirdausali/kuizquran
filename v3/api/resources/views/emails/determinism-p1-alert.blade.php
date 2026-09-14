@@ -5,6 +5,23 @@
 
 <p><strong>Night:</strong> {{ $night }} UTC — this <strong>resets the 7-night launch window</strong>.</p>
 
+@if ($kind === 'selection')
+<p>
+The nightly selection-replay check found that shuffling a committed event
+log under one or more seeds reproduced a <strong>different</strong>
+selection trace (siteKey/deviceId/visitOrdinal → lane/variant) than the
+canonical-order baseline. Selection determinism — the guarantee that
+rotation and lane/variant choice reproduce regardless of arrival order — is
+broken for at least one trace under the currently deployed engine version.
+</p>
+
+<ul>
+    <li>Seeds compared: <strong>{{ $seedsCompared }}</strong></li>
+    <li>Events replayed: {{ $eventsReplayed }}</li>
+    <li>Traces compared: {{ $tracesCompared }}</li>
+    <li>Divergent traces: <strong>{{ $divergentTraces }}</strong></li>
+</ul>
+@else
 <p>
 The nightly determinism check found a live <code>atom_cache</code> row that
 disagrees with a fresh fold of the same learner's event log, under the
@@ -18,6 +35,7 @@ is truth") is broken for at least one learner until this is investigated.
     <li>Atoms compared: {{ $atomsCompared }}</li>
     <li>Learners sampled: {{ $usersChecked }}</li>
 </ul>
+@endif
 
 <p>
 Run <code>php artisan nightly:window</code> for the current streak, or open

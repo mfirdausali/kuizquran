@@ -185,4 +185,112 @@ class DeterminismP1PagerTest extends TestCase
             ->withArgs(fn (string $message) => str_contains($message, 'smtp connection refused'))
             ->once();
     }
+
+    /**
+     * `DeterminismP1Alert::content()` reads `report['divergentCount']` /
+     * `['skewCount']` / `['atomsCompared']` / `['usersChecked']` —
+     * `fold_determinism_check`'s own `FoldCheckReport` shape
+     * (worker/fold-runner/src/foldCheck.ts). `runSelection()`'s own
+     * `SelectionCheckReport` (worker/fold-runner/src/selectionCheck.ts) has
+     * none of those keys — it has `seeds`, `eventsReplayed`,
+     * `tracesCompared`, `divergences` instead — so every one of those four
+     * `??` fallbacks silently reads 0 for a selection P1, and the fixed body
+     * prose ("a live atom_cache row that disagrees with a fresh fold...
+     * Invariant #2 is broken") is flatly wrong for a shuffle-order
+     * divergence. This is the page a 3am on-call engineer reads to decide
+     * whether to act, for the highest-severity signal in this codebase.
+     *
+     * Mirrors `NightlyWindowTest::test_a_selection_confirmed_p1_carries_its_
+     * divergence_findings()`'s own precedent for constructing a
+     * selection-shaped `NightlyCheckRun.report` directly — the runner's own
+     * committed fixture is never touched, so this triggers a genuine test
+     * scenario without regenerating any oracle.
+     */
+    public function test_a_selection_p1_email_renders_selection_shaped_content_not_fold_zeros(): void
+    {
+        $run = NightlyCheckRun::create([
+            'check' => 'selection_determinism_check',
+            'night' => '2026-09-14',
+            'severity' => 'p1',
+            'exit_code' => 4,
+            'report' => [
+                'check' => 'selection_determinism_check',
+                'seeds' => [7, 42, 99],
+                'eventsReplayed' => 36,
+                'tracesCompared' => 108,
+                'divergences' => [
+                    [
+                        'seed' => 7,
+                        'traceKey' => 'site-a:device-1:3',
+                        'baseline' => ['lane' => 's1', 'variantIndex' => 0],
+                        'replayed' => ['lane' => 'cloze', 'variantIndex' => 1],
+                    ],
+                    [
+                        'seed' => 42,
+                        'traceKey' => 'site-b:device-2:1',
+                        'baseline' => null,
+                        'replayed' => ['lane' => 'junction', 'variantIndex' => 0],
+                    ],
+                ],
+            ],
+            'trigger' => 'test',
+            'ran_at' => 0,
+        ]);
+
+        $html = (new DeterminismP1Alert($run))->render();
+
+        // The real, computed selection evidence must reach the email.
+        $this->assertStringContainsString('Seeds compared', $html);
+        $this->assertStringContainsString('3', $html); // 3 seeds
+        $this->assertStringContainsString('Traces compared', $html);
+        $this->assertStringContainsString('108', $html);
+        $this->assertStringContainsString('Divergent traces', $html);
+        $this->assertStringContainsString('2', $html); // 2 divergences
+
+        // Never the fold check's own wrong-for-this-check body prose.
+        $this->assertStringNotContainsString('atom_cache', $html);
+        $this->assertStringNotContainsString('a fresh fold', $html);
+
+        // Never a fabricated fold-shaped zero standing in for a real count
+        // this check never produces — a bare "0" would silently read as
+        // "checked, nothing found" rather than "wrong template".
+        $this->assertStringNotContainsString('Divergent atoms', $html);
+        $this->assertStringNotContainsString('Skewed atoms', $html);
+        $this->assertStringNotContainsString('Atoms compared', $html);
+        $this->assertStringNotContainsString('Learners sampled', $html);
+    }
+
+    /** The fold branch's own rendered content is unchanged by the fix — a
+     *  regression guard alongside the pre-existing `Mail::assertSent` props
+     *  check above, which never inspected rendered HTML at all. */
+    public function test_a_fold_p1_email_still_renders_fold_shaped_content(): void
+    {
+        $run = NightlyCheckRun::create([
+            'check' => 'fold_determinism_check',
+            'night' => '2026-09-14',
+            'severity' => 'p1',
+            'exit_code' => 4,
+            'report' => [
+                'check' => 'fold_determinism_check',
+                'divergentCount' => 2,
+                'skewCount' => 1,
+                'atomsCompared' => 40,
+                'usersChecked' => 5,
+            ],
+            'trigger' => 'test',
+            'ran_at' => 0,
+        ]);
+
+        $html = (new DeterminismP1Alert($run))->render();
+
+        $this->assertStringContainsString('atom_cache', $html);
+        $this->assertStringContainsString('Divergent atoms', $html);
+        $this->assertStringContainsString('2', $html);
+        $this->assertStringContainsString('Atoms compared', $html);
+        $this->assertStringContainsString('40', $html);
+        $this->assertStringContainsString('Learners sampled', $html);
+        $this->assertStringContainsString('5', $html);
+        $this->assertStringNotContainsString('Seeds compared', $html);
+        $this->assertStringNotContainsString('Traces compared', $html);
+    }
 }

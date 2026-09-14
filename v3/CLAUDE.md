@@ -53,9 +53,123 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2721 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 377 v3/api + 120 corpus-compiler
-             # + 430 engine + 61 fold-runner + 1431 apps/web. (v3-D214, 2026-09-14)
+make test    # 2723 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 379 v3/api + 120 corpus-compiler
+             # + 430 engine + 61 fold-runner + 1431 apps/web. (v3-D215, 2026-09-14)
+             # NOTE (v3-D215, 2026-09-14): a confirmed `selection_determinism_
+             # check` P1 paged its on-call engineer a page SHAPED FOR THE
+             # OTHER CHECK. `App\Mail\DeterminismP1Alert::content()` has been
+             # dispatched for a confirmed P1 on either nightly check since
+             # v3-D82 (`record()`/`pageOnCall()` call it identically for
+             # `fold_determinism_check` and `selection_determinism_check`,
+             # both scheduled nightly via `determinism:check both`), but it
+             # unconditionally read `report['divergentCount']`/`['skewCount']`/
+             # `['atomsCompared']`/`['usersChecked']` — `FoldCheckReport`'s
+             # own shape. `SelectionCheckReport`
+             # (`worker/fold-runner/src/selectionCheck.ts`) has none of those
+             # keys — `seeds`/`eventsReplayed`/`tracesCompared`/`divergences`
+             # instead — so every `??` fallback silently read 0, and the
+             # fixed body prose ("a live atom_cache row that disagrees with a
+             # fresh fold... Invariant #2 is broken") was flatly wrong for a
+             # shuffle-order divergence, which has no atom_cache and no
+             # invariant-#2 relationship at all. The page a 3am on-call
+             # engineer reads to decide whether to act, for the highest-
+             # severity signal in this codebase (a confirmed P1 resets the
+             # 7-night launch window), read "Divergent atoms: 0. Atoms
+             # compared: 0. Learners sampled: 0" — indistinguishable from a
+             # broken template — while three real seeds and two real
+             # divergent traces sat computed and unused in the same report.
+             # Distinct from v3-D179 (gave the admin console's own
+             # `/settings/health` panel a `selectionFindings()` reader for
+             # the same report shape) — this mailer is a separate consumer
+             # of the identical `NightlyCheckRun.report` column v3-D179 never
+             # touched, and had carried the wrong-shape read since its own
+             # creation at v3-D82. Fixed, mailer + view only, no report
+             # schema change: `content()` branches on `$this->check` — a
+             # selection run builds `seedsCompared`/`eventsReplayed`/
+             # `tracesCompared`/`divergentTraces` instead of the fold-shaped
+             # keys; the blade view gains an `@if ($kind === 'selection')`
+             # branch with matching body prose and its own four bullets, the
+             # fold branch's markup byte-identical to before. No PII either
+             # way — `divergences` carries no learner id at all (a selection
+             # check replays a committed fixture log, never production
+             # data). RED confirmed directly: two new cases in
+             # `DeterminismP1PagerTest.php` (5 pre-existing, all `check:
+             # 'fold'`, untouched) — the load-bearing case constructs a
+             # `NightlyCheckRun` directly with a real selection-shaped report
+             # (3 seeds, 2 divergences, mirroring `NightlyWindowTest`'s own
+             # precedent for this construction — the committed selection-log
+             # fixture is never touched, no oracle regenerated) and renders
+             # `(new DeterminismP1Alert($run))->render()`, asserting the real
+             # counts reach the HTML while the fold-only labels and prose are
+             # absent — failed exactly `Failed asserting that '...' contains
+             # "Seeds compared"` against the unmodified class; the sibling
+             # fold-content case passed vacuously, correctly (that branch was
+             # already right). Restored byte-identically, reran: 7/7 green
+             # (was 5, +2). `php artisan test` (v3/api): 379 passing (was
+             # 377, +2; 2 incomplete + 6 skipped unchanged, PAY-1).
+             # `./vendor/bin/pint --test` on all three changed files: passed.
+             # `TZ=UTC make test`: 2723 passing (was 2721, +2 — exactly this
+             # run's two new tests; v3/api 379, was 377; no other suite
+             # moved — apps/web unchanged at 1431 since no apps/web file was
+             # touched). `check-test-floor.mjs`: OK, 2723 >= floor 1899 (+824
+             # margin, unmoved, same discipline as every prior entry).
+             # `TZ=UTC make build`: exit 0, 30 routes (unchanged — no
+             # apps/web route or component touched, Laravel-only fix). `npm
+             # run gates`: all green (boundaries 316 files, unchanged count —
+             # no new production file under apps/web; fonts degraded-but-
+             # non-blocking, pre-existing, 2/6 UI fonts present; corpus-
+             # morphology 362 words / corpus-glyphs 206 codepoints, both
+             # unchanged — no new corpus data). No `v1/**`/`v2/**` edit (a
+             # stray `v2/tsconfig.tsbuildinfo` build-cache diff produced by
+             # running the suite was reverted before committing, same
+             # discipline as every prior entry — `git status --porcelain --
+             # v1 v2` empty immediately before committing). No Arabic
+             # codepoint (all three changed files swept programmatically, in
+             # Python, over the Arabic, Arabic Supplement, Arabic Extended-A
+             # and both Presentation Forms Unicode blocks, plus a
+             # `fromCharCode`/`fromCodePoint`/`\u06xx`/`\u07xx`/`\u08xx`/
+             # `\uFBxx`/`\uFExx` escape sweep — zero matches; every new
+             # string is a PHP identifier, a wire field name, a fixed
+             # English sentence, or a synthetic seed/traceKey/lane test
+             # fixture value ported from `NightlyWindowTest`'s own
+             # precedent, never corpus text). Session start: fresh
+             # container, no `node_modules`/`vendor`/compiled corpus
+             # anywhere; `HEAD` was found detached at `9da82ee`, the same
+             # commit `origin/main` was already at, on a stale LOCAL `main`
+             # branch ref thirteen commits behind (`26cc664`, v3-D201) — the
+             # recurring "stale local main" trap this file has recorded
+             # roughly fifty times since v3-D77 — caught before any
+             # implementation work via `git fetch` + `git checkout main &&
+             # git merge --ff-only origin/main`, a clean fast-forward, no
+             # work lost or at risk. `make setup` then `make compile-corpus`
+             # both run from scratch, no retries needed. Found by a
+             # dedicated fresh-sweep agent (Explore) handed the full
+             # exclusion list carried through v3-D214 and directed at
+             # `worker/fold-runner/src`, `api/app/Console/Commands`,
+             # `api/app/Mail`, and the newest migrations/type fields — it
+             # independently re-confirmed the away-day feature (v3-D207),
+             # the admin controller/`lib/admin` type-pair family, and
+             # `DrillEvent.locale` (v3-D213/D214) all genuinely fully wired
+             # before landing on this instance; independently re-verified by
+             # this run directly against `DeterminismP1Alert.php`, the blade
+             # view, and both report shapes' real TypeScript source before
+             # writing any test. NOT addressed: every item on v3-D214's own
+             # "NOT addressed" list, unchanged (the streak/away-day
+             # day-space mismatch, v3-D209; `rhymeClassOf()`, v3-D136;
+             # `EntitlementMachine::merge()`; `App\Billing\TrialAttribution`;
+             # `lib/pricing.ts#regionFromCountry()`; `PaywallGate` as a whole
+             # class; multi-surah enrollment; the operational mailer/7-night
+             # window — this fix makes the mailer's OWN content correct for
+             # both checks, but does not stand up a live SMTP account or a
+             # staging host, C5/gate 20's own "who carries the 3am pager" is
+             # still unanswered; PAY-1's Stripe fixtures; surah 67's scene
+             # beats; `worker/fold-runner/src/severity.ts`'s taxonomy drift;
+             # `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel`; `StripeField.editable`;
+             # `corpusHash`'s own zero fold-side consumer; `lib/plan/
+             # forecast.ts`'s empty-log zero-state). See DECISIONS.md
+             # v3-D215.
              # NOTE (v3-D214, 2026-09-14): `TestIsland.tsx`'s own `test_start`/
              # `test_answer`/`test_result` events still carried no `locale` —
              # v3-D213's own "NOT addressed" list named this exactly as its

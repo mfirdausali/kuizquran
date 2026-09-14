@@ -20,6 +20,15 @@ use Illuminate\Queue\SerializesModels;
  * — an operator follows up in the admin console or `nightly:window` for the
  * per-atom findings, which is where `userId` (an internal integer, not an
  * identity) already lives behind the reveal-audited admin surface.
+ *
+ * TWO REPORT SHAPES, ONE MAILABLE (v3-D215): `$run->check` is either
+ * `fold_determinism_check` (FoldCheckReport — divergentCount/skewCount/
+ * atomsCompared/usersChecked) or `selection_determinism_check`
+ * (SelectionCheckReport — seeds/eventsReplayed/tracesCompared/divergences).
+ * They share no field names. `content()` branches on `$this->check` and
+ * builds only the counts the triggering check actually produces — reading
+ * the other shape's keys would silently coalesce every one to 0 via `??`,
+ * which is exactly the page a confirmed selection P1 sent before this fix.
  */
 class DeterminismP1Alert extends Mailable
 {
@@ -46,11 +55,32 @@ class DeterminismP1Alert extends Mailable
     {
         $report = $this->run->report;
 
+        if ($this->check === 'selection_determinism_check') {
+            // SelectionCheckReport (worker/fold-runner/src/selectionCheck.ts)
+            // is a DIFFERENT shape than fold's FoldCheckReport — no
+            // divergentCount/skewCount/atomsCompared/usersChecked exists on
+            // it at all. Reading those keys here would silently coalesce to
+            // 0 via `??`, the exact gap this branch closes.
+            return new Content(
+                view: 'emails.determinism-p1-alert',
+                with: [
+                    'check' => $this->check,
+                    'night' => $this->night,
+                    'kind' => 'selection',
+                    'seedsCompared' => count($report['seeds'] ?? []),
+                    'eventsReplayed' => (int) ($report['eventsReplayed'] ?? 0),
+                    'tracesCompared' => (int) ($report['tracesCompared'] ?? 0),
+                    'divergentTraces' => count($report['divergences'] ?? []),
+                ],
+            );
+        }
+
         return new Content(
             view: 'emails.determinism-p1-alert',
             with: [
                 'check' => $this->check,
                 'night' => $this->night,
+                'kind' => 'fold',
                 'divergentCount' => (int) ($report['divergentCount'] ?? 0),
                 'skewCount' => (int) ($report['skewCount'] ?? 0),
                 'atomsCompared' => (int) ($report['atomsCompared'] ?? 0),
