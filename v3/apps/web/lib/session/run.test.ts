@@ -2537,3 +2537,120 @@ describe("v3-D206 — DrillEvent.corpusHash reaches the real session loop", () =
     expect(adopted?.corpusHash).toBe(TEST_HASH);
   });
 });
+
+// v3-D213 — `DrillEvent.locale` (v2-D27's own frozen wire field,
+// `@engine/types.ts`, docblock: "Gloss language active for this event") has
+// been fully plumbed to persistent storage since the wire froze — a real
+// `locale` column on the `events` table (`Event.php`'s `$fillable`,
+// `EventWireCodec.php`, `EventsController.php`) and round-tripped by
+// `packages/engine/test/wire-freeze.test.ts` with two distinct values ("en"
+// and "ms") — but `run.ts`, the one module that actually commits a real
+// learner's events, never read it: `StartInput` had no `glossLang` member,
+// and every one of the four `start*` entry points built its `session_start`/
+// `reconstruct_tap`/`ayah_produced`/`gate_result`/`gate_demote`/`adoption`
+// events without one. The learner's actual gloss-language CHOICE
+// (`lib/onboarding/choices.ts#OnboardingChoices.glossLang`, real and durable
+// since onboarding shipped, and the very thing `wordGloss()` reads on every
+// S1/vocab item) was therefore never attached to the durable log, silently
+// defeating the one thing this field exists to let a later reader ask: which
+// gloss language was active when a given historical event was answered.
+//
+// Fixed the same way `corpusHash` was (v3-D206): `StartInput` gains an
+// optional `glossLang`, `SessionRun` carries it, resolved ONCE in
+// `startFromQueue` (so a mid-session language toggle elsewhere in the app
+// cannot retroactively repaint history), and stamped as `locale` on every
+// event `run.ts` commits.
+//
+// These tests pass `glossLang` in directly (never fabricated) — the frozen/
+// compiled fixtures this file otherwise reads carry no onboarding choice at
+// all, so there is nothing to read one FROM; the positive case proves the
+// caller-supplied value reaches every emitted event, and the degrade case
+// proves an absent one is never fabricated into a guess.
+describe("v3-D213 — DrillEvent.locale reaches the real session loop", () => {
+  it("stamps session_start, reconstruct_tap and ayah_produced with the caller's glossLang", async () => {
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ, glossLang: "ms" }, c);
+    if (!started.ok) throw new Error("session must start");
+    expect(started.run.glossLang).toBe("ms");
+    await playThrough(started.run, c);
+
+    const events = await getAllEvents();
+    const relevant = events.filter((e) =>
+      ["session_start", "reconstruct_tap", "ayah_produced"].includes(e.type),
+    );
+    // At least one of each kind actually landed — otherwise the assertion
+    // below would pass vacuously over an empty filtered set.
+    expect(relevant.filter((e) => e.type === "session_start").length).toBe(1);
+    expect(relevant.filter((e) => e.type === "reconstruct_tap").length).toBeGreaterThan(0);
+    expect(relevant.filter((e) => e.type === "ayah_produced").length).toBeGreaterThan(0);
+    for (const e of relevant) expect(e.locale).toBe("ms");
+  });
+
+  it("never fabricates a locale — a caller with none stamps events with none", async () => {
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+    expect(started.run.glossLang).toBeUndefined();
+    await playThrough(started.run, c);
+
+    const events = await getAllEvents();
+    expect(events.length).toBeGreaterThan(0);
+    expect(events.every((e) => e.locale === undefined)).toBe(true);
+  });
+
+  it("acceptGateDemote's gate_demote event carries the run's own glossLang", async () => {
+    const c = corpus();
+    const gatedAyah = 1;
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah: gatedAyah, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+    for (let day = 1; day <= DEMOTE_OFFER_AFTER_FAILS; day++) {
+      await append(
+        {
+          type: "gate_result",
+          ts: T0 + day * 86_400_000,
+          tz: TZ,
+          surah: SURAH,
+          ayah: gatedAyah,
+          rung: "S3",
+          correct: false,
+          structured: true,
+        } as DrillEvent,
+        { now: T0 + day * 86_400_000, tz: TZ },
+      );
+    }
+    const dueDay = T0 + (DEMOTE_OFFER_AFTER_FAILS + 1) * 86_400_000;
+    const started = await startSession({ surah: SURAH, now: dueDay, tz: TZ, glossLang: "ms" }, c);
+    if (!started.ok) throw new Error("session must start");
+    expect(started.run.queue[0]?.kind).toBe("gate");
+
+    await acceptGateDemote(started.run, c, { now: dueDay + 500, tz: TZ });
+
+    const events = await getAllEvents();
+    const demote = events.find((e) => e.type === "gate_demote");
+    expect(demote?.locale).toBe("ms");
+  });
+
+  it("acceptAdoption stamps its ayah_produced AND adoption events with the run's own glossLang", async () => {
+    const c = corpus();
+    const ayah = 2;
+    const started = await startOpenPractice(
+      { surah: SURAH, now: T0, tz: TZ, ayah, drill: "S3", glossLang: "ms" },
+      c,
+    );
+    if (!started.ok) throw new Error("open practice must start");
+    const { run } = await playThrough(started.run, c);
+    const before = await getAllEvents();
+    const beforeIds = new Set(before.map((e) => e.id));
+
+    await acceptAdoption(run, { now: T0 + 100_000, tz: TZ });
+
+    const after = await getAllEvents();
+    const fresh = after.filter((e) => !beforeIds.has(e.id));
+    const produced = fresh.find((e) => e.type === "ayah_produced" && e.ayah === ayah);
+    const adopted = fresh.find((e) => e.type === "adoption" && e.ayah === ayah);
+    expect(produced?.locale).toBe("ms");
+    expect(adopted?.locale).toBe("ms");
+  });
+});

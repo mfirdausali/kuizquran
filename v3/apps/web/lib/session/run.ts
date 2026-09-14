@@ -37,7 +37,7 @@
 // the `choice` passed to `advanceReconstruct` — and that string is read back
 // OUT of the engine's own item, never supplied by this module.
 
-import type { Corpus } from "@engine/types.ts";
+import type { Corpus, GlossLang } from "@engine/types.ts";
 import type { DrillEvent } from "@engine/types.ts";
 import {
   advanceReconstruct,
@@ -154,6 +154,19 @@ export interface StartInput {
    *  this field; it rides along on the shared type rather than forcing every
    *  entry point to redeclare it. */
   pace?: PaceMode;
+  /**
+   * v3-D213 — the learner's chosen gloss language
+   * (`lib/onboarding/choices.ts`'s `OnboardingChoices.glossLang`), or
+   * `undefined` when the caller has none to offer (e.g. a bare `StartInput`
+   * from an older test). Carried verbatim onto every `DrillEvent.locale`
+   * this session commits (`@engine/types.ts`'s own docblock: "Gloss language
+   * active for this event") — never re-derived per event, the same
+   * "resolve once, stamp everywhere" discipline `corpusHash` already
+   * follows, so a mid-session language toggle elsewhere in the app cannot
+   * retroactively repaint history that was actually answered under a
+   * different one.
+   */
+  glossLang?: GlossLang;
 }
 
 /** Which queue a session was started from — the ordinary daily assembly, or
@@ -250,6 +263,18 @@ export interface SessionRun {
    * stamp.
    */
   readonly corpusHash?: string;
+  /**
+   * v3-D213 — the learner's chosen gloss language (`StartInput.glossLang`),
+   * captured ONCE at `startFromQueue` and carried on every event this
+   * session commits — the same "resolve a provenance fact once, stamp it on
+   * every emit" shape `corpusHash`/`structured`/`openPracticeDrill` already
+   * establish, here for `DrillEvent.locale`'s own documented purpose (v2-D27:
+   * "Gloss language active for this event"). `undefined` for a caller with
+   * none to offer — never fabricated, and never re-derived per event, which
+   * could let a mid-session language toggle silently disagree with
+   * `session_start`'s own stamp.
+   */
+  readonly glossLang?: GlossLang;
 }
 
 export type StartResult =
@@ -406,13 +431,25 @@ export async function assembleFor(
  * reload look like a fresh sitting.
  */
 export async function startSession(input: StartInput, c: Corpus): Promise<StartResult> {
-  const { surah, now, tz, pace } = input;
+  const { surah, now, tz, pace, glossLang } = input;
 
   const assembled = await assembleFor({ surah, now, pace }, c);
   if (!assembled) {
     return { ok: false, unavailable: "no-corpus" };
   }
-  return startFromQueue(surah, now, tz, assembled.queue, assembled.atoms, assembled.prior, c);
+  return startFromQueue(
+    surah,
+    now,
+    tz,
+    assembled.queue,
+    assembled.atoms,
+    assembled.prior,
+    c,
+    undefined,
+    undefined,
+    null,
+    glossLang,
+  );
 }
 
 /**
@@ -437,7 +474,7 @@ export async function startSession(input: StartInput, c: Corpus): Promise<StartR
  * FR6 Door 2.
  */
 export async function startFloorSession(input: StartInput, c: Corpus): Promise<StartResult> {
-  const { surah, now, tz } = input;
+  const { surah, now, tz, glossLang } = input;
 
   if (!Array.isArray(c.words) || c.words.length === 0) {
     return { ok: false, unavailable: "no-corpus" };
@@ -462,7 +499,19 @@ export async function startFloorSession(input: StartInput, c: Corpus): Promise<S
     estMin: i.estMin,
   }));
 
-  return startFromQueue(surah, now, tz, queue, atomsMap, prior, c);
+  return startFromQueue(
+    surah,
+    now,
+    tz,
+    queue,
+    atomsMap,
+    prior,
+    c,
+    undefined,
+    undefined,
+    null,
+    glossLang,
+  );
 }
 
 /** What `startDrillSession` needs beyond an ordinary start: the chosen ayat and
@@ -518,7 +567,7 @@ export interface DrillStartInput extends StartInput {
  * which the shared `startFromQueue` carries onto the run.
  */
 export async function startDrillSession(input: DrillStartInput, c: Corpus): Promise<StartResult> {
-  const { surah, now, tz, ayat, structured } = input;
+  const { surah, now, tz, ayat, structured, glossLang } = input;
 
   if (!Array.isArray(c.words) || c.words.length === 0) {
     return { ok: false, unavailable: "no-corpus" };
@@ -542,7 +591,19 @@ export async function startDrillSession(input: DrillStartInput, c: Corpus): Prom
     estMin: 0,
   }));
 
-  return startFromQueue(surah, now, tz, queue, atomsMap, prior, c, structured);
+  return startFromQueue(
+    surah,
+    now,
+    tz,
+    queue,
+    atomsMap,
+    prior,
+    c,
+    structured,
+    undefined,
+    null,
+    glossLang,
+  );
 }
 
 /**
@@ -617,7 +678,7 @@ export async function startOpenPractice(
   input: OpenPracticeStartInput,
   c: Corpus,
 ): Promise<StartResult> {
-  const { surah, now, tz, ayah, drill } = input;
+  const { surah, now, tz, ayah, drill, glossLang } = input;
 
   if (!Array.isArray(c.words) || c.words.length === 0) {
     return { ok: false, unavailable: "no-corpus" };
@@ -643,6 +704,7 @@ export async function startOpenPractice(
     false,
     machineForOpenPractice(c, surah, ayah, drill),
     drill,
+    glossLang,
   );
 }
 
@@ -677,6 +739,10 @@ async function startFromQueue(
   // resulting run (see `SessionRun.openPracticeDrill`'s own header for why).
   // Never passed by any caller but `startOpenPractice`.
   openPracticeDrill: OpenPracticeDrill | null = null,
+  // v3-D213 — the learner's chosen gloss language (`StartInput.glossLang`),
+  // carried onto the run and every event it commits (see `SessionRun
+  // .glossLang`'s own header). Passed by every caller alike.
+  glossLang?: GlossLang,
 ): Promise<StartResult> {
   if (queue.length === 0) {
     return { ok: false, unavailable: "nothing-due" };
@@ -697,6 +763,7 @@ async function startFromQueue(
         ayah: queue[0]!.ayah,
         rung: gradeClassToWire("rc"),
         corpusHash: c.meta.corpusHash,
+        locale: glossLang,
       } as DrillEvent,
       { now, tz },
     );
@@ -724,6 +791,7 @@ async function startFromQueue(
       structured,
       openPracticeDrill,
       corpusHash: c.meta.corpusHash,
+      glossLang,
     },
   };
 }
@@ -883,6 +951,7 @@ export async function answerCurrent(
     // every ordinary session, so nothing about the normal grading path moves.
     structured: run.structured,
     corpusHash: run.corpusHash,
+    locale: run.glossLang,
   } as DrillEvent;
 
   // ---- COMMIT ---------------------------------------------------------------
@@ -924,6 +993,7 @@ async function answerAfterTap(
         rung: gradeClassToWire(adv.full ? "s3_full" : "s2_partial"),
         structured: true,
         corpusHash: run.corpusHash,
+        locale: run.glossLang,
       } as DrillEvent;
       return commitThenContinue(warmupEvent, ctx, null, () =>
         settleRescaffoldWarmup(run, c, cur, optionIndex),
@@ -959,6 +1029,7 @@ async function answerAfterTap(
           correct: !run.gateSlipped,
           structured: true,
           corpusHash: run.corpusHash,
+          locale: run.glossLang,
         } as DrillEvent)
       : ({
           type: "ayah_produced",
@@ -975,6 +1046,7 @@ async function answerAfterTap(
           // `true` for every ordinary review — the graded path is unchanged.
           structured: run.structured,
           corpusHash: run.corpusHash,
+          locale: run.glossLang,
         } as DrillEvent);
 
     return commitThenContinue(ayahEvent, ctx, null, () =>
@@ -1347,6 +1419,7 @@ export async function acceptGateDemote(
     // gate.ts's own contract ("gates only ever apply to S3-encoded ayat").
     rung: gradeClassToWire("gate"),
     corpusHash: run.corpusHash,
+    locale: run.glossLang,
   } as DrillEvent;
 
   return commitThenContinue(demoteEvent, ctx, null, () => advancePastCurrent(run, c));
@@ -1469,6 +1542,7 @@ export async function acceptAdoption(
     correct: true,
     structured: true,
     corpusHash: run.corpusHash,
+    locale: run.glossLang,
   } as DrillEvent;
 
   return commitThenContinue(encodeEvent, ctx, null, () => {
@@ -1480,6 +1554,7 @@ export async function acceptAdoption(
       ayah: q.ayah,
       rung: gradeClassToWire("s3_full"),
       corpusHash: run.corpusHash,
+      locale: run.glossLang,
     } as DrillEvent;
     return commitThenContinue(adoptionEvent, ctx, null, () => Promise.resolve(run));
   });

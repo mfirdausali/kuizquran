@@ -30,7 +30,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import type { Corpus } from "@engine/types.ts";
+import type { Corpus, GlossLang } from "@engine/types.ts";
 
 import { QuizCard } from "@/components/quiz/QuizCard";
 import { fetchCorpus } from "@/lib/corpus/client";
@@ -97,6 +97,15 @@ export interface SessionIslandProps {
    *  `DEFAULT_PACE_MODE` for a caller (or an older test) that has none to
    *  offer. */
   pace?: PaceMode;
+  /**
+   * v3-D213 — the learner's chosen gloss language, read by `SessionGate` from
+   * the onboarding choices and passed straight down. Threaded onto every
+   * `start*` call so `DrillEvent.locale` (`@engine/types.ts`, v2-D27) is
+   * stamped with the language actually active for this session, rather than
+   * left `undefined` forever. `undefined` for a caller (or an older test)
+   * with none to offer — never fabricated.
+   */
+  glossLang?: GlossLang;
   /** Step 20 — a continuous drill request from `/drill` (a chosen range or
    *  page + graded/victory-lap), or null for an ordinary session. When present
    *  it takes precedence over `mode`. The ayat and the structured flag are
@@ -127,6 +136,7 @@ export function SessionIsland({
   surah,
   mode = "full",
   pace = DEFAULT_PACE_MODE,
+  glossLang,
   drill = null,
   practice = null,
 }: SessionIslandProps) {
@@ -226,17 +236,25 @@ export function SessionIsland({
                 tz: currentTz(),
                 ayat: ayatForSelection(c, drill.selection),
                 structured: structuredFor(drill.mode),
+                glossLang,
               },
               c,
             )
           : practice
             ? await startOpenPractice(
-                { surah, now: Date.now(), tz: currentTz(), ayah: practice.ayah, drill: practice.drill },
+                {
+                  surah,
+                  now: Date.now(),
+                  tz: currentTz(),
+                  ayah: practice.ayah,
+                  drill: practice.drill,
+                  glossLang,
+                },
                 c,
               )
             : mode === "floor"
-              ? await startFloorSession({ surah, now: Date.now(), tz: currentTz() }, c)
-              : await startSession({ surah, now: Date.now(), tz: currentTz(), pace }, c);
+              ? await startFloorSession({ surah, now: Date.now(), tz: currentTz(), glossLang }, c)
+              : await startSession({ surah, now: Date.now(), tz: currentTz(), pace, glossLang }, c);
         if (!alive) return;
         if (!started.ok) {
           setPhase({ kind: "unavailable", reason: started.unavailable });

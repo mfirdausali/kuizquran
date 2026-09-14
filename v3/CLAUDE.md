@@ -53,9 +53,110 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2714 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2720 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 377 v3/api + 120 corpus-compiler
-             # + 430 engine + 61 fold-runner + 1424 apps/web. (v3-D212, 2026-09-14)
+             # + 430 engine + 61 fold-runner + 1430 apps/web. (v3-D213, 2026-09-14)
+             # NOTE (v3-D213, 2026-09-14): `DrillEvent.locale` — frozen at
+             # build-plan step 10 with a documented purpose ("Gloss language
+             # active for this event", v2-D27) and round-tripped by
+             # `wire-freeze.test.ts` with two distinct values since — was
+             # never stamped by the real session loop: `lib/session/run.ts`'s
+             # `StartInput` had no `glossLang` member, so all four `start*`
+             # entry points built every `session_start`/`reconstruct_tap`/
+             # `ayah_produced`/`gate_result`/`gate_demote`/`adoption` event
+             # with no `locale` at all. Sharper than the usual "computed,
+             # zero reader" shape: the fact this field exists to pin was
+             # already sitting durably captured on the same device, unread —
+             # `lib/onboarding/choices.ts#OnboardingChoices.glossLang` is
+             # real, required, committed atomically at onboarding, and the
+             # very field `wordGloss()` reads on every S1/vocab item —
+             # `SessionGate.tsx` already read `choices.surah`/`choices.pace`
+             # via the same `readChoices()` call but discarded
+             # `choices.glossLang` on the same line. Fixed on the exact
+             # `corpusHash` template (v3-D206): `StartInput`/`SessionRun`
+             # gain an optional `glossLang`, resolved ONCE in the shared
+             # `startFromQueue` and stamped as `locale` on all eight
+             # event-emission sites; `SessionGate.tsx` reads
+             # `choices.glossLang` and passes it to `SessionIsland` as a new
+             # prop (mirroring `pace`'s own v3-D138 precedent exactly);
+             # `SessionIsland.tsx` threads it into all four `start*` calls,
+             # never added to the mount effect's own dependency array (same
+             # precedent `pace` set — a later choice change does not restart
+             # an in-flight session). RED confirmed at both layers, each via
+             # `git stash` of the three source files alone (every new test
+             # kept), restored byte-identically after: engine/session-loop
+             # level, all 4 new `run.test.ts` cases in a dedicated `v3-D213`
+             # describe block failed exactly as predicted (`expected
+             # undefined to be 'ms'` on the two positive cases and
+             # `acceptGateDemote`/`acceptAdoption`'s own cases; the negative
+             # "never fabricates" case passed vacuously, correctly, since
+             # `undefined` was already the pre-fix behavior everywhere) —
+             # 77/77 green after (was 73, +4). Component level, one new
+             # `session-island.test.tsx` describe block (2 cases) — the
+             # positive case (`glossLang="ms"` prop, drives one real DOM tap)
+             # failed identically; restored, 31/31 green after (was 29, +2).
+             # Both positive cases pass a caller-supplied `glossLang`
+             # directly (the frozen/compiled fixtures this file otherwise
+             # reads carry no onboarding choice to read one from) and assert
+             # every relevant event type carries it, proving the wiring
+             # rather than one lucky literal. `TZ=UTC make test`: 2720
+             # passing (was 2714, +6 — exactly this run's new tests: 4 + 2;
+             # apps/web 1430, was 1424; no other suite moved: 255 v2 vitest,
+             # 47 v2/api, 377 v3/api, 120 corpus-compiler, 430 engine, 61
+             # fold-runner). `check-test-floor.mjs`: OK, 2720 >= floor 1899
+             # (+821 margin, unmoved, same discipline as every prior entry).
+             # `TZ=UTC make build`: exit 0, 30 routes (unchanged — no route
+             # touched, edits inside the existing `/session` component tree
+             # and its `lib/` layer). `npm run gates`: all green (boundaries
+             # 315 files, unchanged count — no new production file, three
+             # existing files edited plus two existing test files; fonts
+             # degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+             # corpus-morphology 362 words / corpus-glyphs 206 codepoints,
+             # both unchanged — no new corpus data, only a wire field carried
+             # through). `npx tsc --noEmit` (via `next build`'s own
+             # TypeScript pass): clean, exit 0, `Version 5.9.3` confirmed. No
+             # `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff produced by running the suite was reverted
+             # before committing, same discipline as every prior entry —
+             # `git status --porcelain -- v1 v2` empty immediately before
+             # committing). No Arabic codepoint (all five changed/new files
+             # swept programmatically, in Python, over the Arabic, Arabic
+             # Supplement, Arabic Extended-A and both Presentation Forms
+             # Unicode blocks, plus a `fromCharCode`/`fromCodePoint`/
+             # `\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape sweep —
+             # zero matches; every new string is a wire field name, the
+             # closed-set literal `"en"`/`"ms"`, or a fixed English docblock
+             # sentence, never corpus text). Session start: fresh container,
+             # no `node_modules`/`vendor`/compiled corpus anywhere; local
+             # `main` and `origin/main` both already agreed at `86453e2`
+             # (v3-D212) — no stale-local-main trap this run, confirmed
+             # directly via `git fetch origin main` before any exploration.
+             # `make setup` then `make compile-corpus` both run from
+             # scratch, no retries needed. Found by a dedicated fresh-sweep
+             # agent handed the exclusion list carried through v3-D212 and
+             # directed at fields whose producer exists and is tested but
+             # whose actual value never reaches a real emitted event — a
+             # narrower cut than the usual zero-caller search, since
+             # `makeEvent()` does have callers (fixture generators, tests),
+             # just none of them in the real session loop. NOT addressed:
+             # every item on v3-D212's own "NOT addressed" list, unchanged
+             # (the streak/away-day day-space mismatch, v3-D209;
+             # `rhymeClassOf()`, v3-D136; `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution`;
+             # `lib/pricing.ts#regionFromCountry()`; `PaywallGate` as a whole
+             # class; multi-surah enrollment; the operational mailer/7-night
+             # window; PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift;
+             # `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel`; `StripeField.editable`;
+             # `corpusHash`'s own zero fold-side consumer;
+             # `lib/plan/forecast.ts`'s empty-log zero-state); also not
+             # addressed: `test.ts`/`TestIsland.tsx`'s own
+             # `test_answer`/`test_result` events still carry no `locale`
+             # either — a different, deliberately read-only/ungraded event
+             # family (invariant #5), left alone this run as a smaller,
+             # separate, lower-stakes gap than the graded session loop this
+             # run closed. See DECISIONS.md v3-D213.
              # NOTE (v3-D212, 2026-09-14): `components/macro/graphNodes.ts`
              # carried its OWN unexported copy of `lib/progress/rows.ts`'s
              # `gateStateOf()` instead of importing it — named and

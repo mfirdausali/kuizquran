@@ -18045,3 +18045,151 @@ taxonomy drift (v3-D127); `packages/engine/src/placement.ts`
 `StripeField.editable` (v3-D204); `corpusHash`'s own zero fold-side
 consumer (v3-D206); `lib/plan/forecast.ts`'s empty-log zero-state
 (v3-D207) — all unchanged.
+
+## v3-D213, 2026-09-14: `DrillEvent.locale` — the wire froze it at step 10 with a documented purpose, but the real session loop never stamped it, and the choice it exists to pin was already sitting durably in IndexedDB unread
+
+`DrillEvent.locale` (`packages/engine/src/types.ts`, docblock: "Gloss
+language active for this event (v2-D27)") has been round-tripped by
+`packages/engine/test/wire-freeze.test.ts` with two distinct values ("en"
+and "ms") since the wire froze at build-plan step 10, and fully plumbed to
+persistent storage on the Laravel side ever since — a real, nullable
+`locale` column on `events` (`Event.php`'s `$fillable`,
+`EventWireCodec.php`, `EventsController.php`). But `lib/session/run.ts` —
+the one module that actually commits a real learner's events, the direct
+site of this build's own B2/B10/B11/B12 findings — never read it:
+`StartInput` had no `glossLang` member, and none of the four `start*` entry
+points (`startSession`, `startFloorSession`, `startDrillSession`,
+`startOpenPractice`) or their shared `startFromQueue` built a
+`session_start`/`reconstruct_tap`/`ayah_produced`/`gate_result`/
+`gate_demote`/`adoption` event with a `locale` field at all. `grep -n
+"locale" apps/web/lib/session/run.ts` returned nothing before this fix.
+
+Sharper than the usual "computed and shipped, zero reader" shape this build
+closes: the fact `locale` exists to pin was not merely uncomputed, it was
+already sitting durably captured on the SAME device, unread. A learner's
+actual gloss-language choice (`lib/onboarding/choices.ts
+#OnboardingChoices.glossLang`, real, required, committed atomically at
+onboarding, and the very field `wordGloss()` reads on every S1/vocab item
+rendered thereafter) was available the whole time via `readChoices()` —
+`SessionGate.tsx` already called it, for `surah` and (since v3-D138) `pace`
+— but discarded `choices.glossLang` on the same line. So the durable event
+log could never answer "which gloss language was this learner using when
+they got this item right or wrong" — a fact with real value for the
+still-ratification-gated MS-gloss rollout (v3-D15/D145): knowing whether a
+historical answer was made against an EN or MS-shown item.
+
+**Fixed on the exact template `corpusHash` established at v3-D206**
+("resolve a provenance fact once, stamp it on every emit"), one layer
+closer to the UI since `glossLang` (unlike `corpusHash`) is not on the
+corpus at all — it is a caller-supplied fact that has to be threaded from
+the onboarding-choices read, through two components, into the session
+loop:
+
+- `StartInput` (`lib/session/run.ts`) gains an optional `glossLang?:
+  GlossLang`, consumed identically by all four entry points (`DrillStartInput`/
+  `OpenPracticeStartInput` both extend it, so no second declaration).
+- `SessionRun` gains a matching `glossLang?: GlossLang`, resolved ONCE in
+  the shared `startFromQueue` (never re-derived per event, the same
+  discipline `corpusHash`/`structured`/`openPracticeDrill` already use — a
+  mid-session language toggle elsewhere in the app cannot retroactively
+  repaint history that was actually answered under a different one) and
+  stamped as `locale` on all eight event-emission sites: `session_start`
+  (the pre-run-object site, stamped from the raw parameter),
+  `reconstruct_tap`, the rescaffold-warm-up `ayah_produced`, both the
+  `gate_result` and ordinary `ayah_produced` branches of `answerAfterTap`,
+  `gate_demote` (`acceptGateDemote`), and both events `acceptAdoption`
+  commits (`ayah_produced` + `adoption`).
+- `SessionGate.tsx` now reads `choices.glossLang` (a required field on
+  `OnboardingChoices` — no `?? default` needed, unlike `pace`, since a
+  committed enrollment always has one) and passes it to `SessionIsland` as
+  a new prop, mirroring `pace`'s own v3-D138 precedent exactly.
+- `SessionIsland.tsx` gains a matching optional `glossLang` prop, threaded
+  into all four `start*` call sites' input objects — never added to the
+  mount effect's own dependency array, the same precedent `pace` already
+  set (a mid-session change to the underlying choice does not restart an
+  already-running session).
+
+**RED confirmed at both layers, each reverted via `git stash` of the three
+source files alone (every new test kept) and restored byte-identically:**
+engine/session-loop level, all four new `run.test.ts` cases in a dedicated
+`v3-D213` describe block failed exactly as predicted against the unmodified
+source — the two positive cases (`stamps session_start,
+reconstruct_tap and ayah_produced`; `acceptGateDemote`'s `gate_demote`;
+`acceptAdoption`'s pair) each failed on `expected undefined to be 'ms'`,
+while the negative "never fabricates" case passed vacuously, correctly,
+since `undefined` was already the pre-fix behavior for every event. Restored,
+reran: 77/77 green in the file (was 73, +4). Component level, one new
+`session-island.test.tsx` describe block (2 cases) — the positive case
+(`glossLang="ms"` prop, drives one real tap via the DOM) failed identically
+(`expected undefined to be 'ms'`); the negative case passed vacuously.
+Restored, reran: 31/31 green in the file (was 29, +2).
+
+The positive cases each pass a caller-supplied `glossLang` directly (never
+read from a fixture that predates the field, since the frozen/compiled
+corpus fixtures this file otherwise reads carry no onboarding choice to
+read one FROM) and assert every relevant event type carries it — proving
+the wiring, not merely that one hardcoded literal happens to satisfy one
+assertion.
+
+**Full verification.** Session start: fresh container, no
+`node_modules`/`vendor`/compiled corpus anywhere; local `main` and
+`origin/main` both already agreed at `86453e2` (v3-D212) — no
+stale-local-main trap this run, confirmed directly via `git fetch origin
+main` before any exploration. `TZ=UTC make setup` run from scratch, no
+retries needed; `TZ=UTC make compile-corpus` run once before any test
+relying on the real 103/112/67 corpora. `TZ=UTC make test`: **2720
+passing** (was 2714, +6 — exactly this run's new tests: 4 in
+`run.test.ts` + 2 in `session-island.test.tsx`; apps/web 1430, was 1424; no
+other suite moved: 255 v2 vitest, 47 v2/api, 377 v3/api (2 incomplete + 6
+skipped, unchanged), 120 corpus-compiler, 430 engine, 61 fold-runner).
+`check-test-floor.mjs`: OK, 2720 >= floor 1899 (+821 margin, unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 30 routes
+(unchanged — no route touched, edits inside the existing `/session`
+component tree and its `lib/` layer). `npm run gates` (via `prebuild`): all
+green — boundaries 315 files, unchanged count (no new production file,
+three existing files edited plus two existing test files; fonts
+degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology 362 words / corpus-glyphs 206 codepoints, both unchanged
+— no new corpus data, only a caption-free wire field carried through).
+`npx tsc --noEmit` (via `next build`'s own TypeScript pass): clean, exit 0,
+`Version 5.9.3` confirmed. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite
+was reverted before committing, same discipline as every prior entry —
+`git status --porcelain -- v1 v2` empty immediately before committing). No
+Arabic codepoint (all five changed/new files swept programmatically, in
+Python, over the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks, plus a `fromCharCode`/`fromCodePoint`/
+`\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape sweep — zero matches;
+every new string is a wire field name, the closed-set literal `"en"`/`"ms"`,
+or a fixed English docblock sentence, never corpus text).
+
+**Found by** a dedicated fresh-sweep agent handed the exclusion list
+carried through v3-D212 and directed at fields whose PRODUCER exists and is
+tested but whose actual VALUE never reaches a real emitted event — a
+narrower cut than the usual "zero caller" search, since `makeEvent()` (the
+function that would set `locale`) does have callers (fixture generators,
+tests), just none of them in the real session loop. It also independently
+re-confirmed several already-excluded candidates untouched (the streak/
+away-day mismatch, `rhymeClassOf()`, `PaywallGate`) before landing on this
+one.
+
+**NOT addressed**, named so a future run doesn't re-discover it as new:
+every item on v3-D212's own "NOT addressed" list, unchanged — the
+streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class / `permitsIssuance`/`permitsReview` (v3-D88, v3-D151); multi-surah
+enrollment; the operational mailer/7-night window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy drift (v3-D127); `packages/engine/src/placement.ts`
+(v3-D111/D113/D123); `MacroFacts.litany.rhymeLabel` (v3-D188);
+`StripeField.editable` (v3-D204); `corpusHash`'s own zero fold-side
+consumer (v3-D206); `lib/plan/forecast.ts`'s empty-log zero-state
+(v3-D207) — all unchanged. Also not addressed: `test.ts`/`TestIsland.tsx`'s
+own `test_answer`/`test_result` events (a DIFFERENT event family,
+deliberately read-only/ungraded, DEFECTS.md invariant #5) still carry no
+`locale` either — left alone this run, since those events are never folded
+and the same "resolve once, stamp everywhere" fix would need its own
+threading through `lib/test/build.ts`, a smaller, separate, lower-stakes
+gap than the graded session loop this run closed.

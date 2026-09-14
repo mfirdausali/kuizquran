@@ -304,6 +304,59 @@ describe("edge case #74 — a retryable append failure offers Retry, not a dead 
   });
 });
 
+// v3-D213 — `SessionGate` reads `OnboardingChoices.glossLang` and passes it
+// straight down as `SessionIsland`'s own `glossLang` prop (the same "read by
+// the gate, threaded by the island" shape v3-D138 already established for
+// `pace`), so this proves the COMPONENT BOUNDARY actually carries the value
+// through to `DrillEvent.locale` on a real commit — not just that `run.ts`'s
+// own `start*` functions honour a `glossLang` they are handed directly
+// (already proven in `lib/session/run.test.ts`). `SessionGate` itself has no
+// database to read from in a plain component test, so this exercises
+// `SessionIsland`'s own prop straight through, the same boundary its `pace`
+// prop is exercised at everywhere else in this file.
+describe("v3-D213 — SessionIsland's glossLang prop reaches the committed log", () => {
+  it("stamps session_start and reconstruct_tap with the prop's glossLang", async () => {
+    installFetch();
+    render(<SessionIsland surah={SURAH} glossLang="ms" />);
+    await waitFor(() => expect(screen.getByTestId("session-drill")).toBeTruthy());
+
+    const bank = document.querySelector(".bank");
+    expect(bank).not.toBeNull();
+    const tiles = within(bank as HTMLElement).getAllByRole("button");
+    fireEvent.click(tiles[0]!);
+
+    await waitFor(async () => {
+      const events = await getAllEvents();
+      expect(events.filter((e) => e.type === "reconstruct_tap").length).toBeGreaterThan(0);
+    });
+
+    const events = await getAllEvents();
+    const relevant = events.filter((e) => ["session_start", "reconstruct_tap"].includes(e.type));
+    expect(relevant.length).toBeGreaterThan(0);
+    for (const e of relevant) expect(e.locale).toBe("ms");
+  });
+
+  it("never fabricates a locale — an omitted prop stamps events with none", async () => {
+    installFetch();
+    render(<SessionIsland surah={SURAH} />);
+    await waitFor(() => expect(screen.getByTestId("session-drill")).toBeTruthy());
+
+    const bank = document.querySelector(".bank");
+    expect(bank).not.toBeNull();
+    const tiles = within(bank as HTMLElement).getAllByRole("button");
+    fireEvent.click(tiles[0]!);
+
+    await waitFor(async () => {
+      const events = await getAllEvents();
+      expect(events.filter((e) => e.type === "reconstruct_tap").length).toBeGreaterThan(0);
+    });
+
+    const events = await getAllEvents();
+    expect(events.length).toBeGreaterThan(0);
+    expect(events.every((e) => e.locale === undefined)).toBe(true);
+  });
+});
+
 // v3-D98 — FR6 Door 1 ("extra Learn"): `packages/engine/src/freeplay.ts
 // #extraLearnGrant` was real, pure, unit-tested three times over and had
 // ZERO production callers anywhere in this app — a learner who finished
