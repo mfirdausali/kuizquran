@@ -124,11 +124,18 @@ function stageWord(stage: Stage, encoded: boolean): string {
   }
 }
 
-/** The gate's state as a value rather than as an opacity (#101). */
-function gateStateOf(atom: AtomState | undefined, now: number): GateState {
-  if (!atom || atom.gateDueAt === null) return atom?.gatePassed ? "passed" : "none";
+/** The gate's state as a value rather than as an opacity (#101).
+ *
+ *  Exported (v3-D212) — `components/macro/graphNodes.ts` used to carry a
+ *  second, unexported copy of this exact decision rather than importing it,
+ *  the "two implementations of one decision" shape this file's own
+ *  `GateState` docblock exists to prevent. Both call sites now share this
+ *  one function. */
+export function gateStateOf(atom: AtomState | undefined, now: number): GateState {
+  if (!atom) return "none";
   if (atom.gatePassed) return "passed";
   if (atom.gateFails > 0) return "failed";
+  if (atom.gateDueAt === null) return "none";
   return atom.gateDueAt <= now ? "due" : "armed";
 }
 

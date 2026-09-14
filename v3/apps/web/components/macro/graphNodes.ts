@@ -32,10 +32,17 @@ import { currentBand, currentStrength } from "@engine/strength.ts";
 
 /** Gate state, precomputed — edge case #101 ("gate-pending lock opacity =>
  *  learner confusion; gate-armed/due states + why-locked explanation").
- *  Re-exported from the progress row builder so the ring and the table cannot
- *  drift into two different vocabularies for the same fact. */
+ *  Re-exported from the progress row builder — TYPE AND FUNCTION BOTH
+ *  (v3-D212) — so the ring and the table cannot drift into two different
+ *  vocabularies, or two different DECISIONS, for the same fact. A prior
+ *  version of this file re-exported only the type and carried its own,
+ *  unexported copy of the function; the two disagreed for a state the
+ *  engine's real transitions never produce (`gateFails > 0` with
+ *  `gateDueAt` still `null`) but a synthetic test fixture could. */
 export type { GateState } from "@/lib/progress/rows.ts";
 import type { GateState } from "@/lib/progress/rows.ts";
+export { gateStateOf } from "@/lib/progress/rows.ts";
+import { gateStateOf } from "@/lib/progress/rows.ts";
 
 interface GraphNodeBase {
   /** The engine atom key this mark reads from. Always via siteToAtomKey —
@@ -118,17 +125,6 @@ export function stageLabelOf(stage: Stage, encoded: boolean): string {
     case "lapsed":
       return "Lapsed";
   }
-}
-
-/** Gate state for one atom, precomputed here so no view ever compares a
- *  timestamp. `null` atom => "none": nothing is scheduled for an atom that
- *  does not exist yet. */
-export function gateStateOf(atom: AtomState | undefined, now: number): GateState {
-  if (!atom) return "none";
-  if (atom.gatePassed) return "passed";
-  if (atom.gateFails > 0) return "failed";
-  if (atom.gateDueAt === null) return "none";
-  return atom.gateDueAt <= now ? "due" : "armed";
 }
 
 /** Build one mark from a Site. The seam and the ayah go through the SAME

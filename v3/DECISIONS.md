@@ -17917,3 +17917,131 @@ taxonomy drift (v3-D127); `packages/engine/src/placement.ts`
 `StripeField.editable` (v3-D204); `corpusHash`'s own zero fold-side
 consumer (v3-D206); `lib/plan/forecast.ts`'s empty-log zero-state
 (v3-D207) — all unchanged.
+
+## v3-D212, 2026-09-14: `components/macro/graphNodes.ts#gateStateOf()` duplicated `lib/progress/rows.ts`'s own decision instead of importing it — and the two copies had already silently disagreed
+
+v3-D211's own "NOT addressed" list named this exactly: "a real, smaller
+'two implementations of one decision' shape, distinct from the
+vocabulary-drift class v3-D210 closed, left alone this run to keep the fix
+to the one field genuinely reaching learners with wrong text." Picked up
+this run as a small, already-scoped, concrete item rather than dispatching
+a fresh sweep agent.
+
+`GateState` (the type) has been re-exported from `graphNodes.ts` since
+v3-D210, with a docblock naming exactly why: "so the ring and the table
+cannot drift into two different vocabularies for the same fact." But only
+the TYPE was re-exported — the FUNCTION that decides a `GateState` from an
+atom, `gateStateOf()`, existed as two separate, unexported definitions,
+one in each file, never checked against each other.
+
+**They had already drifted.** `rows.ts`'s version:
+
+```ts
+function gateStateOf(atom, now): GateState {
+  if (!atom || atom.gateDueAt === null) return atom?.gatePassed ? "passed" : "none";
+  if (atom.gatePassed) return "passed";
+  if (atom.gateFails > 0) return "failed";
+  return atom.gateDueAt <= now ? "due" : "armed";
+}
+```
+
+checks `atom.gateDueAt === null` FIRST, short-circuiting straight to
+`"passed"`/`"none"` without ever looking at `gateFails`. `graphNodes.ts`'s
+version checks `gateFails > 0` first, `gateDueAt === null` only after. For
+every atom the real engine can actually produce the two agree —
+`gate.ts#applyGateResult` always sets `gateDueAt` to a real value in the
+same write that increments `gateFails`, and `demoteToLearn` resets both
+together — so `gateFails > 0` with `gateDueAt === null` cannot arise via
+any real transition. But `test/macro-ring.test.tsx`'s own v3-D210 case "a
+FAILED gate is named" builds exactly that combination directly
+(`gateAtom(103, 1, { gateFails: 1 })`, leaving `gateDueAt` at `initAtom`'s
+default `null`) and asserts `"failed"` — which only passed because that
+test exercises `graphNodes.ts`'s copy. Had anything ever called `rows.ts`'s
+copy with the identical fixture, it would have said `"none"` instead. The
+duplication was not merely a style issue; it was already a live behavioral
+fork, caught only because nothing had yet asked the two functions the same
+question in the same test.
+
+**Fixed.** `rows.ts#gateStateOf` is now `export`ed and reordered to check
+`gateFails > 0` before `gateDueAt === null` — `graphNodes.ts`'s ordering,
+chosen because it is the one already covered by `test/macro-ring.test.tsx`'s
+v3-D210 case, and because it is the more defensive of the two orderings (it
+names a failed attempt as failed even in a state the engine does not
+produce today, rather than silently reporting "none"). This reordering is
+behavior-identical to the old `rows.ts` ordering for every state a real
+fold can produce — verified by enumerating all four `(gateDueAt === null,
+gateFails > 0)` combinations against both orderings; they diverge only on
+the combination that is unreachable in practice. `graphNodes.ts` deletes
+its own copy entirely and adds `export { gateStateOf } from
+"@/lib/progress/rows.ts"` beside the existing type re-export, so `nodeFor()`
+now calls the SAME function `rows.ts` exports, not a lookalike.
+
+**RED confirmed directly.** New
+`v3/apps/web/lib/progress/gateStateOf-agreement.test.ts` (2 cases): (1)
+`expect(graphGateStateOf).toBe(rowsGateStateOf)` — reference identity, not
+merely behavioral overlap; (2) a `gateFails: 1` atom with `gateDueAt` left
+`null` (the exact combination the two copies disagreed on) must read
+`"failed"` from BOTH imports. Run against the unmodified duplication (`git
+stash` of `rows.ts` + `graphNodes.ts` alone, the new test file kept): case 1
+failed with `expected [Function gateStateOf] to be undefined` (`rows.ts` had
+no such export yet); case 2 failed with `TypeError: gateStateOf is not a
+function`, for the same reason. Restored byte-identically (`git diff`
+empty before implementing), then implemented; reran green — and
+`npx vitest run lib/progress/gateStateOf-agreement.test.ts
+test/macro-ring.test.tsx test/ayah-detail.test.tsx test/progress-list.test.tsx`
+together: 108/108 green (was 106, +2 — exactly the new file; the other
+three files' own pre-existing counts, 33 + 46 + 27, unchanged, confirming no
+regression on either real consumer: `RingDiagram.tsx` via `macro-ring`, and
+`ProgressTable.tsx`/`AyahStatsIsland.tsx` via `ayah-detail`/`progress-list`).
+
+**Full verification.** Session start: fresh container, no
+`node_modules`/`vendor`/compiled corpus anywhere; `HEAD` was found detached
+at `edf46c7` (v3-D211), the same commit `origin/main` was already at, on a
+stale LOCAL `main` branch ref ten commits behind (`26cc664`, v3-D201) — the
+recurring "stale local main" trap this file has recorded roughly forty
+times since v3-D77 — caught before any implementation work via `git fetch`
++ `git checkout main && git merge --ff-only origin/main`, a clean
+fast-forward, no work lost or at risk. `TZ=UTC make setup` run from
+scratch, no retries needed. `TZ=UTC make test`: **2714 passing** (was 2712,
++2 — exactly this run's new test file; apps/web 1424, was 1422; every other
+suite unchanged: 255 v2 vitest, 47 v2/api, 377 v3/api, 120 corpus-compiler,
+430 engine, 61 fold-runner). `check-test-floor.mjs`: OK, 2714 >= floor 1899
+(+815 margin, unmoved, same discipline as every prior entry). `TZ=UTC make
+build`: exit 0, 30 routes (unchanged — no route touched, a pure
+lib/component consolidation inside the existing `/progress` and
+`/surah/[surah]` component trees). `npm run gates`: all green (boundaries
+315 files, unchanged count — no new production file, two existing files
+edited plus one new test file; fonts degraded-but-non-blocking,
+pre-existing, 2/6 UI fonts present; corpus-morphology 362 words /
+corpus-glyphs 206 codepoints, both unchanged — no new corpus data, only a
+function moved to one place). `npx tsc --noEmit` (via `next build`'s own
+TypeScript pass): clean, exit 0. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite
+was reverted before committing, same discipline as every prior entry —
+`git status --porcelain -- v1 v2` empty immediately before committing). No
+Arabic codepoint (all three changed/new files swept programmatically, in
+Python, over the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks, plus a `fromCharCode`/`fromCodePoint`/
+`\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape sweep — zero matches;
+every new string is a fixed English docblock sentence or a synthetic
+gate-state test fixture value, never corpus text).
+
+**Found by** re-reading v3-D211's own "NOT addressed" list directly rather
+than dispatching a fresh sweep agent — the item was already named,
+concrete, and small enough to verify and fix by hand (a two-function diff
+plus a reachability proof, not a codebase-wide search).
+
+**NOT addressed**, named so a future run doesn't re-discover it as new:
+every item on v3-D211's own "NOT addressed" list, unchanged — the
+streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class / `permitsIssuance`/`permitsReview` (v3-D88, v3-D151); multi-surah
+enrollment; the operational mailer/7-night window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy drift (v3-D127); `packages/engine/src/placement.ts`
+(v3-D111/D113/D123); `MacroFacts.litany.rhymeLabel` (v3-D188);
+`StripeField.editable` (v3-D204); `corpusHash`'s own zero fold-side
+consumer (v3-D206); `lib/plan/forecast.ts`'s empty-log zero-state
+(v3-D207) — all unchanged.

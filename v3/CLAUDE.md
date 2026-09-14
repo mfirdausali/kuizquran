@@ -53,9 +53,101 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2712 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2714 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 377 v3/api + 120 corpus-compiler
-             # + 430 engine + 61 fold-runner + 1422 apps/web. (v3-D211, 2026-09-13)
+             # + 430 engine + 61 fold-runner + 1424 apps/web. (v3-D212, 2026-09-14)
+             # NOTE (v3-D212, 2026-09-14): `components/macro/graphNodes.ts`
+             # carried its OWN unexported copy of `lib/progress/rows.ts`'s
+             # `gateStateOf()` instead of importing it — named and
+             # deliberately left by v3-D211's own "NOT addressed" list as "a
+             # real, smaller 'two implementations of one decision' shape,
+             # distinct from the vocabulary-drift class v3-D210 closed." The
+             # two copies actually DISAGREED for one input shape: rows.ts
+             # checked `atom.gateDueAt === null` before `atom.gateFails > 0`
+             # (so a null `gateDueAt` short-circuited straight to
+             # "passed"/"none" regardless of `gateFails`), while
+             # graphNodes.ts checked `gateFails > 0` first. Real engine
+             # transitions (`gate.ts#applyGateResult` sets both together on a
+             # failure; `demoteToLearn` resets both together) never produce
+             # `gateFails > 0` with `gateDueAt` still `null`, so this never
+             # showed a learner the wrong word — but `test/macro-ring.test.tsx`'s
+             # own v3-D210 "a FAILED gate is named" case constructs exactly
+             # that combination (`gateAtom(103, 1, { gateFails: 1 })`, leaving
+             # `gateDueAt` at `initAtom`'s default `null`) and only passed
+             # because it exercised graphNodes.ts's copy, not rows.ts's — the
+             # two implementations had already drifted apart with nothing
+             # noticing. Fixed: `rows.ts#gateStateOf` is now exported and
+             # reordered to check `gateFails > 0` before `gateDueAt === null`
+             # (graphNodes.ts's ordering — verified behavior-identical to the
+             # old rows.ts ordering across every REACHABLE state, since
+             # `gateFails > 0` implies `gateDueAt !== null` in practice);
+             # `graphNodes.ts` deletes its local copy and imports+re-exports
+             # the one function, alongside `GateState` the type (already
+             # re-exported since v3-D210). RED confirmed directly: a new
+             # `lib/progress/gateStateOf-agreement.test.ts` (2 cases) run
+             # against the unmodified duplication failed both — the first on
+             # `import { gateStateOf } from "./rows.ts"` resolving to
+             # `undefined` (not yet exported) so `toBe` compared a real
+             # function against `undefined`; the second with `TypeError:
+             # gateStateOf is not a function` for the same reason. Restored
+             # byte-identically (`git diff` empty before implementing), then
+             # implemented; reran: 2/2 green. `npx vitest run
+             # lib/progress/gateStateOf-agreement.test.ts test/macro-ring.test.tsx
+             # test/ayah-detail.test.tsx test/progress-list.test.tsx`: 108/108
+             # green (was 106, +2 — exactly this run's new file; the other
+             # three files' own pre-existing counts, 33+46+27, unchanged —
+             # confirming no regression on either real consumer). `TZ=UTC
+             # make test`: 2714 passing (was 2712, +2; apps/web 1424, was
+             # 1422; every other suite unchanged: 255 v2 vitest, 47 v2/api,
+             # 377 v3/api, 120 corpus-compiler, 430 engine, 61 fold-runner).
+             # `check-test-floor.mjs`: OK, 2714 >= floor 1899 (+815 margin,
+             # unmoved, same discipline as every prior entry). `TZ=UTC make
+             # build`: exit 0, 30 routes (unchanged — no route touched, a
+             # pure lib/component consolidation). `npm run gates`: all green
+             # (boundaries 315 files, unchanged count — no new production
+             # file, two existing files edited plus one new test file; fonts
+             # degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+             # corpus-morphology 362 words / corpus-glyphs 206 codepoints,
+             # both unchanged — no new corpus data, only a function moved to
+             # one place). `npx tsc --noEmit` (apps/web, via `next build`'s
+             # own pass): clean, exit 0. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff produced by running
+             # the suite was reverted before committing, same discipline as
+             # every prior entry — `git status --porcelain -- v1 v2` empty
+             # immediately before committing). No Arabic codepoint (all three
+             # changed/new files swept programmatically, in Python, over the
+             # Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms Unicode blocks, plus a `fromCharCode`/
+             # `fromCodePoint`/`\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx`
+             # escape sweep — zero matches; every new string is a fixed
+             # English docblock sentence or a synthetic gate-state test
+             # fixture value, never corpus text). Session start: fresh
+             # container, no `node_modules`/`vendor`/compiled corpus
+             # anywhere; `HEAD` was found detached at `edf46c7` (v3-D211),
+             # the same commit `origin/main` was already at, on a stale LOCAL
+             # `main` branch ref ten commits behind (`26cc664`, v3-D201) —
+             # the recurring "stale local main" trap this file has recorded
+             # roughly forty times since v3-D77 — caught before any
+             # implementation work via `git fetch` + `git checkout main &&
+             # git merge --ff-only origin/main`, a clean fast-forward, no
+             # work lost or at risk. `make setup` then run from scratch, no
+             # retries needed. Found by re-reading v3-D211's own "NOT
+             # addressed" list directly rather than dispatching a fresh sweep
+             # agent — the item was already named, concrete, and small enough
+             # to verify by hand (a two-function diff, not a codebase-wide
+             # search). NOT addressed: every item on v3-D211's own "NOT
+             # addressed" list, unchanged (the streak/away-day day-space
+             # mismatch, v3-D209; `rhymeClassOf()`, v3-D136;
+             # `EntitlementMachine::merge()`; `App\Billing\TrialAttribution`;
+             # `lib/pricing.ts#regionFromCountry()`; `PaywallGate` as a whole
+             # class; multi-surah enrollment; the operational mailer/7-night
+             # window; PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift;
+             # `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel`; `StripeField.editable`;
+             # `corpusHash`'s own zero fold-side consumer;
+             # `lib/plan/forecast.ts`'s empty-log zero-state) — all
+             # unchanged. See DECISIONS.md v3-D212.
              # NOTE (v3-D211, 2026-09-13): `lib/progress/rows.ts#gateStateOf()`
              # has computed the real, reachable "failed" member of `GateState`
              # since the forgiveness ladder shipped (gate.ts#applyGateResult,
