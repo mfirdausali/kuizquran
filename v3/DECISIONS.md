@@ -18451,3 +18451,129 @@ scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy drift
 `MacroFacts.litany.rhymeLabel` (v3-D188); `StripeField.editable` (v3-D204);
 `corpusHash`'s own zero fold-side consumer (v3-D206); `lib/plan/
 forecast.ts`'s empty-log zero-state (v3-D207) — all unchanged.
+
+---
+
+## v3-D216 (2026-09-15): `foldDeterminismCheckRun` re-derived `foldEvents`+`compareAtomCaches` inline instead of calling the shared `foldDeterminismCheck` primitive it sits directly beside
+
+`worker/fold-runner/src/determinism.ts#foldDeterminismCheck` — the file's own
+headline export, its docblock calling it "the nightly check itself" — has
+been fully unit-tested (`test/determinism.test.ts`) since the fold-runner
+shipped (build-plan step 14), but the ONE real production consumer,
+`foldDeterminismCheckRun()` in the SAME package's `foldCheck.ts`
+(`bin/fold-determinism-check.ts`'s real entry point, the code that actually
+runs at 3am), never called it: it re-derived the identical computation
+inline — `foldEvents(sample.events, cfg)` then a manually-built
+`Set([...fresh.keys(), ...sample.liveCache.keys()])` for the atom count,
+then a separate `compareAtomCaches(fresh, sample.liveCache)` call for the
+divergent keys — three lines duplicating exactly what `foldDeterminismCheck`
+already does in one call. `grep -rn "foldDeterminismCheck\b"
+worker/fold-runner/src worker/fold-runner/bin` showed the function's only
+non-test reference was its own declaration; `bin/fold-determinism-check.ts`
+imports `foldDeterminismCheckRun` only. This is the exact "tested helper
+exists, the one real call site re-derives it inline instead" shape v3-D159
+(`digestsMatch`) and v3-D113 (`lastActiveDayMs`) already closed elsewhere in
+this codebase — not yet found in `worker/fold-runner/src`, which repeated
+prior sweeps (v3-D127, v3-D159) had flagged as only lightly checked.
+
+Not a live correctness bug today — both code paths compute the identical
+fold-then-compare — but it is exactly the duplication this codebase treats
+as a real defect class: if `foldDeterminismCheck`'s own comparison rule ever
+changes (a new field added to `AtomState`, a different equality rule), the
+real 3am entrypoint would silently keep running the STALE inline copy,
+since nothing routes through the tested primitive. The highest-severity
+signal in this codebase (a confirmed P1 resets the 7-night launch window)
+was one un-synced edit away from checking the wrong thing.
+
+**Fixed:** `DeterminismResult` gains a `comparedKeys: number` field (the
+size of the key union `compareAtomCaches` already computes internally — an
+additive field, so `foldDeterminismCheck`'s signature and every existing
+non-`toEqual` caller are unchanged). `foldDeterminismCheckRun` now calls
+`foldDeterminismCheck(sample.events, sample.liveCache, cfg)` once per
+sample and reads `divergentKeys`/`comparedKeys` off its result — the
+`foldEvents` and `compareAtomCaches` imports are gone from `foldCheck.ts`
+entirely; there is no second implementation left to drift.
+
+**RED confirmed directly:** `git stash` of the two source files only (every
+test kept) reran `test/foldCheck.test.ts` + `test/determinism.test.ts` —
+the new wiring-proof test (a `vi.mock` spy seam over
+`determinism.ts#foldDeterminismCheck`, mirroring `assemble-lastactive.test.ts`'s
+own v3-D113 precedent exactly) failed genuinely: `expected 2 to be 999` — a
+sentinel result the spy returns (`comparedKeys: 999`, one divergent key) was
+silently ignored by the unfixed `foldDeterminismCheckRun`, which computed
+its own `atomsCompared: 2` from a real inline fold instead of reading the
+override. Two pre-existing `determinism.test.ts` `toEqual` assertions also
+failed (missing `comparedKeys`) — expected, since that field is new
+plumbing, not the wiring proof itself. Restored byte-identically (`git diff`
+empty), reran: 63/63 green in the fold-runner suite (was 61, +2 — exactly
+this run's two new cases: the wiring-proof test and its negative sibling,
+which proves the real primitive's own output still reaches
+`foldDeterminismCheckRun` unmodified when nothing overrides it). The
+existing `test/runners.test.ts` (11 cases, drives the real
+`bin/fold-determinism-check.ts` subprocess against the committed golden log
++ oracle) and `test/rebuildAtomCache.test.ts` (8 cases) stayed green
+unchanged, confirming the real CLI entrypoint's severity taxonomy
+(green/WARN/P1 exit codes) is unaffected end to end.
+
+`TZ=UTC make test`: **2725 passing** (was 2723, +2 — exactly this run's two
+new tests; fold-runner 63, was 61; no other suite moved: 255 v2 vitest, 47
+v2/api, 379 v3/api, 120 corpus-compiler, 430 engine, 1431 apps/web).
+`check-test-floor.mjs`: OK, 2725 >= floor 1899 (+826 margin, unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 30 routes
+(unchanged — a fold-runner-internal fix, no `apps/web` route or component
+touched). `npm run gates`: all green (boundaries 316 files, unchanged count
+— two existing production files edited plus two existing test files, no new
+production file; fonts degraded-but-non-blocking, pre-existing, 2/6 UI
+fonts present; corpus-morphology 362 words / corpus-glyphs 206 codepoints,
+both unchanged — no new corpus data). `npx tsc --noEmit`, run standalone
+inside `worker/fold-runner`: clean (one real iteration — the spy wrapper's
+first draft typed `cfg` as `unknown`, which `tsc` rejected against
+`DayConfig | undefined`; fixed by importing the real `DayConfig` type
+instead of widening to `unknown`). No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite was
+reverted before committing, same discipline as every prior entry — `git
+status --porcelain -- v1 v2` empty immediately before committing). No
+Arabic codepoint (both changed source files and both changed test files
+swept programmatically, in Python, over the Arabic, Arabic Supplement,
+Arabic Extended-A and both Presentation Forms Unicode blocks, plus a
+`\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape and
+`fromCharCode`/`fromCodePoint` sweep — zero matches; every new string is a
+TypeScript identifier, a wire field name, a fixed English docblock sentence,
+or a synthetic fixture coordinate/version string ported from this same test
+file's own established convention, never corpus text).
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; `HEAD` was found detached at `a2a3e78`, the same commit
+`origin/main` was already at, on a stale LOCAL `main` branch ref fourteen
+commits behind (`26cc664`) — the recurring "stale local main" trap this
+file has recorded roughly fifty times since v3-D77 — caught before any
+implementation work via `git fetch` + `git checkout main && git merge
+--ff-only origin/main`, a clean fast-forward, no work lost or at risk. `make
+setup` then `make compile-corpus` both ran from scratch, no retries needed.
+
+**Found by** a dedicated fresh-sweep agent (Explore) handed the full
+exclusion list carried through v3-D215 and directed at
+`worker/fold-runner/src` (flagged by name as under-swept),
+`packages/corpus-compiler/src`, recently-landed features (away-day,
+`DrillEvent.locale`), `v3/api/app/**`, and a zero-caller pass over
+`apps/web/lib/**` — it independently re-confirmed the away-day feature, the
+`DrillEvent.locale` wiring, and the whole `Corpus`/`CorpusMeta` type family
+still clean before landing on this instance; independently re-verified by
+this run directly against both `determinism.ts` and `foldCheck.ts`'s real
+source (the greps above) before writing any test.
+
+**NOT addressed**, named so a future run doesn't re-discover it as new:
+every item on v3-D215's own "NOT addressed" list, unchanged (the
+streak/away-day day-space mismatch, v3-D209; `rhymeClassOf()`, v3-D136;
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution`;
+`lib/pricing.ts#regionFromCountry()`; `PaywallGate` as a whole class;
+multi-surah enrollment; the operational mailer/7-night window; PAY-1's
+Stripe fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy drift; `packages/engine/src/placement.ts`;
+`MacroFacts.litany.rhymeLabel`; `StripeField.editable`; `corpusHash`'s own
+zero fold-side consumer; `lib/plan/forecast.ts`'s empty-log zero-state).
+Also not pursued this run: `corpus-compiler/src/report.ts#buildReport()`
+(writes `corpus-report.md`, never read by any gate script or admin UI) — a
+weaker candidate, plausibly a deliberate human-read build artifact rather
+than a wiring gap, same shape as v3-D202's rejected `ManifestEntry` lead;
+left for a future run to confirm or fix rather than guessed at here.

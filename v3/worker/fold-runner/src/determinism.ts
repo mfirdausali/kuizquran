@@ -15,6 +15,11 @@ import { foldEvents } from "./fold.ts";
 
 export interface DeterminismResult {
   matches: boolean;
+  /** Every key present on EITHER side — the size of the union, i.e. the
+   *  total number of atoms this comparison actually covered. A caller that
+   *  needs an "atoms compared" count reads it here rather than re-deriving
+   *  the same key union a second time. */
+  comparedKeys: number;
   /** Every atom key present in only one cache, or whose AtomState differs —
    *  ANY divergence, however small a field, however few keys. Sorted for a
    *  stable, diffable report. */
@@ -42,7 +47,7 @@ export function compareAtomCaches(a: AtomsMap, b: AtomsMap): DeterminismResult {
     if (!av || !bv || !atomsEqual(av, bv)) divergentKeys.push(key);
   }
   divergentKeys.sort();
-  return { matches: divergentKeys.length === 0, divergentKeys };
+  return { matches: divergentKeys.length === 0, comparedKeys: keys.size, divergentKeys };
 }
 
 /**

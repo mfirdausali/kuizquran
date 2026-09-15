@@ -5,13 +5,34 @@
 // different severity depending only on the cached row's engine_version.
 // Anything less and the taxonomy is decoration.
 
-import { describe, expect, it } from "vitest";
-import { foldDeterminismCheckRun, type SampledUser } from "../src/foldCheck.ts";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import { foldEvents } from "../src/fold.ts";
 import { EXIT_CODE, countsAsGreen, resetsWindow, severityFromExitCode } from "../src/severity.ts";
 import type { AtomState } from "../../../packages/engine/src/atom.ts";
 import type { AtomsMap } from "../../../packages/engine/src/rebuild.ts";
 import type { DrillEvent } from "../../../packages/engine/src/types.ts";
+import type { DeterminismResult } from "../src/determinism.ts";
+import type { DayConfig } from "../../../packages/engine/src/daybound.ts";
+
+// A spy seam over the shared pure primitive `foldDeterminismCheck`. When set,
+// it OVERRIDES the real one, so a caller that genuinely ROUTES through it
+// (rather than re-deriving foldEvents+compareAtomCaches inline, v3-D216's own
+// finding) observably reflects the override.
+let foldDeterminismCheckSpy:
+  | ((events: DrillEvent[], liveCache: AtomsMap, cfg?: DayConfig) => DeterminismResult)
+  | null = null;
+vi.mock("../src/determinism.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/determinism.ts")>();
+  return {
+    ...actual,
+    foldDeterminismCheck: (events: DrillEvent[], liveCache: AtomsMap, cfg?: DayConfig) =>
+      foldDeterminismCheckSpy
+        ? foldDeterminismCheckSpy(events, liveCache, cfg)
+        : actual.foldDeterminismCheck(events, liveCache, cfg),
+  };
+});
+
+import { foldDeterminismCheckRun, type SampledUser } from "../src/foldCheck.ts";
 
 const VERSION = "v3-engine-0.1.0";
 
@@ -35,6 +56,39 @@ function sample(mutate?: (cache: AtomsMap) => void, versions?: Map<string, strin
     cachedEngineVersion: versions ?? new Map([...copy.keys()].map((k) => [k, VERSION])),
   };
 }
+
+beforeEach(() => {
+  foldDeterminismCheckSpy = null;
+});
+
+describe("foldDeterminismCheckRun routes through the shared foldDeterminismCheck primitive (v3-D216)", () => {
+  it("reflects an overridden foldDeterminismCheck's own comparedKeys/divergentKeys, not a re-derived inline fold+compare", () => {
+    // A sentinel result no real fold+compare of `sample()`'s fixture could
+    // ever produce (single key, 999 compared) — if foldDeterminismCheckRun
+    // re-derives foldEvents+compareAtomCaches inline instead of calling
+    // foldDeterminismCheck, it is blind to this override.
+    foldDeterminismCheckSpy = () => ({
+      matches: false,
+      comparedKeys: 999,
+      divergentKeys: ["12:ayah:1"],
+    });
+
+    const report = foldDeterminismCheckRun([sample()], VERSION);
+
+    expect(report.atomsCompared).toBe(999);
+    expect(report.divergentCount).toBe(1);
+    expect(report.findings[0]!.key).toBe("12:ayah:1");
+  });
+
+  it("hands the real fold+compare through when the primitive is not overridden", () => {
+    foldDeterminismCheckSpy = null; // the real determinism.ts primitive
+
+    const report = foldDeterminismCheckRun([sample()], VERSION);
+
+    expect(report.severity).toBe("green");
+    expect(report.atomsCompared).toBe(2); // the two events fold to two distinct ayah atoms
+  });
+});
 
 describe("severity — the taxonomy is a type and an exit code, not a log string", () => {
   it("maps each severity to a distinct exit code", () => {

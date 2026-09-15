@@ -37,7 +37,7 @@ describe("compareAtomCaches — the fold_determinism_check comparison primitive"
   it("matches when both caches are identical", () => {
     const a = new Map([["12:ayah:4", atom()]]);
     const b = new Map([["12:ayah:4", atom()]]);
-    expect(compareAtomCaches(a, b)).toEqual({ matches: true, divergentKeys: [] });
+    expect(compareAtomCaches(a, b)).toEqual({ matches: true, comparedKeys: 1, divergentKeys: [] });
   });
 
   it("reports a divergent key when a field differs — ANY divergence, however small", () => {
@@ -60,7 +60,7 @@ describe("compareAtomCaches — the fold_determinism_check comparison primitive"
   });
 
   it("an empty-vs-empty comparison matches", () => {
-    expect(compareAtomCaches(new Map(), new Map())).toEqual({ matches: true, divergentKeys: [] });
+    expect(compareAtomCaches(new Map(), new Map())).toEqual({ matches: true, comparedKeys: 0, divergentKeys: [] });
   });
 });
 

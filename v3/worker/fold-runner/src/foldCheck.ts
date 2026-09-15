@@ -32,8 +32,7 @@
 import type { AtomsMap } from "../../../packages/engine/src/rebuild.ts";
 import type { DayConfig } from "../../../packages/engine/src/daybound.ts";
 import type { DrillEvent } from "../../../packages/engine/src/types.ts";
-import { compareAtomCaches } from "./determinism.ts";
-import { foldEvents } from "./fold.ts";
+import { foldDeterminismCheck } from "./determinism.ts";
 import type { Severity } from "./severity.ts";
 
 /** One sampled learner's inputs, as a live deployment supplies them. */
@@ -89,13 +88,12 @@ export function foldDeterminismCheckRun(
   let atomsCompared = 0;
 
   for (const sample of samples) {
-    const fresh = foldEvents(sample.events, cfg);
-    // Every key on either side is compared — a key the cache has and the
-    // fold does not is as much a divergence as the reverse.
-    const allKeys = new Set([...fresh.keys(), ...sample.liveCache.keys()]);
-    atomsCompared += allKeys.size;
+    // Routed through the shared pure primitive (re-fold from scratch, then
+    // compare) rather than re-derived inline — the fold and the comparison
+    // rule live in exactly one place, `determinism.ts`.
+    const { divergentKeys, comparedKeys } = foldDeterminismCheck(sample.events, sample.liveCache, cfg);
+    atomsCompared += comparedKeys;
 
-    const { divergentKeys } = compareAtomCaches(fresh, sample.liveCache);
     for (const key of divergentKeys) {
       const cachedVersion = sample.cachedEngineVersion.get(key) ?? null;
       // Skew ONLY when a version is recorded AND differs. No recorded
