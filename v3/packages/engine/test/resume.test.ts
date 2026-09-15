@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resumePolicy, TWO_MIN, ONE_HOUR } from "../src/resume.ts";
+import { resumePolicy, resumeNotice, TWO_MIN, ONE_HOUR } from "../src/resume.ts";
 import { DEFAULT_DAY_CONFIG } from "../src/daybound.ts";
 
 // UTC wall clock — matches DEFAULT_DAY_CONFIG.tz, which the boundary tests pass.
@@ -45,5 +45,25 @@ describe("resumePolicy (FR5)", () => {
     const after = atUtc(2026, 7, 14, 4, 31);
     const d = resumePolicy(before, after, DEFAULT_DAY_CONFIG);
     expect(d.action).toBe("makeup");
+  });
+});
+
+describe("resumeNotice (FR5) — the one-line notice for a real re-entry", () => {
+  it("says nothing for the ordinary 'resume' case", () => {
+    expect(resumeNotice("resume")).toBeNull();
+  });
+
+  it("names the time-on-task consequence for restart and replan, distinctly from makeup", () => {
+    const restart = resumeNotice("restart");
+    const replan = resumeNotice("replan");
+    const makeup = resumeNotice("makeup");
+    expect(restart).not.toBeNull();
+    expect(replan).not.toBeNull();
+    expect(makeup).not.toBeNull();
+    // restart/replan share the honest "won't count" framing; makeup is a
+    // materially different fact (a new day, not a discarded latency) and must
+    // not be conflated with the other two under one shared sentence.
+    expect(restart).toBe(replan);
+    expect(makeup).not.toBe(restart);
   });
 });

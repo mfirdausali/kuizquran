@@ -41,8 +41,10 @@ import { refreshEntitlementSnapshot } from "@/lib/entitlement/sync";
 import {
   acceptAdoption,
   acceptGateDemote,
+  acknowledgeReentry,
   adoptionOfferFor,
   answerCurrent,
+  classifyReentry,
   clearReveal,
   currentItem,
   demoteOfferFor,
@@ -61,6 +63,7 @@ import {
   type SessionRun,
   type SessionUnavailable,
 } from "@/lib/session/run";
+import { resumeNotice } from "@engine/resume.ts";
 import { structuredFor } from "@/lib/drill/preview";
 import { ayatForSelection } from "@/lib/drill/sites";
 import type { DrillSpec } from "@/lib/drill/handoff";
@@ -175,6 +178,13 @@ export function SessionIsland({
   // is needed here — the same "ask the engine, render what it says" shape
   // every other offer on this screen follows.
   const [adoptionOffer, setAdoptionOffer] = useState<AdoptionOffer | null>(null);
+  // FR5 (v3-D217) — the honest one-line notice for a real re-entry gap
+  // (`resumePolicy()`/`classifyReentry`, `lib/session/run.ts`). Set by the
+  // `window` "focus" effect below, mirroring `SyncTrigger.tsx`'s own
+  // established re-entry signal; cleared the moment the learner interacts
+  // again (`commit`, below), so it is never stale chrome left over from a
+  // gap several taps ago.
+  const [reentryNotice, setReentryNotice] = useState<string | null>(null);
 
   // A stable identity for the drill request, so the start effect keys on the
   // VALUE, not the object reference (a parent re-render hands down a
@@ -322,6 +332,44 @@ export function SessionIsland({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [surah, mode, drillKey, practiceKey]);
 
+  // FR5 (v3-D217) — a real re-entry gap. `resumePolicy()`
+  // (`packages/engine/src/resume.ts`) was built and unit-tested since build
+  // step 18's own summary work but had ZERO production callers anywhere —
+  // `lib/progress/rows.ts#timeOnTaskMs`'s own docblock claimed "the same
+  // function the session loop uses", which was false until this effect:
+  // that function is the ONLY caller, and never through the session loop.
+  //
+  // `window` "focus" is the SAME re-entry signal `SyncTrigger.tsx` already
+  // uses for the identical "the learner just came back" question — no new
+  // signal invented. Only reacts while `phase.kind === "drilling"`: a gap
+  // while looking at the finished summary has nothing current to attach an
+  // interruption event to (`classifyReentry` itself already returns `null`
+  // there), and a gap before a session has even started has no run yet.
+  //
+  // Deliberately does NOT restart, re-plan or make-up merge the queue —
+  // `classifyReentry`'s own header names that as separate, larger scope.
+  // What this DOES do, honestly: log the gap (an evidence-only audit event,
+  // invariant #5) and say the one thing that is already true regardless —
+  // the gap's latency will not count toward "time on task"
+  // (`timeOnTaskMs` already excludes it, independently of this effect).
+  useEffect(() => {
+    if (phase.kind !== "drilling" || !run) return;
+    function onFocus() {
+      if (!run) return;
+      const decision = classifyReentry(run, Date.now());
+      if (!decision || decision.action === "resume") return;
+      const notice = resumeNotice(decision.action);
+      void acknowledgeReentry(run, decision, { now: Date.now(), tz: currentTz() }).then(
+        (next) => {
+          setRun(next);
+          setReentryNotice(notice);
+        },
+      );
+    }
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [phase, run]);
+
   const cur = useMemo(() => {
     if (!run || !corpus) return null;
     return currentItem(run, corpus);
@@ -347,6 +395,9 @@ export function SessionIsland({
   // message the learner previously saw.
   const commit = useCallback((action: () => Promise<SessionRun>) => {
     setBusy(true);
+    // A re-entry notice is about the gap that just ended; the learner's next
+    // interaction is proof it has, so it never lingers as stale chrome.
+    setReentryNotice(null);
     void (async () => {
       // COMMIT BEFORE PAINT: this await is the invariant. Neither a fresh
       // `answerCurrent` nor a resumed retry resolves until the event is
@@ -730,6 +781,14 @@ export function SessionIsland({
       {run?.rescaffolding ? (
         <p className="caption" data-testid="session-rescaffold-hint">
           A lighter warm-up first — then the real cold check.
+        </p>
+      ) : null}
+      {/* FR5 (v3-D217): only ever shown once the engine's own `resumePolicy`
+          classifies a genuine re-entry gap — this component never guesses at
+          how long the learner was away. */}
+      {reentryNotice ? (
+        <p className="caption" role="status" data-testid="reentry-notice">
+          {reentryNotice}
         </p>
       ) : null}
       <QuizCard

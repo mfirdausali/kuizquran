@@ -31,7 +31,7 @@
 //      fetch fails outright — this is a cache warm, not a precondition.
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -197,6 +197,91 @@ describe("#103 — it never blocks the session (cache warm, not a precondition)"
     // And the failure left no cache entry — a failed refresh must not
     // fabricate a grant either.
     await expect(readEntitlementSnapshot()).resolves.toBeNull();
+  });
+});
+
+// v3-D217 — FR5 (`packages/engine/src/resume.ts#resumePolicy`) reaches the
+// real session loop for the first time. `resumePolicy` classified a genuine
+// re-entry gap since it landed, unit-tested (`resume.test.ts`), but had ZERO
+// production callers — `lib/progress/rows.ts#timeOnTaskMs`'s own docblock
+// claimed otherwise ("the same function the session loop uses"), which was
+// false until this. `window` "focus" is the SAME re-entry signal
+// `SyncTrigger.tsx` already uses (`test/sync-trigger.test.tsx`'s own
+// precedent) — no new signal invented here either.
+describe("v3-D217 — FR5's resumePolicy reaches the real session loop via a window 'focus' re-entry", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("after a genuine re-entry gap: logs a real interruption event and shows the honest notice", async () => {
+    installFetch();
+    render(<SessionIsland surah={SURAH} />);
+    await screen.findByTestId("session-drill");
+    expect(screen.queryByTestId("reentry-notice")).toBeNull();
+
+    // 30 minutes: past resumePolicy's TWO_MIN threshold, inside its ONE_HOUR
+    // one — "restart", exactly the classification run.test.ts's own FR5
+    // block pins for this same gap size. `Date.now` is spied directly rather
+    // than `vi.useFakeTimers()` — real timers stay real, so fake-indexeddb's
+    // own internal scheduling (which the mount effect's session_start commit
+    // already depends on) is untouched.
+    const later = Date.now() + 30 * 60_000;
+    vi.spyOn(Date, "now").mockReturnValue(later);
+
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+    });
+
+    const notice = await screen.findByTestId("reentry-notice");
+    expect(notice.textContent).toMatch(/time on task/i);
+
+    const events = await getAllEvents();
+    const interruption = events.find((e) => e.type === "interruption");
+    expect(interruption).toBeDefined();
+    expect(interruption?.resume).toBe("restart");
+    expect(interruption?.structured).toBe(false);
+  });
+
+  it("an ordinary short gap ('resume') earns no notice and no interruption event", async () => {
+    installFetch();
+    render(<SessionIsland surah={SURAH} />);
+    await screen.findByTestId("session-drill");
+
+    const before = await getAllEvents();
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByTestId("reentry-notice")).toBeNull();
+    const after = await getAllEvents();
+    expect(after.length).toBe(before.length);
+  });
+
+  it("the notice clears on the learner's next interaction — never stale chrome from a gap several taps ago", async () => {
+    installFetch();
+    render(<SessionIsland surah={SURAH} />);
+    await screen.findByTestId("session-drill");
+
+    const later = Date.now() + 30 * 60_000;
+    vi.spyOn(Date, "now").mockReturnValue(later);
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await screen.findByTestId("reentry-notice");
+
+    // `commit()` clears the notice at the START of the callback, synchronously
+    // and regardless of whether the tap turns out right or wrong — so any one
+    // tile tap proves the clearing, with no need to know which tile is
+    // correct (this file never writes Quranic Arabic to find out).
+    const bank = document.querySelector(".bank");
+    if (!bank) throw new Error("no bank to drive");
+    const tile = within(bank as HTMLElement).getAllByRole("button")[0]!;
+    await act(async () => {
+      fireEvent.click(tile);
+    });
+
+    expect(screen.queryByTestId("reentry-notice")).toBeNull();
   });
 });
 
@@ -429,6 +514,7 @@ function trivialOneItemRun(c: Corpus, now: number): SessionRun {
     rescaffolding: false,
     openPracticeDrill: null,
     structured: true,
+    lastActivityAt: now,
   };
 }
 
@@ -495,6 +581,7 @@ describe("v3-D98 — Door 1 CTA on the real summary screen, actually wired", () 
       rescaffolding: false,
       openPracticeDrill: null,
       structured: true,
+      lastActivityAt: now - 1000,
     };
     // Play this seeding run to completion OFF-SCREEN, via the real (unmocked)
     // functions — mirrors run.test.ts's own playThrough, driven by the
@@ -598,6 +685,7 @@ describe("v3-D106 — Door 2 CTA on the real summary screen, actually wired", ()
           rescaffolding: false,
           openPracticeDrill: null,
           structured: true,
+          lastActivityAt: now,
         },
       });
 
@@ -728,6 +816,7 @@ function gateRunFor(c: Corpus, now: number): SessionRun {
     rescaffolding: false,
     openPracticeDrill: null,
     structured: true,
+    lastActivityAt: now,
   };
 }
 
@@ -1120,6 +1209,7 @@ function twoItemRun(c: Corpus, now: number): SessionRun {
     rescaffolding: false,
     openPracticeDrill: null,
     structured: true,
+    lastActivityAt: now,
   };
 }
 

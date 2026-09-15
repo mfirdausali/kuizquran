@@ -107,6 +107,11 @@ import { gradeClassToWire } from "@engine/gradeClass.ts";
 // v3-D107/D108 named. The one derivation now lives in one place; the inline
 // copy's `0` floor (vs the engine's `-Infinity`) is gone with it.
 import { lastActiveDayMs } from "@engine/activity.ts";
+// FR5 — resume policy (`packages/engine/src/resume.ts#resumePolicy`). See
+// `classifyReentry`/`acknowledgeReentry` near the bottom of this file for why
+// this had ZERO production callers until now, despite
+// `lib/progress/rows.ts#timeOnTaskMs`'s own docblock claiming otherwise.
+import { resumePolicy, resumeNotice, type ResumeDecision } from "@engine/resume.ts";
 
 import {
   append,
@@ -275,6 +280,15 @@ export interface SessionRun {
    * `session_start`'s own stamp.
    */
   readonly glossLang?: GlossLang;
+  /**
+   * FR5 — the ts of this run's own most recent commit (any event
+   * `commitThenContinue` landed), or `startedAt` before the first one.
+   * `classifyReentry`, below, is `resumePolicy(run.lastActivityAt, now)` —
+   * so this is deliberately the LAST tap/commit, never `startedAt`: a
+   * learner who has been tapping steadily for twenty minutes has not been
+   * "away" for twenty minutes, only since their last tap.
+   */
+  readonly lastActivityAt: number;
 }
 
 export type StartResult =
@@ -792,6 +806,7 @@ async function startFromQueue(
       openPracticeDrill,
       corpusHash: c.meta.corpusHash,
       glossLang,
+      lastActivityAt: now,
     },
   };
 }
@@ -884,7 +899,12 @@ async function commitThenContinue(
     }
     throw err;
   }
-  return onSuccess();
+  // FR5: every commit that lands through this choke point is real learner
+  // activity, so `lastActivityAt` refreshes here — the one place, rather than
+  // in each of this file's dozen call sites — regardless of which kind of
+  // event just landed.
+  const next = await onSuccess();
+  return { ...next, lastActivityAt: event.ts };
 }
 
 /**
@@ -1148,6 +1168,80 @@ async function settleAnswer(
 /** Clear the reveal so the next blank paints unmarked. */
 export function clearReveal(run: SessionRun): SessionRun {
   return run.lastTap === null ? run : { ...run, lastTap: null };
+}
+
+/**
+ * FR5 — resume policy (`packages/engine/src/resume.ts#resumePolicy`).
+ *
+ * `resumePolicy` classified a real re-entry gap (<2min resume, <1hr restart,
+ * >1hr same-day replan, day-boundary-crossed makeup) since it landed, fully
+ * unit-tested (`resume.test.ts`), but had ZERO production callers anywhere —
+ * neither this module nor `SessionIsland.tsx` ever asked it anything.
+ * `lib/progress/rows.ts#timeOnTaskMs`'s own docblock already claimed
+ * otherwise ("the same function the session loop uses, so the number in
+ * this column is the number the engine believes") — false when written:
+ * that function is the ONLY real caller anywhere, and it never routes
+ * through the session loop at all.
+ *
+ * `null` once the session is done — there is no current queue item left to
+ * attach an audit event to, and a learner looking at their own completed
+ * summary has nothing left to be "interrupted" out of.
+ *
+ * Deliberately just the CLASSIFICATION. Restructuring the queue for
+ * "restart"/"replan"/"makeup" (discarding the current item's partial state,
+ * re-deriving the whole remaining queue, or running a make-up merge) is a
+ * genuinely separate, larger scope — this file's own established "one door
+ * at a time" precedent (v3-D98's Door 1, v3-D106's Door 2, v3-D117's Door
+ * 3), named here so a future run does not have to re-derive that boundary.
+ * What a caller MAY honestly say today, regardless of whether it ever
+ * builds that larger scope: `timeOnTaskMs` already excludes this gap's
+ * latency from "time on task" for any classification other than "resume",
+ * independently of anything here ever running — see `resumeNotice`.
+ */
+export function classifyReentry(run: SessionRun, now: number): ResumeDecision | null {
+  if (run.done) return null;
+  return resumePolicy(run.lastActivityAt, now);
+}
+
+/**
+ * Acknowledge a genuine re-entry gap: commit a real `interruption` event (an
+ * evidence-only audit trail — `structured: false`, exactly like `test_*`/
+ * `day_marked_away`; `rebuild.ts` has no branch for it, invariant #5's
+ * structural-absence discipline, so this can never move a strength or a due
+ * date) and refresh `lastActivityAt`. A no-op — no event, `run` returned
+ * unchanged — for the ordinary "resume" classification (dozens of times a
+ * session; it earns no audit row) and once the session is done, mirroring
+ * `acceptGateDemote`'s own "acts on exactly what it was shown, never a
+ * stale caller" discipline: a caller that raced past a completed session
+ * cannot retroactively interrupt it.
+ *
+ * `ayah` is the CURRENT queue item's — the one thing an interruption can be
+ * said to be "about" — never a fabricated coordinate.
+ */
+export async function acknowledgeReentry(
+  run: SessionRun,
+  decision: ResumeDecision,
+  ctx: AppendContext,
+): Promise<SessionRun> {
+  if (decision.action === "resume" || run.done) return run;
+  const q = run.queue[run.cursor];
+  if (!q) return run;
+
+  const event = {
+    type: "interruption",
+    ts: ctx.now,
+    tz: ctx.tz,
+    surah: run.surah,
+    ayah: q.ayah,
+    rung: gradeClassToWire("ungraded"),
+    structured: false,
+    resume: decision.action,
+    corpusHash: run.corpusHash,
+    locale: run.glossLang,
+  } as DrillEvent;
+
+  await append(event, ctx);
+  return { ...run, lastActivityAt: ctx.now };
 }
 
 /**

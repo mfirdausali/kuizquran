@@ -52,3 +52,23 @@ export function resumePolicy(
   // >1 hr but same learning-day → re-plan with a warm-up.
   return { action: "replan", discardLatency: true, massed: false };
 }
+
+/**
+ * The one-line notice a caller may show for a real re-entry gap — `null` for
+ * "resume" (the ordinary case, several times a session; it deserves no
+ * words). Says only what is ALREADY true regardless of whether a caller
+ * implements any queue-level behavior for the gap: the discarded-latency
+ * fact for "restart"/"replan" holds by construction of `discardLatency`
+ * above, independently of anything downstream ever reading it.
+ */
+export function resumeNotice(action: ResumeAction): string | null {
+  switch (action) {
+    case "resume":
+      return null;
+    case "restart":
+    case "replan":
+      return "Welcome back — that pause won't count toward your time on task.";
+    case "makeup":
+      return "Welcome back — it looks like a new day. Head to Home for today's fresh queue.";
+  }
+}

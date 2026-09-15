@@ -18577,3 +18577,148 @@ Also not pursued this run: `corpus-compiler/src/report.ts#buildReport()`
 weaker candidate, plausibly a deliberate human-read build artifact rather
 than a wiring gap, same shape as v3-D202's rejected `ManifestEntry` lead;
 left for a future run to confirm or fix rather than guessed at here.
+
+---
+
+## v3-D217 (2026-09-15): `resumePolicy()` (FR5) reached the real session loop for the first time — `lib/progress/rows.ts`'s own docblock claim was false since it was written
+
+`packages/engine/src/resume.ts#resumePolicy()` — FR5's re-entry classifier
+(`<2min → resume`, `<1hr → restart`, `>1hr same-day → replan`, day-boundary
+crossed → `makeup`) — has been pure, exported and fully unit-tested
+(`resume.test.ts`) since it landed, but had exactly ONE caller anywhere in
+this codebase: `apps/web/lib/progress/rows.ts#timeOnTaskMs`, which reads
+only its `discardLatency` boolean to zero out a Progress-table stat cell.
+That function's own docblock made a specific factual claim: "`resumePolicy`
+is asked... the same function the session loop uses, so the number in this
+column is the number the engine believes." Grepping `lib/session/run.ts`
+and every `components/session/*` file for `resumePolicy` returned nothing
+before this fix — the claim was false when written: `timeOnTaskMs` was the
+ONLY caller, and it never routed through the session loop at all. The
+`interruption` `EventType`/`DrillEvent.resume` field (`@engine/types.ts`,
+"a session re-entry classified by resumePolicy... v0.6 metric") had zero
+constructors anywhere outside test fixtures — a learner who backgrounded
+the app mid-drill for ninety minutes and came back left no trace of the gap
+anywhere in their own log, and was told nothing about it.
+
+Found by a dedicated fresh-sweep agent (Explore) handed the full exclusion
+list carried through v3-D216 and directed at `worker/fold-runner/src`,
+`packages/corpus-compiler/src`, `v3/api/app/**` and `apps/web/lib/**`
+subdirectories; it also independently confirmed `corpus-compiler/src/
+report.ts#buildReport()` (flagged unconfirmed at v3-D216) is a real,
+deliberate human-read build artifact (`compile.ts` calls it, writes
+`corpus-report.md`) — not the zero-caller shape, closed off future "NOT
+addressed" lists as resolved-not-a-gap.
+
+**Scope, deliberate.** The full FR5 feature (`resumePolicy`'s own header)
+implies real queue-level behavior for "restart"/"replan"/"makeup" —
+discarding the current item's partial reconstruct state, re-deriving the
+whole remaining queue, or running a make-up merge. That is a genuinely
+separate, larger scope (a full night's own work, comparable to FR6's
+Door 1/2/3, each landed as its own night — v3-D98/D106/D117), and this run
+does not build it — named explicitly, mirroring this codebase's own
+established "one door at a time" precedent, so a future run does not have
+to re-derive that boundary from scratch. What this run DOES build: an
+honest audit trail and an honest one-line notice, both real and wired.
+
+**Fixed**, end to end, three layers:
+
+- `packages/engine/src/resume.ts` gains `resumeNotice(action): string |
+  null` — the one-line copy for a real gap (`null` for "resume"; a shared
+  "won't count toward time on task" sentence for "restart"/"replan",
+  distinctly worded for "makeup", which is a different fact — a new day,
+  not a discarded latency), mirroring `freeplay.ts#diminishingReturns`'s own
+  precedent for engine-owned copy.
+- `apps/web/lib/session/run.ts` gains `SessionRun.lastActivityAt` (the ts of
+  the run's own most recent commit, refreshed centrally inside
+  `commitThenContinue` — one choke point, not a dozen call sites — never
+  `startedAt`, since a learner who has been tapping steadily has not been
+  "away"); `classifyReentry(run, now)` (`resumePolicy(run.lastActivityAt,
+  now)`, `null` once `run.done`); `acknowledgeReentry(run, decision, ctx)`
+  (commits a real `interruption` event — `structured: false`, exactly like
+  `test_*`/`day_marked_away`, so `rebuild.ts`'s structural absence of a
+  branch for it means it can never move a strength or a due date — and
+  refreshes `lastActivityAt`; a no-op, mirroring `acceptGateDemote`'s own
+  "acts on exactly what it was shown" discipline, for the ordinary "resume"
+  classification and once the session is done).
+- `components/session/SessionIsland.tsx` gains a `window` "focus" effect —
+  the SAME re-entry signal `SyncTrigger.tsx` already uses for the identical
+  question, no new signal invented — that classifies a real re-entry gap
+  while drilling, commits the audit event, and renders `resumeNotice`'s
+  string beneath the rescaffold hint, cleared the moment the learner
+  interacts again (`commit()`'s own first line).
+
+**RED confirmed at all three layers**, each reverted via `git stash` of the
+production file(s) alone (every new test kept) and restored byte-identically
+after: engine (`resume.test.ts`, 2 new cases) failed exactly on
+`resumeNotice is not a function`; `run.ts` (`run.test.ts`, 7 new cases in a
+dedicated "FR5" describe block) failed on `classifyReentry`/
+`acknowledgeReentry is not a function`; the component (`session-island
+.test.tsx`, 3 new cases in a dedicated "v3-D217" describe block) failed
+exactly 2 of 3 against the unmodified component — `findByTestId
+("reentry-notice")` timing out on both the load-bearing positive case and
+the notice-clearing case — while the third, negative case ("an ordinary
+short gap earns no notice") passed vacuously, correctly, since `null` was
+already the pre-fix behavior for every gap. The load-bearing `run.ts` case
+proves the fold is genuinely untouched by an `interruption` event
+(`rebuild()` before/after `acknowledgeReentry`, deep-equal on the affected
+atom); a second proves the gap is measured from the LAST commit (a real
+wrong tap, mid-item, that never advances the run) rather than from
+`startedAt`, using a deliberately WRONG tap so the run stays open on this
+surah's own single-item virgin queue (a correct tap completes it in one, as
+`run.test.ts`'s own Door-1 comment already documents for surah 112). The
+component's positive case spies `Date.now` directly (never `vi
+.useFakeTimers()`, which serialized against fake-indexeddb's own internal
+scheduling and produced a 5-second test timeout on the first draft — caught
+and fixed before this note was written) so real timers keep the mount
+effect's own IndexedDB writes flowing normally.
+
+`TZ=UTC make test`: **2737 passing** (was 2725, +12 — exactly this run's
+new tests: 2 engine + 7 + 3 apps/web; engine 432, was 430; apps/web 1441,
+was 1431; no other suite moved: 255 v2 vitest, 47 v2/api, 379 v3/api, 120
+corpus-compiler, 63 fold-runner). `check-test-floor.mjs`: OK, 2737 >= floor
+1899 (+838 margin, unmoved, same discipline as every prior entry). `TZ=UTC
+make build`: exit 0, 30 routes (unchanged — no new route or component file,
+edits inside the existing `/session` component tree and its `lib/` layer).
+`npm run gates`: all green (boundaries 315 files — no new production file,
+three existing production files edited plus three existing test files, no
+new production file; fonts degraded-but-non-blocking, pre-existing, 2/6 UI
+fonts present; corpus-morphology 362 words / corpus-glyphs 206 codepoints,
+both unchanged — no corpus recompile, all three staged corpusHashes
+byte-identical to v3-D216's own). `npx tsc --noEmit`, run separately across
+all four v3 node packages (widening `SessionRun` with a new required field
+surfaced eleven pre-existing bare-literal fixtures across `run.test.ts`/
+`session-island.test.tsx` that needed `lastActivityAt` added — a genuine
+TS compile-time catch, not a test-only concern, since `SessionRun` is a
+real exported interface): clean in all four. No `v1/**`/`v2/**` edit (a
+stray `v2/tsconfig.tsbuildinfo` build-cache diff produced by running the
+suite was reverted before committing, same discipline as every prior
+entry — `git status --porcelain -- v1 v2` empty immediately before
+committing). No Arabic codepoint (all six changed files swept
+programmatically, in Python, over the Arabic, Arabic Supplement, Arabic
+Extended-A and both Presentation Forms Unicode blocks, plus a
+`fromCharCode`/`fromCodePoint`/`\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx`
+escape sweep — zero matches; every new string is a TypeScript identifier, a
+fixed English sentence, a wire field name, or a millisecond arithmetic
+result, never corpus text).
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; `HEAD` was found detached at `e8c4cfd`, exactly
+`origin/main`'s own tip (v3-D216) — no stale-local-main trap this run,
+confirmed directly via `git fetch origin main` before any exploration.
+`make setup` then `make compile-corpus` both ran from scratch, no retries
+needed.
+
+**NOT addressed**, named so a future run doesn't re-discover it as new:
+FR5's own queue-level behavior for "restart"/"replan"/"makeup" (above);
+every item on v3-D216's own "NOT addressed" list, unchanged — the
+streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148); `lib/pricing.ts#regionFromCountry()`
+(v3-D163); `PaywallGate` as a whole class / `permitsIssuance`/
+`permitsReview` (v3-D88, v3-D151); multi-surah enrollment; the operational
+mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123);
+`MacroFacts.litany.rhymeLabel` (v3-D188); `StripeField.editable` (v3-D204);
+`corpusHash`'s own zero fold-side consumer (v3-D206); `lib/plan/
+forecast.ts`'s empty-log zero-state (v3-D207) — all unchanged.

@@ -100,11 +100,14 @@ import {
   startOpenPractice,
   adoptionOfferFor,
   acceptAdoption,
+  classifyReentry,
+  acknowledgeReentry,
   SessionCommitFailure,
   type SessionRun,
 } from "./run";
 import { RetryableAppendError } from "@/lib/idb/append";
 import { DEMOTE_OFFER_AFTER_FAILS, RESCAFFOLD_AFTER_FAILS } from "@engine/gate.ts";
+import { TWO_MIN, ONE_HOUR } from "@engine/resume.ts";
 
 // A fixed clock. The frontend is ALLOWED Date.now(); the engine is not. Tests
 // pass time in explicitly so a run is reproducible and TZ-independent — the
@@ -721,7 +724,7 @@ describe("v3-D98 — Door 1, 'extra Learn' after the assembled queue is done", (
   it("offers nothing before the mastery gate window opens the FIRST candidate is un-encoded — a virgin log grants the first mushaf-order ayah", async () => {
     const c = corpus();
     const offer = await extraLearnOfferFor(
-      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true, gateSlipped: false, rescaffolding: false, structured: true, openPracticeDrill: null },
+      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true, gateSlipped: false, rescaffolding: false, structured: true, openPracticeDrill: null, lastActivityAt: T0 },
       c,
       T0,
     );
@@ -800,6 +803,7 @@ describe("v3-D98 — Door 1, 'extra Learn' after the assembled queue is done", (
         rescaffolding: false,
         structured: true,
         openPracticeDrill: null,
+        lastActivityAt: T0,
       },
       c,
       T0 + 10_000,
@@ -853,7 +857,7 @@ describe("v3-D98 — Door 1, 'extra Learn' after the assembled queue is done", (
 describe("v3-D106 — Door 2, 'weak-spot gym' after the assembled queue is done", () => {
   it("offers nothing before any atom is encoded — a virgin log has no weak spot to rank", async () => {
     const offer = await weakSpotOfferFor(
-      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true, gateSlipped: false, rescaffolding: false, structured: true, openPracticeDrill: null },
+      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true, gateSlipped: false, rescaffolding: false, structured: true, openPracticeDrill: null, lastActivityAt: T0 },
       T0,
     );
     expect(offer).toBeNull();
@@ -889,6 +893,7 @@ describe("v3-D106 — Door 2, 'weak-spot gym' after the assembled queue is done"
       rescaffolding: false,
       openPracticeDrill: null,
       structured: true,
+      lastActivityAt: T0,
     };
     const offer = await weakSpotOfferFor(doneRun, T0 + 10_000);
     expect(offer).not.toBeNull();
@@ -917,6 +922,7 @@ describe("v3-D106 — Door 2, 'weak-spot gym' after the assembled queue is done"
       rescaffolding: false,
       openPracticeDrill: null,
       structured: true,
+      lastActivityAt: T0,
     };
     const offer = await weakSpotOfferFor(doneRun, T0 + 10_000);
     expect(offer).not.toBeNull();
@@ -993,6 +999,7 @@ describe("v3-D111 — FR6 diminishing-returns nudge on the Door 2 weak-spot offe
     rescaffolding: false,
     openPracticeDrill: null,
     structured: true,
+    lastActivityAt: T0,
   };
 
   it("returns null below the threshold — three same-day reps is not yet 'a lot'", async () => {
@@ -1336,6 +1343,147 @@ describe("v3-D107 — gate forgiveness ladder: demoteOfferFor / acceptGateDemote
     expect(events.length).toBe(before.length);
     expect(events.some((e) => e.type === "gate_demote")).toBe(false);
     expect(after).toBe(started.run);
+  });
+});
+
+// FR5 — resume policy (`packages/engine/src/resume.ts#resumePolicy`).
+//
+// `resumePolicy` classified a real re-entry gap since it landed
+// (`resume.test.ts`) but had ZERO production callers anywhere: neither this
+// module nor `SessionIsland.tsx` ever asked it anything, despite
+// `lib/progress/rows.ts#timeOnTaskMs`'s own docblock CLAIMING "the same
+// function the session loop uses" — false when written; the session loop
+// used nothing.
+//
+// Scoped narrowly, matching this file's own "one door at a time" precedent
+// (v3-D98/v3-D106/v3-D117): `classifyReentry`/`acknowledgeReentry` give a
+// real re-entry gap an honest audit trail (a genuine `interruption` event,
+// evidence-only — `rebuild.ts` has no branch for it, invariant #5's
+// structural-absence discipline) and an honest one-line notice
+// (`resumeNotice`, engine-owned copy). Actually RESTRUCTURING the queue on
+// "restart"/"replan"/"makeup" is deliberately NOT built here — a genuinely
+// separate, larger scope, named so a future run doesn't have to re-derive
+// that boundary from scratch.
+describe("FR5 — resumePolicy reaches the real session loop (classifyReentry / acknowledgeReentry)", () => {
+  it("classifyReentry: null once the session is done — nothing left to attach an audit event to", async () => {
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+    const { run } = await playThrough(started.run, c);
+    expect(run.done).toBe(true);
+
+    expect(classifyReentry(run, T0 + ONE_HOUR)).toBeNull();
+  });
+
+  it("classifyReentry: agrees with resumePolicy for a short gap ('resume')", async () => {
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+
+    const decision = classifyReentry(started.run, T0 + TWO_MIN - 1000);
+    expect(decision).not.toBeNull();
+    expect(decision?.action).toBe("resume");
+  });
+
+  it("classifyReentry: agrees with resumePolicy for a >2min <1hr gap ('restart')", async () => {
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+
+    const decision = classifyReentry(started.run, T0 + 30 * 60_000);
+    expect(decision).not.toBeNull();
+    expect(decision?.action).toBe("restart");
+  });
+
+  it("classifyReentry's gap is measured from the LAST commit, not session start — a tap resets it", async () => {
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+
+    // A WRONG tap still commits (and refreshes lastActivityAt) without
+    // completing the item — `advanceReconstruct` never advances on a wrong
+    // tap, so the run stays not-done, unlike a correct tap on this corpus's
+    // single-item virgin queue (which finishes the whole session in one).
+    const correct = correctIndexFor(started.run, c);
+    const wrong = correct === 0 ? 1 : 0;
+    const afterTap = await answerCurrent(started.run, c, wrong, { now: T0 + 90_000, tz: TZ });
+    expect(afterTap.done).toBe(false);
+
+    // A gap measured from the ORIGINAL session_start (T0) would already be
+    // past ONE_HOUR by T0 + 90s + ONE_HOUR; measured from the tap that just
+    // landed (T0 + 90s), the identical wall-clock moment is still well
+    // inside the 1hr "restart" window.
+    const decision = classifyReentry(afterTap, T0 + 90_000 + 30 * 60_000);
+    expect(decision?.action).toBe("restart");
+  });
+
+  it("acknowledgeReentry commits a real interruption event carrying the classification, and moves no strength", async () => {
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+
+    const gapNow = T0 + 30 * 60_000;
+    const decision = classifyReentry(started.run, gapNow);
+    expect(decision).not.toBeNull();
+    if (!decision) return;
+
+    const before = await getAllEvents();
+    const atomsBefore = rebuild(before);
+
+    const acked = await acknowledgeReentry(started.run, decision, { now: gapNow, tz: TZ });
+    expect(acked.lastActivityAt).toBe(gapNow);
+
+    const after = await getAllEvents();
+    const interruption = after.find((e) => e.type === "interruption");
+    expect(interruption).toBeDefined();
+    expect(interruption?.ts).toBe(gapNow);
+    expect(interruption?.resume).toBe("restart");
+    expect(interruption?.structured).toBe(false);
+    expect(interruption?.surah).toBe(SURAH);
+
+    // Invariant #5: a read-only, evidence-only event moves no strength — the
+    // fold before and after must agree on every atom this interruption's own
+    // ayah already had.
+    const atomsAfter = rebuild(after);
+    const key = atomKey(SURAH, "ayah", started.run.queue[0]!.ayah);
+    expect(atomsAfter.get(key)).toEqual(atomsBefore.get(key));
+  });
+
+  it("acknowledgeReentry is a no-op for the ordinary 'resume' classification — no event, run unchanged", async () => {
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+
+    const before = await getAllEvents();
+    const decision = classifyReentry(started.run, T0 + 1000);
+    expect(decision?.action).toBe("resume");
+    if (!decision) return;
+
+    const acked = await acknowledgeReentry(started.run, decision, { now: T0 + 1000, tz: TZ });
+    const after = await getAllEvents();
+
+    expect(after.length).toBe(before.length);
+    expect(after.some((e) => e.type === "interruption")).toBe(false);
+    expect(acked).toBe(started.run);
+  });
+
+  it("acknowledgeReentry is a no-op once the session is done — acts on exactly what it was shown, never a stale caller", async () => {
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+    const { run } = await playThrough(started.run, c);
+    expect(run.done).toBe(true);
+
+    const before = await getAllEvents();
+    const acked = await acknowledgeReentry(
+      run,
+      { action: "restart", discardLatency: true, massed: true },
+      { now: run.startedAt + 30 * 60_000, tz: TZ },
+    );
+    const after = await getAllEvents();
+
+    expect(after.length).toBe(before.length);
+    expect(acked).toBe(run);
   });
 });
 
