@@ -18,7 +18,7 @@ class Event extends Model
     protected $fillable = [
         'user_id', 'uuid', 'type', 'ts',
         'surah', 'ayah', 'rung', 'position', 'choice', 'correct', 'pretest',
-        'to_ayah', 'step_kind', 'structured', 'latency', 'resume', 'test_kind',
+        'to_ayah', 'step_kind', 'structured', 'latency', 'resume', 'resume_massed', 'test_kind',
         'score', 'total', 'sent_to_reviews',
         'site_key', 'visit_ordinal', 'device_id', 'device_seq', 'tz',
         'corpus_hash', 'locale', 'spec_snapshot', 'grade_class',
@@ -35,6 +35,7 @@ class Event extends Model
             'sent_to_reviews' => 'boolean',
             'spec_snapshot' => 'array',
             'away' => 'boolean',
+            'resume_massed' => 'boolean',
         ];
     }
 

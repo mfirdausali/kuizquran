@@ -44,14 +44,16 @@ class EventsController extends Controller
         'specSnapshot' => 'spec_snapshot',
         'gradeClass' => 'grade_class',
         'awayDayIndex' => 'away_day_index',
+        'resumeMassed' => 'resume_massed',
     ];
 
     /** Every DrillEvent field beyond {id, type, ts} — the full frozen wire
      *  shape (v3-D10), plus every field added since (v3-D207's
-     *  `awayDayIndex`/`away`) — stored as-is, nullable when absent. */
+     *  `awayDayIndex`/`away`, v3-D218's `resumeMassed`) — stored as-is,
+     *  nullable when absent. */
     private const NULLABLE_FIELDS = [
         'surah', 'ayah', 'rung', 'position', 'choice', 'correct', 'pretest',
-        'to', 'stepKind', 'structured', 'latency', 'resume', 'testKind',
+        'to', 'stepKind', 'structured', 'latency', 'resume', 'resumeMassed', 'testKind',
         'score', 'total', 'sentToReviews',
         'siteKey', 'visitOrdinal', 'deviceId', 'deviceSeq', 'tz',
         'corpusHash', 'locale', 'specSnapshot', 'gradeClass',

@@ -103,6 +103,37 @@ class EventsIngestionTest extends TestCase
         ]);
     }
 
+    public function test_an_interruption_event_stores_the_resume_classification_and_its_massed_flag(): void
+    {
+        // v3-D218: `resumeMassed` (packages/engine/src/resume.ts) was fully
+        // computed by `resumePolicy()` but discarded at the one real call
+        // site (`acknowledgeReentry`) that builds the `interruption` event —
+        // its sibling `resume` field already had a real column and reached
+        // this far; `resumeMassed` never did.
+        $this->actingUser();
+
+        $this->postJson('/api/events', [
+            'events' => [[
+                'id' => 'interruption-1',
+                'type' => 'interruption',
+                'ts' => 1000,
+                'surah' => 12,
+                'ayah' => 4,
+                'rung' => 'S4',
+                'structured' => false,
+                'resume' => 'restart',
+                'resumeMassed' => true,
+            ]],
+        ])->assertOk()->assertJson(['accepted' => 1, 'ignored' => 0]);
+
+        $this->assertDatabaseHas('events', [
+            'uuid' => 'interruption-1',
+            'type' => 'interruption',
+            'resume' => 'restart',
+            'resume_massed' => true,
+        ]);
+    }
+
     public function test_user_id_is_never_taken_from_the_request_body(): void
     {
         $me = $this->actingUser();

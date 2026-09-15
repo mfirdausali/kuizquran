@@ -365,6 +365,11 @@ export interface DrillEvent {
   latency?: number;
   /** For interruption events: the resumePolicy classification. v0.6 metric. */
   resume?: "resume" | "restart" | "replan" | "makeup";
+  /** For interruption events: resumePolicy's own `massed` classification —
+   *  true for a same-hour "restart", false otherwise. Informational only:
+   *  the real ×0.35 damping (invariant #4) is applied by `update()` off the
+   *  atom's own `lastRetrieval`, independently of this field. v0.6 metric. */
+  resumeMassed?: boolean;
   /** v2 Phase 4 Test events only. test_start/test_result: the range end (`ayah`
    *  holds the range start, reusing the same from/to shape as connection/junction
    *  events). test_answer: which Test sub-type this item was. */

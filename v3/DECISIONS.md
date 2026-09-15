@@ -18722,3 +18722,133 @@ mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
 `MacroFacts.litany.rhymeLabel` (v3-D188); `StripeField.editable` (v3-D204);
 `corpusHash`'s own zero fold-side consumer (v3-D206); `lib/plan/
 forecast.ts`'s empty-log zero-state (v3-D207) — all unchanged.
+
+---
+
+## v3-D218 (2026-09-15): `ResumeDecision.massed` was computed on every re-entry classification and dropped at the one real call site FR5 gained hours earlier
+
+`packages/engine/src/resume.ts#resumePolicy()` — FR5's re-entry classifier,
+wired into the real session loop for the first time this same day (v3-D217)
+— computes `ResumeDecision.massed` on every call: `true` only for a
+same-hour ("restart") re-entry gap, `false` otherwise. Its own docblock
+names why the field exists: "same-hour restarts are weighted as massed...
+spaced success is worth ~3x a massed one." Before this fix, the only reader
+of that field anywhere in the codebase was `resume.test.ts`'s own
+assertions — `grep -rn "massed" --include="*.ts" --include="*.tsx"
+--include="*.php" .` (excluding tests) across the whole `v3/` tree returned
+one hit, and it was `packages/engine/src/update.ts`'s own, UNRELATED
+`massed` computation (a per-atom `lastRetrieval` same-learning-day check
+that already applies invariant #4's ×0.35 damping correctly on every
+ordinary graded rep, independently of `resume.ts`'s field — confirmed
+directly by reading `update.ts:98-102` before writing any test, so this fix
+is diagnostic/audit-trail only, never a grading-correctness change).
+
+`lib/session/run.ts#acknowledgeReentry()` — the exact function v3-D217
+built to give a real re-entry gap "a real trace" (that entry's own words)
+— stamped `resume: decision.action` onto the committed `interruption`
+event but never `decision.massed`, silently dropping the one bit of
+context `resumePolicy()` computed specifically to distinguish a quick
+same-hour restart from a longer gap within the identical "restart" bucket.
+A future consumer of this audit trail (an analytics view, or the still-
+deferred FR5 queue-level "restart" behavior itself) has no way to tell the
+two apart from the committed log.
+
+**Found by** a dedicated fresh-sweep agent (Explore) handed the full
+exclusion list carried through v3-D217 and directed at
+`worker/fold-runner/src`, `packages/corpus-compiler/src`, `v3/api/app/**`
+and `apps/web/lib/**` subdirectories; independently re-verified by this run
+directly against `resume.ts`, `run.ts` and `update.ts`'s real source (the
+greps above) before writing any test.
+
+**Fixed**, one field carried through three layers, mirroring `resume`'s own
+already-established plumbing exactly (no new mechanism invented):
+
+- `packages/engine/src/types.ts`/`events.ts`: `DrillEvent`/`MakeEventArgs`
+  gain an optional `resumeMassed?: boolean`, declared and stamped
+  identically to the sibling `resume` field one line above each.
+- `apps/web/lib/session/run.ts#acknowledgeReentry()`: the committed
+  `interruption` event gains `resumeMassed: decision.massed` alongside the
+  existing `resume: decision.action`.
+- `v3/api`: a new migration adds a real `resume_massed` nullable boolean
+  column to `events` (`resume` itself already has one — this is its direct
+  sibling, not a new kind of field), with matching `FIELD_MAP`/
+  `NULLABLE_FIELDS` entries in `EventsController` and `$fillable`/cast
+  entries on `Event` — the exact template v3-D207's `awayDayIndex`/`away`
+  pair established for a genuinely new post-freeze field pair.
+
+**RED confirmed at both layers**, each reverted (`git stash` of the engine/
+session-loop files; the migration and its controller/model changes moved
+aside) with every new test kept, and restored byte-identically after:
+
+- Engine/session-loop level: `run.test.ts` gained one strengthened
+  assertion on the existing "acknowledgeReentry commits a real interruption
+  event..." case (`interruption?.resumeMassed` toBe `true` for a same-hour
+  restart) plus one new case proving a `>1hr` "replan" gap carries
+  `resumeMassed: false` — so the fix cannot be a hardcoded `true` for every
+  interruption. Both failed exactly `expected undefined to be
+  true`/`false` against the unmodified `run.ts`; 85/85 green after (was 83,
+  +1 net — one strengthened test, one genuinely new).
+- Laravel level: one new case each in `EventsIngestionTest` (an
+  `interruption` event posting `resume: "restart"`/`resumeMassed: true`,
+  asserting the real `resume_massed` column) and `EventsPullTest` (the same
+  event round-tripped through `GET /api/events`, asserting `resumeMassed`
+  reads back as `false` for a `"replan"` fixture — a different value than
+  the ingestion case's, so neither test can pass on a shared hardcoded
+  literal). Both failed genuinely against the unmodified controller/model
+  (`Undefined array key "resumeMassed"` on pull; the ingestion case's
+  `assertDatabaseHas` found no such column) before the migration ran;
+  10/10 and 9/9 green after (was 9/9 and 8/9, +1 each).
+
+**Full verification.** `php artisan test` (v3/api): 381 passing (was 379,
++2; 2 incomplete + 6 skipped unchanged, PAY-1). `./vendor/bin/pint --test`
+on all five changed/new PHP files: passed. `TZ=UTC make test`: **2740
+passing** (was 2737, +3 — exactly this run's new tests: 1 apps/web + 2
+v3/api; apps/web 1442, was 1441; v3/api 381, was 379; no other suite
+moved: 255 v2 vitest, 47 v2/api, 120 corpus-compiler, 432 engine, 63
+fold-runner). `check-test-floor.mjs`: OK, 2740 >= floor 1899 (+841 margin,
+unmoved, same discipline as every prior entry). `TZ=UTC make build`: exit
+0, 30 routes (unchanged — no new route or component, a lib/model/
+controller-only change). `npm run gates`: all green (boundaries 316 files,
+unchanged count — no new production file under `apps/web`; fonts
+degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology 362 words / corpus-glyphs 206 codepoints, both
+unchanged — no corpus recompile, this is a wire-field-only change). `npx
+tsc --noEmit`, run separately across all four v3 node packages (the new
+field is optional, so — unlike v3-D217's own required `lastActivityAt` —
+no existing test fixture needed updating to keep compiling): clean in all
+four. No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache
+diff produced by running the suite was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2` empty
+immediately before committing). No Arabic codepoint (all nine changed/new
+files swept programmatically, in Python, over the Arabic, Arabic
+Supplement, Arabic Extended-A and both Presentation Forms Unicode blocks,
+plus a `fromCharCode`/`fromCodePoint`/`\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/
+`\uFExx` escape sweep — zero matches; every new string is a TypeScript/PHP
+identifier, a wire field name, a fixed English docblock sentence, or a
+closed-set test fixture value ("restart", "replan"), never corpus text).
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; local `HEAD` was found detached at `d678e54`, exactly
+`origin/main`'s own tip (v3-D217) — no stale-local-main trap this run,
+confirmed directly via `git fetch origin main` before any exploration (the
+fetch itself advanced a PRE-EXISTING stale local remote-tracking ref from
+`26cc664` to `d678e54`; no work from a prior session was ever left
+unpushed). `make setup` then `make compile-corpus` both ran from scratch,
+no retries needed.
+
+**NOT addressed**, named so a future run doesn't re-discover it as new: the
+full FR5 queue-level restart/replan/makeup behavior (v3-D217, still
+deliberately deferred — this fix only carries one more classification fact
+into the audit trail, it does not restructure the queue); every item on
+v3-D217's own "NOT addressed" list, unchanged — the streak/away-day
+day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148); `lib/pricing.ts#regionFromCountry()`
+(v3-D163); `PaywallGate` as a whole class / `permitsIssuance`/
+`permitsReview` (v3-D88, v3-D151); multi-surah enrollment; the operational
+mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123);
+`MacroFacts.litany.rhymeLabel` (v3-D188); `StripeField.editable` (v3-D204);
+`corpusHash`'s own zero fold-side consumer (v3-D206); `lib/plan/
+forecast.ts`'s empty-log zero-state (v3-D207) — all unchanged.

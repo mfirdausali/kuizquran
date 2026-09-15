@@ -26,6 +26,9 @@ export interface MakeEventArgs {
   latency?: number;
   /** resumePolicy classification for interruption events (v0.6 metric). */
   resume?: "resume" | "restart" | "replan" | "makeup";
+  /** resumePolicy's own `massed` classification for interruption events
+   *  (v0.6 metric). */
+  resumeMassed?: boolean;
   /** v2 Phase 4 Test events only — see DrillEvent. */
   testKind?: TestItemKind;
   score?: number;
@@ -64,6 +67,7 @@ export function makeEvent(a: MakeEventArgs): DrillEvent {
   if (a.structured !== undefined) e.structured = a.structured;
   if (a.latency !== undefined) e.latency = a.latency;
   if (a.resume !== undefined) e.resume = a.resume;
+  if (a.resumeMassed !== undefined) e.resumeMassed = a.resumeMassed;
   if (a.testKind !== undefined) e.testKind = a.testKind;
   if (a.score !== undefined) e.score = a.score;
   if (a.total !== undefined) e.total = a.total;

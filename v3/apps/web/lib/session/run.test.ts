@@ -1438,6 +1438,7 @@ describe("FR5 — resumePolicy reaches the real session loop (classifyReentry / 
     expect(interruption).toBeDefined();
     expect(interruption?.ts).toBe(gapNow);
     expect(interruption?.resume).toBe("restart");
+    expect(interruption?.resumeMassed).toBe(true);
     expect(interruption?.structured).toBe(false);
     expect(interruption?.surah).toBe(SURAH);
 
@@ -1447,6 +1448,25 @@ describe("FR5 — resumePolicy reaches the real session loop (classifyReentry / 
     const atomsAfter = rebuild(after);
     const key = atomKey(SURAH, "ayah", started.run.queue[0]!.ayah);
     expect(atomsAfter.get(key)).toEqual(atomsBefore.get(key));
+  });
+
+  it("acknowledgeReentry carries decision.massed verbatim — false for a >1hr 'replan' gap, proving it isn't hardcoded true", async () => {
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+
+    const gapNow = T0 + ONE_HOUR + 60_000;
+    const decision = classifyReentry(started.run, gapNow);
+    expect(decision?.action).toBe("replan");
+    expect(decision?.massed).toBe(false);
+    if (!decision) return;
+
+    await acknowledgeReentry(started.run, decision, { now: gapNow, tz: TZ });
+
+    const after = await getAllEvents();
+    const interruption = after.find((e) => e.type === "interruption");
+    expect(interruption?.resume).toBe("replan");
+    expect(interruption?.resumeMassed).toBe(false);
   });
 
   it("acknowledgeReentry is a no-op for the ordinary 'resume' classification — no event, run unchanged", async () => {

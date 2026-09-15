@@ -53,9 +53,111 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2737 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 379 v3/api + 120 corpus-compiler
-             # + 432 engine + 63 fold-runner + 1441 apps/web. (v3-D217, 2026-09-15)
+make test    # 2740 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 381 v3/api + 120 corpus-compiler
+             # + 432 engine + 63 fold-runner + 1442 apps/web. (v3-D218, 2026-09-15)
+             # NOTE (v3-D218, 2026-09-15): `packages/engine/src/resume.ts
+             # #ResumeDecision.massed` — computed by `resumePolicy()` on
+             # every interruption classification since FR5 landed (v3-D217,
+             # earlier the SAME day), real and dynamic (`true` only for a
+             # same-hour "restart", `false` otherwise) — had exactly ONE
+             # reader anywhere: `resume.test.ts`'s own assertions. The real
+             # production call site v3-D217 just built,
+             # `lib/session/run.ts#acknowledgeReentry()`, stamped its
+             # sibling `decision.action` onto the committed `interruption`
+             # event but silently dropped `decision.massed` — the one fact
+             # `ResumeDecision`'s own docblock says exists to distinguish a
+             # quick same-hour restart from a longer gap within the
+             # identical "restart" bucket. `grep -rn "massed"` outside test
+             # files confirmed the only hit anywhere was `update.ts`'s own,
+             # UNRELATED `massed` computation (a per-atom `lastRetrieval`
+             # same-day check that already applies invariant #4's ×0.35
+             # damping correctly regardless of this field — confirmed
+             # directly by reading `update.ts:98-102` before writing any
+             # test, so this fix is diagnostic/audit-trail only, not a
+             # grading-correctness fix). Found by a dedicated fresh-sweep
+             # agent (Explore) handed the full exclusion list carried
+             # through v3-D217 and directed at `worker/fold-runner/src`,
+             # `packages/corpus-compiler/src`, `v3/api/app/**` and
+             # `apps/web/lib/**`; independently re-verified by this run
+             # directly against `resume.ts`, `run.ts` and `update.ts`'s real
+             # source before writing any test. Fixed, one field carried
+             # through three layers, mirroring `resume`'s own established
+             # plumbing exactly: `DrillEvent`/`MakeEventArgs` gain an
+             # optional `resumeMassed?: boolean`; `acknowledgeReentry` now
+             # stamps `resumeMassed: decision.massed` alongside
+             # `resume: decision.action`; the `events` table gains a real
+             # `resume_massed` nullable boolean column (a migration, since
+             # `resume` itself already has one and this is its direct
+             # sibling) with matching `FIELD_MAP`/`NULLABLE_FIELDS`/
+             # `$fillable`/cast entries, the exact template v3-D207's
+             # `awayDayIndex`/`away` pair established. RED confirmed at both
+             # layers, each reverted via `git stash`/moving the migration
+             # aside (every new test kept) and restored byte-identically
+             # after: engine/session-loop level, 2 cases in `run.test.ts` (a
+             # strengthened existing assertion plus one new test proving a
+             # `>1hr` "replan" gap carries `resumeMassed: false`, so the fix
+             # cannot be a hardcoded `true`) failed exactly `expected
+             # undefined to be true`/`false`; 85/85 green after (was 83,
+             # +1 net — one strengthened test, one new). Laravel level, 2
+             # new cases (`EventsIngestionTest`, `EventsPullTest`) failed on
+             # `Undefined array key "resumeMassed"` / a missing
+             # `resume_massed` column value against the unmodified
+             # controller/model; 10/10 and 9/9 green after (was 9/9 and 8/9,
+             # +1 each). `php artisan test` (v3/api): 381 passing (was 379,
+             # +2; 2 incomplete + 6 skipped unchanged, PAY-1).
+             # `./vendor/bin/pint --test` on all five changed/new PHP files:
+             # passed. `TZ=UTC make test`: 2740 passing (was 2737, +3 —
+             # exactly this run's new tests: 1 apps/web + 2 v3/api; no other
+             # suite moved). `check-test-floor.mjs`: OK, 2740 >= floor 1899
+             # (+841 margin, unmoved, same discipline as every prior entry).
+             # `TZ=UTC make build`: exit 0, 30 routes (unchanged — no new
+             # route or component, a lib/model/controller-only change).
+             # `npm run gates`: all green (boundaries 316 files, unchanged
+             # count — no new production file under `apps/web`; fonts
+             # degraded-but-non-blocking, pre-existing, 2/6 UI fonts
+             # present; corpus-morphology 362 words / corpus-glyphs 206
+             # codepoints, both unchanged — no corpus recompile, this is a
+             # wire-field-only change). `npx tsc --noEmit`, run separately
+             # across all four v3 node packages (the field is optional, so
+             # no existing fixture needed updating, unlike v3-D217's own
+             # required `lastActivityAt` field): clean in all four. No
+             # `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff produced by running the suite was reverted
+             # before committing, same discipline as every prior entry —
+             # `git status --porcelain -- v1 v2` empty immediately before
+             # committing). No Arabic codepoint (all nine changed/new files
+             # swept programmatically, in Python, over the Arabic, Arabic
+             # Supplement, Arabic Extended-A and both Presentation Forms
+             # Unicode blocks, plus a `fromCharCode`/`fromCodePoint`/
+             # `\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape sweep —
+             # zero matches; every new string is a TypeScript/PHP
+             # identifier, a wire field name, a fixed English docblock
+             # sentence, or a closed-set test fixture value ("restart",
+             # "replan"), never corpus text). Session start: fresh
+             # container, no `node_modules`/`vendor`/compiled corpus
+             # anywhere; local `HEAD` was found detached at `d678e54`,
+             # exactly `origin/main`'s own tip (v3-D217) — no
+             # stale-local-main trap this run, confirmed directly via `git
+             # fetch origin main` before any exploration (the fetch itself
+             # advanced a PRE-EXISTING stale remote-tracking ref from
+             # `26cc664` to `d678e54`; no work was ever unpushed). `make
+             # setup` then `make compile-corpus` both ran from scratch, no
+             # retries needed. NOT addressed: the full FR5 queue-level
+             # restart/replan/makeup behavior (v3-D217, still deliberately
+             # deferred); every item on v3-D217's own "NOT addressed" list,
+             # unchanged (the streak/away-day day-space mismatch, v3-D209;
+             # `rhymeClassOf()`, v3-D136; `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution`;
+             # `lib/pricing.ts#regionFromCountry()`; `PaywallGate` as a
+             # whole class; multi-surah enrollment; the operational
+             # mailer/7-night window; PAY-1's Stripe fixtures; surah 67's
+             # scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy
+             # drift; `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel`; `StripeField.editable`;
+             # `corpusHash`'s own zero fold-side consumer; `lib/plan/
+             # forecast.ts`'s empty-log zero-state). See DECISIONS.md
+             # v3-D218.
              # NOTE (v3-D217, 2026-09-15): `packages/engine/src/resume.ts
              # #resumePolicy()` (FR5's re-entry classifier) had exactly ONE
              # caller anywhere — `lib/progress/rows.ts#timeOnTaskMs`, which

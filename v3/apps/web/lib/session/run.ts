@@ -1236,6 +1236,7 @@ export async function acknowledgeReentry(
     rung: gradeClassToWire("ungraded"),
     structured: false,
     resume: decision.action,
+    resumeMassed: decision.massed,
     corpusHash: run.corpusHash,
     locale: run.glossLang,
   } as DrillEvent;

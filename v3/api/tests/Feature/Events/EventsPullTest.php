@@ -139,6 +139,30 @@ class EventsPullTest extends TestCase
         $this->assertTrue($event['away']);
     }
 
+    public function test_an_interruption_event_round_trips_its_resume_massed_flag_on_pull(): void
+    {
+        // v3-D218: the same round-trip guarantee every v3-D10 wire field
+        // gets, for `resumeMassed` — computed since resume.ts landed, never
+        // reaching this far until now.
+        [, $token] = $this->actingUser();
+        $headers = ['Authorization' => 'Bearer '.$token];
+        $this->postJson('/api/events', ['events' => [[
+            'id' => 'interruption-pull-1',
+            'type' => 'interruption',
+            'ts' => 1000,
+            'surah' => 12,
+            'ayah' => 4,
+            'rung' => 'S4',
+            'resume' => 'replan',
+            'resumeMassed' => false,
+        ]]], $headers)->assertOk();
+
+        $response = $this->getJson('/api/events', $headers)->assertOk();
+        $event = $response->json('events.0');
+        $this->assertSame('replan', $event['resume']);
+        $this->assertFalse($event['resumeMassed']);
+    }
+
     public function test_limit_caps_the_page_and_reports_has_more(): void
     {
         [, $token] = $this->actingUser();
