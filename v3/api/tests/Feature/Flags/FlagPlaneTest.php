@@ -4,6 +4,7 @@ namespace Tests\Feature\Flags;
 
 use App\Flags\FlagRegistry;
 use App\Flags\FlagService;
+use App\Http\Controllers\Admin\Pseudonymizer;
 use App\Models\Flag;
 use App\Models\FlagRampAudit;
 use App\Models\User;
@@ -29,7 +30,7 @@ class FlagPlaneTest extends TestCase
     private function admin(): User
     {
         $user = User::factory()->create(['email' => 'ops@example.com', 'email_verified_at' => now()]);
-        config(['admin.emails' => ['ops@example.com']]);
+        config(['admin.emails' => ['ops@example.com'], 'admin.pseudonym_pepper' => 'test-pepper']);
         Sanctum::actingAs($user);
 
         return $user;
@@ -402,5 +403,94 @@ class FlagPlaneTest extends TestCase
         ])->assertStatus(409);
 
         $this->assertFalse($this->flags()->enabled($key));
+    }
+
+    // ═══════ v3-D223 — WHO killed/acknowledged a flag reaches the wire ═════════
+
+    /**
+     * `FlagService::kill()` stamps a real `killed_by` on every kill
+     * (`FlagController.php`'s own docblock), but `index()` never read it back
+     * — an admin's own identity, same as every other admin-actor field, must
+     * be pseudonymized on the way out, never the raw id (same rule
+     * `FlagAuditController`/`AdminAuditController` already apply).
+     *
+     * MUTATION: read `killed_by` verbatim instead of through `Pseudonymizer`.
+     */
+    public function test_the_killing_admin_reaches_the_wire_pseudonymized_not_raw(): void
+    {
+        $admin = $this->admin();
+        $key = 'social.leaderboard';
+        Flag::create(['key' => $key, 'enabled' => true, 'version' => 1]);
+
+        $this->flags()->kill($key, $admin->id, 1_700_000_000_000);
+
+        $flags = $this->getJson('/api/admin/flags')->assertOk()->json('flags');
+        $row = collect($flags)->firstWhere('key', $key);
+
+        $expected = app(Pseudonymizer::class)->for($admin->id);
+        $this->assertSame($expected, $row['killedBy']);
+        $this->assertStringStartsWith('u_', $row['killedBy']);
+        $this->assertNotEquals((string) $admin->id, $row['killedBy']);
+    }
+
+    /** The acknowledging admin gets the same treatment as the killing one. */
+    public function test_the_acknowledging_admin_reaches_the_wire_pseudonymized(): void
+    {
+        $admin = $this->admin();
+        $key = 'social.friends';
+        Flag::create(['key' => $key, 'enabled' => true, 'version' => 1]);
+
+        $this->flags()->kill($key, $admin->id, 1_700_000_000_000);
+        $this->postJson("/api/admin/flags/{$key}/ack")->assertOk();
+
+        $flags = $this->getJson('/api/admin/flags')->assertOk()->json('flags');
+        $row = collect($flags)->firstWhere('key', $key);
+
+        $expected = app(Pseudonymizer::class)->for($admin->id);
+        $this->assertSame($expected, $row['ackBy']);
+    }
+
+    /**
+     * `autoWaiveDueKills()` calls `acknowledgeKill($key, null, $now, ...)` from
+     * the unattended scheduler — `(string) null` casts to `""`, not `null`, so
+     * the read side must recognise an empty stored actor as "no actor" too,
+     * exactly like `killedBy`/`ackBy`'s nullable sibling `FlagRampAudit
+     * .actor_admin_id`. Never a crash, never a fabricated pseudonym for an
+     * action no person took.
+     *
+     * MUTATION: pseudonymize the empty string verbatim (`Pseudonymizer::for()`
+     * casts it to `(int) ""` = `0`, producing a real-looking `u_...` pseudonym
+     * for nobody).
+     */
+    public function test_an_auto_waived_ack_has_no_actor_pseudonym(): void
+    {
+        $admin = $this->admin();
+        $key = 'social.study_groups';
+        $killedAt = 1_700_000_000_000;
+        Flag::create(['key' => $key, 'enabled' => true, 'version' => 1]);
+        $this->flags()->kill($key, $admin->id, $killedAt);
+
+        $this->flags()->autoWaiveDueKills($killedAt + (73 * 3600 * 1000));
+
+        $flags = $this->getJson('/api/admin/flags')->assertOk()->json('flags');
+        $row = collect($flags)->firstWhere('key', $key);
+
+        $this->assertNull($row['ackBy'], 'a system auto-waive has no human actor to pseudonymize');
+        // The kill itself still names its real, human admin.
+        $this->assertNotNull($row['killedBy']);
+    }
+
+    /** A never-killed flag names no killer and no acknowledger — never a stray "u_" for nobody. */
+    public function test_an_untouched_flag_names_no_actor_at_all(): void
+    {
+        $this->admin();
+        $key = 'experiments.new_onboarding';
+        Flag::create(['key' => $key, 'enabled' => false, 'version' => 0]);
+
+        $flags = $this->getJson('/api/admin/flags')->assertOk()->json('flags');
+        $row = collect($flags)->firstWhere('key', $key);
+
+        $this->assertNull($row['killedBy']);
+        $this->assertNull($row['ackBy']);
     }
 }

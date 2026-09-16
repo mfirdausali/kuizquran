@@ -19409,3 +19409,114 @@ mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
 (v3-D204); `corpusHash`'s own zero fold-side consumer (v3-D206); FR5's
 own queue-level behavior for "restart"/"replan"/"makeup" (v3-D217) — all
 unchanged.
+
+## v3-D223 (2026-09-16): `Flag.killed_by`/`.ack_by` — who killed or acknowledged a flag reaches no one
+
+`FlagService::kill()`/`acknowledgeKill()` (`v3/api/app/Flags/FlagService.php:91,176`)
+stamp a real `killed_by`/`ack_by` on every real kill/acknowledge action —
+including the unattended nightly `AutoWaiveKillsCommand` auto-waive — and both
+columns are real, non-derived storage (`database/migrations/
+2026_08_11_120000_create_flags_tables.php:32,37`). But `Admin\FlagController
+::index()`, the ONLY reader of the `flags` table for the admin panel, never put
+either on the wire: `'killedAt'`/`'ackAt'` reached JSON, `'killed_by'`/
+`'ack_by'` did not, so `lib/admin/flags.ts#FlagRow` never declared them and
+`FlagsPanel.tsx`'s kill banner named only WHEN a flag was killed/acknowledged,
+never WHO — despite the fact already sitting in the same row.
+
+Sharper than v3-D209's own closed sibling on this same panel (`FlagRow.ackAt`,
+fetched and typed but never rendered): here the field never even reached the
+JSON response at all — `grep -rn "killedBy\|ackBy" --include=*.php
+--include=*.ts --include=*.tsx v3/` (excluding `node_modules`/`vendor`)
+returned nothing anywhere before this fix, and no prior DECISIONS.md entry
+names either field.
+
+Fixed on the exact template `FlagAuditController`/`AdminAuditController`
+already established for a raw admin-actor FK: `FlagController` constructor-
+injects `Pseudonymizer` (same namespace, no new `use`) and `index()` adds
+`'killedBy'`/`'ackBy'`, each resolved through a new `actorPseudonym()` helper —
+`null` when the stored value is `null` OR an empty string (`FlagService`
+stamps `(string) $adminId`, and `(string) null` casts to `""`, not `null`, for
+the auto-waive path's systemless actor) else `$this->pseudonymizer->for((int)
+$rawAdminId)`. `lib/admin/flags.ts#FlagRow` gains matching required
+`killedBy: string | null`/`ackBy: string | null`, validated by `isFlagRow`
+(never merely passed through); `FlagsPanel.tsx`'s banner gains a `by
+{pseudonym}` clause on both the kill and the acknowledge sentence, present
+only when the server sent a real actor — a system auto-waive still renders
+"acknowledged at {ackAt} (auto-waived after 72h)" with no fabricated "by"
+clause, since its own `ackBy` is genuinely `null`.
+
+RED confirmed independently at both layers: backend, 4 new `FlagPlaneTest`
+cases (killing admin pseudonymized; acknowledging admin pseudonymized; an
+auto-waived ack has no actor pseudonym while the kill itself keeps its real
+one; a never-killed flag names no actor at all) run against the unmodified
+controller all failed identically on `Undefined array key "killedBy"`/
+`"ackBy"` — the field was not merely wrong, it did not exist; 20/20 green
+after (was 16, +4). Frontend, both source files (`flags.ts`, `FlagsPanel.tsx`)
+moved aside via `git stash` (every new/strengthened test kept) — 1 of 14
+`flags.test.ts` cases failed genuinely (`isFlagRow` accepted a row missing
+both fields, proving the validation is real, not a rename) and 3 of 12
+`flags-panel.test.tsx` cases failed on the banner never containing the
+pseudonym string; every other case passed vacuously (a fixture that already
+carried `killedBy`/`ackBy` in its JSON survives the frontend TYPE gap simply
+because JS never strips untyped fields — the earlier draft of the round-trip
+test in `flags.test.ts` accidentally proved nothing for exactly this reason,
+caught and replaced with the missing-field negative case above before this
+note was written). Restored byte-identically, reran: 14/14 + 12/12 green (was
+13 + 9, +1 +3).
+
+`TZ=UTC make test`: 2760 passing (was 2752, +8 — exactly this run's new
+tests: 4 PHPUnit + 1 + 3 vitest; v3/api 388, was 384; apps/web 1455, was 1451;
+no other suite moved: 255 v2 vitest, 47 v2/api, 120 corpus-compiler, 432
+engine, 63 fold-runner). `check-test-floor.mjs`: OK, 2760 >= floor 1899 (+861
+margin, unmoved, same discipline as every prior entry). `TZ=UTC make build`:
+exit 0, 30 routes (unchanged — a Laravel-controller-plus-admin-panel-only
+change, no route or component added). `npm run gates`: all green (boundaries
+317 files, unchanged count — three existing production files edited plus
+their three existing test files, no new production file; fonts
+degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology 362 words / corpus-glyphs 206 codepoints, both unchanged —
+no corpus recompile, a pure admin-actor-attribution wiring change). `npx tsc
+--noEmit` (apps/web): clean. `./vendor/bin/pint --test` on both changed PHP
+files: passed. No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff produced by running the suite was reverted before
+committing, same discipline as every prior entry — `git status --porcelain
+-- v1 v2` empty immediately before committing). No Arabic codepoint (all six
+changed files swept programmatically, in Python, over the Arabic, Arabic
+Supplement, Arabic Extended-A and both Presentation Forms Unicode blocks,
+plus a `fromCharCode`/`fromCodePoint`/`\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/
+`\uFExx` escape sweep — zero matches; every new string is a PHP identifier, a
+wire field name, a fixed English docblock/caption sentence, or a synthetic
+`u_...`-shaped pseudonym test placeholder matching this codebase's own
+established convention for exactly this shape of fixture, never corpus text).
+
+Session start: dependencies were not yet installed in this container (`v2`,
+`v2/api`, `v3/api` all had empty `node_modules`/`vendor`); `make setup` ran
+clean from scratch, no retries needed. `HEAD` and `origin/main` already
+agreed at `2548af6` (v3-D222) — no stale-local-main trap this run, confirmed
+directly via `git fetch origin main` before any exploration (a genuinely
+stale LOCAL `main` branch ref, six commits behind, was found and
+fast-forwarded before dependency install). Found by a dedicated fresh-sweep
+agent (Explore) handed the exclusion list carried through v3-D222 and
+directed at Console Commands/Jobs/Notifications, `apps/web/lib/**` zero-caller
+exports, unread component props, Eloquent model fields, `packages/engine`/
+`worker/fold-runner` exports, and wire-type fields sent-but-unread — it
+independently confirmed the candidate by grep before reporting, and this run
+independently re-verified the same grep and the real source of
+`FlagService`/`FlagController`/`Flag`/the migration before writing any test.
+
+**NOT addressed:** every item on v3-D222's own "NOT addressed" list, unchanged
+— `DrillPicker.tsx`'s own unused `now` prop; `session_start`'s own "app-open ->
+first drill" latency metric (v0.8); `CorpusVerse.line`; the streak/away-day
+day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148); `lib/pricing.ts#regionFromCountry()`
+(v3-D163); `PaywallGate` as a whole class (v3-D88, v3-D151); multi-surah
+enrollment; the operational mailer/7-night window; PAY-1's Stripe fixtures;
+surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy drift
+(v3-D127); `packages/engine/src/placement.ts` (v3-D111/D113/D123);
+`MacroFacts.litany.rhymeLabel` (v3-D188); `StripeField.editable` (v3-D204);
+`corpusHash`'s own zero fold-side consumer (v3-D206); FR5's own queue-level
+behavior for "restart"/"replan"/"makeup" (v3-D217) — all unchanged. With this,
+`FlagsPanel.tsx`'s banner now names every field `Admin\FlagController::index()`
+sends about a kill/acknowledge action; a future sweep should look elsewhere
+for the next instance of this bug class.

@@ -53,9 +53,112 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2752 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 384 v3/api + 120 corpus-compiler
-             # + 432 engine + 63 fold-runner + 1451 apps/web. (v3-D222, 2026-09-16)
+make test    # 2760 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 388 v3/api + 120 corpus-compiler
+             # + 432 engine + 63 fold-runner + 1455 apps/web. (v3-D223, 2026-09-16)
+             # NOTE (v3-D223, 2026-09-16): `Flag.killed_by`/`.ack_by` — stamped
+             # by `FlagService::kill()`/`acknowledgeKill()` on every real
+             # kill/ack (`v3/api/app/Flags/FlagService.php:91,176`), including
+             # the unattended nightly auto-waive — reached no reader anywhere:
+             # `Admin\FlagController::index()` put `killedAt`/`ackAt` on the
+             # wire but never `killed_by`/`ack_by`, so `lib/admin/flags.ts
+             # #FlagRow` never declared them and `FlagsPanel.tsx`'s kill
+             # banner named only WHEN a flag was killed/acknowledged, never
+             # WHO — despite the fact already sitting in the same row.
+             # Sharper than v3-D209's own closed sibling on this same panel
+             # (`FlagRow.ackAt`, fetched and typed but never rendered): here
+             # the field never even reached the JSON response at all — `grep
+             # -rn "killedBy\|ackBy" --include=*.php --include=*.ts
+             # --include=*.tsx v3/` returned nothing anywhere before this
+             # fix. Fixed on the exact `FlagAuditController`/
+             # `AdminAuditController` template: `FlagController` constructor-
+             # injects `Pseudonymizer` and `index()` adds `killedBy`/`ackBy`
+             # via a new `actorPseudonym()` helper — `null` when the stored
+             # value is `null` OR `""` (`(string) null` casts to `""`, not
+             # `null`, for the auto-waive path's systemless actor) else a
+             # real HMAC pseudonym; `FlagRow` gains matching required
+             # fields, validated by `isFlagRow` (never merely passed
+             # through); the banner gains a `by {pseudonym}` clause on both
+             # sentences, present only for a real actor — an auto-waive
+             # still renders no fabricated "by" clause, since its own
+             # `ackBy` is genuinely null. RED confirmed independently at
+             # both layers: 4 new `FlagPlaneTest` cases against the
+             # unmodified controller all failed on `Undefined array key
+             # "killedBy"`/`"ackBy"` — the field did not exist, not merely
+             # wrong — 20/20 green after (was 16, +4); frontend, both source
+             # files moved aside via `git stash` (tests kept) failed 1 of 14
+             # `flags.test.ts` cases (`isFlagRow` wrongly accepted a row
+             # missing both fields) and 3 of 12 `flags-panel.test.tsx` cases
+             # (the banner never contained the pseudonym) — every other case
+             # passed vacuously, including this file's own first-drafted
+             # round-trip assertion, caught and replaced with a genuine
+             # missing-field negative case before this note was written;
+             # restored byte-identically, 14/14 + 12/12 green (was 13 + 9,
+             # +1 +3). `php artisan test` (v3/api): 388 passing (was 384,
+             # +4; 2 incomplete + 6 skipped unchanged, PAY-1). `./vendor/bin
+             # /pint --test` on both changed PHP files: passed. `TZ=UTC make
+             # test`: 2760 passing (was 2752, +8 — exactly this run's new
+             # tests: 4 PHPUnit + 1 + 3 vitest; no other suite moved).
+             # `check-test-floor.mjs`: OK, 2760 >= floor 1899 (+861 margin,
+             # unmoved, same discipline as every prior entry). `TZ=UTC make
+             # build`: exit 0, 30 routes (unchanged — a controller-plus-
+             # admin-panel-only change, no route or component added). `npm
+             # run gates`: all green (boundaries 317 files, unchanged count —
+             # three existing production files edited plus their three
+             # existing test files, no new production file; fonts
+             # degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+             # corpus-morphology 362 words / corpus-glyphs 206 codepoints,
+             # both unchanged — no corpus recompile, a pure admin-actor-
+             # attribution wiring change). `npx tsc --noEmit` (apps/web):
+             # clean. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff produced by
+             # running the suite was reverted before committing, same
+             # discipline as every prior entry — `git status --porcelain --
+             # v1 v2` empty immediately before committing). No Arabic
+             # codepoint (all six changed files swept programmatically, in
+             # Python, over the Arabic, Arabic Supplement, Arabic
+             # Extended-A and both Presentation Forms Unicode blocks, plus a
+             # `fromCharCode`/`fromCodePoint`/`\u06xx`/`\u07xx`/`\u08xx`/
+             # `\uFBxx`/`\uFExx` escape sweep — zero matches; every new
+             # string is a PHP identifier, a wire field name, a fixed
+             # English docblock/caption sentence, or a synthetic
+             # `u_...`-shaped pseudonym test placeholder matching this
+             # codebase's own established convention, never corpus text).
+             # Session start: dependencies were not yet installed in this
+             # container (`v2`/`v2/api`/`v3/api` all had empty
+             # `node_modules`/`vendor`); `make setup` ran clean from
+             # scratch, no retries needed. `HEAD` and `origin/main` already
+             # agreed at `2548af6` (v3-D222) — no stale-local-main trap this
+             # run, confirmed directly via `git fetch origin main` before
+             # any exploration (a genuinely stale LOCAL `main` branch ref,
+             # six commits behind, was found and fast-forwarded before
+             # dependency install). Found by a dedicated fresh-sweep agent
+             # (Explore) handed the exclusion list carried through v3-D222
+             # and directed at Console Commands/Jobs/Notifications,
+             # `apps/web/lib/**` zero-caller exports, unread component
+             # props, Eloquent model fields, `packages/engine`/
+             # `worker/fold-runner` exports, and wire-type fields
+             # sent-but-unread — independently re-verified by this run
+             # directly against `FlagService`/`FlagController`/`Flag`/the
+             # migration before writing any test. NOT addressed: every item
+             # on v3-D222's own "NOT addressed" list, unchanged —
+             # `DrillPicker.tsx`'s own unused `now` prop; `session_start`'s
+             # own "app-open -> first drill" latency metric (v0.8);
+             # `CorpusVerse.line`; the streak/away-day day-space mismatch
+             # (v3-D209); `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+             # `App\Billing\TrialAttribution` (v3-D148);
+             # `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate`
+             # as a whole class (v3-D88, v3-D151); multi-surah enrollment;
+             # the operational mailer/7-night window; PAY-1's Stripe
+             # fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`
+             # (v3-D111/D113/D123); `MacroFacts.litany.rhymeLabel`
+             # (v3-D188); `StripeField.editable` (v3-D204); `corpusHash`'s
+             # own zero fold-side consumer (v3-D206); FR5's own queue-level
+             # behavior for "restart"/"replan"/"makeup" (v3-D217) — all
+             # unchanged. See DECISIONS.md v3-D223.
              # NOTE (v3-D222, 2026-09-16): `DrillEvent.latency` ("item-shown ->
              # tap ms", WIREFRAME §15's own "built" v0.6 metric) had a real,
              # tested consumer (`lib/progress/rows.ts#timeOnTaskMs`, which

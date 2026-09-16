@@ -45,8 +45,10 @@ describe("loadFlags — failure is a STATE, never an exception", () => {
               enabled: false,
               version: 0,
               killedAt: null,
+              killedBy: null,
               bannerVisible: false,
               ackAt: null,
+              ackBy: null,
               ackAutoWaived: false,
             },
             {
@@ -55,8 +57,10 @@ describe("loadFlags — failure is a STATE, never an exception", () => {
               enabled: true,
               version: 4,
               killedAt: "2026-08-20T03:00:00Z",
+              killedBy: "u_ab12cd34ef56",
               bannerVisible: true,
               ackAt: null,
+              ackBy: null,
               ackAutoWaived: false,
             },
           ],
@@ -71,8 +75,10 @@ describe("loadFlags — failure is a STATE, never an exception", () => {
       expect(load.flags).toHaveLength(2);
       expect(load.flags[0]!.key).toBe("social.leaderboard");
       expect(load.flags[0]!.enabled).toBe(false);
+      expect(load.flags[0]!.killedBy).toBeNull();
       expect(load.flags[1]!.bannerVisible).toBe(true);
       expect(load.flags[1]!.killedAt).toBe("2026-08-20T03:00:00Z");
+      expect(load.flags[1]!.killedBy).toBe("u_ab12cd34ef56");
     }
   });
 
@@ -95,6 +101,37 @@ describe("loadFlags — failure is a STATE, never an exception", () => {
 
   it("a 200 whose JSON has no `flags` becomes `unavailable`, never an empty ready", async () => {
     globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({}), { status: 200 })) as unknown as typeof fetch;
+    const load = await loadFlags();
+    expect(load.state).toBe("unavailable");
+  });
+
+  // v3-D223: `killedBy`/`ackBy` are validated fields, not merely passed
+  // through — a response missing either one must be rejected the same way a
+  // missing `enabled` would be, never silently accepted with an `undefined`
+  // actor that later renders as a stray "by undefined".
+  it("a flag row missing killedBy/ackBy is rejected, never silently accepted", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          flags: [
+            {
+              key: "social.leaderboard",
+              description: "Ranked leaderboard.",
+              enabled: false,
+              version: 0,
+              killedAt: null,
+              // killedBy omitted
+              bannerVisible: false,
+              ackAt: null,
+              // ackBy omitted
+              ackAutoWaived: false,
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    ) as unknown as typeof fetch;
+
     const load = await loadFlags();
     expect(load.state).toBe("unavailable");
   });

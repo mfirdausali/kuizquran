@@ -30,8 +30,10 @@ const offFlag = {
   enabled: false,
   version: 0,
   killedAt: null,
+  killedBy: null,
   bannerVisible: false,
   ackAt: null,
+  ackBy: null,
   ackAutoWaived: false,
 };
 
@@ -41,8 +43,10 @@ const killedFlag = {
   enabled: false,
   version: 2,
   killedAt: "2026-08-20T03:00:00Z",
+  killedBy: "u_ab12cd34ef56",
   bannerVisible: true,
   ackAt: null,
+  ackBy: null,
   ackAutoWaived: false,
 };
 
@@ -54,13 +58,17 @@ const ackedFlag = {
   ...killedFlag,
   key: "social.leaderboard_v2",
   ackAt: "2026-08-21T09:00:00Z",
+  ackBy: "u_98fe76dc54ba",
   ackAutoWaived: false,
 };
 
+// A system auto-waive has no human actor — `ackBy` stays null even though the
+// kill itself named a real admin.
 const autoWaivedFlag = {
   ...killedFlag,
   key: "social.mutuals",
   ackAt: "2026-08-23T04:00:00Z",
+  ackBy: null,
   ackAutoWaived: true,
 };
 
@@ -124,6 +132,39 @@ describe("FlagsPanel — three states, never two", () => {
     expect(banner).toContain("2026-08-23T04:00:00Z");
     expect(banner).toMatch(/auto-waived after 72h/i);
     expect(banner).not.toMatch(/not yet acknowledged/i);
+  });
+
+  // v3-D223: `killedBy`/`ackBy` — the pseudonymized actor who took each real
+  // action — have been fetched and type-validated (`isFlagRow`) since the
+  // controller started sending them, but the banner named only WHEN each
+  // action happened, never WHO. An admin killing a flag another admin ramped
+  // yesterday had no way to tell who to ask.
+  it("names the killing admin's pseudonym in the banner, not just when", async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse({ flags: [killedFlag] })) as unknown as typeof fetch;
+    render(<FlagsPanel />);
+    await waitFor(() => expect(screen.getByText("social.friends")).toBeTruthy());
+    const banner = screen.getByRole("alert").textContent ?? "";
+    expect(banner).toContain("u_ab12cd34ef56");
+    expect(banner).toContain("2026-08-20T03:00:00Z");
+  });
+
+  it("names the acknowledging admin's pseudonym in the banner", async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse({ flags: [ackedFlag] })) as unknown as typeof fetch;
+    render(<FlagsPanel />);
+    await waitFor(() => expect(screen.getByText("social.leaderboard_v2")).toBeTruthy());
+    const banner = screen.getByRole("alert").textContent ?? "";
+    expect(banner).toContain("u_98fe76dc54ba");
+  });
+
+  // A system auto-waive has no human acknowledger — the banner must never
+  // fabricate a "by ..." clause for an action nobody took.
+  it("an auto-waived ack names no acknowledging admin, only the killing one", async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse({ flags: [autoWaivedFlag] })) as unknown as typeof fetch;
+    render(<FlagsPanel />);
+    await waitFor(() => expect(screen.getByText("social.mutuals")).toBeTruthy());
+    const banner = screen.getByRole("alert").textContent ?? "";
+    expect(banner).toContain("u_ab12cd34ef56"); // the real killer
+    expect(banner).not.toMatch(/acknowledged by/i);
   });
 });
 

@@ -39,8 +39,12 @@ export interface FlagRow {
   enabled: boolean;
   version: number;
   killedAt: string | null;
+  /** Pseudonymized actor (`u_...`), never a raw admin id — null when never
+   *  killed, or when an auto-waive's own `ackBy` has no human actor. */
+  killedBy: string | null;
   bannerVisible: boolean;
   ackAt: string | null;
+  ackBy: string | null;
   ackAutoWaived: boolean;
 }
 
@@ -61,8 +65,10 @@ function isFlagRow(v: unknown): v is FlagRow {
     typeof f.enabled === "boolean" &&
     typeof f.version === "number" &&
     (typeof f.killedAt === "string" || f.killedAt === null) &&
+    (typeof f.killedBy === "string" || f.killedBy === null) &&
     typeof f.bannerVisible === "boolean" &&
     (typeof f.ackAt === "string" || f.ackAt === null) &&
+    (typeof f.ackBy === "string" || f.ackBy === null) &&
     typeof f.ackAutoWaived === "boolean"
   );
 }

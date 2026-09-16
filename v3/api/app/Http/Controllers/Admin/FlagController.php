@@ -22,7 +22,10 @@ use Illuminate\Http\Request;
  */
 class FlagController extends Controller
 {
-    public function __construct(private readonly FlagService $flags) {}
+    public function __construct(
+        private readonly FlagService $flags,
+        private readonly Pseudonymizer $pseudonymizer,
+    ) {}
 
     public function index(): JsonResponse
     {
@@ -37,13 +40,35 @@ class FlagController extends Controller
                 'enabled' => $row ? (bool) $row->enabled : FlagRegistry::default($key),
                 'version' => $row->version ?? 0,
                 'killedAt' => $row->killed_at ?? null,
+                'killedBy' => $this->actorPseudonym($row?->killed_by),
                 'bannerVisible' => $row ? $row->bannerVisible() : false,
                 'ackAt' => $row->ack_at ?? null,
+                'ackBy' => $this->actorPseudonym($row?->ack_by),
                 'ackAutoWaived' => (bool) ($row->ack_auto_waived ?? false),
             ];
         }
 
         return response()->json(['flags' => $out]);
+    }
+
+    /**
+     * `killed_by`/`ack_by` are raw admin ids — same rule as every other
+     * admin-actor field on this console (`AdminAuditController`,
+     * `FlagAuditController`, `NightlyWindowController`): pseudonymize, never
+     * the raw id. `FlagService::kill()`/`acknowledgeKill()` stamp
+     * `(string) $adminId`, and `$adminId` is nullable (the unattended 72h
+     * auto-waive scheduler passes `null`) — `(string) null` casts to `""`,
+     * not `null`, so an empty stored value means "no actor" too, exactly like
+     * a genuinely-null one. Never a crash, never a fabricated pseudonym for
+     * an action no person took.
+     */
+    private function actorPseudonym(?string $rawAdminId): ?string
+    {
+        if ($rawAdminId === null || $rawAdminId === '') {
+            return null;
+        }
+
+        return $this->pseudonymizer->for((int) $rawAdminId);
     }
 
     /**
