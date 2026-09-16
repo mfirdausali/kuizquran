@@ -53,9 +53,108 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2749 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2752 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 384 v3/api + 120 corpus-compiler
-             # + 432 engine + 63 fold-runner + 1448 apps/web. (v3-D221, 2026-09-16)
+             # + 432 engine + 63 fold-runner + 1451 apps/web. (v3-D222, 2026-09-16)
+             # NOTE (v3-D222, 2026-09-16): `DrillEvent.latency` ("item-shown ->
+             # tap ms", WIREFRAME §15's own "built" v0.6 metric) had a real,
+             # tested consumer (`lib/progress/rows.ts#timeOnTaskMs`, which
+             # feeds the "Time" column on `/progress/list` and the ayah-detail
+             # page) and NO producer anywhere — not in v3, not in v2
+             # (`grep -rn "latency:" v2/src` outside `sync/outbox.ts`, which
+             # only relays a value some producer was supposed to set, returns
+             # nothing). Every real learner's `reconstruct_tap` therefore
+             # carried no `latency`, `timeOnTaskMs`'s own `typeof e.latency
+             # !== "number"` guard excluded every one, and `formatDuration(0)`
+             # printed the fixed "-" placeholder — the one column WIREFRAME
+             # §15 calls "the most motivating honest number the app has" had
+             # shown nothing else for any real learner since it shipped.
+             # Fixed with no new field: `answerCurrent` now stamps
+             # `latency: Math.max(0, ctx.now - run.lastActivityAt)` on the
+             # `reconstruct_tap` event — `lastActivityAt` was already, by its
+             # own docblock (v3-D107/v3-D217), "the ts of this run's own most
+             # recent commit... or startedAt before the first one", exactly
+             # "when did the item now being answered become active"; this
+             # reads a value `run.ts` already tracked rather than adding one,
+             # the same "resolve once, stamp it" shape `corpusHash`/`glossLang`
+             # already established. RED confirmed directly: 3 new cases in
+             # `lib/session/run.test.ts` (88 pre-existing untouched), reverted
+             # via `git stash` of `run.ts` alone (tests kept) — a day-2 due
+             # cold gate's own full reconstruct (a first-encounter learn item
+             # completes in one tap regardless of surah, verified directly,
+             # so a genuine second tap needs a due gate instead) failed
+             # `expected undefined to be 5000` on the first tap and
+             # `expected undefined to be 2000` on the second (proving a
+             # per-tap gap, never a cumulative total from `startedAt`); a
+             # backward-clock case failed `expected undefined to be +0`; an
+             # integration case driving a real gate session to completion and
+             # reading the REAL `timeOnTaskMs` failed `expected 0 to be
+             # greater than 0`. Restored byte-identically, reran: 88/88 green
+             # (was 85, +3). `npx vitest run lib/session/run.test.ts test/
+             # progress-list.test.tsx test/ayah-detail.test.tsx test/
+             # session-island.test.tsx lib/session/assemble-lastactive.test.ts`:
+             # 197/197 green — no regression on either real consumer.
+             # `TZ=UTC make test`: 2752 passing (was 2749, +3 — exactly this
+             # run's three new tests; apps/web 1451, was 1448; no other suite
+             # moved). `check-test-floor.mjs`: OK, 2752 >= floor 1899 (+853
+             # margin, unmoved, same discipline as every prior entry). `TZ=UTC
+             # make build`: exit 0, 30 routes (unchanged — a
+             # `lib/session/run.ts`-only change, no route or component
+             # touched). `npm run gates`: all green (boundaries 317 files,
+             # unchanged count — one existing production file edited plus its
+             # one existing test file, no new production file; fonts
+             # degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+             # corpus-morphology 362 words / corpus-glyphs 206 codepoints,
+             # both unchanged — no corpus recompile, a session-loop-only
+             # wiring change). `npx tsc --noEmit`, run separately across all
+             # four v3 node packages: clean in all four. No `v1/**`/`v2/**`
+             # edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+             # produced by running the suite was reverted before committing,
+             # same discipline as every prior entry — `git status
+             # --porcelain -- v1 v2` empty immediately before committing). No
+             # Arabic codepoint (the full diff swept programmatically, in
+             # Python, over the Arabic, Arabic Supplement, Arabic Extended-A
+             # and both Presentation Forms Unicode blocks, plus a
+             # `fromCharCode`/`fromCodePoint`/`\u06xx`/`\u07xx`/`\u08xx`/
+             # `\uFBxx`/`\uFExx` escape sweep — zero matches; every new
+             # string is a TypeScript identifier, a millisecond arithmetic
+             # result, or a fixed English docblock/comment sentence, never
+             # corpus text). Session start: picked up mid-session, `make
+             # setup` run once from scratch (a transient proxy timeout
+             # cloning `laravel/pint` recovered via the documented git-mirror
+             # source fallback, no retry flag needed); `HEAD` and
+             # `origin/main` already agreed at `734030a` (v3-D221) — no
+             # stale-local-main trap this run. Found by a direct field-by-
+             # field sweep of `DrillEvent`/`MakeEventArgs` against `run.ts`'s
+             # real event-construction sites (the same technique that closed
+             # `corpusHash`/v3-D206 and `locale`/v3-D213), after a broader
+             # zero-caller sweep across `apps/web/lib/**`, a Laravel model-
+             # relation sweep, a Console-Commands/Jobs/Notifications sweep,
+             # and a component-prop sweep (found one weaker, harmless
+             # candidate — `DrillPicker.tsx`'s own unused `now` prop, a dead
+             # parameter with no learner-facing consequence, not a computed-
+             # and-discarded field with a real reader — left alone) all came
+             # back with only already-excluded or non-gap candidates. NOT
+             # addressed: `DrillPicker.tsx`'s unused `now` prop (above);
+             # `session_start`'s own separate "app-open -> first drill" (v0.8)
+             # latency metric, which needs an app-open timestamp `run.ts` has
+             # no state for; `CorpusVerse.line` (declared, never populated by
+             # the compiler — re-confirmed the same dead-field shape v3-D194
+             # already excluded); the streak/away-day day-space mismatch
+             # (v3-D209); `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+             # `App\Billing\TrialAttribution` (v3-D148);
+             # `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate`
+             # as a whole class (v3-D88, v3-D151); multi-surah enrollment;
+             # the operational mailer/7-night window; PAY-1's Stripe
+             # fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`
+             # (v3-D111/D113/D123); `MacroFacts.litany.rhymeLabel` (v3-D188);
+             # `StripeField.editable` (v3-D204); `corpusHash`'s own zero
+             # fold-side consumer (v3-D206); FR5's own queue-level behavior
+             # for "restart"/"replan"/"makeup" (v3-D217) — all unchanged. See
+             # DECISIONS.md v3-D222.
              # NOTE (v3-D221, 2026-09-16): `PlanIsland`'s trajectory zone
              # assumed every learner's pace was Steady's 8 min/day —
              # `app/(app)/plan/page.tsx`'s own prop was literally named

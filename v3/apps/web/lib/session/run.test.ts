@@ -44,6 +44,7 @@ import { append } from "@/lib/idb/append";
 import { resetDbForTests } from "@/lib/idb/db";
 import { writeLock } from "@/lib/idb/writeLock";
 import { assemblePass } from "@/lib/onboarding/pass";
+import { timeOnTaskMs } from "@/lib/progress/rows";
 
 // A seam for the commit-before-paint test alone. When null (every other test)
 // the REAL append runs untouched, so nothing here weakens the other assertions.
@@ -2820,5 +2821,136 @@ describe("v3-D213 — DrillEvent.locale reaches the real session loop", () => {
     const adopted = fresh.find((e) => e.type === "adoption" && e.ayah === ayah);
     expect(produced?.locale).toBe("ms");
     expect(adopted?.locale).toBe("ms");
+  });
+});
+
+// v3-D222 — `DrillEvent.latency` ("Tap latency in ms (item-shown -> tap)",
+// `@engine/types.ts`, WIREFRAME §15's own "built" row: "ms per tap — the
+// time-per-word metric (v0.6)") has never been stamped by any real session
+// loop, in v2 or in v3 — `grep -rn "latency:" v2/src --include=*.ts` (outside
+// `sync/outbox.ts`, which only relays a value some producer was supposed to
+// have set) returns nothing, and the same grep against this file's own
+// production code, before this fix, was equally empty. The CONSUMER side is
+// real and tested: `lib/progress/rows.ts#timeOnTaskMs` sums every matching
+// event's own `.latency` to build the "Time" column
+// `components/progress/ProgressTable.tsx` and `AyahStatsIsland.tsx` both
+// render, and its own tests (`progress-list.test.tsx`, `ayah-detail.test.tsx`)
+// hand-construct fixture events with real `latency` values to prove the sum
+// and the interruption-discard rule both work — but every one of those
+// values was synthetic. `timeOnTaskMs`'s own filter,
+// `typeof e.latency !== "number"`, silently excluded every real tap a real
+// learner had ever made, so `formatDuration(0)` — the fixed "-" placeholder
+// — was the ONLY string a real learner could ever see in that column, no
+// matter how long they had actually spent.
+//
+// Fixed with no new field: `run.ts` was already maintaining exactly the
+// value this needs. `SessionRun.lastActivityAt` is, by its own docblock,
+// "the ts of this run's own most recent commit... or startedAt before the
+// first one" (v3-D107/v3-D217) — precisely "when did the item now being
+// answered become active". `answerCurrent` now stamps
+// `latency: Math.max(0, ctx.now - run.lastActivityAt)` on the
+// `reconstruct_tap` event it builds, read BEFORE `commitThenContinue`
+// refreshes `lastActivityAt` for the next tap — the same "resolve a fact
+// once, from state already being carried" shape `corpusHash`/`glossLang`
+// established, here reading a value rather than adding one.
+describe("v3-D222 — DrillEvent.latency reaches the real session loop", () => {
+  it("stamps each reconstruct_tap with real elapsed time since the run's last activity, not a running total", async () => {
+    // A first-encounter "learn" item completes in a single tap regardless of
+    // surah (a deliberately gentle first blank), so a second tap needs a DUE
+    // COLD GATE instead — the same real, full-reconstruct (every word of the
+    // ayah blanked) seeding this file's own v3-D108 block already uses — to
+    // guarantee more than one blank exists.
+    const c = corpus();
+    const gatedAyah = 1;
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah: gatedAyah, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+    const day2 = T0 + 86_400_000;
+    const started = await startFloorSession({ surah: SURAH, now: day2, tz: TZ }, c);
+    if (!started.ok) throw new Error("floor session must start on the due gate");
+    expect(started.run.queue[0]?.kind).toBe("gate");
+
+    // First tap, 5s after the SESSION's own start (day2) — nothing has
+    // happened on this run yet, so `lastActivityAt` is still `startedAt`
+    // (day2), never the unrelated day-1 `ayah_produced` seeded above.
+    const afterFirst = await answerCurrent(
+      started.run,
+      c,
+      correctIndexFor(started.run, c),
+      { now: day2 + 5_000, tz: TZ },
+    );
+    const firstEvents = await getAllEvents();
+    const firstTap = firstEvents.find((e) => e.type === "reconstruct_tap" && e.ts >= day2);
+    expect(firstTap?.latency).toBe(5_000);
+
+    const cur2 = currentItem(afterFirst, c);
+    if (!cur2) throw new Error("a full-reconstruct cold gate must have more than one blank");
+
+    // Second tap, 2s after the FIRST tap (day2+7_000) — not 2s after session
+    // start and not the 7s cumulative total. Proves this is a per-tap gap
+    // since the run's last commit, never re-derived from `startedAt` and
+    // never accumulated.
+    const beforeSecondIds = new Set(firstEvents.map((e) => e.id));
+    await answerCurrent(afterFirst, c, correctIndexFor(afterFirst, c), {
+      now: day2 + 7_000,
+      tz: TZ,
+    });
+    const secondEvents = await getAllEvents();
+    const secondTap = secondEvents.find(
+      (e) => e.type === "reconstruct_tap" && !beforeSecondIds.has(e.id),
+    );
+    expect(secondTap?.latency).toBe(2_000);
+  });
+
+  it("never fabricates negative latency across a backward clock jump", async () => {
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+
+    // A tap timestamped BEFORE the run's own lastActivityAt (a clock that
+    // moved backward, or a retried commit) must never produce a negative
+    // latency — clamped at 0, never a signed number a caller would have to
+    // guard against separately.
+    await answerCurrent(started.run, c, correctIndexFor(started.run, c), {
+      now: T0 - 1_000,
+      tz: TZ,
+    });
+    const events = await getAllEvents();
+    const tap = events.find((e) => e.type === "reconstruct_tap");
+    expect(tap?.latency).toBe(0);
+  });
+
+  it("a real learner's tap now feeds timeOnTaskMs — the Time column is no longer permanently unmeasured", async () => {
+    // `playThrough` (this file's shared helper) taps at a fixed T0-anchored
+    // `now` regardless of when the session itself started — harmless for
+    // every other assertion in this file, but it would pre-date a
+    // day2-started floor session and clamp every latency to 0 (v3-D133's own
+    // documented reason for NOT using `playThrough` on a day2 session). This
+    // drives the same real graded path with `now` genuinely advancing from
+    // the session's own start, exactly like the v3-D133 test above.
+    const c = corpus();
+    const gatedAyah = 1;
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah: gatedAyah, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+    const day2 = T0 + 86_400_000;
+    const started = await startFloorSession({ surah: SURAH, now: day2, tz: TZ }, c);
+    if (!started.ok) throw new Error("floor session must start on the due gate");
+
+    let run = started.run;
+    let cur = currentItem(run, c);
+    let taps = 0;
+    while (cur && taps < 500) {
+      run = await answerCurrent(run, c, correctIndexFor(run, c), { now: day2 + taps * 1_000, tz: TZ });
+      taps++;
+      cur = currentItem(run, c);
+    }
+    expect(taps).toBeGreaterThan(0);
+
+    const events = await getAllEvents();
+    const ms = timeOnTaskMs(events as DrillEvent[], SURAH, "ayah", gatedAyah);
+    expect(ms).toBeGreaterThan(0);
   });
 });

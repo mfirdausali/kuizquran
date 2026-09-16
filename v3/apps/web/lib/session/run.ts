@@ -972,6 +972,15 @@ export async function answerCurrent(
     structured: run.structured,
     corpusHash: run.corpusHash,
     locale: run.glossLang,
+    // v3-D222 — `DrillEvent.latency` ("item-shown -> tap ms", the v0.6
+    // per-tap metric `lib/progress/rows.ts#timeOnTaskMs` sums for the Time
+    // column) read BEFORE this commit refreshes `lastActivityAt` below:
+    // `run.lastActivityAt` is already "the ts of this run's own most recent
+    // commit... or startedAt before the first one" (v3-D107/v3-D217) —
+    // exactly "when did the item now being answered become active". Clamped
+    // at 0 rather than signed, so a retried commit or a backward clock jump
+    // can never produce a negative measurement.
+    latency: Math.max(0, ctx.now - run.lastActivityAt),
   } as DrillEvent;
 
   // ---- COMMIT ---------------------------------------------------------------

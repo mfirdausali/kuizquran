@@ -19219,3 +19219,193 @@ mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
 own queue-level behavior for "restart"/"replan"/"makeup" (v3-D217) — all
 unchanged. `/plan`'s pace assumption is now CLOSED — remove it from
 future "NOT addressed" lists.
+
+## v3-D222 (2026-09-16): `DrillEvent.latency` — a real, tested consumer, and no producer anywhere, in v2 or in v3
+
+`DrillEvent.latency` ("Tap latency in ms (item-shown -> tap)",
+`@engine/types.ts`; WIREFRAME §15's own timing table lists it as **built**:
+"ms per tap — the time-per-word metric (v0.6)") is a documented, frozen
+wire field, and the CONSUMER side is real: `lib/progress/rows.ts
+#timeOnTaskMs` sums every matching event's own `.latency` — discarding an
+interrupted one via `resumePolicy(...).discardLatency`, per §15's own
+"time on task, never wall-clock" rule — to build the `timeOnTask` field
+`components/progress/ProgressTable.tsx` (the accessible progress list,
+§15's own explicit requirement) and `AyahStatsIsland.tsx` both render
+verbatim. Its own tests, `test/progress-list.test.tsx` and
+`test/ayah-detail.test.tsx`, hand-construct fixture events carrying real
+`latency` values (`1_500`, `2_500`, `900_000`, …) to prove both the sum
+and the interruption-discard rule work correctly.
+
+Every one of those values was synthetic. `grep -n "latency" lib/session
+/run.ts` (production code, not comments) returned exactly one hit before
+this fix — a comment referencing the concept, never a stamp — across
+every one of `run.ts`'s eight real event-construction sites
+(`session_start`, `reconstruct_tap`, both `ayah_produced` branches,
+`gate_result`, `gate_demote`, both `adoption` events). Broader than the
+usual instance of this build's own bug class: this is not "v2 had it, v3's
+port dropped it" (the shape `corpusHash`/`glossLang`/`resumeMassed` each
+were) — `grep -rn "latency:" v2/src --include=*.ts` returns nothing
+outside `sync/outbox.ts`, which only relays whatever value some producer
+was supposed to have already set. The field was designed at the wire
+level (v0.6) and given a real, tested reader, but no session loop in this
+codebase's whole history — v1, v2, or v3 — ever produced it.
+
+**Consequence:** `timeOnTaskMs`'s own filter, `typeof e.latency !==
+"number"`, silently excluded every real tap any real learner had ever
+made. `formatDuration(0)` returns the fixed placeholder `"-"` — so the
+Time column WIREFRAME §15 calls "the most motivating honest number the
+app has" ("ayah 1 took you 48 seconds this week, down from 3 minutes")
+had shown that one placeholder, and nothing else, for every ayah of every
+real learner, no matter how long they had actually spent, since the
+column shipped.
+
+**Fixed with no new field.** `run.ts` was already maintaining exactly the
+value this needs: `SessionRun.lastActivityAt` is, by its own docblock
+(v3-D107/v3-D217), "the ts of this run's own most recent commit... or
+`startedAt` before the first one" — precisely "when did the item now
+being answered become active." `answerCurrent` now stamps
+`latency: Math.max(0, ctx.now - run.lastActivityAt)` on the
+`reconstruct_tap` event it builds, read BEFORE `commitThenContinue`
+refreshes `lastActivityAt` for the next tap — the same "resolve a fact
+once, from state already carried on the run" shape `corpusHash`/
+`glossLang` already established (v3-D206/v3-D213), here reading a value
+`run.ts` already tracked rather than adding a new one. Clamped at 0
+rather than signed, so a retried commit or a backward clock jump can
+never produce a negative measurement a caller would have to guard
+against separately. Deliberately scoped to `reconstruct_tap` alone —
+the ONLY graded path in the product (this file's own header: "it never
+decides whether a tap was right") — and not to `ayah_produced`/
+`gate_result` (which commit at the SAME instant as the tap that
+completes them and would double-count the identical interval if both
+carried a latency) nor to `session_start` (whose own doc names a
+DIFFERENT metric, "app-open -> first drill", which needs an app-open
+timestamp `run.ts` has no state for at all — a separate, smaller gap,
+left alone rather than conflating two different v0.6 metrics in one
+fix). Junction/chain-step events (the "connection" atom half of
+`timeOnTaskMs`'s own filter) are untouched: DEFECTS.md#E-08 already
+established that `bridge.ts` was atticked and never wired into any
+shipped v3 screen, so a connection atom has no real producer of any
+event to carry a latency on today.
+
+**RED confirmed directly**, three cases in a new
+`describe("v3-D222 — DrillEvent.latency reaches the real session loop")`
+block in `lib/session/run.test.ts` (88 pre-existing cases in the file
+untouched), each run against the unmodified `run.ts` via `git stash` of
+that one production file alone (every new test kept) before being
+restored byte-identically:
+
+- the load-bearing case seeds a real Carry-band `ayah_produced` on day 1
+  and starts a `startFloorSession` on day 2, so the due cold gate forces a
+  genuine full reconstruct (every word of the ayah blanked) rather than a
+  first-encounter learn item's single gentle blank — the latter completes
+  in exactly one tap regardless of surah (verified directly: neither
+  surah 112 nor surah 12's own first-session learn item survives a second
+  `answerCurrent` call, `assemblePass` returning `null` both times,
+  confirmed empirically while drafting this test rather than assumed).
+  The first tap, 5s after the session's own start, failed exactly
+  `expected undefined to be 5000`; a second tap 2s after the FIRST tap
+  (not 2s after session start, not the 7s cumulative total) failed
+  identically — proving the fix cannot be a re-derivation from
+  `startedAt`;
+- a clock-moved-backward case (`now: T0 - 1_000`) failed
+  `expected undefined to be +0`, proving the clamp is real and not merely
+  coincidentally unreached;
+- an integration case drives a real day-2 gate session to completion
+  (mirroring this file's own pre-existing v3-D133 test's technique of
+  advancing `now` from the session's OWN start, `day2 + taps * 1_000`,
+  rather than this file's shared `playThrough` helper's fixed
+  T0-anchored clock — using `playThrough` here would pre-date the day-2
+  session and clamp every latency to 0, the exact quirk v3-D133's own
+  comment already names) and asserts the REAL `timeOnTaskMs` — not a
+  stub — returns a positive duration for the gated ayah; failed
+  `expected 0 to be greater than 0` against the unmodified source.
+
+Restored byte-identically, reran: 88/88 green (was 85, +3). `npx vitest
+run lib/session/run.test.ts test/progress-list.test.tsx
+test/ayah-detail.test.tsx test/session-island.test.tsx lib/session
+/assemble-lastactive.test.ts`: 197/197 green — no regression on either
+real consumer or the sibling `lastActivityAt`-reading function.
+
+`TZ=UTC make test`: **2752 passing** (was 2749, +3 — exactly this run's
+three new tests; apps/web 1451, was 1448; no other suite moved: 255 v2
+vitest, 47 v2/api, 384 v3/api, 120 corpus-compiler, 432 engine, 63
+fold-runner). `check-test-floor.mjs`: OK, 2752 >= floor 1899 (+853
+margin, unmoved, same discipline as every prior entry). `TZ=UTC make
+build`: exit 0, 30 routes (unchanged — a `lib/session/run.ts`-only
+change, no route or component touched). `npm run gates`: all green
+(boundaries 317 files, unchanged count — one existing production file
+edited plus its one existing test file, no new production file; fonts
+degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology 362 words / corpus-glyphs 206 codepoints, both
+unchanged — no corpus recompile, this is a session-loop-only wiring
+change). `npx tsc --noEmit`, run separately across all four v3 node
+packages: clean in all four. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite
+was reverted before committing, same discipline as every prior entry —
+`git status --porcelain -- v1 v2` empty immediately before committing).
+No Arabic codepoint (the full diff swept programmatically, in Python,
+over the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks, plus a `fromCharCode`/`fromCodePoint`/
+`\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape sweep — zero matches;
+every new string is a TypeScript identifier, a millisecond arithmetic
+result, or a fixed English docblock/comment sentence, never corpus
+text).
+
+**Session start:** picked up mid-session on a container with no
+`node_modules`/`vendor` anywhere (fresh checkout); `make setup` ran once
+from scratch via the documented git-mirror composer fallback for
+`v3/api` (a transient proxy timeout cloning `laravel/pint` via dist,
+recovered automatically via the git-mirror source fallback already built
+into this environment — no retry flag needed this run). `HEAD` and
+`origin/main` already agreed at `734030a` (v3-D221) — no stale-local-main
+trap this run, confirmed directly via `git fetch origin main` before any
+exploration. Baseline `TZ=UTC make test` (before any change): 2749
+passing, matching v3-D221's own recorded count exactly.
+
+**Found by** a direct field-by-field sweep of `packages/engine/src/types.ts`'s
+`DrillEvent`/`MakeEventArgs` against `lib/session/run.ts`'s actual
+event-construction sites — the same technique that closed `corpusHash`
+(v3-D206) and `locale` (v3-D213) — after a broader zero-caller sweep
+across `apps/web/lib/**` (an exported-symbol/usage-count script run
+against every non-test file) came back with only already-excluded or
+internal-use-only candidates (`lib/pricing.ts#regionFromCountry`,
+`lib/i18n/dictionaries.ts#LOCALES`, and several exported helpers used
+only within their own defining file, none a genuine gap), a Laravel
+model-relation sweep (`Entitlement::user()`/`EntitlementTransition
+::user()`/`AccountDeletionRequest::user()` — all zero-caller, but each
+controller deliberately queries the raw `user_id` FK directly instead,
+the same established non-gap shape `AdminAudit::actor()` already set at
+v3-D191), a Console-Commands/Notifications/Jobs sweep (`v3/api/app/Jobs`
+and `.../Notifications` do not exist as directories; every Console
+Command's own output already reaches an admin panel per its own prior
+DECISIONS entry), and a component-prop sweep (an AST-light script
+checking every destructured prop in `components/**/*.tsx` is referenced
+in its own body) that found exactly one other candidate,
+`DrillPicker.tsx`'s own `now` prop — genuinely unused (confirmed:
+`buildDrillPreview`/`capacity.ts#estMinutes` are both time-independent,
+so nothing in `/drill`'s current design needs it) but a dead PARAMETER
+with no consequence to a learner, not a computed-and-discarded FIELD
+with a real reader on the other end — a different, much weaker shape
+than this bug class targets, and left alone rather than forced into a
+fix for its own sake.
+
+**NOT addressed:** `DrillPicker.tsx`'s own unused `now` prop (above,
+named so a future run does not have to re-derive that it is harmless
+rather than assuming it is a fresh finding); `session_start`'s own
+"app-open -> first drill" latency metric (v0.8, a different field from
+this fix, needs an app-open timestamp `run.ts` has no state for);
+`CorpusVerse.line` (declared on the engine's wire type, never populated
+by the compiler at all — re-confirmed this run as the same dead-field
+shape v3-D194 already found and deliberately excluded, not reopened);
+the streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()`
+(v3-D136); `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151); multi-surah enrollment; the operational
+mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123);
+`MacroFacts.litany.rhymeLabel` (v3-D188); `StripeField.editable`
+(v3-D204); `corpusHash`'s own zero fold-side consumer (v3-D206); FR5's
+own queue-level behavior for "restart"/"replan"/"makeup" (v3-D217) — all
+unchanged.
