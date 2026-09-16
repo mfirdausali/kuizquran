@@ -20,6 +20,7 @@ import type { Corpus } from "@engine/types.ts";
 import { dayIndexOf } from "@engine/awayDays.ts";
 import { DB_NAME, openDb, resetDbForTests, writeLock } from "@/lib/idb";
 import { setDayAway } from "@/lib/plan/awayDay";
+import { commitOnboarding } from "@/lib/onboarding/choices";
 import { PlanIsland } from "@/components/plan/PlanIsland";
 
 afterEach(cleanup);
@@ -151,5 +152,43 @@ describe("PlanIsland — marking a day away before any session exists (v3-D220)"
     // The log is no longer empty, so the honest zero-state sentence is gone
     // — a real (if still nearly empty) forecast now exists.
     expect(screen.queryByText(/nothing recorded yet/i)).toBeNull();
+  });
+});
+
+describe("PlanIsland — the trajectory reflects the learner's REAL pace commitment (v3-D221)", () => {
+  // `SessionGate.tsx`/`TodaySession.tsx` both read `choices.pace` (v3-D138) so
+  // the session and the dashboard's due count agree with a Sprint/Maintain
+  // learner's actual commitment. `PlanIsland` never carried it — the prop it
+  // takes is literally named `STEADY_MINUTES_PER_DAY` at its one call site
+  // (`app/(app)/plan/page.tsx`) — so every learner's trajectory zone showed
+  // Steady's assumed 8 min/day and ETA regardless of what they actually
+  // chose. A harmless past-day away-toggle reaches "ready" without a
+  // fabricated forecast, the same technique the describe block above uses.
+
+  it("uses Sprint's own 16 min/day budget, not Steady's fallback, once onboarding choices load", async () => {
+    await commitOnboarding(
+      { glossLang: "en", surah: SURAH, pace: "sprint", placement: { kind: "fresh" } },
+      NOW,
+    );
+    await setDayAway(SURAH, TODAY - 100, true, { now: NOW, tz: TZ });
+    await renderReady();
+
+    const traj = screen.getByTestId("zone-trajectory");
+    await waitFor(() => {
+      expect(within(traj).getByText(/~15 min\/day/)).toBeTruthy();
+    });
+    // Never left showing the Steady fallback the prop supplies before the
+    // real choice loads.
+    expect(within(traj).queryByText(/~10 min\/day/)).toBeNull();
+  });
+
+  it("falls back to the Steady default when this device has no onboarding choice at all", async () => {
+    await setDayAway(SURAH, TODAY - 100, true, { now: NOW, tz: TZ });
+    await renderReady();
+
+    const traj = screen.getByTestId("zone-trajectory");
+    await waitFor(() => {
+      expect(within(traj).getByText(/~10 min\/day/)).toBeTruthy();
+    });
   });
 });

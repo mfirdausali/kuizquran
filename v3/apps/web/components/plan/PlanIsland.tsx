@@ -13,15 +13,17 @@
 // finish date. All of that is `lib/plan/forecast.ts`. This file folds the log
 // into atoms, counts what is left, and hands the numbers over.
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Corpus } from "@engine/types.ts";
 import type { AtomState } from "@engine/atom.ts";
 import { rebuild } from "@engine/rebuild.ts";
 import { atomKey } from "@engine/atom.ts";
 import { currentBand } from "@engine/strength.ts";
 import { awayDayOffsets, dayIndexOf } from "@engine/awayDays.ts";
+import { DEFAULT_PACE_MODE, paceConfig } from "@engine/pace.ts";
 import { currentTz, getEventsForSurah, useLogState } from "@/lib/idb";
 import type { LocalEventRow } from "@/lib/idb";
+import { readChoices } from "@/lib/onboarding/choices";
 import { setDayAway } from "@/lib/plan/awayDay";
 import { buildForecast, type EnrolledSurah } from "@/lib/plan/forecast";
 import { EmptyPlanAwayList } from "./EmptyPlanAwayList";
@@ -31,12 +33,18 @@ interface PlanIslandProps {
   corpus: Corpus;
   now: number;
   tz: string;
-  /** The learner's daily commitment. From the pace mode once that persists
-   *  (M6); the engine's Steady default until then. */
+  /** FALLBACK ONLY, used until the learner's real pace mode loads from
+   *  onboarding choices (v3-D221) — client-only IndexedDB storage a server
+   *  component cannot read, which is why this is a prop at all. The engine's
+   *  Steady default. Once the read below resolves, the REAL choice — Sprint's
+   *  16 min/day, Maintain's reviews-only 8 — replaces it, the same
+   *  `choices.pace` read `SessionGate.tsx`/`TodaySession.tsx` already use
+   *  (v3-D138) for the identical reason: a plan built on an assumed pace is
+   *  exactly the "every ETA lies" failure E-06 was closed to prevent. */
   minutesPerDay: number;
 }
 
-export function PlanIsland({ corpus, now, tz, minutesPerDay }: PlanIslandProps) {
+export function PlanIsland({ corpus, now, tz, minutesPerDay: fallbackMinutesPerDay }: PlanIslandProps) {
   const surah = corpus.meta.surah;
   const selector = useCallback(() => getEventsForSurah(surah), [surah]);
   const isEmpty = useCallback((rows: LocalEventRow[]) => rows.length === 0, []);
@@ -45,6 +53,23 @@ export function PlanIsland({ corpus, now, tz, minutesPerDay }: PlanIslandProps) 
   // it has no way to know happened (it holds no live subscription).
   const [refreshNonce, setRefreshNonce] = useState(0);
   const state = useLogState<LocalEventRow[]>(selector, isEmpty, [surah, refreshNonce]);
+
+  // v3-D221: the learner's REAL daily commitment, not always Steady's
+  // assumed 8. Independent of the log read above — never blocks first paint
+  // on it, and never re-runs on `refreshNonce` (a pace change persists
+  // through onboarding's own screens, not through an away-day toggle).
+  const [minutesPerDay, setMinutesPerDay] = useState(fallbackMinutesPerDay);
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const choices = await readChoices();
+      if (!alive) return;
+      setMinutesPerDay(paceConfig(choices?.pace ?? DEFAULT_PACE_MODE).budgetMin);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // WIREFRAME §14 "Planned absences": commits through the SAME
   // commit-before-paint `append()` every other event uses, then forces the

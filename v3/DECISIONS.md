@@ -19106,3 +19106,116 @@ mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
 own queue-level behavior for "restart"/"replan"/"makeup" (v3-D217) — all
 unchanged. `lib/plan/forecast.ts`'s empty-log zero-state is now CLOSED —
 remove it from future "NOT addressed" lists.
+
+## v3-D221 (2026-09-16): `/plan`'s trajectory zone assumed every learner's pace was Steady's 8 min/day
+
+`packages/engine/src/pace.ts#paceConfig()` — Sprint's real 16 min/day
+commitment, Maintain's reviews-only 8 — has been persisted per learner
+since onboarding (`lib/onboarding/choices.ts#OnboardingChoices.pace`,
+`commitOnboarding()`) and consumed by two real production call sites
+since v3-D138: `SessionGate.tsx` (feeds the actual session assembly) and
+`TodaySession.tsx` (feeds `/home`'s own due count, closing exactly this
+"computed and stored, one sibling caller still hardcodes it" shape for
+the dashboard). `PlanIsland.tsx` never carried it — `app/(app)/plan/
+page.tsx`'s own prop was literally named `STEADY_MINUTES_PER_DAY`, passed
+unconditionally, and `PlanIsland` never called `readChoices()` at all.
+`grep -rn "readChoices" apps/web/components/plan` returned nothing before
+this fix.
+
+Real, not cosmetic: `minutesPerDay` drives `forecast.ts#buildForecast()`'s
+`paceLabel` (the trajectory zone's own "~N min/day" commitment sentence),
+`etaDays`/`finishLabel` (the "mid-March" finish date, via `planFor()`),
+and the estimated zone's `estimatedMinutes`. A Sprint learner (real
+16 min/day) saw a trajectory built on half their actual pace and a finish
+date roughly twice as far out as reality; a Maintain learner (reviews
+only, `newAyahCeiling: 0`) was shown a finite finish date implying
+ongoing new-ayah progress that will never happen. This is precisely the
+"every ETA lies" failure E-06 (`splitBudget()`, build-plan step 9) was
+closed to prevent — E-06 stops the lie from ONE surah stealing another's
+budget; this stopped the lie of picking the wrong budget size in the
+first place. The page's own comment blaming this on "M6's schema work" was
+stale: that storage has existed and been consumed by two other surfaces
+since before v3-D138 landed; nobody carried it to `/plan` when it did.
+
+A second, smaller instance on the same screen: `PlanCalendar.tsx`'s
+trajectory caption hardcoded "The commitment is what stays fixed: about
+eight minutes a day" — Steady's own number, printed one line above the
+REAL `forecast.paceLabel` it would now contradict for any non-Steady
+learner (a Sprint learner would have read "about eight minutes" directly
+beside "~15 min/day").
+
+**Fixed:** `PlanIsland` gains a `useEffect`/`useState` reading
+`readChoices()` on mount (mirroring `SessionGate.tsx`/`TodaySession.tsx`'s
+own precedent exactly) and resolves `paceConfig(choices?.pace ??
+DEFAULT_PACE_MODE).budgetMin` in place of the prop, which is now
+FALLBACK-ONLY — used only until that read resolves, never a permanently
+assumed value; independent of the existing log-read effect, so it never
+blocks first paint on the fold. `PlanCalendar.tsx`'s caption drops the
+specific number entirely rather than duplicating `forecast.paceLabel` a
+second time — the same "one source of truth, not two copies" discipline
+this build applies to `dateLabel`/`gradeClassToWire`/`digestsMatch`.
+
+**RED confirmed directly:** two new cases in a dedicated
+`test/plan-island.test.tsx` describe block, run against the unmodified
+component (the file's existing describe blocks, 7 cases, untouched) — the
+load-bearing case (commits `pace: "sprint"` via the real
+`commitOnboarding()`, reaches "ready" via a harmless past-day away-toggle
+exactly like the file's own established technique, never fabricating a
+forecast) failed on `expected element with text ~15 min/day to exist` —
+the trajectory zone kept showing `~10 min/day`, the Steady fallback's own
+label; the sibling no-onboarding-choice case passed vacuously, correctly,
+since it was already exercising the same fallback path the bug shared.
+Implemented; reran: 9/9 green (was 7, +2).
+
+`TZ=UTC make test`: **2749 passing** (was 2747, +2 — exactly this run's
+two new tests; apps/web 1448, was 1446; no other suite moved: 255 v2
+vitest, 47 v2/api, 384 v3/api, 120 corpus-compiler, 432 engine, 63
+fold-runner). `check-test-floor.mjs`: OK, 2749 >= floor 1899 (+850
+margin, unmoved, same discipline as every prior entry). `TZ=UTC make
+build`: exit 0, 30 routes (unchanged — edits inside the existing `/plan`
+component tree, no new route). `npm run gates`: all green (boundaries 317
+files, unchanged count — no new production file, three existing files
+edited plus one existing test file; fonts degraded-but-non-blocking,
+pre-existing, 2/6 UI fonts present; corpus-morphology 362 words /
+corpus-glyphs 206 codepoints, both unchanged — no corpus recompile, this
+is a plan-only pace-wiring change). `npx tsc --noEmit` (apps/web): clean.
+No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache
+diff produced by running the suite was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2` empty
+immediately before committing). No Arabic codepoint (the full diff swept
+programmatically, in Python, over the Arabic, Arabic Supplement, Arabic
+Extended-A and both Presentation Forms Unicode blocks, plus a
+`fromCharCode`/`fromCodePoint`/`\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/
+`\uFExx` escape sweep — zero matches; every new string is a fixed English
+caption/comment or a closed-set pace-mode fixture value ("sprint",
+already used elsewhere in this test file), never corpus text).
+
+**Session start:** picked up mid-session on a container where `make
+setup` and a baseline `TZ=UTC make test`/`make build` had already been run
+fresh from a clean checkout this same run (2747 passing, matching
+v3-D220's own recorded count exactly — no drift, no stale-local-main
+trap: `HEAD` and `origin/main` already agreed at `fd9ce26`, this entry's
+own parent).
+
+**Found by** a dedicated fresh-sweep agent (Explore) handed the full
+exclusion list carried through v3-D220 and directed at the away-day
+feature's own siblings, the resume/interruption feature, `worker/
+fold-runner/src`, Console Commands, and a zero-caller function sweep over
+`apps/web/lib/**` — independently re-verified by this run directly against
+`PlanIsland.tsx`, `page.tsx`, `PlanCalendar.tsx`, `pace.ts` and
+`choices.ts`'s real source before writing any test.
+
+**NOT addressed:** every item on v3-D220's own "NOT addressed" list,
+unchanged — the streak/away-day day-space mismatch (v3-D209);
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151); multi-surah enrollment; the operational
+mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123);
+`MacroFacts.litany.rhymeLabel` (v3-D188); `StripeField.editable`
+(v3-D204); `corpusHash`'s own zero fold-side consumer (v3-D206); FR5's
+own queue-level behavior for "restart"/"replan"/"makeup" (v3-D217) — all
+unchanged. `/plan`'s pace assumption is now CLOSED — remove it from
+future "NOT addressed" lists.

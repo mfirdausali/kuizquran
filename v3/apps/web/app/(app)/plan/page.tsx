@@ -78,10 +78,13 @@ const ZONES = [
   },
 ] as const;
 
-/** The Steady pace budget (pace.ts). Persisting a learner's chosen mode is
- *  M6's schema work (E-05 is explicitly a storage question, not an engine
- *  one), so the default is used and named rather than silently assumed. */
-const STEADY_MINUTES_PER_DAY = 8;
+/** FALLBACK ONLY (pace.ts's Steady default), used until `PlanIsland` (v3-D221)
+ *  reads the learner's REAL pace choice from onboarding's own client-only
+ *  IndexedDB storage — this server component cannot read it. E-05's storage
+ *  question (M6) is answered: `lib/onboarding/choices.ts` persists it and
+ *  `SessionGate.tsx`/`TodaySession.tsx` already consume it (v3-D138); this
+ *  was the one sibling caller that still assumed Steady unconditionally. */
+const FALLBACK_MINUTES_PER_DAY = 8;
 
 export default async function PlanPage() {
   const surah = AVAILABLE_SURAHS[0]!;
@@ -144,7 +147,7 @@ export default async function PlanPage() {
               corpus={corpus}
               now={now}
               tz={tz}
-              minutesPerDay={STEADY_MINUTES_PER_DAY}
+              minutesPerDay={FALLBACK_MINUTES_PER_DAY}
             />
           )}
         </section>

@@ -104,8 +104,12 @@ export function PlanCalendar({ forecast, onToggleAway }: PlanCalendarProps) {
           Beyond — a trajectory
         </h3>
         <p className="caption zone__why">
-          Too far out to schedule. The commitment is what stays fixed: about
-          eight minutes a day.
+          {/* v3-D221: this used to hardcode "about eight minutes a day" —
+              Steady's own number, wrong for a Sprint or Maintain learner and
+              self-contradicting the REAL commitment printed one line below.
+              Named here, never a second literal. */}
+          Too far out to schedule. The commitment is what stays fixed, even
+          when the item list is not.
         </p>
         <p className="zone__trajectory">
           <strong>{forecast.paceLabel}</strong>
