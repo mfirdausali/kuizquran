@@ -53,9 +53,9 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2740 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 381 v3/api + 120 corpus-compiler
-             # + 432 engine + 63 fold-runner + 1442 apps/web. (v3-D218, 2026-09-15)
+make test    # 2743 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 384 v3/api + 120 corpus-compiler
+             # + 432 engine + 63 fold-runner + 1442 apps/web. (v3-D219, 2026-09-16)
              # NOTE (v3-D218, 2026-09-15): `packages/engine/src/resume.ts
              # #ResumeDecision.massed` — computed by `resumePolicy()` on
              # every interruption classification since FR5 landed (v3-D217,
@@ -158,6 +158,111 @@ make test    # 2740 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # `corpusHash`'s own zero fold-side consumer; `lib/plan/
              # forecast.ts`'s empty-log zero-state). See DECISIONS.md
              # v3-D218.
+             # NOTE (v3-D219, 2026-09-16): `App\Billing\PaywallGate` re-derived
+             # `EntitlementState`'s own two named decisions instead of calling
+             # them. `permitsNewContent()` ("the ONLY question the paywall may
+             # ever ask") and `permitsReview()` ("a single named place for the
+             # never-hostage rule v3-D16") both exist specifically so this
+             # question has one home — but `permitsIssuance()` re-derived the
+             # first via an if/else chain whose FINAL branch fell through
+             # unconditionally to `lapsed_review_only`, correct only because
+             # exactly four states exist today, and `permitsReview()`
+             # hardcoded `true` a second time, ignoring `$entitlement`
+             # entirely. Same "tested resolver exists, the one caller
+             # re-derives it inline" shape as `gradeClassToWire` (v3-D83),
+             # `lastActiveDayMs` (v3-D113), `digestsMatch` (v3-D159) — found
+             # by re-reading `PaywallGate` against `EntitlementState` after
+             # v3-D217's own "NOT addressed" list named `PaywallGate` as a
+             # whole class still worth checking. Not a live divergence for
+             # today's four states (both methods already agree, coincidentally
+             # rather than by construction) but a fifth state would silently
+             # diverge — `permitsNewContent()`'s own closed `match` would
+             # throw, `permitsIssuance()`'s manual chain would instead mislabel
+             # it `lapsed_review_only`. Fixed: `permitsIssuance()` now checks
+             # `$state->permitsNewContent()` first and denies only when it
+             # returns false (today reachable by `LapsedReviewOnly` alone,
+             # unchanged); the three admitted states keep their own existing
+             # branches; the old unconditional fallback is now unreachable
+             # code guarded by a `throw new \LogicException` naming any future
+             # unhandled state explicitly, never a silent mislabel.
+             # `permitsReview()` now returns `$entitlement === null ||
+             # $entitlement->state->permitsReview()` — a null entitlement (no
+             # account yet) still defaults to the same unconditional `true`.
+             # RED confirmed directly, mirroring `EntitlementBoundaryTest`'s
+             # own STRUCTURAL technique (source, not behavior — a behavioral
+             # test can only prove the two methods currently agree, never that
+             # one delegates to the other): `git stash` of `PaywallGate.php`
+             # alone (all 3 new tests kept, 8 pre-existing cases untouched)
+             # failed exactly the 2 structural cases —
+             # `assertStringContainsString('permitsNewContent()', $body)` /
+             # `'permitsReview()'` both failed against the untouched
+             # if/else-chain and hardcoded-`true` bodies; the third,
+             # regression case (iterates all four `EntitlementState::cases()`,
+             # asserts `permitsIssuance()`'s own `->permitted` equals
+             # `$state->permitsNewContent()` directly) passed vacuously,
+             # correctly — it guards a FUTURE refactor, not this run's own
+             # RED. Restored byte-identically, reran: 11/11 green in
+             # `PaywallBoundaryTest` (was 8, +3), 56 assertions. `TZ=UTC make
+             # test`: 2743 passing (was 2740 after v3-D218's own fix landed
+             # first, +3 — exactly this run's three new PHPUnit cases; v3/api
+             # 384, was 381; no other suite moved). `check-test-floor.mjs`:
+             # OK, 2743 >= floor 1899 (+844 margin, unmoved). `TZ=UTC make
+             # build`: exit 0, 30 routes (unchanged —
+             # a Laravel-only fix, no apps/web file touched). `npm run
+             # gates`: all green (boundaries 316 files, unchanged count — no
+             # new production file, one existing PHP file edited plus its
+             # one existing test file; fonts degraded-but-non-blocking,
+             # pre-existing, 2/6 UI fonts present; corpus-morphology 362
+             # words / corpus-glyphs 206 codepoints, both unchanged — no
+             # corpus recompile). `./vendor/bin/pint --test` on both changed
+             # files: `PaywallGate.php` passed; `PaywallBoundaryTest.php`
+             # reports the identical single `single_quote` finding on the
+             # SAME pre-existing line both before and after this diff,
+             # confirmed directly by stashing and re-running pint —
+             # pre-existing drift this fix does not introduce, left alone,
+             # same discipline as `WebhookHandler.php`'s own precedent
+             # (v3-D203). No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff produced by running
+             # the suite was reverted before committing, same discipline as
+             # every prior entry — `git status --porcelain -- v1 v2` empty
+             # immediately before committing). No Arabic codepoint (both
+             # changed files swept programmatically, in Python, over the
+             # Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms Unicode blocks, plus a
+             # `fromCharCode`/`fromCodePoint`/`\u06xx`/`\u07xx`/`\u08xx`/
+             # `\uFBxx`/`\uFExx` escape sweep — zero matches; every new line
+             # is a PHP identifier, a method name, or a fixed English
+             # docblock/assertion-message sentence, never corpus text).
+             # Session start: this run picked up mid-session after a
+             # container restart during a prior autonomous run had already
+             # left this exact fix uncommitted and unverified on disk; the
+             # inherited diff was read directly, RED was independently
+             # re-confirmed against it before trusting it, and every gate
+             # was run fresh rather than assumed. `origin/main` had moved to
+             # `61ca26d` (v3-D218, the `resumeMassed` fix, a concurrent
+             # session's own independent work — disjoint files, no
+             # conflict) while this fix was in flight; rebased cleanly onto
+             # it and renumbered this entry from a collision at v3-D218 to
+             # v3-D219. NOT addressed:
+             # `PaywallGate` as a whole class still has zero production
+             # callers — this fix makes what it COMPUTES self-consistent,
+             # not whether anything calls it; wiring it into session
+             # assembly still needs Firdaus's still-open call on
+             # review-vs-new-content in one mixed queue (v3-D88,
+             # unresolved). Every item on v3-D217's own "NOT addressed"
+             # list, unchanged (the streak/away-day day-space mismatch,
+             # v3-D209; `rhymeClassOf()`; `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution`;
+             # `lib/pricing.ts#regionFromCountry()`; multi-surah enrollment;
+             # the operational mailer/7-night window; PAY-1's Stripe
+             # fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift;
+             # `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel`; `StripeField.editable`;
+             # `corpusHash`'s own zero fold-side consumer; `lib/plan/
+             # forecast.ts`'s empty-log zero-state; FR5's own queue-level
+             # behavior for "restart"/"replan"/"makeup") — all unchanged.
+             # See DECISIONS.md v3-D219.
              # NOTE (v3-D217, 2026-09-15): `packages/engine/src/resume.ts
              # #resumePolicy()` (FR5's re-entry classifier) had exactly ONE
              # caller anywhere — `lib/progress/rows.ts#timeOnTaskMs`, which

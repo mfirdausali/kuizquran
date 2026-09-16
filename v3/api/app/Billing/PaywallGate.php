@@ -51,11 +51,29 @@ class PaywallGate
 
         $state = $entitlement->state;
 
+        // ---- v3-D218: delegate to the ONE named place this question lives ----
+        // `EntitlementState::permitsNewContent()` decides exactly this — "may
+        // this state be issued new content" — and was, until this fix, never
+        // called here: the branches below re-derived the identical answer via
+        // an if/else chain whose FINAL branch silently assumed "whatever state
+        // is left must be LapsedReviewOnly", true only because the enum
+        // currently has exactly four cases. Checking the real method first
+        // means a future fifth state is judged by its own declared
+        // permission, not by an implicit fallthrough that predates it.
+        if (! $state->permitsNewContent()) {
+            // Today this is reachable by LapsedReviewOnly alone (v3-D16/v3-D54):
+            // new content is denied, review is not — see permitsReview() below.
+            return PaywallDecision::deny('lapsed_review_only', 'review stays open; new content requires payment');
+        }
+
         // Active/grace: everything compiled is open.
         if ($state === EntitlementState::Active || $state === EntitlementState::Grace) {
             return PaywallDecision::allow("state={$state->value}");
         }
 
+        // $state === EntitlementState::Trial from here — permitsNewContent()
+        // above admits only Active/Grace/Trial, and the branch just above
+        // already exhausts Active/Grace.
         if ($state === EntitlementState::Trial) {
             // ---- v3-D07's OTHER HALF: "one surah, OR 14 days" ----
             // Only the surah half was checked here until this fix. A trial that
@@ -97,12 +115,14 @@ class PaywallGate
             );
         }
 
-        // ---- v3-D16 / v3-D54: LAPSED IS REVIEW-ONLY, INDEFINITELY ----
-        // New content is denied. Review is NEVER denied — see permitsReview()
-        // below, which has no time component at all. There is deliberately no
-        // "lapsed more than N days" branch here, and the entitlements table has no
-        // column that could support one.
-        return PaywallDecision::deny('lapsed_review_only', 'review stays open; new content requires payment');
+        // Unreachable today: `permitsNewContent()` admits only Active/Grace/
+        // Trial, all three handled above, and denies only LapsedReviewOnly,
+        // handled by the guard at the top of this method. A future state that
+        // reaches here would mean `permitsNewContent()` says "yes" but nothing
+        // in this method knows how to issue for it — loud and named, never a
+        // silent `lapsed_review_only` mislabel for a state that was never
+        // LapsedReviewOnly at all.
+        throw new \LogicException("PaywallGate::permitsIssuance() has no issuance branch for state={$state->value}");
     }
 
     /**
@@ -117,9 +137,20 @@ class PaywallGate
      * v3-D54 resolved the conflicting WIREFRAME "7 days" prose in favour of this.
      * The method takes no `$now` ON PURPOSE — there is no timestamp it could
      * legitimately compare, and a signature without a clock cannot grow an expiry.
+     *
+     * v3-D218: delegates to `EntitlementState::permitsReview()` — the ONE
+     * named place the never-hostage rule lives — instead of hardcoding the
+     * identical `true` a second time in this file. No entitlement row at all
+     * is the newest possible learner, who has nothing yet to review; there is
+     * no state to ask, so that case defaults to the same `true` every real
+     * state already returns.
      */
     public function permitsReview(?Entitlement $entitlement): PaywallDecision
     {
-        return PaywallDecision::allow('review is never gated (v3-D16)');
+        $permitted = $entitlement === null || $entitlement->state->permitsReview();
+
+        return $permitted
+            ? PaywallDecision::allow('review is never gated (v3-D16)')
+            : PaywallDecision::deny('review_denied', 'unreachable while EntitlementState::permitsReview() returns true unconditionally');
     }
 }

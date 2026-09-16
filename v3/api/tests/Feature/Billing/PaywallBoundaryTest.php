@@ -294,4 +294,142 @@ class PaywallBoundaryTest extends TestCase
 
         $this->assertTrue($this->gate()->permitsReview($ent)->permitted);
     }
+
+    // ═════ v3-D218 — PaywallGate must DELEGATE to EntitlementState, not re-derive ═════
+
+    /**
+     * `EntitlementState::permitsNewContent()`/`::permitsReview()` are the ONE
+     * named place each of these two decisions lives (their own docblocks say
+     * so). `PaywallGate::permitsIssuance()`/`::permitsReview()` are this
+     * codebase's only two production call sites that could ever ask either
+     * question — and, until this fix, neither one called the method that
+     * exists to answer it: `permitsIssuance()` fell through to an implicit
+     * "whatever state is left must be LapsedReviewOnly" assumption (true only
+     * because `EntitlementState` currently has exactly four cases), and
+     * `permitsReview()` hardcoded the identical `true` a second time instead
+     * of asking `$entitlement->state->permitsReview()`.
+     *
+     * This is a STRUCTURAL test, mirroring `EntitlementBoundaryTest`'s own
+     * technique (source, not behaviour) — a behavioural test proves the two
+     * methods currently AGREE (`test_review_is_permitted_in_every_state_
+     * without_exception` already does, for every one of the four live
+     * states); it cannot prove one DELEGATES to the other, which is exactly
+     * what stops a fifth `EntitlementState` case from being silently
+     * misjudged by `PaywallGate`'s own copy of the decision (the closed-set
+     * `match` inside `permitsNewContent()` would throw `UnhandledMatchError`
+     * on an unhandled case; the un-matched `if`-chain in `permitsIssuance()`
+     * would instead silently deny it as `lapsed_review_only` — the wrong
+     * reason for a state that was never checked at all).
+     */
+    /** Strip comments so the check inspects CODE, not prose ABOUT the code —
+     *  the same discipline `EntitlementBoundaryTest::stripComments()` already
+     *  applies one directory over. Without this, a comment that merely
+     *  MENTIONS the method's name (this very test file does, in its own
+     *  docblocks) would satisfy the assertion without a single line of real
+     *  delegation existing. */
+    private function stripComments(string $src): string
+    {
+        $src = preg_replace('!/\*[\s\S]*?\*/!', '', $src);
+
+        return preg_replace('!^\s*//.*$!m', '', $src);
+    }
+
+    private function methodBody(string $path, string $method): string
+    {
+        $src = $this->stripComments(file_get_contents($path));
+        $this->assertNotFalse($src, "could not read {$path}");
+
+        $sigPos = strpos($src, "function {$method}(");
+        $this->assertNotFalse($sigPos, "method {$method}() not found in {$path}");
+
+        $braceStart = strpos($src, '{', $sigPos);
+        $this->assertNotFalse($braceStart, "no opening brace for {$method}() in {$path}");
+
+        $depth = 0;
+        $i = $braceStart;
+        $len = strlen($src);
+        do {
+            if ($src[$i] === '{') {
+                $depth++;
+            } elseif ($src[$i] === '}') {
+                $depth--;
+            }
+            $i++;
+        } while ($depth > 0 && $i < $len);
+
+        return substr($src, $braceStart, $i - $braceStart);
+    }
+
+    private function paywallGatePath(): string
+    {
+        return dirname(__DIR__, 3).'/app/Billing/PaywallGate.php';
+    }
+
+    public function test_permits_issuance_delegates_the_new_content_question_to_entitlementstate(): void
+    {
+        $body = $this->methodBody($this->paywallGatePath(), 'permitsIssuance');
+
+        $this->assertStringContainsString(
+            'permitsNewContent()',
+            $body,
+            'EntitlementState::permitsNewContent() exists as the ONE named place '.
+            "for 'may this state be issued new content' (its own docblock says ".
+            'so). permitsIssuance() must call it rather than re-deriving the '.
+            'identical decision through an if/else chain whose final branch '.
+            "silently assumes 'whatever is left must be LapsedReviewOnly' — true ".
+            'only by coincidence of there being exactly four states today.',
+        );
+    }
+
+    public function test_permits_review_delegates_to_entitlementstate_permitsreview(): void
+    {
+        $body = $this->methodBody($this->paywallGatePath(), 'permitsReview');
+
+        $this->assertStringContainsString(
+            'permitsReview()',
+            $body,
+            'EntitlementState::permitsReview() is the ONE named place for the '.
+            'never-hostage rule (v3-D16) — PaywallGate::permitsReview() must '.
+            "call it (on the entitlement's own state) rather than hardcoding ".
+            'the identical `true` a second time in a completely separate file.',
+        );
+    }
+
+    /**
+     * The delegation must be REAL, not merely present as dead text somewhere
+     * in the method — `EntitlementState::cases()` is exhaustive, so every one
+     * of today's four states must still resolve exactly as before. This is the
+     * regression half: the structural tests above prove the wiring exists;
+     * this proves the refactor did not change what any of the four real
+     * states actually decide.
+     */
+    public function test_delegation_preserves_every_states_existing_decision(): void
+    {
+        $expectedIssuance = [
+            EntitlementState::Active->value => true,
+            EntitlementState::Grace->value => true,
+            EntitlementState::Trial->value => true, // trial_surah null → open
+            EntitlementState::LapsedReviewOnly->value => false,
+        ];
+
+        foreach (EntitlementState::cases() as $state) {
+            $user = User::factory()->create();
+            $ent = Entitlement::create([
+                'user_id' => $user->id,
+                'state' => $state->value,
+                'tier' => EntitlementTier::None->value,
+                'region' => 'MY',
+            ]);
+
+            $decision = $this->gate()->permitsIssuance($ent, 12, [12, 103], 1_700_000_000_000);
+            $this->assertSame(
+                $expectedIssuance[$state->value],
+                $decision->permitted,
+                "state={$state->value}: permitsIssuance() must still agree with permitsNewContent()={$state->permitsNewContent()}",
+            );
+            $this->assertSame($state->permitsNewContent(), $decision->permitted);
+
+            $this->assertTrue($this->gate()->permitsReview($ent)->permitted, "state={$state->value}: review must still be unconditional");
+        }
+    }
 }
