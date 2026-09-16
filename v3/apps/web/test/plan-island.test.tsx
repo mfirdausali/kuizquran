@@ -109,3 +109,47 @@ describe("PlanIsland — the plan calendar's own log", () => {
     });
   });
 });
+
+describe("PlanIsland — marking a day away before any session exists (v3-D220)", () => {
+  // HANDOVER.md/DECISIONS.md v3-D207's own closing note: "the 'empty' log
+  // zero-state still shows no calendar at all, so a learner who has not yet
+  // completed a first session cannot pre-mark a future travel date away."
+  // These prove the fix without ever fabricating a forecast from zero
+  // events — no item, no load, no zone, only the toggle itself.
+
+  it("still shows the honest zero-state sentence — this is not a forecast", async () => {
+    render(<PlanIsland corpus={corpus} now={NOW} tz={TZ} minutesPerDay={8} />);
+    await waitFor(() => expect(screen.queryByText(/working out your plan/i)).toBeNull());
+    expect(screen.getByText(/nothing recorded yet/i)).toBeTruthy();
+  });
+
+  it("offers 'Mark this day away' for a future day with zero events recorded", async () => {
+    render(<PlanIsland corpus={corpus} now={NOW} tz={TZ} minutesPerDay={8} />);
+    await waitFor(() => expect(screen.queryByText(/working out your plan/i)).toBeNull());
+
+    const row = document.querySelector('[data-day-row][data-offset="5"]') as HTMLElement;
+    expect(row).toBeTruthy();
+    expect(within(row).getByRole("button", { name: /mark.*away/i })).toBeTruthy();
+  });
+
+  it("never offers today — a day already underway is not a planned absence", async () => {
+    render(<PlanIsland corpus={corpus} now={NOW} tz={TZ} minutesPerDay={8} />);
+    await waitFor(() => expect(screen.queryByText(/working out your plan/i)).toBeNull());
+    expect(document.querySelector('[data-day-row][data-offset="0"]')).toBeNull();
+  });
+
+  it("marking a day away from the empty state actually commits — the real calendar takes over, showing it away", async () => {
+    render(<PlanIsland corpus={corpus} now={NOW} tz={TZ} minutesPerDay={8} />);
+    await waitFor(() => expect(screen.queryByText(/working out your plan/i)).toBeNull());
+
+    const row = document.querySelector('[data-day-row][data-offset="5"]') as HTMLElement;
+    fireEvent.click(within(row).getByRole("button", { name: /mark.*away/i }));
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-day-row][data-offset="5"][data-away="true"]')).toBeTruthy();
+    });
+    // The log is no longer empty, so the honest zero-state sentence is gone
+    // — a real (if still nearly empty) forecast now exists.
+    expect(screen.queryByText(/nothing recorded yet/i)).toBeNull();
+  });
+});

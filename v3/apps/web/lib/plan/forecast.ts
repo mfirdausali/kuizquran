@@ -130,8 +130,11 @@ function zoneFor(offset: number): Zone {
 }
 
 /** A date label. `tz` is passed in and used — never the machine's zone, so a
- *  learner in Kuala Lumpur and a fold running in UTC agree on which day it is. */
-function dateLabel(at: number, offset: number, tz: string): string {
+ *  learner in Kuala Lumpur and a fold running in UTC agree on which day it is.
+ *  Exported so a caller with no forecast to render — `EmptyPlanAwayList`,
+ *  v3-D220 — can still label a future day honestly, without re-deriving this
+ *  formatting a second time. */
+export function dateLabel(at: number, offset: number, tz: string): string {
   if (offset === 0) return "Today";
   if (offset === 1) return "Tomorrow";
   return new Intl.DateTimeFormat("en-GB", {

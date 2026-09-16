@@ -53,9 +53,124 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2743 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2747 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 384 v3/api + 120 corpus-compiler
-             # + 432 engine + 63 fold-runner + 1442 apps/web. (v3-D219, 2026-09-16)
+             # + 432 engine + 63 fold-runner + 1446 apps/web. (v3-D220, 2026-09-16)
+             # NOTE (v3-D220, 2026-09-16): `PlanIsland`'s "empty" case (zero
+             # events recorded for the enrolled surah) correctly refused to
+             # project a forecast from nothing — §14's own honesty mechanic,
+             # #73's "skeletons are never zeros" applied to a log rather than
+             # a load — but its own sibling feature, "mark a future day away"
+             # (WIREFRAME §14, wired end-to-end at v3-D207), needs no
+             # forecast at all: `setDayAway`/`day_marked_away` is a plain
+             # toggle over a day INDEX, evidence-only by construction
+             # (`rebuild.ts` has no branch for it, invariant #5). Named
+             # explicitly in `test/plan-island.test.tsx`'s own v3-D207
+             # comment ("a log with zero events shows the honest zero-state
+             # instead of a forecast — this test is about the away-day
+             # wiring, not the zero-state") and repeated on every "NOT
+             # addressed" list since v3-D207 as "real, separate, smaller UX
+             # scope, deliberately left." A learner who had not yet completed
+             # a first session had no way to pre-mark known travel — booking
+             # it before a first session is not a rarer case than booking it
+             # after, and the empty-state screen offered nothing but a
+             # sentence. Fixed: new `components/plan/EmptyPlanAwayList.tsx`,
+             # rendered alongside the existing honest zero-state sentence
+             # (never in place of it — the sentence is still true, this adds
+             # a second, independent fact beside it). It decides nothing
+             # about scheduling — no item, no load, no zone, since none of
+             # those exist yet and fabricating one would be exactly the
+             # "projecting a schedule for a learner who has not started" lie
+             # the zero-state sentence exists to refuse — it only enumerates
+             # the same future window `forecast.ts` already names
+             # (`ESTIMATED_THROUGH_DAY`, offsets 1..14, never 0 — a day
+             # already underway is not a planned absence, the same rule
+             # `PlanCalendar.tsx#MarkAwayButton` already enforces) and calls
+             # the same `onToggleAway` handler `PlanIsland` already built for
+             # the "ready" case. `lib/plan/forecast.ts#dateLabel` is now
+             # exported (was private) so the new component labels a day
+             # identically to the real calendar, rather than re-deriving the
+             # same `Intl.DateTimeFormat` call a second time — the exact
+             # "tested resolver exists, a second copy is grown beside it"
+             # shape this build has repeatedly closed elsewhere
+             # (`gradeClassToWire`, `lastActiveDayMs`, `digestsMatch`,
+             # `EntitlementState::permitsNewContent()`). Once a toggle
+             # commits, the log is no longer empty (one `day_marked_away`
+             # event), so `useLogState` naturally re-renders the SAME real
+             # `PlanCalendar` the "ready" case always used — no second
+             # rendering path, no divergent implementation of "away" for the
+             # pre-first-session case.
+             #
+             # RED confirmed directly: four new cases in a dedicated
+             # `test/plan-island.test.tsx` describe block, run against the
+             # unmodified component (3 pre-existing describe-block tests in
+             # the file untouched) — 2 of 4 failed exactly as predicted
+             # (`expected null to be truthy` on the day row; a `TypeError`
+             # on `within(null)` for the commit case), the other 2 (the
+             # zero-state sentence still renders; today is never offered)
+             # passed vacuously, correctly, since neither depends on the fix.
+             # Implemented; reran: 7/7 green (was 3, +4). The load-bearing
+             # commit case does not stub the write path — it clicks the real
+             # button, awaits the real `setDayAway`/`append()` call, and
+             # asserts the REAL `PlanCalendar`'s own `data-away="true"` row
+             # appears afterward, proving the empty-state list and the ready-
+             # state calendar agree on the same offset for the same toggle,
+             # not merely that a click handler fires.
+             #
+             # `TZ=UTC make test`: 2747 passing (was 2743, +4 — exactly this
+             # run's four new tests; apps/web 1446, was 1442; no other suite
+             # moved: 255 v2 vitest, 47 v2/api, 384 v3/api, 120
+             # corpus-compiler, 432 engine, 63 fold-runner).
+             # `check-test-floor.mjs`: OK, 2747 >= floor 1899 (+848 margin,
+             # unmoved, same discipline as every prior entry). `TZ=UTC make
+             # build`: exit 0, 30 routes (unchanged — no new route, edits
+             # inside the existing `/plan` component tree). `npm run gates`:
+             # all green (boundaries 317 files, up from 316 — exactly the
+             # one new production file; fonts degraded-but-non-blocking,
+             # pre-existing, 2/6 UI fonts present; corpus-morphology 362
+             # words / corpus-glyphs 206 codepoints, both unchanged — no
+             # corpus recompile, this is a plan-calendar-only change). `npx
+             # tsc --noEmit`, run separately across all four v3 node
+             # packages (`dateLabel`'s export is additive, so no existing
+             # caller needed updating): clean in all four. No
+             # `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff produced by running the suite was reverted
+             # before committing, same discipline as every prior entry —
+             # `git status --porcelain -- v1 v2` empty immediately before
+             # committing). No Arabic codepoint (all four changed/new files
+             # swept programmatically, in Python, over the Arabic, Arabic
+             # Supplement, Arabic Extended-A and both Presentation Forms
+             # Unicode blocks, plus a `fromCharCode`/`fromCodePoint`/
+             # `\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape sweep —
+             # zero matches; every new string is a fixed English caption/
+             # button label or a day-offset integer, never corpus text).
+             # Session start: fresh container, no
+             # `node_modules`/`vendor`/compiled corpus anywhere; `HEAD` was
+             # found detached at `6a62525`, exactly `origin/main`'s own tip
+             # (v3-D219) — no stale-local-main trap this run, confirmed
+             # directly via `git fetch origin main` before any exploration.
+             # `make setup` ran from scratch, no retries needed. Found by
+             # re-reading v3-D207's own repeatedly-carried "NOT addressed"
+             # note directly (it already named this gap by file and by
+             # reason) rather than dispatching a fresh zero-caller sweep —
+             # independently re-verified against `PlanIsland.tsx`'s real
+             # source and `test/plan-island.test.tsx`'s own comment before
+             # writing any test. NOT addressed: every item on v3-D219's own
+             # "NOT addressed" list, unchanged — the streak/away-day
+             # day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+             # `App\Billing\TrialAttribution` (v3-D148);
+             # `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate`
+             # as a whole class (v3-D88, v3-D151); multi-surah enrollment;
+             # the operational mailer/7-night window; PAY-1's Stripe
+             # fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`
+             # (v3-D111/D113/D123); `MacroFacts.litany.rhymeLabel`
+             # (v3-D188); `StripeField.editable` (v3-D204); `corpusHash`'s
+             # own zero fold-side consumer (v3-D206); FR5's own queue-level
+             # behavior for "restart"/"replan"/"makeup" (v3-D217) — all
+             # unchanged. See DECISIONS.md v3-D220.
              # NOTE (v3-D218, 2026-09-15): `packages/engine/src/resume.ts
              # #ResumeDecision.massed` — computed by `resumePolicy()` on
              # every interruption classification since FR5 landed (v3-D217,

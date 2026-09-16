@@ -24,6 +24,7 @@ import { currentTz, getEventsForSurah, useLogState } from "@/lib/idb";
 import type { LocalEventRow } from "@/lib/idb";
 import { setDayAway } from "@/lib/plan/awayDay";
 import { buildForecast, type EnrolledSurah } from "@/lib/plan/forecast";
+import { EmptyPlanAwayList } from "./EmptyPlanAwayList";
 import { PlanCalendar } from "./PlanCalendar";
 
 interface PlanIslandProps {
@@ -73,12 +74,18 @@ export function PlanIsland({ corpus, now, tz, minutesPerDay }: PlanIslandProps) 
     case "empty":
       // A designed zero-state. There is genuinely no forecast to make from no
       // events — and saying so is more honest than projecting a schedule for
-      // a learner who has not started.
+      // a learner who has not started. But marking a future day away (v3-D220)
+      // needs no forecast at all — only the toggle itself — so it is offered
+      // here too, rather than making a learner wait for a first session just
+      // to book known travel.
       return (
-        <p className="caption">
-          Nothing recorded yet, so there is no pace to project from. Your plan
-          appears after your first session.
-        </p>
+        <div className="stack">
+          <p className="caption">
+            Nothing recorded yet, so there is no pace to project from. Your
+            plan appears after your first session.
+          </p>
+          <EmptyPlanAwayList now={now} tz={tz} onToggleAway={handleToggleAway} />
+        </div>
       );
 
     case "ready": {
