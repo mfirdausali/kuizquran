@@ -25,7 +25,12 @@ const DAY_MS = 86_400_000;
 interface EmptyPlanAwayListProps {
   now: number;
   tz: string;
-  onToggleAway: (offset: number, away: boolean) => void;
+  /** Present only when the caller can actually commit the toggle — omitted
+   *  (v3-D226: this tab does not hold the write lock, `lib/idb/writeLock.ts`
+   *  edge case #75) this stays a pure read-only render, no button, no
+   *  affordance, the identical discipline `PlanCalendar`'s own
+   *  `MarkAwayButton` already establishes for the exact same reason. */
+  onToggleAway?: (offset: number, away: boolean) => void;
 }
 
 export function EmptyPlanAwayList({ now, tz, onToggleAway }: EmptyPlanAwayListProps) {
@@ -41,13 +46,15 @@ export function EmptyPlanAwayList({ now, tz, onToggleAway }: EmptyPlanAwayListPr
           <div className="day-row__head">
             <strong>{dateLabel(now + offset * DAY_MS, offset, tz)}</strong>
           </div>
-          <button
-            type="button"
-            className="btn btn--ghost day-row__away-toggle"
-            onClick={() => onToggleAway(offset, true)}
-          >
-            Mark this day away
-          </button>
+          {onToggleAway ? (
+            <button
+              type="button"
+              className="btn btn--ghost day-row__away-toggle"
+              onClick={() => onToggleAway(offset, true)}
+            >
+              Mark this day away
+            </button>
+          ) : null}
         </div>
       ))}
     </div>

@@ -155,6 +155,52 @@ describe("PlanIsland — marking a day away before any session exists (v3-D220)"
   });
 });
 
+describe("PlanIsland — read-only when this tab is not the writer (v3-D226)", () => {
+  // `lib/idb/writeLock.ts#assertWriter()` throws `NotWriterError` inside
+  // `append()` for any tab that does not hold the write lock (edge case #75)
+  // — `SessionIsland.tsx` and `TestIsland.tsx` both subscribe to
+  // `writeLock`/`useWriterStatus()` and hide their own commit affordances
+  // for exactly this reason. `PlanIsland`'s away-day toggle never did: a
+  // learner with a second tab open (e.g. a real session running as the
+  // writer elsewhere) who clicked "Mark this day away" here got a silent,
+  // unhandled promise rejection — no toggle, no error, no explanation.
+
+  it("offers no away-day control in the ready calendar when another tab is the writer", async () => {
+    await setDayAway(SURAH, TODAY - 100, true, { now: NOW, tz: TZ });
+    writeLock.forceForTests({ role: "reader", reason: "another-tab" });
+    await renderReady();
+
+    const row = document.querySelector('[data-day-row][data-offset="2"]') as HTMLElement;
+    expect(within(row).queryByRole("button", { name: /mark.*away/i })).toBeNull();
+  });
+
+  it("offers no away-day control in the empty-state list when another tab is the writer", async () => {
+    writeLock.forceForTests({ role: "reader", reason: "another-tab" });
+    render(<PlanIsland corpus={corpus} now={NOW} tz={TZ} minutesPerDay={8} />);
+    await waitFor(() => expect(screen.queryByText(/working out your plan/i)).toBeNull());
+
+    const row = document.querySelector('[data-day-row][data-offset="5"]') as HTMLElement;
+    expect(row).toBeTruthy();
+    expect(within(row).queryByRole("button", { name: /mark.*away/i })).toBeNull();
+  });
+
+  it("restores the control once this tab becomes the writer, with no remount", async () => {
+    await setDayAway(SURAH, TODAY - 100, true, { now: NOW, tz: TZ });
+    writeLock.forceForTests({ role: "reader", reason: "another-tab" });
+    await renderReady();
+
+    let row = document.querySelector('[data-day-row][data-offset="2"]') as HTMLElement;
+    expect(within(row).queryByRole("button", { name: /mark.*away/i })).toBeNull();
+
+    writeLock.forceForTests({ role: "writer" });
+
+    await waitFor(() => {
+      row = document.querySelector('[data-day-row][data-offset="2"]') as HTMLElement;
+      expect(within(row).getByRole("button", { name: /mark.*away/i })).toBeTruthy();
+    });
+  });
+});
+
 describe("PlanIsland — the trajectory reflects the learner's REAL pace commitment (v3-D221)", () => {
   // `SessionGate.tsx`/`TodaySession.tsx` both read `choices.pace` (v3-D138) so
   // the session and the dashboard's due count agree with a Sprint/Maintain

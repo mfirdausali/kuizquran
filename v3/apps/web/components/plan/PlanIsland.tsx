@@ -21,7 +21,7 @@ import { atomKey } from "@engine/atom.ts";
 import { currentBand } from "@engine/strength.ts";
 import { awayDayOffsets, dayIndexOf } from "@engine/awayDays.ts";
 import { DEFAULT_PACE_MODE, paceConfig } from "@engine/pace.ts";
-import { currentTz, getEventsForSurah, useLogState } from "@/lib/idb";
+import { currentTz, getEventsForSurah, useLogState, useWriterStatus } from "@/lib/idb";
 import type { LocalEventRow } from "@/lib/idb";
 import { readChoices } from "@/lib/onboarding/choices";
 import { setDayAway } from "@/lib/plan/awayDay";
@@ -76,9 +76,25 @@ export function PlanIsland({ corpus, now, tz, minutesPerDay: fallbackMinutesPerD
   // log re-read above. `offset` is resolved against THIS render's own `now`
   // — the same `now` `awayDayOffsets` below reads it back against — so a
   // toggle written now always lands on the day currently shown at `offset`.
+  //
+  // v3-D226: `append()` re-asserts writer status at commit time
+  // (`lib/idb/writeLock.ts#assertWriter`, edge case #75) and throws
+  // `NotWriterError` for any tab that does not hold the lock —
+  // `SessionIsland.tsx`/`TestIsland.tsx` both guard their own commit paths
+  // against exactly that. This one did not: a stale `canWrite` snapshot
+  // (the lock changed hands between render and click) must not surface as
+  // an unhandled promise rejection with a silently-inert button — caught
+  // here and swallowed, since `writeLock`'s own subscription below is what
+  // actually keeps the affordance honest render to render.
+  const writer = useWriterStatus();
+  const canWrite = writer.role === "writer";
   const handleToggleAway = useCallback(
     async (offset: number, away: boolean) => {
-      await setDayAway(surah, dayIndexOf(now) + offset, away, { now: Date.now(), tz: currentTz() });
+      try {
+        await setDayAway(surah, dayIndexOf(now) + offset, away, { now: Date.now(), tz: currentTz() });
+      } catch {
+        return;
+      }
       setRefreshNonce((n) => n + 1);
     },
     [surah, now],
@@ -109,7 +125,7 @@ export function PlanIsland({ corpus, now, tz, minutesPerDay: fallbackMinutesPerD
             Nothing recorded yet, so there is no pace to project from. Your
             plan appears after your first session.
           </p>
-          <EmptyPlanAwayList now={now} tz={tz} onToggleAway={handleToggleAway} />
+          <EmptyPlanAwayList now={now} tz={tz} onToggleAway={canWrite ? handleToggleAway : undefined} />
         </div>
       );
 
@@ -127,7 +143,7 @@ export function PlanIsland({ corpus, now, tz, minutesPerDay: fallbackMinutesPerD
             // holds — the day_marked_away toggle `handleToggleAway` writes.
             awayDays: awayDayOffsets(state.data, now),
           })}
-          onToggleAway={handleToggleAway}
+          onToggleAway={canWrite ? handleToggleAway : undefined}
         />
       );
     }

@@ -19812,3 +19812,134 @@ Stripe fixtures; surah 67's scene beats;
 `MacroFacts.litany.rhymeLabel` (v3-D188); `StripeField.editable` (v3-D204);
 `corpusHash`'s own zero fold-side consumer (v3-D206); FR5's own queue-level
 behavior for "restart"/"replan"/"makeup" (v3-D217) — all unchanged.
+
+### v3-D226 — PlanIsland's away-day toggle ignored the multi-tab write lock (2026-09-17)
+
+`lib/idb/writeLock.ts`'s single-writer mechanism (edge case #75: "two tabs,
+one session -> double-committed events") has one function, `useWriterStatus()`
+(`lib/idb/useLogState.ts`), built specifically to let a component "render the
+read-only takeover banner and disable its commit path" in a second tab. It has
+existed, unit-tested, since the multi-tab lock shipped, and had **zero
+production callers anywhere** — flagged and deliberately left open at v3-D93
+("`useWriterStatus()` itself remains unconsumed (a separate, smaller gap)")
+and unchanged across every one of the 130+ nightly runs since.
+
+`SessionIsland.tsx` and `TestIsland.tsx` — the two components that actually
+commit graded/read-only events — both already guard their commit path against
+losing the write lock, just not via the hook: they call `writeLock.acquire()`/
+`writeLock.subscribe()` directly and render a "this session is open in another
+tab" state. `components/plan/PlanIsland.tsx`'s away-day toggle
+(`setDayAway`/`day_marked_away`, WIREFRAME §14, v3-D207/D220) is the **third**
+real write surface in `apps/web`, and it did neither: it rendered "Mark this
+day away" / "I'm back — unmark this day" unconditionally, in both the "ready"
+calendar and the pre-first-session empty state, with no writer-status check at
+all.
+
+`append()` (`lib/idb/append.ts`) re-asserts writer status at commit time
+(`assertWriter()`) and throws `NotWriterError` for any tab that does not hold
+the lock. Since `PlanIsland`'s `handleToggleAway` awaited `setDayAway` with no
+try/catch and no writer guard, a learner with a real session running as the
+writer in one tab, and `/plan` open in a second, who clicked either away-day
+control in that second tab got a silent, unhandled promise rejection: no
+toggle committed, no error shown, the button left sitting there ready to be
+clicked again with the identical silent failure every time.
+
+**Fixed:** `PlanIsland` now calls `useWriterStatus()` — its first real
+production caller — and passes `onToggleAway` to `PlanCalendar`/
+`EmptyPlanAwayList` only when this tab is genuinely the writer.
+`PlanCalendar`'s own `MarkAwayButton` already documented "omitted, no button,
+no affordance" as its contract for exactly this shape (a caller that cannot
+honestly offer the write), so no new UI language was invented — only the
+missing wiring. `EmptyPlanAwayList.tsx`'s `onToggleAway` prop widened from
+required to optional to match. `handleToggleAway` itself also gained a
+try/catch around the `setDayAway` call as a second, defensive layer against
+the lock changing hands between render and the click actually landing
+(genuinely async) — `writeLock`'s own live subscription is what keeps the
+rendered affordance honest render to render; the try/catch only stops a race
+from surfacing as an unhandled rejection in between.
+
+**RED confirmed directly:** `git status --porcelain` before any
+implementation confirmed both production files (`PlanIsland.tsx`,
+`EmptyPlanAwayList.tsx`) untouched. Three new cases in a dedicated
+`test/plan-island.test.tsx` describe block (9 pre-existing cases in the file
+untouched) — forcing `writeLock` to `{role: "reader", reason: "another-tab"}`
+before rendering: the "ready"-calendar case and the empty-state case both
+failed identically, `expected <button ...> to be null` (the unmodified
+component renders the button regardless of writer status); a third case
+starts as reader, asserts no button, then flips the **same mounted instance**
+to writer via `writeLock.forceForTests` with no remount, and failed the same
+assertion before the flip — proving the eventual fix has to be reactive to a
+live status change, not merely a value read once at mount. Implemented after
+confirming RED, reran: 12/12 green (was 9, +3).
+
+`npx vitest run test/plan-island.test.tsx test/plan-calendar.test.tsx
+test/session-island.test.tsx test/test-island.test.tsx`: 77/77 green — no
+regression on either sibling multi-tab consumer (`SessionIsland`,
+`TestIsland`) or the pure read-only calendar renderer (`PlanCalendar`).
+
+`TZ=UTC make test`: 2772 passing (was 2769, +3 — exactly this run's three new
+tests; apps/web 1462, was 1459; no other suite moved: 255 v2 vitest, 47
+v2/api, 393 v3/api, 120 corpus-compiler, 432 engine, 63 fold-runner).
+`check-test-floor.mjs`: OK, 2772 >= floor 1899 (+873 margin, unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 30 routes
+(unchanged — edits inside the existing `/plan` component tree, no new
+route). `npm run gates`: all green (boundaries 317 files, unchanged count —
+no new production file, two existing files edited plus one existing test
+file; fonts degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology 362 words / corpus-glyphs 206 codepoints, both unchanged —
+no corpus recompile, this is a pure client-side write-lock-wiring fix). `npx
+tsc --noEmit` (apps/web): clean.
+
+No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the suite was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2` empty
+immediately before committing). No Arabic codepoint (all three changed files
+swept programmatically, in Python, over the Arabic, Arabic Supplement,
+Arabic Extended-A and both Presentation Forms Unicode blocks, plus a
+`fromCharCode`/`fromCodePoint`/`\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx`
+escape sweep — zero matches; every new string is a fixed English
+docblock/comment sentence or a closed-set `WriterStatus` role literal
+already used elsewhere in this test file, never corpus text).
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; `make setup` ran clean from scratch, no retries needed.
+`HEAD`/local `main`/`origin/main` all already agreed at `7c23b73` (v3-D225)
+— no stale-local-main trap this run, confirmed directly via `git fetch
+origin main` before any exploration.
+
+**Found by:** a targeted, manual field-by-field sweep (Grep/Glob, not a
+dispatched sub-agent) directed at `worker/fold-runner/src` (re-confirmed
+clean — `foldCheck.ts`/`selectionCheck.ts`/`severity.ts` are all fully
+consumed by the admin/mailer surfaces v3-D178/D179/D215 already built),
+`packages/corpus-compiler/src` (re-confirmed `connections.ts` and
+`manifest.ts`'s `generatedFrom` as build-tooling artifacts with no natural
+admin/learner home, matching the `schemaVersion`-class non-gap v3-D193
+already named), several Laravel Console Commands and models
+(`PurgeDueAccountsCommand`, `Entitlement`, `EntitlementTransition`, `Spec` —
+all already fully wired), and a bulk export-usage scan across every
+`apps/web/lib/**` module (most zero-external-caller hits were pure
+internal-only helpers exported only for their own unit tests, a
+false-positive shape this sweep learned to discount) before landing on
+`useWriterStatus()` as the one genuine, previously-flagged-but-unfixed
+instance — independently re-verified directly against
+`lib/idb/writeLock.ts`, `lib/idb/append.ts`, `SessionIsland.tsx` and
+`TestIsland.tsx`'s real source (confirming both already guard their own
+commit paths, and `PlanIsland.tsx` genuinely did not) before writing any
+test.
+
+**NOT addressed:** every item on v3-D225's own "NOT addressed" list,
+unchanged — `DrillPicker.tsx`'s own unused `now` prop; `session_start`'s own
+"app-open -> first drill" latency metric (v0.8); `CorpusVerse.line`; the
+streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151); multi-surah enrollment; the operational
+mailer/7-night launch window; PAY-1's Stripe fixtures; surah 67's scene
+beats; `worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123);
+`MacroFacts.litany.rhymeLabel` (v3-D188); `StripeField.editable` (v3-D204);
+`corpusHash`'s own zero fold-side consumer (v3-D206); FR5's own queue-level
+behavior for "restart"/"replan"/"makeup" (v3-D217) — all unchanged.
+`useWriterStatus()` is now CLOSED — remove it from future "NOT addressed"
+lists.
