@@ -515,6 +515,7 @@ function trivialOneItemRun(c: Corpus, now: number): SessionRun {
     openPracticeDrill: null,
     structured: true,
     lastActivityAt: now,
+    siteVisit: null,
   };
 }
 
@@ -582,6 +583,7 @@ describe("v3-D98 — Door 1 CTA on the real summary screen, actually wired", () 
       openPracticeDrill: null,
       structured: true,
       lastActivityAt: now - 1000,
+      siteVisit: null,
     };
     // Play this seeding run to completion OFF-SCREEN, via the real (unmocked)
     // functions — mirrors run.test.ts's own playThrough, driven by the
@@ -686,6 +688,7 @@ describe("v3-D106 — Door 2 CTA on the real summary screen, actually wired", ()
           openPracticeDrill: null,
           structured: true,
           lastActivityAt: now,
+          siteVisit: null,
         },
       });
 
@@ -817,6 +820,7 @@ function gateRunFor(c: Corpus, now: number): SessionRun {
     openPracticeDrill: null,
     structured: true,
     lastActivityAt: now,
+    siteVisit: null,
   };
 }
 
@@ -1210,6 +1214,7 @@ function twoItemRun(c: Corpus, now: number): SessionRun {
     openPracticeDrill: null,
     structured: true,
     lastActivityAt: now,
+    siteVisit: null,
   };
 }
 

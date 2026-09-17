@@ -49,6 +49,12 @@ import { rebuild } from "@engine/rebuild.ts";
 import { assembleQueue, type QueueItem } from "@engine/scheduler.ts";
 import { summarizeSession, type SessionSummary } from "@engine/sessionSummary.ts";
 import { atomKey } from "@engine/atom.ts";
+// v3-D227 — build-plan step 10 froze `DrillEvent.siteKey`/`.visitOrdinal`
+// (v3-D10) and nothing in this product ever produced either. `siteKey()` is
+// the engine's own `${surah}:ayah|seam:${n}` — the one place that string's
+// shape is decided, so this module never spells it out itself. See
+// `siteForItem` / `ensureSiteVisit` below.
+import { siteKey, type Site } from "@engine/site.ts";
 // FR9, the 2-minute floor session (v3-D108) — see `startFloorSession` below
 // for why this had zero production callers until now.
 import { floorQueue } from "@engine/floor.ts";
@@ -119,7 +125,7 @@ import {
   RetryableAppendError,
   type AppendContext,
 } from "@/lib/idb/append";
-import { getEventsForSurah } from "@/lib/idb/read";
+import { getEventsForSurah, nextVisitOrdinalForSite } from "@/lib/idb/read";
 // DEFECTS.md#B10 / v3-D99 — `answerCurrent`'s `optionIndex` is the DISPLAYED
 // (shuffled) slot a real tap reports, never the engine's raw, unshuffled
 // order. `assemblePass` is the SAME assembly `SessionIsland` renders the
@@ -289,6 +295,41 @@ export interface SessionRun {
    * "away" for twenty minutes, only since their last tap.
    */
   readonly lastActivityAt: number;
+  /**
+   * v3-D227 — the CURRENT queue item's own site coordinate and visit ordinal,
+   * or `null` before the first commit of this visit has needed one.
+   *
+   * Resolved LAZILY, in `ensureSiteVisit`, at the first tap of each queue item
+   * rather than eagerly at start: `nextVisitOrdinalForSite` is an IndexedDB
+   * read, and a session must not pay for one before the learner has actually
+   * done anything. Never fabricated — a run whose cursor has moved past this
+   * visit keeps a visibly STALE value (see `SiteVisit.cursor`) that
+   * `ensureSiteVisit` re-resolves rather than reuses.
+   */
+  readonly siteVisit: SiteVisit | null;
+}
+
+/**
+ * v3-D227 — the Site coordinate and visit ordinal of ONE visit to ONE queue
+ * item, resolved once and carried on every event that visit commits.
+ *
+ * `cursor` is what scopes it: it is the index of the queue item this visit
+ * belongs to, so a run that has moved on holds a visibly STALE value rather
+ * than a silently wrong one. Every path in this file that changes `cursor`
+ * (`settleAnswer`'s own advance, `advancePastCurrent`, `startExtraLearn`,
+ * `startWeakSpotDrill`) does so by spreading the run, so none of them has to
+ * remember to clear this field — a stale cursor invalidates it by
+ * construction. That is the whole reason the cursor is stored alongside.
+ */
+export interface SiteVisit {
+  /** The `SessionRun.cursor` this visit belongs to. */
+  readonly cursor: number;
+  /** `site.ts#siteKey()` — `${surah}:ayah|seam:${n}`. */
+  readonly siteKey: string;
+  /** `site.ts#nextVisitOrdinal()`'s output, read off the log through the
+   *  `by_siteKey` index. Stable for the WHOLE visit: every tap, and the
+   *  completion that ends it, share one ordinal. */
+  readonly visitOrdinal: number;
 }
 
 export type StartResult =
@@ -807,8 +848,57 @@ async function startFromQueue(
       corpusHash: c.meta.corpusHash,
       glossLang,
       lastActivityAt: now,
+      // v3-D227 — resolved lazily at the first tap (`ensureSiteVisit`), never
+      // here: a session that is started and abandoned must not pay for an
+      // IndexedDB read it never used.
+      siteVisit: null,
     },
   };
+}
+
+/**
+ * v3-D227 — the Site a queue item's questions are served from.
+ *
+ * `QueueItem.atomKey` is E-01's `${surah}:${kind}:${ref}`, and
+ * `site.ts#siteToAtomKey` is this mapping's inverse: a `connection` atom's
+ * site is the SEAM at its own ref, never the ayah site that happens to share
+ * the number. Getting that backwards would file a junction's visits under the
+ * ayah's own ordinal namespace, which is precisely the collision `siteKey`'s
+ * own three-part shape exists to prevent.
+ */
+function siteForItem(surah: number, q: QueueItem): Site {
+  const kind = q.atomKey.split(":")[1];
+  return { kind: kind === "connection" ? "seam" : "ayah", surah, ayah: q.ayah };
+}
+
+/**
+ * v3-D227 — resolve (once) the CURRENT queue item's site coordinate and the
+ * next visit ordinal for it, and carry both on the run.
+ *
+ * WIREFRAME.md §23 Q2 is "record the ordinal, don't derive it", and
+ * `lib/idb/read.ts#nextVisitOrdinalForSite` is the recorded-max read that
+ * implements it (delegating the arithmetic to the engine's own
+ * `nextVisitOrdinal`, through the `by_siteKey` index built for this one
+ * query). Both had existed, tested, since build-plan step 17 with no caller.
+ *
+ * Memoized on `SessionRun.siteVisit.cursor`, so ONE visit resolves ONE
+ * ordinal: every `reconstruct_tap` of a pass, and the `ayah_produced` /
+ * `gate_result` that ends it, carry the same number. Re-resolving per event
+ * would burn one ordinal per tap and make a replayed trace meaningless.
+ *
+ * A resumed session (a reload mid-queue) legitimately takes a FRESH ordinal
+ * for the item it re-opens: the question is genuinely served again, and an
+ * ordinal names a serving, not an atom. That is also why this cannot be
+ * derived after the fact — the log is the only record that the second serving
+ * happened at all.
+ */
+async function ensureSiteVisit(run: SessionRun): Promise<SessionRun> {
+  if (run.siteVisit !== null && run.siteVisit.cursor === run.cursor) return run;
+  const q = run.queue[run.cursor];
+  if (!q) return run;
+  const key = siteKey(siteForItem(run.surah, q));
+  const visitOrdinal = await nextVisitOrdinalForSite(key);
+  return { ...run, siteVisit: { cursor: run.cursor, siteKey: key, visitOrdinal } };
 }
 
 /**
@@ -926,6 +1016,14 @@ export async function answerCurrent(
   const cur = currentItem(run, c);
   if (!cur) return run;
 
+  // v3-D227 — resolve this VISIT's site coordinate and ordinal before any
+  // event is built, so the tap and the completion that ends the pass carry
+  // the same pair. Memoized per queue item; this is a no-op after the first
+  // tap of the visit. `visited` replaces `run` for the rest of this function
+  // and is what the continuation receives, so the ordinal cannot be resolved
+  // on one run object and stamped from another.
+  const visited = await ensureSiteVisit(run);
+
   // DEFECTS.md#B10 / v3-D99 — `optionIndex` is the LOGICAL index a real tap
   // reports (`components/quiz/QuizCard.tsx`'s own contract: "an index into
   // the item's own options... never a verbatim index into the engine's raw
@@ -945,11 +1043,11 @@ export async function answerCurrent(
   // (via the Face `assemblePass` already resolved through `buildFace`) —
   // this module still never authors Arabic, which is what keeps scripture
   // out of application code.
-  const assembled = assemblePass(run.machine, c);
+  const assembled = assemblePass(visited.machine, c);
   const choice = assembled?.item.options[optionIndex]?.text;
   if (choice === undefined) return run;
 
-  const adv = advanceReconstruct(run.machine, c, choice);
+  const adv = advanceReconstruct(visited.machine, c, choice);
 
   // `tz` is stamped explicitly (rather than left to `append()`'s `ctx.tz`
   // fallback) so a resumed retry — which may run long after this `ctx` was
@@ -959,19 +1057,24 @@ export async function answerCurrent(
     type: "reconstruct_tap",
     ts: ctx.now,
     tz: ctx.tz,
-    surah: run.surah,
+    surah: visited.surah,
     ayah: cur.ayah,
     rung: gradeClassToWire("rc"),
     position: cur.position,
     choice,
     correct: adv.correct,
+    // v3-D227 — the served question's own Site coordinate and visit ordinal
+    // (v3-D10's frozen wire, WIREFRAME §23 Q2). Read off `visited.siteVisit`
+    // rather than re-derived here, so every event of this pass agrees.
+    siteKey: visited.siteVisit?.siteKey,
+    visitOrdinal: visited.siteVisit?.visitOrdinal,
     // Step 20: `run.structured` is false ONLY for a victory-lap drill, so a
     // slip during a victory lap is recorded as evidence but the fold's guard
     // (`update.ts:71`) never lets it cost strength. `true` (== graded) for
     // every ordinary session, so nothing about the normal grading path moves.
-    structured: run.structured,
-    corpusHash: run.corpusHash,
-    locale: run.glossLang,
+    structured: visited.structured,
+    corpusHash: visited.corpusHash,
+    locale: visited.glossLang,
     // v3-D222 — `DrillEvent.latency` ("item-shown -> tap ms", the v0.6
     // per-tap metric `lib/progress/rows.ts#timeOnTaskMs` sums for the Time
     // column) read BEFORE this commit refreshes `lastActivityAt` below:
@@ -980,12 +1083,12 @@ export async function answerCurrent(
     // exactly "when did the item now being answered become active". Clamped
     // at 0 rather than signed, so a retried commit or a backward clock jump
     // can never produce a negative measurement.
-    latency: Math.max(0, ctx.now - run.lastActivityAt),
+    latency: Math.max(0, ctx.now - visited.lastActivityAt),
   } as DrillEvent;
 
   // ---- COMMIT ---------------------------------------------------------------
   return commitThenContinue(tapEvent, ctx, null, () =>
-    answerAfterTap(run, c, cur, adv, optionIndex, ctx),
+    answerAfterTap(visited, c, cur, adv, optionIndex, ctx),
   );
 }
 
@@ -1023,6 +1126,10 @@ async function answerAfterTap(
         structured: true,
         corpusHash: run.corpusHash,
         locale: run.glossLang,
+        // v3-D227 — the same Site coordinate and visit ordinal this pass's
+        // own taps carry (`answerCurrent`). One visit, one ordinal.
+        siteKey: run.siteVisit?.siteKey,
+        visitOrdinal: run.siteVisit?.visitOrdinal,
       } as DrillEvent;
       return commitThenContinue(warmupEvent, ctx, null, () =>
         settleRescaffoldWarmup(run, c, cur, optionIndex),
@@ -1059,6 +1166,10 @@ async function answerAfterTap(
           structured: true,
           corpusHash: run.corpusHash,
           locale: run.glossLang,
+          // v3-D227 — the same Site coordinate and visit ordinal this pass's
+          // own taps carry (`answerCurrent`). One visit, one ordinal.
+          siteKey: run.siteVisit?.siteKey,
+          visitOrdinal: run.siteVisit?.visitOrdinal,
         } as DrillEvent)
       : ({
           type: "ayah_produced",
@@ -1076,6 +1187,10 @@ async function answerAfterTap(
           structured: run.structured,
           corpusHash: run.corpusHash,
           locale: run.glossLang,
+          // v3-D227 — the same Site coordinate and visit ordinal this pass's
+          // own taps carry (`answerCurrent`). One visit, one ordinal.
+          siteKey: run.siteVisit?.siteKey,
+          visitOrdinal: run.siteVisit?.visitOrdinal,
         } as DrillEvent);
 
     return commitThenContinue(ayahEvent, ctx, null, () =>

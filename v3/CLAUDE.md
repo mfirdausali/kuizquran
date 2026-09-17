@@ -53,9 +53,224 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2772 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2778 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 393 v3/api + 120 corpus-compiler
-             # + 432 engine + 63 fold-runner + 1462 apps/web. (v3-D226, 2026-09-17)
+             # + 432 engine + 63 fold-runner + 1468 apps/web. (v3-D227, 2026-09-17)
+             # NOTE (v3-D227, 2026-09-17): `DrillEvent.siteKey` and
+             # `DrillEvent.visitOrdinal` — two of the eleven fields build-plan
+             # step 10 froze into the wire ONCE, COMPLETE (v3-D10) — had NO
+             # PRODUCER anywhere in the product. Everything downstream of the
+             # emit was built for them and only the emit was missing:
+             # `packages/engine/src/types.ts` declares both with an explicit
+             # contract ("`site.ts#siteKey()` of the Site this event's item was
+             # served from... Set for events tied to a served question; absent
+             # for pure evidence events (interruption, session_start, ...)" and
+             # "`site.ts#nextVisitOrdinal()`'s output, stamped AT EMIT TIME
+             # (WIREFRAME.md §23 Q2 — 'record the ordinal, don't derive it')");
+             # `lib/idb/db.ts`'s first upgrade created a dedicated `by_siteKey`
+             # IndexedDB index for exactly one query; that query —
+             # `lib/idb/read.ts#nextVisitOrdinalForSite()`, whose own docblock
+             # quotes §23 Q2 and delegates the arithmetic to the engine's
+             # `nextVisitOrdinal()` — has been unit-tested since build-plan
+             # step 17 (four assertions in `append.test.ts`) with ZERO
+             # production callers; and Laravel has had `events.site_key` /
+             # `events.visit_ordinal` columns since the step-14 migration, with
+             # `EventsController::FIELD_MAP`/`NULLABLE_FIELDS` and
+             # `EventWireCodec` all carrying both, and
+             # `lib/idb/schema.ts#toWire()` stripping only `syncedAt` — so both
+             # would have round-tripped untouched. Nothing ever sent a value.
+             # `grep -rn "siteKey:\|visitOrdinal:" apps/web/{lib,components,app}`
+             # (minus tests) returned exactly three hits, NONE of them an
+             # event: the index declaration, `nextVisitOrdinalForSite`'s own
+             # parameter, and `lib/workbench/explain.ts`'s admin PREVIEW trace
+             # (a siteKey computed for a screen, never for the log). Not
+             # cosmetic: `visitOrdinal` is what makes a served question
+             # REPLAYABLE — `packages/engine/src/selection.ts#replaySelection`,
+             # the fold `selection_determinism_check` (build-plan step 12, one
+             # of BUILD-PLAN M10's two launch-gate primitives, whose confirmed
+             # P1 resets the 7-night window) is built on, opens with
+             # `if (e.visitOrdinal === undefined || !e.deviceId) continue;` and
+             # then `siteFromEvent(e)` returns null for any event with no
+             # `siteKey`, so EVERY event a real learner has ever committed is
+             # skipped and a replay of a real log yields an EMPTY trace: zero
+             # keys compared, seed after seed, reported green. (The nightly
+             # runs against a committed fixture today and says so honestly —
+             # `DeterminismCheckCommand::runSelection`'s own `scope` string —
+             # but that fixture stands in for exactly the production log this
+             # gap empties.) And unlike a render gap it is UNBACKFILLABLE: §23
+             # Q2 is "record the ordinal, don't derive it" precisely because a
+             # visit ordinal cannot be recovered from a log that never carried
+             # it. Same shape and same fix template as `corpusHash` (v3-D206)
+             # and `locale` (v3-D213): resolve the fact once per visit, stamp
+             # it on every event of that visit. Fixed in ONE production file,
+             # `lib/session/run.ts` — no wire change, no migration, no
+             # component change, no backend change: `SessionRun` gains
+             # `siteVisit: SiteVisit | null` (`{cursor, siteKey,
+             # visitOrdinal}`), scoped by `cursor` so that every path which
+             # advances the cursor (`settleAnswer`, `advancePastCurrent`,
+             # `startExtraLearn`, `startWeakSpotDrill`, `acceptGateDemote`)
+             # invalidates it BY CONSTRUCTION via its own existing spread and
+             # needed no edit; `siteForItem()` maps a `QueueItem` to its `Site`
+             # off its own E-01 atom key, so a `connection` atom's site is the
+             # SEAM at its ref, never the ayah site sharing that number
+             # (`site.ts#siteToAtomKey` is the inverse — getting it backwards
+             # would file a junction's visits in the ayah's ordinal namespace,
+             # the exact collision `siteKey`'s three-part shape prevents);
+             # `ensureSiteVisit()` resolves the pair ONCE per queue item,
+             # lazily at the first tap (an IndexedDB read a started-and-
+             # abandoned session must not pay for), memoized on `cursor` so one
+             # visit yields one ordinal — re-resolving per event would burn an
+             # ordinal per tap and make a replayed trace meaningless.
+             # `answerCurrent` resolves before building any event and passes
+             # the RESOLVED run into the continuation, so an ordinal can never
+             # be resolved on one run object and stamped from another. Stamped
+             # on `reconstruct_tap`, on both `ayah_produced` branches (the
+             # ordinary completion and v3-D109's rescaffold warm-up) and on
+             # `gate_result` — the served-question events and only those,
+             # exactly as the field's own docblock scopes them;
+             # `session_start`, `interruption`, `gate_demote`, `adoption` and
+             # `day_marked_away` stay deliberately uncoordinated, since
+             # painting a coordinate onto a pure evidence event would corrupt
+             # `nextVisitOrdinalForSite`'s own max-of-recorded arithmetic with
+             # ordinals nobody visited. RED confirmed directly, TWICE: 6 new
+             # cases in a dedicated `lib/session/run.test.ts` describe block
+             # (88 pre-existing cases untouched), run against the unmodified
+             # `run.ts` (`git status --porcelain -- lib/session/run.ts` empty
+             # at the time) — 5 of 6 failed exactly as predicted (`expected
+             # undefined to be '112:ayah:1'`, twice; `expected [] to deeply
+             # equal [1, 2]`; `expected 1 to be 2` — a row whose `siteKey` is
+             # `undefined` is not in the `by_siteKey` index AT ALL, so
+             # `nextVisitOrdinalForSite` reads 1 forever; and the load-bearing
+             # consequence case, `expected 0 to be greater than 0`, which is
+             # `replaySelection()` over a REAL session log returning an empty
+             # trace). The 6th ("`session_start` carries no site coordinate")
+             # passed vacuously and correctly — it guards the opposite failure.
+             # Two of the six were then rewritten: one had failed for the WRONG
+             # reason (`startDrillSession` correctly refused `none-ready`, since
+             # a first session's Learn items complete as S2 and nothing is
+             # ENCODED yet — it now uses FR6 Door 3 open practice, which needs
+             # no encoding and additionally proves the ordinal advances for an
+             # UNGRADED visit), and one asserted "more than one site was
+             # visited", false for a virgin surah-112 session because the
+             # Steady pace ceiling (v3-D138) unlocks exactly one new ayah a day
+             # — made TRUE rather than weakened, by seeding two day-1 S3
+             # completions so day 2 genuinely assembles two due cold gates. RED
+             # was then RE-CONFIRMED against the reverted production file with
+             # the rewritten tests kept: 5 failed / 89 passed again, same five
+             # messages. Restored byte-identically, reran: 94/94 green (was 88,
+             # +6). `npx vitest run lib/session/run.test.ts
+             # test/session-island.test.tsx test/test-island.test.tsx
+             # lib/session/assemble-lastactive.test.ts`: 136/136 green — no
+             # regression on any session-loop consumer. `TZ=UTC make test`:
+             # 2778 passing (was 2772, +6 — exactly this run's six new tests;
+             # apps/web 1468, was 1462; no other suite moved: 255 v2 vitest, 47
+             # v2/api, 393 v3/api, 120 corpus-compiler, 432 engine, 63
+             # fold-runner). `check-test-floor.mjs`: OK, 2778 >= floor 1899
+             # (+879 margin, unmoved, same discipline as every prior entry).
+             # `TZ=UTC make build`: exit 0, 30 routes (unchanged — a
+             # `lib/session/run.ts`-only change, no route or component
+             # touched). `npm run gates`: all green (boundaries 317 files,
+             # unchanged count — no new production file, one existing file
+             # edited plus two existing test files; fonts degraded-but-non-
+             # blocking, pre-existing, 2/6 UI fonts present; corpus-morphology
+             # 362 words / corpus-glyphs 206 codepoints, both unchanged — no
+             # corpus recompile produced new data, this is a session-loop-only
+             # provenance fix). `npx tsc --noEmit`, run separately across all
+             # four v3 node packages: clean in all four — making `siteVisit`
+             # REQUIRED rather than optional surfaced eleven pre-existing
+             # bare-literal `SessionRun` fixtures across `run.test.ts` and
+             # `test/session-island.test.tsx` needing `siteVisit: null`, a
+             # genuine compile-time catch of the same shape v3-D217's own
+             # `lastActivityAt` produced, deliberately preferred over v3-D218's
+             # optional-field precedent because "this run has not resolved a
+             # visit yet" is a real state worth naming. No `v1/**`/`v2/**` edit
+             # (a stray `v2/tsconfig.tsbuildinfo` build-cache diff produced by
+             # running the suite was reverted before committing, same
+             # discipline as every prior entry — `git status --porcelain -- v1
+             # v2` empty immediately before committing). No Arabic codepoint
+             # (all three changed files swept programmatically, in Python, over
+             # the Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms Unicode blocks, plus a `fromCharCode`/
+             # `fromCodePoint`/`\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx`
+             # escape sweep — zero matches across 404 added lines and zero
+             # across each whole file; every new string is a TypeScript
+             # identifier, a wire field name, a `${surah}:ayah:${n}` coordinate
+             # built from integers, or a fixed English docblock sentence, never
+             # corpus text). No oracle/golden-log/fixture/snapshot regenerated.
+             # Session start: fresh container, no `node_modules`/`vendor`/
+             # compiled corpus anywhere; `make setup` ran clean from scratch
+             # (transient proxy timeouts on several composer dist downloads
+             # recovered automatically via the documented git-mirror source
+             # fallback, no retry flag needed). THE STALE-REF TRAP RECURRED IN
+             # ITS MOST MISLEADING FORM YET: this run was handed a briefing
+             # stating `origin/main` was at `26cc664` while `HEAD` sat detached
+             # 25 commits ahead, concluding ~25 prior nightly runs had committed
+             # real work and never pushed it. That conclusion was FALSE and the
+             # reading behind it was a STALE REMOTE-TRACKING REF — `git log -1
+             # origin/main` in a fresh container reads the cached ref, not the
+             # remote. `git fetch origin main` printed `26cc664..2905fea main ->
+             # origin/main` and `git ls-remote origin main` confirmed the real
+             # `refs/heads/main` was ALREADY at `2905fea`: every one of those 25
+             # commits had been pushed by the run that made it. Only the LOCAL
+             # `main` branch ref was genuinely behind, fast-forwarded with `git
+             # merge --ff-only` before any work; the subsequent `git push origin
+             # main` reported `Everything up-to-date`. ALWAYS `git fetch` before
+             # reading `origin/main`, and prefer `git ls-remote` when the answer
+             # decides whether work is at risk. Found by a manual field-by-field
+             # sweep (Grep/Glob, not a dispatched sub-agent) of `MakeEventArgs`/
+             # `DrillEvent`'s full declared shape against `lib/session/run.ts`'s
+             # real event-construction sites — the same technique that closed
+             # `corpusHash`/v3-D206, `locale`/v3-D213 and `latency`/v3-D222,
+             # applied to the two fields none of those three touched. Also swept,
+             # all false positives or already-excluded: a zero-caller export scan
+             # over every `packages/engine/src` module (`placement.ts` and
+             # `selectFor`, both already deferred, plus internal-only helpers my
+             # sweep's own file exclusion mis-flagged — `gateDue`,
+             # `estLearnMinutes`, `reduceChip` all have real in-file callers); an
+             # unused-prop scan over every `components/**/*.tsx` (clean); an
+             # interface-field-vs-read scan over every `apps/web/lib/**` module
+             # (`LibraryRow.practisable`/`.detailed` are real inputs to the
+             # rendered `status` string — the `allMet`-class non-gap v3-D194
+             # already named); and a wire-key scan of every `'key' =>` in
+             # `v3/api/app` against all of `apps/web` (`StripeSettingsController
+             # ::store()`'s `howTo`, a 501 refusal body no client posts to, plus
+             # `SpecsController`'s `specId`/`authorId`, part of the spec/selection
+             # subsystem v3-D190 already scoped out as re-architecture). NOT
+             # addressed: every item on v3-D226's own "NOT addressed" list,
+             # unchanged — `DrillPicker.tsx`'s own unused `now` prop;
+             # `session_start`'s own "app-open -> first drill" latency metric
+             # (v0.8); `CorpusVerse.line`; the streak/away-day day-space
+             # mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+             # `App\Billing\TrialAttribution` (v3-D148);
+             # `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as
+             # a whole class (v3-D88, v3-D151); multi-surah enrollment; the
+             # operational mailer/7-night launch window; PAY-1's Stripe
+             # fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+             # `packages/engine/src/placement.ts` (v3-D111/D113/D123);
+             # `MacroFacts.litany.rhymeLabel` (v3-D188); `StripeField.editable`
+             # (v3-D204); `corpusHash`'s own zero fold-side consumer (v3-D206);
+             # FR5's own queue-level behavior for "restart"/"replan"/"makeup"
+             # (v3-D217) — all unchanged. NEWLY named and NOT addressed:
+             # `components/plan/PlanIsland.tsx#dueToday` re-derives
+             # `gate.ts#gateDue()`'s predicate inline and omits its
+             # `atom.encoded` term — the same "tested resolver exists, the
+             # caller re-derives it inline" shape v3-D212 closed for
+             # `gateStateOf()`, not currently divergent (no reachable engine
+             # transition leaves `gateDueAt` set with `encoded` false —
+             # `demoteToLearn` clears both), a separate smaller fix;
+             # `lib/test/build.ts`/`TestIsland.tsx`'s own `test_*` events still
+             # carry no site coordinate (a deliberately read-only, ungraded
+             # event family, invariant #5 — the same smaller sibling scope
+             # v3-D213 left for v3-D214); and `selection_determinism_check`
+             # still replays a committed fixture rather than production logs,
+             # which needs a server-side corpus store (`replaySelection`'s own
+             # long-standing deferral, unwidened here) — what changed is that a
+             # production log is now REPLAYABLE AT ALL.
+             # `DrillEvent.siteKey`/`.visitOrdinal` are now CLOSED for the
+             # graded session loop — remove them from future "no producer"
+             # sweeps. See DECISIONS.md v3-D227.
              # NOTE (v3-D226, 2026-09-17): `PlanIsland`'s away-day toggle
              # (WIREFRAME §14, `setDayAway`/`day_marked_away`, v3-D207/D220)
              # never checked `lib/idb/writeLock.ts`'s single-writer status

@@ -38,8 +38,12 @@ import { fileURLToPath } from "node:url";
 import type { Corpus, DrillEvent } from "@engine/types.ts";
 import { rebuild } from "@engine/rebuild.ts";
 import { atomKey } from "@engine/atom.ts";
+// v3-D227 — the fold `selection_determinism_check` is built on. Imported here
+// to prove a REAL session log is replayable at all, not merely that two
+// fields are present on a row.
+import { replaySelection } from "@engine/selection.ts";
 
-import { getAllEvents } from "@/lib/idb/read";
+import { getAllEvents, nextVisitOrdinalForSite } from "@/lib/idb/read";
 import { append } from "@/lib/idb/append";
 import { resetDbForTests } from "@/lib/idb/db";
 import { writeLock } from "@/lib/idb/writeLock";
@@ -725,7 +729,7 @@ describe("v3-D98 — Door 1, 'extra Learn' after the assembled queue is done", (
   it("offers nothing before the mastery gate window opens the FIRST candidate is un-encoded — a virgin log grants the first mushaf-order ayah", async () => {
     const c = corpus();
     const offer = await extraLearnOfferFor(
-      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true, gateSlipped: false, rescaffolding: false, structured: true, openPracticeDrill: null, lastActivityAt: T0 },
+      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true, gateSlipped: false, rescaffolding: false, structured: true, openPracticeDrill: null, lastActivityAt: T0, siteVisit: null },
       c,
       T0,
     );
@@ -805,6 +809,7 @@ describe("v3-D98 — Door 1, 'extra Learn' after the assembled queue is done", (
         structured: true,
         openPracticeDrill: null,
         lastActivityAt: T0,
+        siteVisit: null,
       },
       c,
       T0 + 10_000,
@@ -858,7 +863,7 @@ describe("v3-D98 — Door 1, 'extra Learn' after the assembled queue is done", (
 describe("v3-D106 — Door 2, 'weak-spot gym' after the assembled queue is done", () => {
   it("offers nothing before any atom is encoded — a virgin log has no weak spot to rank", async () => {
     const offer = await weakSpotOfferFor(
-      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true, gateSlipped: false, rescaffolding: false, structured: true, openPracticeDrill: null, lastActivityAt: T0 },
+      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true, gateSlipped: false, rescaffolding: false, structured: true, openPracticeDrill: null, lastActivityAt: T0, siteVisit: null },
       T0,
     );
     expect(offer).toBeNull();
@@ -895,6 +900,7 @@ describe("v3-D106 — Door 2, 'weak-spot gym' after the assembled queue is done"
       openPracticeDrill: null,
       structured: true,
       lastActivityAt: T0,
+      siteVisit: null,
     };
     const offer = await weakSpotOfferFor(doneRun, T0 + 10_000);
     expect(offer).not.toBeNull();
@@ -924,6 +930,7 @@ describe("v3-D106 — Door 2, 'weak-spot gym' after the assembled queue is done"
       openPracticeDrill: null,
       structured: true,
       lastActivityAt: T0,
+      siteVisit: null,
     };
     const offer = await weakSpotOfferFor(doneRun, T0 + 10_000);
     expect(offer).not.toBeNull();
@@ -1001,6 +1008,7 @@ describe("v3-D111 — FR6 diminishing-returns nudge on the Door 2 weak-spot offe
     openPracticeDrill: null,
     structured: true,
     lastActivityAt: T0,
+    siteVisit: null,
   };
 
   it("returns null below the threshold — three same-day reps is not yet 'a lot'", async () => {
@@ -2952,5 +2960,270 @@ describe("v3-D222 — DrillEvent.latency reaches the real session loop", () => {
     const events = await getAllEvents();
     const ms = timeOnTaskMs(events as DrillEvent[], SURAH, "ayah", gatedAyah);
     expect(ms).toBeGreaterThan(0);
+  });
+});
+
+// v3-D227 — `DrillEvent.siteKey` / `DrillEvent.visitOrdinal`: two of the wire
+// fields FROZEN ONCE, COMPLETE at build-plan step 10 (v3-D10), with a producer
+// nowhere in the product.
+//
+// Both fields are real end to end EXCEPT at the one place that matters. The
+// engine declares them with an explicit contract (`types.ts`: "`site.ts
+// #siteKey()` of the Site this event's item was served from... Set for events
+// tied to a served question; absent for pure evidence events (interruption,
+// session_start, ...)" and "`site.ts#nextVisitOrdinal()`'s output, stamped AT
+// EMIT TIME (WIREFRAME.md §23 Q2 — 'record the ordinal, don't derive it')").
+// The client log has carried a dedicated `by_siteKey` IndexedDB index since
+// `lib/idb/db.ts`'s first upgrade, built for exactly one query. That query —
+// `lib/idb/read.ts#nextVisitOrdinalForSite()`, whose own docblock names §23 Q2
+// verbatim and delegates the arithmetic to the engine's `nextVisitOrdinal()` —
+// has been unit-tested since build-plan step 17 and had ZERO production
+// callers. Laravel has had `events.site_key` / `events.visit_ordinal` columns
+// since the step-14 migration, `EventsController::FIELD_MAP` maps both, and
+// `EventWireCodec` carries both; nothing has ever sent them a value.
+//
+// `grep -rn "siteKey:\|visitOrdinal:" apps/web/{lib,components,app}` (minus
+// tests) returned exactly three hits before this fix, none of them an event:
+// the `by_siteKey` index declaration, `nextVisitOrdinalForSite`'s own
+// parameter, and `lib/workbench/explain.ts`'s admin PREVIEW trace — which
+// computes a siteKey for a screen, never for the log.
+//
+// Consequence, and why it is not cosmetic: `visitOrdinal` is the fact that
+// makes a served question REPLAYABLE. `packages/engine/src/selection.ts
+// #replaySelection` — the fold `selection_determinism_check` (build-plan step
+// 12, one of BUILD-PLAN M10's two launch-gate primitives) is built on — opens
+// with `if (e.visitOrdinal === undefined || !e.deviceId) continue;` and then
+// `siteFromEvent(e)` returns null for any event with no `siteKey`. So every
+// event a real learner has ever committed is SKIPPED, and a replay of a real
+// production log yields an empty trace: zero keys compared, reported green.
+// (The nightly runs against a committed fixture today and says so honestly —
+// `DeterminismCheckCommand::runSelection`'s own `scope` string — but the
+// fixture is a stand-in for exactly the production log this gap empties.)
+//
+// And unlike a render gap, this one is UNBACKFILLABLE: a visit ordinal is
+// "record it, don't derive it" precisely because it cannot be recovered after
+// the fact from a log that never carried it. Same shape, same reasoning and
+// the same fix template as `corpusHash` (v3-D206) and `locale` (v3-D213):
+// resolve the fact once per visit, stamp it on every event of that visit.
+describe("v3-D227 — a served question's own Site coordinate and visit ordinal must reach the log", () => {
+  it("stamps siteKey and visitOrdinal on a real session's taps AND its completion — one ordinal per VISIT, not per tap", async () => {
+    const c = corpus();
+    // TWO sites in one session, deliberately. A virgin session on surah 112
+    // serves exactly ONE new ayah (the Steady pace ceiling, v3-D138), which
+    // would make "each site gets its own ordinal" a claim about a single key.
+    // Seeding two S3 completions on day 1 arms two cold gates for day 2, so
+    // day 2's assembled queue genuinely holds two distinct sites.
+    for (const ayah of [1, 2]) {
+      await append(
+        { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah, rung: "S3", structured: true } as DrillEvent,
+        { now: T0, tz: TZ },
+      );
+    }
+    const day2 = T0 + 86_400_000;
+    const started = await startSession({ surah: SURAH, now: day2, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+    expect(started.run.queue.length).toBeGreaterThan(1);
+
+    let run = started.run;
+    let cur = currentItem(run, c);
+    let taps = 0;
+    while (cur && taps < 500) {
+      run = await answerCurrent(run, c, correctIndexFor(run, c), { now: day2 + taps * 1_000, tz: TZ });
+      taps++;
+      cur = currentItem(run, c);
+    }
+    expect(taps).toBeGreaterThan(0);
+
+    const events = await getAllEvents();
+    const served = events.filter(
+      (e) =>
+        e.ts >= day2 &&
+        (e.type === "reconstruct_tap" ||
+          e.type === "ayah_produced" ||
+          e.type === "gate_result"),
+    );
+    // Several events across two sites — otherwise the "same ordinal across a
+    // visit" assertion below would be vacuous.
+    expect(served.length).toBeGreaterThan(1);
+
+    const ordinalsPerSite = new Map<string, Set<number>>();
+    for (const e of served) {
+      // `siteKey` is the ENGINE's own `${surah}:${kind}:${ayah}` shape
+      // (site.ts#siteKey) — asserted by value, not merely by presence, so a
+      // stamp of some other string cannot pass.
+      expect(e.siteKey).toBe(`${SURAH}:ayah:${e.ayah}`);
+      expect(e.visitOrdinal).toBe(1);
+      const seen = ordinalsPerSite.get(e.siteKey!) ?? new Set<number>();
+      seen.add(e.visitOrdinal!);
+      ordinalsPerSite.set(e.siteKey!, seen);
+    }
+    // Every event of one visit shares ONE ordinal. A per-EVENT ordinal would
+    // still satisfy "is a number" and would break replay outright.
+    for (const [, seen] of ordinalsPerSite) expect(seen.size).toBe(1);
+    // ...and more than one distinct SITE was visited, so "one ordinal per
+    // site" is a real claim here rather than a claim about a single key.
+    expect(ordinalsPerSite.size).toBeGreaterThan(1);
+  });
+
+  it("a SECOND drill of the same ayah records visitOrdinal 2 — the ordinal is read off the recorded log, never a constant", async () => {
+    // THE load-bearing case: a fix that hardcoded `visitOrdinal: 1` would
+    // satisfy the first test completely.
+    const c = corpus();
+    const first = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    if (!first.ok) throw new Error("session must start");
+    await playThrough(first.run, c);
+
+    const afterFirst = await getAllEvents();
+    const drilled = [
+      ...new Set(
+        afterFirst
+          .filter((e) => e.type === "ayah_produced")
+          .map((e) => e.ayah as number),
+      ),
+    ].sort((a, b) => a - b);
+    expect(drilled.length).toBeGreaterThan(0);
+    const revisited = drilled[0]!;
+
+    // FR6 Door 3 — open practice on an ayah the first session already drilled.
+    // A real production entry point, and deliberately this one rather than
+    // `startDrillSession`: a first session's Learn items complete as S2, so
+    // nothing is ENCODED yet and a continuous drill would correctly refuse
+    // ("none-ready"). Open practice needs no encoding, and being free-play
+    // (`structured:false`) it also proves the ordinal advances for an
+    // UNGRADED visit — a visit is a visit whether or not it moves strength.
+    const second = await startOpenPractice(
+      { surah: SURAH, now: T0 + 60_000, tz: TZ, ayah: revisited, drill: "S2" },
+      c,
+    );
+    if (!second.ok) throw new Error(`open practice must start: ${JSON.stringify(second)}`);
+    const { taps } = await playThrough(second.run, c);
+    expect(taps).toBeGreaterThan(0);
+
+    const all = await getAllEvents();
+    const key = `${SURAH}:ayah:${revisited}`;
+    const ordinals = new Set(
+      all
+        .filter((e) => e.siteKey === key && typeof e.visitOrdinal === "number")
+        .map((e) => e.visitOrdinal as number),
+    );
+    // Exactly two visits to this site: the first session, then open practice.
+    expect([...ordinals].sort((a, b) => a - b)).toEqual([1, 2]);
+
+    // A site neither visit touched is untouched by either — the ordinal is
+    // per-site, never a session-wide or device-wide counter.
+    const other = revisited === 1 ? 2 : 1;
+    expect(
+      all.some((e) => e.siteKey === `${SURAH}:ayah:${other}`),
+    ).toBe(false);
+    expect(await nextVisitOrdinalForSite(`${SURAH}:ayah:${other}`)).toBe(1);
+  });
+
+  it("nextVisitOrdinalForSite() finally finds real events through the by_siteKey index it was built for", async () => {
+    // The index only holds rows whose `siteKey` is a defined value — an
+    // un-stamped row is not indexed AT ALL, so this returns 1 forever against
+    // a log the session loop never coordinates.
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+    await playThrough(started.run, c);
+
+    const events = await getAllEvents();
+    const firstAyah = events.find((e) => e.type === "reconstruct_tap")?.ayah as number;
+    expect(typeof firstAyah).toBe("number");
+
+    expect(await nextVisitOrdinalForSite(`${SURAH}:ayah:${firstAyah}`)).toBe(2);
+    // A site this learner has never visited still starts at 1 — the index
+    // read is genuinely per-site, not a global counter.
+    expect(await nextVisitOrdinalForSite(`${SURAH}:seam:${firstAyah}`)).toBe(1);
+  });
+
+  it("a completed cold gate's gate_result carries the same site coordinate as the taps that earned it", async () => {
+    const c = corpus();
+    const gatedAyah = 1;
+    await append(
+      {
+        type: "ayah_produced",
+        ts: T0,
+        tz: TZ,
+        surah: SURAH,
+        ayah: gatedAyah,
+        rung: "S3",
+        structured: true,
+      } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+
+    const day2 = T0 + 86_400_000;
+    const started = await startSession({ surah: SURAH, now: day2, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+    expect(started.run.queue[0]?.kind).toBe("gate");
+
+    let run = started.run;
+    let cur = currentItem(run, c);
+    let taps = 0;
+    while (cur && taps < 500) {
+      run = await answerCurrent(run, c, correctIndexFor(run, c), {
+        now: day2 + taps * 1_000,
+        tz: TZ,
+      });
+      taps++;
+      cur = currentItem(run, c);
+    }
+    expect(taps).toBeGreaterThan(0);
+
+    const events = await getAllEvents();
+    const gateResult = events.find(
+      (e) => e.type === "gate_result" && e.ayah === gatedAyah,
+    );
+    expect(gateResult).toBeDefined();
+    expect(gateResult?.siteKey).toBe(`${SURAH}:ayah:${gatedAyah}`);
+    // The seeded `ayah_produced` above was committed directly through
+    // `append()` (no session), so it carries no ordinal — this gate is the
+    // first VISIT the session loop itself recorded for the site.
+    expect(gateResult?.visitOrdinal).toBe(1);
+    // Every tap of that gate pass shares the gate_result's own coordinate.
+    const gateTaps = events.filter(
+      (e) => e.type === "reconstruct_tap" && e.ayah === gatedAyah && e.ts >= day2,
+    );
+    expect(gateTaps.length).toBeGreaterThan(0);
+    for (const t of gateTaps) {
+      expect(t.siteKey).toBe(gateResult?.siteKey);
+      expect(t.visitOrdinal).toBe(gateResult?.visitOrdinal);
+    }
+  });
+
+  it("session_start carries NO site coordinate — `DrillEvent.siteKey`'s own contract for a pure evidence event", async () => {
+    // Guards the opposite failure: a fix that painted a coordinate onto every
+    // event would corrupt `nextVisitOrdinalForSite`'s own max-of-recorded
+    // arithmetic with ordinals nobody visited.
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+
+    const events = await getAllEvents();
+    const opening = events.find((e) => e.type === "session_start");
+    expect(opening).toBeDefined();
+    expect(opening?.siteKey).toBeUndefined();
+    expect(opening?.visitOrdinal).toBeUndefined();
+  });
+
+  it("replaySelection() can finally see a real learner's log — the selection fold had nothing to compare", async () => {
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+    await playThrough(started.run, c);
+
+    const events = (await getAllEvents()) as DrillEvent[];
+    const trace = replaySelection(events, new Map([[SURAH, c]]));
+    // Against an un-coordinated log this map is EMPTY: `replaySelection`
+    // skips every event with no `visitOrdinal`, and `siteFromEvent` returns
+    // null for every event with no `siteKey`. That empty trace is what
+    // `selection_determinism_check` would compare, seed after seed, and
+    // report green over.
+    expect(trace.size).toBeGreaterThan(0);
+    for (const key of trace.keys()) {
+      // `${siteKey}:${deviceId}:${visitOrdinal}` — the runner's own trace key.
+      expect(key).toMatch(new RegExp(`^${SURAH}:ayah:\\d+:.+:\\d+$`));
+    }
   });
 });
