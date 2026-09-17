@@ -53,9 +53,125 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2760 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 388 v3/api + 120 corpus-compiler
-             # + 432 engine + 63 fold-runner + 1455 apps/web. (v3-D223, 2026-09-16)
+make test    # 2762 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 390 v3/api + 120 corpus-compiler
+             # + 432 engine + 63 fold-runner + 1455 apps/web. (v3-D224, 2026-09-17)
+             # NOTE (v3-D224, 2026-09-17): `Admin\ContentFreezeController::
+             # LAUNCH_SURAHS` read `[12, 103, 112]` — missing 67 — on the stale
+             # reasoning in its own docblock: "the second surah is BUILD-PLAN's
+             # own open question Q3 and cannot be enumerated." That question
+             # was ANSWERED on 2026-08-11 (AL-MULK/67, v3-D59,
+             # `docs/BUILD-PLAN.md`'s own Q3 entry) — the launch set has been
+             # the closed, enumerable four-surah list `[12, 67, 103, 112]` ever
+             # since, and `scripts/content-freeze.mjs`'s own `LAUNCH_SURAHS`
+             # already states this correctly, even naming v3-D59 in its own
+             # comment. This controller's copy simply never got the memo — it
+             # was authored (build-plan step 28/M9) with no test ever
+             # exercising the DEFAULT (no `?surahs=` query param) request
+             # shape, only explicit single-surah query strings
+             # (`?surahs=12`/`?surahs=103`), so the wrong default silently
+             # never went red. Consequence, real not cosmetic:
+             # `ContentFreezePanel.tsx` (`components/admin/
+             # ContentFreezePanel.tsx`) — the ONE admin screen built to answer
+             # "may I book the qari" (`loadContentFreeze()`'s own docblock:
+             # "Omitted, the controller's own default... applies") — always
+             # calls the endpoint with no `surahs` param, so it silently never
+             # evaluated surah 67's own frontier/hashSpec criteria at all:
+             # its header rendered "FREEZE CRITERIA — SURAHS 12, 103, 112"
+             # with no mention of 67, and every evidence line came from the
+             # other three surahs alone. 67 is precisely the surah
+             # HANDOVER.md names as the sole remaining content-freeze blocker
+             # (H2, scene beats) — an admin trusting a `bookable: true`
+             # reading from this screen had no way to know it was never
+             # checking the one surah most likely to still be red. Fixed:
+             # `LAUNCH_SURAHS` corrected to `[12, 67, 103, 112]`, matching
+             # `scripts/content-freeze.mjs` exactly; the stale docblock
+             # rewritten to state the real history rather than the
+             # once-true-now-false "cannot be enumerated" claim. RED
+             # confirmed directly: `git stash` of the one production file
+             # alone (both new `ContentFreezeTest` cases kept, 7 pre-existing
+             # cases untouched) — the first case (`getJson`, no query string,
+             # asserting `surahs === [12, 67, 103, 112]`) failed exactly
+             # `Failed asserting that two arrays are identical` (`[12, 103,
+             # 112]` vs the expected four); the second, load-bearing case
+             # (seeds real green `CorpusAyahHash`/`AyahVerification` rows for
+             # surah 67 ONLY, 12/103/112 deliberately left empty so the
+             # overall report is correctly not-bookable either way) failed
+             # exactly `Expected ... To contain: surah 67: 1/1 ayat green on
+             # both tiers` — proving the default request never even reached
+             # surah 67's real data, not merely that the number was cosmetic.
+             # Restored byte-identically, reran: 9/9 green (was 7, +2).
+             # `php artisan test`: 390 passing (was 388, +2; 2 incomplete +
+             # 6 skipped unchanged, PAY-1). `./vendor/bin/pint --test` on
+             # both changed files: passed. `TZ=UTC make test`: 2762 passing
+             # (was 2760, +2 — exactly this run's two new tests; v3/api 390,
+             # was 388; no other suite moved). `check-test-floor.mjs`: OK,
+             # 2762 >= floor 1899 (+863 margin, unmoved, same discipline as
+             # every prior entry). `TZ=UTC make build`: exit 0, 30 routes
+             # (unchanged — a Laravel-controller-only fix, no apps/web file
+             # touched). `npm run gates`: all green (boundaries 317 files,
+             # unchanged count — no apps/web file in this diff; fonts
+             # degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+             # corpus-morphology 362 words / corpus-glyphs 206 codepoints,
+             # both unchanged — the corpus recompile this run performed as
+             # part of `make test`/`make compile-corpus` reproduced the same
+             # 4-surah manifest byte-for-byte, no new corpus data). No
+             # `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff produced by running the suite was reverted
+             # before committing, same discipline as every prior entry —
+             # `git status --porcelain -- v1 v2` empty immediately before
+             # committing). No Arabic codepoint (both changed files swept
+             # programmatically, in Python, over the Arabic, Arabic
+             # Supplement, Arabic Extended-A and both Presentation Forms
+             # Unicode blocks, plus a `fromCharCode`/`fromCodePoint`/
+             # `\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape sweep —
+             # zero matches; every new/changed line is a PHP identifier, a
+             # surah-number integer, or a fixed English docblock/test
+             # sentence, never corpus text). Session start: dependencies
+             # were not yet installed in this container (`v2`/`v2/api`/
+             # `v3/api`/`v3/apps/web` all had empty `node_modules`/`vendor`);
+             # `make setup` ran clean from scratch via the documented
+             # git-mirror composer fallback for `v3/api` (transient proxy
+             # timeouts cloning several packages via dist, recovered
+             # automatically, no retry flag needed). `HEAD` and
+             # `origin/main` already agreed at `f10780d` (v3-D223) — no
+             # stale-local-main trap this run, confirmed directly via `git
+             # fetch origin main` before any exploration; local `main` was
+             # a genuinely stale ref 22 commits behind, fast-forwarded
+             # before any implementation work. Found by re-reading
+             # `docs/BUILD-PLAN.md`'s own answered Q3 entry and
+             # `scripts/content-freeze.mjs`'s own correct `LAUNCH_SURAHS`
+             # directly against every OTHER hardcoded launch-surah-set copy
+             # in the tree (`grep -rn "12, 103, 112"` across `.php`/`.ts`/
+             # `.tsx`), after a broad automated sweep — zero-caller TS/PHP
+             # export checks across `apps/web/lib`, `packages/engine/src`,
+             # `packages/corpus-compiler/src`, `worker/fold-runner/src`,
+             # `api/app` (Models/Controllers/Console), an unused-JSX-prop
+             # scan across every `components/**/*.tsx`, and a wire-type
+             # field-vs-rendered-field pass across every `lib/admin/*.ts` /
+             # `components/admin/*.tsx` pair — came back with only
+             # already-known, already-excluded non-gaps (`DrillPicker.tsx`'s
+             # `now` prop, v3-D222; `lib/admin/contentFreeze.ts`'s own
+             # `allMet`, v3-D194) before this stale-constant instance
+             # surfaced as the one genuine, previously-undocumented finding.
+             # NOT addressed: every item on v3-D223's own "NOT addressed"
+             # list, unchanged — `DrillPicker.tsx`'s own unused `now` prop;
+             # `session_start`'s own "app-open -> first drill" latency
+             # metric (v0.8); `CorpusVerse.line`; the streak/away-day
+             # day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+             # `App\Billing\TrialAttribution` (v3-D148);
+             # `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate`
+             # as a whole class (v3-D88, v3-D151); multi-surah enrollment;
+             # the operational mailer/7-night window; PAY-1's Stripe
+             # fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`
+             # (v3-D111/D113/D123); `MacroFacts.litany.rhymeLabel`
+             # (v3-D188); `StripeField.editable` (v3-D204); `corpusHash`'s
+             # own zero fold-side consumer (v3-D206); FR5's own queue-level
+             # behavior for "restart"/"replan"/"makeup" (v3-D217) — all
+             # unchanged. See DECISIONS.md v3-D224.
              # NOTE (v3-D223, 2026-09-16): `Flag.killed_by`/`.ack_by` — stamped
              # by `FlagService::kill()`/`acknowledgeKill()` on every real
              # kill/ack (`v3/api/app/Flags/FlagService.php:91,176`), including

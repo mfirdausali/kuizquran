@@ -48,12 +48,28 @@ class ContentFreezeController extends Controller
 {
     /**
      * BUILD-PLAN M9 scope: "ALL launch-serving surahs (12 + 112 + 103 +
-     * second surah)". The second surah is BUILD-PLAN's own open question Q3
-     * and cannot be enumerated — reported as an open scope rather than
-     * silently omitted, because a surah added after the freeze is a surah the
-     * qari did not sign (edge case #176).
+     * second surah)".
+     *
+     * FIXED (nightly run, 2026-09-17): this constant read `[12, 103, 112]` —
+     * missing 67 — on the stale reasoning that "the second surah is
+     * BUILD-PLAN's own open question Q3 and cannot be enumerated." That
+     * question was ANSWERED on 2026-08-11: AL-MULK (67), ratified by Firdaus
+     * and recorded as v3-D59 (`docs/BUILD-PLAN.md`'s own Q3 entry). The
+     * launch set has been the closed, enumerable four-surah list
+     * `[12, 67, 103, 112]` ever since — `scripts/content-freeze.mjs`'s own
+     * `LAUNCH_SURAHS` already states this correctly and even names v3-D59 in
+     * its own comment. This controller's copy simply never got the memo.
+     *
+     * The consequence was real, not cosmetic: `ContentFreezePanel.tsx`
+     * (`components/admin/ContentFreezePanel.tsx`) always calls
+     * `loadContentFreeze()` with NO `?surahs=` query param, so the ONE admin
+     * screen built to answer "may I book the qari" silently never evaluated
+     * surah 67's own frontier/hashSpec criteria at all — the exact surah
+     * HANDOVER.md names as the sole remaining content-freeze blocker
+     * (H2, scene beats). An admin trusting a `bookable: true` reading from
+     * this screen could not have known it was never checking 67.
      */
-    private const LAUNCH_SURAHS = [12, 103, 112];
+    private const LAUNCH_SURAHS = [12, 67, 103, 112];
 
     public function index(Request $request): JsonResponse
     {

@@ -165,4 +165,56 @@ class ContentFreezeTest extends TestCase
         $this->assertFalse($spec['met']);
         $this->assertStringContainsString('MIXED', implode(' ', $spec['evidence']));
     }
+
+    /**
+     * v3-D59 answered BUILD-PLAN's own Q3 ("the second surah") as AL-MULK
+     * (67) — the launch set has been the closed, enumerable four-surah list
+     * `[12, 67, 103, 112]` ever since, exactly as `scripts/content-freeze.mjs`
+     * `LAUNCH_SURAHS` already states. The one screen built to answer "may I
+     * book the qari" (`ContentFreezePanel.tsx`) always calls this endpoint
+     * with NO `?surahs=` query param, relying entirely on the controller's
+     * own default — so the default must be the real four-surah launch set,
+     * not a stale three-surah copy that predates the answered question.
+     */
+    public function test_the_default_surah_set_is_the_full_four_surah_launch_set(): void
+    {
+        $body = $this->withHeaders($this->adminHeaders())
+            ->getJson('/api/admin/content-freeze')
+            ->assertOk()
+            ->json();
+
+        $this->assertSame([12, 67, 103, 112], $body['surahs']);
+    }
+
+    /**
+     * The stronger, load-bearing half of the assertion above: it is not
+     * enough for `67` to appear in the `surahs` array cosmetically — the
+     * default request must actually EVALUATE surah 67's own ingested hash
+     * and verification rows. Seeded ONLY for surah 67 (12/103/112 are
+     * deliberately left empty, so the overall report is correctly NOT
+     * bookable) — if the default omitted 67, this evidence line could never
+     * appear no matter what is in the database.
+     */
+    public function test_the_default_request_evaluates_surah_67s_own_frontier_data(): void
+    {
+        CorpusAyahHash::create([
+            'surah' => 67, 'ayah' => 1, 'qari_hash' => 'q67-1',
+            'admin_hash' => 'a67-1', 'hash_spec_version' => 1, 'ingested_at' => 1,
+        ]);
+        foreach (['qari' => 'q67-1', 'admin' => 'a67-1'] as $tier => $hash) {
+            AyahVerification::create([
+                'surah' => 67, 'ayah' => 1, 'tier' => $tier, 'content_hash' => $hash,
+                'hash_spec_version' => 1, 'reviewer_kind' => 'human', 'created_at' => 1,
+            ]);
+        }
+
+        $body = $this->withHeaders($this->adminHeaders())
+            ->getJson('/api/admin/content-freeze')
+            ->assertOk()
+            ->json();
+
+        $frontier = collect($body['criteria'])->firstWhere('name', 'Verification frontier green on every launch surah');
+        $joined = implode(' ', $frontier['evidence']);
+        $this->assertStringContainsString('surah 67: 1/1 ayat green on both tiers', $joined);
+    }
 }
