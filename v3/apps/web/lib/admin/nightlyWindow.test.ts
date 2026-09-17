@@ -58,6 +58,48 @@ describe("loadNightlyWindow — failure is a STATE, never an exception", () => {
     }
   });
 
+  /** v3-D225: each night's own per-check `triggers` (schedule|manual|ci)
+   *  must round-trip verbatim — the one fact that lets an operator tell a
+   *  real unattended cron run apart from a human's manual re-run. */
+  it("each night's own per-check trigger round-trips verbatim (v3-D225)", async () => {
+    const status = {
+      ...readyStatus,
+      nights: [
+        {
+          night: "2026-09-01",
+          green: true,
+          severities: { fold_determinism_check: "green", selection_determinism_check: "green" },
+          triggers: { fold_determinism_check: "schedule", selection_determinism_check: "manual" },
+          missing: [],
+        },
+      ],
+    };
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify(status), { status: 200 })) as unknown as typeof fetch;
+
+    const load = await loadNightlyWindow();
+    expect(load.state).toBe("ready");
+    if (load.state === "ready") {
+      expect(load.status.nights[0]?.triggers).toEqual({
+        fold_determinism_check: "schedule",
+        selection_determinism_check: "manual",
+      });
+    }
+  });
+
+  /** A night with no `triggers` at all (an older row, or a malformed
+   *  value) must degrade that one field to absent, never reject the whole
+   *  night or fabricate a trigger. */
+  it("a night with no triggers field still reads ready, with triggers absent", async () => {
+    const status = { ...readyStatus };
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify(status), { status: 200 })) as unknown as typeof fetch;
+
+    const load = await loadNightlyWindow();
+    expect(load.state).toBe("ready");
+    if (load.state === "ready") {
+      expect(load.status.nights[0]?.triggers).toBeUndefined();
+    }
+  });
+
   it("a satisfied window with a confirmed P1 in its history round-trips lastP1", async () => {
     const status = { ...readyStatus, streak: 1, lastP1: { night: "2026-09-03", check: "fold_determinism_check" } };
     globalThis.fetch = vi.fn(async () => new Response(JSON.stringify(status), { status: 200 })) as unknown as typeof fetch;

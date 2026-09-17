@@ -19667,3 +19667,148 @@ mailer/7-night window; PAY-1's Stripe fixtures; surah 67's scene beats;
 `MacroFacts.litany.rhymeLabel` (v3-D188); `StripeField.editable` (v3-D204);
 `corpusHash`'s own zero fold-side consumer (v3-D206); FR5's own queue-level
 behavior for "restart"/"replan"/"makeup" (v3-D217) — all unchanged.
+
+## v3-D225 (2026-09-17): a night's own `trigger` (schedule/manual/ci) never reached the one screen built to catch a dead cron masked by hand
+
+`DeterminismCheckCommand`'s own `--trigger` option (`schedule|manual|ci`, its
+signature's own docblock) has been recorded on every `nightly_check_runs` row
+since that table's migration — `routes/console.php`'s real unattended nightly
+cron passes `--trigger=schedule` explicitly, and any other invocation (an
+operator debugging, or the manual re-run BUILD-PLAN's own C5/H5 requires while
+no operational pager exists) defaults to `manual`. `Admin\NightlyWindowController`
+(v3-D143) is this table's one admin-facing reader, built specifically because
+"a human watching this number by hand is the ENTIRE safety net for the gate
+that blocks public launch" (that controller's own docblock) — but
+`NightlyWindowLedger::nights()` never touched `$run->trigger` at all: its
+per-`(night, check)` winner-selection loop tracked only the WORST severity,
+never which invocation produced it. `grep -rn "trigger" app/Support
+/NightlyWindowLedger.php` returned nothing before this fix; `lib/admin
+/nightlyWindow.ts#NightlyWindowNight` had `severities`/`missing` only, and
+`NightlyWindowPanel.tsx` rendered `${check}=${sev}` with no third fact.
+
+**Why this is sharper than a cosmetic gap.** The ledger's own header already
+built a guard for the ADJACENT failure it names by name — "a scheduler that
+silently stopped running... leaving four green rows that a naive
+`count(green)` would happily call '4 nights and counting'" — the missing-night
+check. But that guard is blind to the harder version of the same lie: a human
+who notices the cron died and quietly re-runs `determinism:check both` by hand
+every single night leaves ZERO gaps and all-green rows, satisfying the launch
+gate while the real unattended automation stays dead. `trigger` is the one
+piece of evidence every run already carries that would expose exactly that —
+and it never reached the one operator relying on this screen to know the
+difference. `HANDOVER.md`'s own C5 already names the structural reason this
+matters: there is still no operational mailer, so "the 7-night window needs a
+human checking `nightly:window` daily" is not a hypothetical fallback, it is
+the actual mechanism today.
+
+**Fixed, read-only, no schema change** (`trigger` was already a real,
+non-nullable column since the original migration — this is a display gap, not
+a missing write): `NightlyWindowLedger::nights()` now tracks
+`$byNightTrigger[$night][$check]` alongside `$byNight`'s existing severity-rank
+selection, updated on the exact same "strictly worse severity wins" branch —
+so a re-run that upgrades a night's severity (the ledger's own documented
+"a re-run never launders a confirmed divergence" rule) also correctly carries
+THAT run's own trigger, never the first run's. `NightlyWindowController`
+needed no change — it is already a thin, untransformed pass-through of
+`status()`. `NightlyWindowNight` gains an optional `triggers?: Record<string,
+string>` (optional rather than required, so no pre-existing test fixture in
+either `nightlyWindow.test.ts` or `nightly-window-panel.test.tsx` needed
+touching just to keep compiling — the same "additive, no fixture churn"
+precedent `resumeMassed` set at v3-D218); `NightlyWindowPanel.tsx` renders it
+as a trailing `(trigger)` clause on each check, e.g.
+`fold_determinism_check=green (schedule)` vs. `...=green (manual)` — so a
+night an operator expects to read `(schedule)` and instead reads `(manual)`
+is now a fact on screen, not something only a raw database query could show.
+
+**RED confirmed independently at three layers**, each reverted and restored
+byte-identically: ledger level, two new `WindowLedgerTest` cases against the
+unmodified `NightlyWindowLedger.php` — the first failed with
+`ErrorException: Undefined array key "triggers"` (the field did not exist at
+all); the second, load-bearing case (a `schedule` run upgraded to `p1` by a
+later `manual` re-run) failed identically, proving the eventual fix has to
+track the trigger PER WINNING RUN, not the night's first run — 27/27 green
+after (was 24, +3). Controller level, one new `NightlyWindowTest` HTTP case
+failed on `Failed asserting that null is identical to 'schedule'` against the
+unmodified controller — 10/10 green after (was 9, +1; net +3 across both
+PHPUnit files once the ledger's own two cases are counted, since the
+controller file's total also includes the pre-existing suite). Frontend, both
+new source files (`nightlyWindow.ts`, `NightlyWindowPanel.tsx`) reverted via
+`git stash` with every new test kept: the FETCH-layer round-trip test (both
+new cases in `nightlyWindow.test.ts`) passed VACUOUSLY against the unmodified
+lib — JavaScript does not strip an unrecognized JSON property just because a
+TypeScript interface doesn't declare it, so `triggers` already flowed through
+`{...body, ...}` regardless of validation; the real RED landed one layer up,
+at the RENDER: the load-bearing `nightly-window-panel.test.tsx` case (two
+checks on the SAME night with DIFFERENT triggers, so it cannot pass on one
+hardcoded label) failed on `screen.getByText(/fold_determinism_check=green
+\(schedule\)/)` timing out, while its negative sibling (a night with no
+`triggers` field at all renders the severity alone, no fabricated suffix)
+passed vacuously, correctly, since that was already the pre-fix behavior.
+Restored byte-identically, reran: `lib/admin/nightlyWindow.test.ts` 14/14
+(was 12, +2), `test/nightly-window-panel.test.tsx` 11/11 (was 9, +2).
+
+`php artisan test` (v3/api): 393 passing (was 390, +3; 2 incomplete + 6
+skipped unchanged, PAY-1). `./vendor/bin/pint --test` on all three changed PHP
+files: `NightlyWindowLedger.php` passed; the two test files report the
+identical pre-existing style findings (`fully_qualified_strict_types`/
+`ordered_imports` on `NightlyWindowTest.php`, `php_unit_method_casing` on
+`WindowLedgerTest.php`) both BEFORE and AFTER this diff, confirmed directly by
+stashing the change and re-running pint — pre-existing repo-wide drift this
+fix does not introduce, left alone, same discipline as `WebhookHandler.php`'s
+own precedent (v3-D203). `TZ=UTC make test`: 2769 passing (was 2762, +7 —
+exactly this run's new tests: 3 v3/api + 4 apps/web; v3/api 393, was 390;
+apps/web 1459, was 1455; no other suite moved: 255 v2 vitest, 47 v2/api, 120
+corpus-compiler, 432 engine, 63 fold-runner). `check-test-floor.mjs`: OK, 2769
+>= floor 1899 (+870 margin, unmoved, same discipline as every prior entry).
+`TZ=UTC make build`: exit 0, 30 routes (unchanged — a `lib/`+`api/`-only
+change to an existing `/settings/health` component, no new route). `npm run
+gates`: all green (boundaries 317 files, unchanged count — no new production
+file, three existing files edited plus their four existing test files; fonts
+degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology 362 words / corpus-glyphs 206 codepoints, both unchanged —
+no corpus recompile, this is a nightly-ledger-only wiring change). `npx tsc
+--noEmit` (apps/web): clean. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite was
+reverted before committing, same discipline as every prior entry — `git
+status --porcelain -- v1 v2` empty immediately before committing). No Arabic
+codepoint (the full diff swept programmatically, in Python, over the Arabic,
+Arabic Supplement, Arabic Extended-A and both Presentation Forms Unicode
+blocks, plus a `fromCharCode`/`fromCodePoint`/`\u06xx`/`\u07xx`/`\u08xx`/
+`\uFBxx`/`\uFExx` escape sweep — zero matches; every new string is a PHP/TS
+identifier, a wire field name, the closed-set trigger literal
+`"schedule"`/`"manual"`, or a fixed English docblock/assertion sentence, never
+corpus text).
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled corpus
+anywhere; `make setup` ran clean from scratch, no retries needed. `HEAD` and
+`origin/main` already agreed at `7c3bbdd` (v3-D224) on a detached HEAD, but the
+local `main` branch ref was a genuinely stale pointer 23 commits behind —
+caught before any exploration via `git fetch origin main` + `git checkout main
+&& git merge --ff-only origin/main`, a clean fast-forward, no work lost or at
+risk — the same recurring trap this file has recorded roughly fifty times
+since v3-D77.
+
+**Found by:** a dedicated fresh-sweep agent (Explore) handed the full exclusion
+list carried through v3-D224 and directed at Laravel Console Commands, wire
+fields fetched-but-unrendered across `apps/web/lib/admin`, and Eloquent
+model/migration columns with no reader — independently re-verified by this run
+directly against `DeterminismCheckCommand.php`, `NightlyWindowLedger.php`, the
+migration, `NightlyWindowController.php`, `lib/admin/nightlyWindow.ts` and
+`NightlyWindowPanel.tsx`'s real source before writing any test.
+
+**NOT addressed:** every item on v3-D224's own "NOT addressed" list, unchanged
+— `DrillPicker.tsx`'s own unused `now` prop; `session_start`'s own "app-open ->
+first drill" latency metric (v0.8); `CorpusVerse.line`; the streak/away-day
+day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole class
+(v3-D88, v3-D151); multi-surah enrollment; the operational mailer/7-night
+window — this fix makes the WINDOW SCREEN able to show who invoked each
+night's run, but does not itself stand up a pager or a staging host; PAY-1's
+Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123);
+`MacroFacts.litany.rhymeLabel` (v3-D188); `StripeField.editable` (v3-D204);
+`corpusHash`'s own zero fold-side consumer (v3-D206); FR5's own queue-level
+behavior for "restart"/"replan"/"makeup" (v3-D217) — all unchanged.

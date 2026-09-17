@@ -46,8 +46,13 @@ class NightlyWindowTest extends TestCase
         ])->save();
     }
 
-    private function appendRun(string $night, string $check, string $severity, ?array $report = null): void
-    {
+    private function appendRun(
+        string $night,
+        string $check,
+        string $severity,
+        ?array $report = null,
+        string $trigger = 'test',
+    ): void {
         $exit = ['green' => 0, 'warn' => 3, 'p1' => 4, 'error' => 5][$severity];
         NightlyCheckRun::create([
             'check' => $check,
@@ -55,7 +60,7 @@ class NightlyWindowTest extends TestCase
             'severity' => $severity,
             'exit_code' => $exit,
             'report' => $report ?? ['atomsCompared' => 8],
-            'trigger' => 'test',
+            'trigger' => $trigger,
             'ran_at' => 0,
         ]);
     }
@@ -250,6 +255,31 @@ class NightlyWindowTest extends TestCase
 
         $this->assertNull($response->json('lastP1'));
         $this->assertNull($response->json('lastP1Findings'));
+    }
+
+    /**
+     * v3-D225: `NightlyCheckRun.trigger` (`schedule|manual|ci`,
+     * `DeterminismCheckCommand`'s own `--trigger` option) is written on
+     * every run and was never read by `NightlyWindowLedger::nights()` — an
+     * operator relying on this exact screen ("a human watching this number
+     * by hand is the ENTIRE safety net for the gate that blocks public
+     * launch", this controller's own docblock) had no way to tell a real
+     * unattended `schedule` run apart from a human's `manual` re-run
+     * quietly keeping the streak alive after the real cron died. This is
+     * the load-bearing case: each check's own winning-run trigger reaches
+     * the wire, per night, per check — not a single flattened value.
+     */
+    public function test_each_nights_own_trigger_reaches_the_wire_per_check(): void
+    {
+        $this->admin();
+        $this->window();
+        $this->appendRun('2026-09-01', 'fold_determinism_check', 'green', trigger: 'schedule');
+        $this->appendRun('2026-09-01', 'selection_determinism_check', 'green', trigger: 'manual');
+
+        $response = $this->getJson('/api/admin/nightly-window')->assertOk();
+
+        $this->assertSame('schedule', $response->json('nights.0.triggers.fold_determinism_check'));
+        $this->assertSame('manual', $response->json('nights.0.triggers.selection_determinism_check'));
     }
 
     /** A missing night — the scheduler silently stopped running — must show

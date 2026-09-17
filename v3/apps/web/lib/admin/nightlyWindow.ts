@@ -26,6 +26,16 @@ export interface NightlyWindowNight {
   night: string;
   green: boolean;
   severities: Record<string, string>;
+  /** v3-D225: which invocation produced the WINNING (worst) severity per
+   *  check that night — `schedule` | `manual` | `ci`, from
+   *  `DeterminismCheckCommand`'s own `--trigger` option
+   *  (`NightlyCheckRun.trigger`). This is what lets an operator tell "the
+   *  real unattended cron ran" apart from "a human quietly kept the streak
+   *  alive with manual re-runs after the cron died" — a bare severity
+   *  cannot distinguish those, and this ledger's own reason for existing is
+   *  that an unobserved night must never read as a green one. Optional:
+   *  omitted or malformed degrades to absent, never fabricated. */
+  triggers?: Record<string, string>;
   missing: string[];
 }
 
@@ -91,6 +101,7 @@ function isNight(v: unknown): v is NightlyWindowNight {
     typeof n.green === "boolean" &&
     typeof n.severities === "object" &&
     n.severities !== null &&
+    (n.triggers === undefined || (typeof n.triggers === "object" && n.triggers !== null)) &&
     Array.isArray(n.missing)
   );
 }

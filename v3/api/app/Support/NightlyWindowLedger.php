@@ -65,7 +65,7 @@ class NightlyWindowLedger
      * @return array{
      *   streak:int, required:int, satisfied:bool,
      *   windowStartedAt:?string, windowReason:?string,
-     *   nights:list<array{night:string,green:bool,severities:array<string,string>,missing:list<string>}>,
+     *   nights:list<array{night:string,green:bool,severities:array<string,string>,triggers:array<string,string>,missing:list<string>}>,
      *   lastP1:?array{night:string,check:string},
      *   blockedBy:?string
      * }
@@ -131,7 +131,7 @@ class NightlyWindowLedger
      * listed as missing. Materializing the gaps is what makes "consecutive"
      * mean consecutive instead of "seven rows somewhere in the table".
      *
-     * @return list<array{night:string,green:bool,severities:array<string,string>,missing:list<string>}>
+     * @return list<array{night:string,green:bool,severities:array<string,string>,triggers:array<string,string>,missing:list<string>}>
      */
     private static function nights(?string $start, ?string $today = null): array
     {
@@ -148,9 +148,15 @@ class NightlyWindowLedger
         // Worst severity per (night, check). A night that ran green and then
         // re-ran after a P1 keeps the P1: a re-run never launders a
         // confirmed divergence. Ordering: p1 worst, then error, then warn,
-        // then green.
+        // then green. `$byNightTrigger` tracks the SAME winning run's own
+        // `trigger` (schedule|manual|ci) — v3-D225: an operator staring at
+        // this ledger to decide whether the real unattended cron is alive
+        // has to be able to tell that apart from a human quietly re-running
+        // it by hand every night, and a re-run that upgrades a night's
+        // severity must carry ITS OWN trigger, never the first run's.
         $rank = ['green' => 0, 'warn' => 1, 'error' => 2, 'p1' => 3];
         $byNight = [];
+        $byNightTrigger = [];
         foreach ($runs as $run) {
             $n = $run->night;
             $c = $run->check;
@@ -158,6 +164,7 @@ class NightlyWindowLedger
             $existing = $byNight[$n][$c] ?? null;
             if ($existing === null || ($rank[$s] ?? 3) > ($rank[$existing] ?? 3)) {
                 $byNight[$n][$c] = $s;
+                $byNightTrigger[$n][$c] = $run->trigger;
             }
         }
 
@@ -190,6 +197,7 @@ class NightlyWindowLedger
                 'night' => $cursor,
                 'green' => $green,
                 'severities' => $severities,
+                'triggers' => $byNightTrigger[$cursor] ?? [],
                 'missing' => $missing,
             ];
             $cursor = date('Y-m-d', strtotime($cursor.' +1 day'));

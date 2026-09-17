@@ -32,7 +32,7 @@ class WindowLedgerTest extends TestCase
     }
 
     /** Append a run for one check on one night. */
-    private function appendRun(string $night, string $check, string $severity): void
+    private function appendRun(string $night, string $check, string $severity, string $trigger = 'test'): void
     {
         $exit = ['green' => 0, 'warn' => 3, 'p1' => 4, 'error' => 5][$severity];
         NightlyCheckRun::create([
@@ -41,7 +41,7 @@ class WindowLedgerTest extends TestCase
             'severity' => $severity,
             'exit_code' => $exit,
             'report' => ['atomsCompared' => 8],
-            'trigger' => 'test',
+            'trigger' => $trigger,
             'ran_at' => 0,
         ]);
     }
@@ -285,6 +285,63 @@ class WindowLedgerTest extends TestCase
         $night = collect($status['nights'])->firstWhere('night', $days[3]);
         $this->assertFalse($night['green'], 'a re-run must not erase a confirmed P1 from its own night');
         $this->assertSame(0, $status['streak']);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // v3-D225: WHO INVOKED EACH NIGHT'S WINNING RUN
+    // ══════════════════════════════════════════════════════════════════════
+    //
+    // `DeterminismCheckCommand`'s own `--trigger` option
+    // (`schedule|manual|ci`) has been recorded on every ledger row since
+    // the table's migration, and `routes/console.php` passes
+    // `--trigger=schedule` for the real unattended nightly cron — but
+    // `nights()` never read it, so a human quietly keeping the streak
+    // alive with manual re-runs after a dead cron was indistinguishable
+    // on this screen from the real automation actually running. See this
+    // ledger's own header: "an unobserved night cannot be a green one" —
+    // a night observed only by a human checking in by hand is exactly
+    // that, and had no way to be told apart from a truly unattended one.
+
+    public function test_each_nights_own_trigger_reaches_the_ledger_per_check(): void
+    {
+        $this->window();
+        $days = $this->week();
+        $this->appendRun($days[0], 'fold_determinism_check', 'green', 'schedule');
+        $this->appendRun($days[0], 'selection_determinism_check', 'green', 'manual');
+
+        $status = NightlyWindowLedger::status();
+
+        $night = collect($status['nights'])->firstWhere('night', $days[0]);
+        $this->assertSame('schedule', $night['triggers']['fold_determinism_check']);
+        $this->assertSame('manual', $night['triggers']['selection_determinism_check']);
+    }
+
+    /**
+     * The load-bearing case: when a re-run upgrades a night's own severity
+     * (the "re-run never launders a P1" rule, above), the recorded trigger
+     * must be the WINNING run's own — never the first run of the night,
+     * and never a re-derivation that could silently keep reporting
+     * `schedule` after a human's manual re-run actually decided the
+     * night's real verdict.
+     */
+    public function test_a_rerun_that_upgrades_severity_also_carries_that_runs_own_trigger(): void
+    {
+        $this->window();
+        $days = $this->week();
+        $this->appendRun($days[0], 'fold_determinism_check', 'green', 'schedule');
+        $this->appendRun($days[0], 'fold_determinism_check', 'p1', 'manual');
+        $this->appendRun($days[0], 'selection_determinism_check', 'green', 'schedule');
+
+        $status = NightlyWindowLedger::status();
+
+        $night = collect($status['nights'])->firstWhere('night', $days[0]);
+        $this->assertSame('p1', $night['severities']['fold_determinism_check']);
+        $this->assertSame(
+            'manual',
+            $night['triggers']['fold_determinism_check'],
+            "the trigger of the WINNING (worst) severity run must be recorded, not the night's first run",
+        );
+        $this->assertSame('schedule', $night['triggers']['selection_determinism_check']);
     }
 
     public function test_the_window_command_exit_code_is_the_gate(): void

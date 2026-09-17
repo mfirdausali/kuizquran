@@ -87,6 +87,69 @@ describe("NightlyWindowPanel — three states, never two", () => {
     expect(screen.getByText(/fold_determinism_check=green/)).toBeTruthy();
   });
 
+  /**
+   * v3-D225: `nights[].triggers` (schedule|manual|ci, per check) is fetched
+   * by `lib/admin/nightlyWindow.ts` but was never rendered — an operator
+   * had no way to see whether a night's own green verdict came from the
+   * real unattended cron or a human's manual re-run. This is the
+   * load-bearing case: TWO checks on the SAME night with DIFFERENT
+   * triggers both render distinctly, so it cannot pass on one hardcoded
+   * label.
+   */
+  it("each check's own trigger is rendered next to its severity (v3-D225)", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse({
+        streak: 7,
+        required: 7,
+        satisfied: true,
+        windowStartedAt: "2026-09-01",
+        windowReason: "engine merge abc1234",
+        nights: [
+          {
+            night: "2026-09-07",
+            green: true,
+            severities: { fold_determinism_check: "green", selection_determinism_check: "green" },
+            triggers: { fold_determinism_check: "schedule", selection_determinism_check: "manual" },
+            missing: [],
+          },
+        ],
+        lastP1: null,
+        blockedBy: null,
+      }),
+    ) as unknown as typeof fetch;
+    render(<NightlyWindowPanel />);
+
+    await waitFor(() => expect(screen.getByText(/fold_determinism_check=green \(schedule\)/)).toBeTruthy());
+    expect(screen.getByText(/selection_determinism_check=green \(manual\)/)).toBeTruthy();
+  });
+
+  /** A night with no `triggers` field at all must render exactly as before
+   *  this fix — no trigger suffix, never a fabricated "(undefined)". */
+  it("a night with no triggers field renders the severity alone, no fabricated suffix", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse({
+        streak: 7,
+        required: 7,
+        satisfied: true,
+        windowStartedAt: "2026-09-01",
+        windowReason: "engine merge abc1234",
+        nights: [
+          {
+            night: "2026-09-07",
+            green: true,
+            severities: { fold_determinism_check: "green" },
+            missing: [],
+          },
+        ],
+        lastP1: null,
+        blockedBy: null,
+      }),
+    ) as unknown as typeof fetch;
+    render(<NightlyWindowPanel />);
+
+    await waitFor(() => expect(screen.getByText("fold_determinism_check=green")).toBeTruthy());
+  });
+
   /** The load-bearing case: a confirmed P1 must be VISIBLE, not just a
    *  lower streak number — an operator needs to see WHY it reset. */
   it("a confirmed P1 is rendered as an explicit alert naming the night and check", async () => {

@@ -28,6 +28,11 @@
 // fixture log) than a `fold_determinism_check` P1's (pseudonym/key/kind) —
 // the list is rendered per its own `type` discriminant, never assumed to be
 // the fold shape.
+//
+// v3-D225: each night's own `triggers` (schedule|manual|ci, per check) is
+// rendered alongside its severity — the one fact that lets an operator tell
+// "the real unattended cron ran" apart from "a human quietly kept the
+// streak alive with a manual re-run after the cron died".
 
 import { useCallback, useEffect, useState } from "react";
 import { loadNightlyWindow, type NightlyWindowLoad } from "@/lib/admin/nightlyWindow";
@@ -125,7 +130,10 @@ export function NightlyWindowPanel() {
                     <td>{n.green ? "green" : "NOT GREEN"}</td>
                     <td>
                       {[
-                        ...Object.entries(n.severities).map(([check, sev]) => `${check}=${sev}`),
+                        ...Object.entries(n.severities).map(
+                          ([check, sev]) =>
+                            `${check}=${sev}${n.triggers?.[check] ? ` (${n.triggers[check]})` : ""}`,
+                        ),
                         ...n.missing.map((m) => `${m}=MISSING`),
                       ].join("  ")}
                     </td>
