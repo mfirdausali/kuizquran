@@ -53,9 +53,106 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2778 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2780 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 393 v3/api + 120 corpus-compiler
-             # + 432 engine + 63 fold-runner + 1468 apps/web. (v3-D227, 2026-09-17)
+             # + 432 engine + 63 fold-runner + 1470 apps/web. (v3-D228, 2026-09-18)
+             # NOTE (v3-D228, 2026-09-18): `components/plan/PlanIsland.tsx
+             # #dueToday` re-derived `packages/engine/src/gate.ts#gateDue()`'s
+             # predicate inline (`atom.gateDueAt !== null && !atom.gatePassed
+             # && atom.gateDueAt <= now`) instead of calling the engine's own
+             # tested resolver — the "tested resolver exists, the caller
+             # re-derives it inline" shape this build has repeatedly closed
+             # (`gradeClassToWire` v3-D83, `lastActiveDayMs` v3-D113,
+             # `digestsMatch` v3-D159, `gateStateOf` v3-D211/D212 — the
+             # closest precedent, two implementations of the same gate-state
+             # decision that had already silently drifted apart). The inline
+             # copy omitted `gateDue()`'s own `atom.encoded` term entirely.
+             # Not a live divergence today — `applyGateResult` sets
+             # `gateDueAt`/`encoded` together on a failure, `demoteToLearn`
+             # resets both together, verified directly against both bodies —
+             # but a standing invitation for a future engine change to update
+             # one copy and miss the other, on the one caller in `apps/web`
+             # that decided this fact without importing the function built to
+             # decide it. Named explicitly by v3-D227's own "NOT addressed"
+             # list one entry earlier. Fixed: `dueToday` (now exported, for
+             # its own test only) imports and calls `gateDue` in place of the
+             # inline boolean; no other line changed. RED confirmed directly:
+             # 2 new cases in `test/plan-due-today.test.ts`, run against the
+             # tree before `dueToday` was exported, failed on `TypeError:
+             # dueToday is not a function`; the load-bearing case then
+             # constructs a synthetic, currently-unreachable atom
+             # (`encoded: false` with a past `gateDueAt`) — exactly the shape
+             # `gateDue()` itself refuses and the OLD inline predicate would
+             # have silently admitted — and asserts `dueToday(...).gates` is
+             # empty; a positive sibling proves a genuinely due gate is still
+             # listed, so the fix cannot pass by always returning empty.
+             # Reran: 2/2 green. `npx vitest run test/plan-due-today.test.ts
+             # test/plan-island.test.tsx test/plan-calendar.test.tsx
+             # test/session-island.test.tsx
+             # lib/progress/gateStateOf-agreement.test.ts`: 75/75 green — no
+             # regression on either sibling `/plan` consumer or the closest
+             # precedent fix. `TZ=UTC make test`: 2780 passing (was 2778,
+             # +2 — exactly this run's two new tests; apps/web 1470, was
+             # 1468; no other suite moved). `check-test-floor.mjs`: OK, 2780
+             # >= floor 1899 (+881 margin, unmoved, same discipline as every
+             # prior entry). `TZ=UTC make build`: exit 0, 30 routes
+             # (unchanged — a `lib/`-level fix inside the existing `/plan`
+             # component tree, no new route or component). `npm run gates`:
+             # all green (boundaries 317 files, unchanged count — no new
+             # production file, one existing file edited plus one new test
+             # file; fonts degraded-but-non-blocking, pre-existing, 2/6 UI
+             # fonts present; corpus-morphology 362 words / corpus-glyphs 206
+             # codepoints, both unchanged — no new corpus data, this is a
+             # pure `/plan`-only gate-predicate wiring fix). `npx tsc
+             # --noEmit` (apps/web): clean. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff produced by running
+             # the suite was reverted before committing, same discipline as
+             # every prior entry — `git status --porcelain -- v1 v2` empty
+             # immediately before committing). No Arabic codepoint (both
+             # changed/new files swept programmatically, in Python, over the
+             # Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms Unicode blocks, plus a `fromCharCode`/
+             # `fromCodePoint` sweep — zero matches; every new string is a
+             # TypeScript identifier, a fixed English docblock/comment
+             # sentence, or a `${surah}:ayah:${n}` coordinate built from
+             # integers, never corpus text). No oracle/golden-log/fixture/
+             # snapshot regenerated. Session start: fresh container, no
+             # `node_modules`/`vendor`/compiled corpus anywhere; `make setup`
+             # ran clean from scratch, no retries needed. `HEAD`/local
+             # `main`/`origin/main` all agreed at `ce5895d` (v3-D227) once
+             # `git fetch origin main` + `git checkout main && git merge
+             # --ff-only origin/main` ran — local `main` was a stale ref 26
+             # commits behind (`26cc664`), the same recurring trap this file
+             # has recorded roughly fifty times since v3-D77, caught before
+             # any implementation work. Found by re-reading v3-D227's own
+             # "NOT addressed" list directly (it already named this gap by
+             # file, function and reason) rather than dispatching a fresh
+             # sweep — independently re-verified against `dueToday`,
+             # `gateDue`, `applyGateResult` and `demoteToLearn`'s real source
+             # before writing any test. NOT addressed: every item on
+             # v3-D227's own "NOT addressed" list, unchanged —
+             # `DrillPicker.tsx`'s own unused `now` prop; `session_start`'s
+             # own "app-open -> first drill" latency metric (v0.8);
+             # `CorpusVerse.line`; the streak/away-day day-space mismatch
+             # (v3-D209); `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+             # `App\Billing\TrialAttribution` (v3-D148);
+             # `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate`
+             # as a whole class (v3-D88, v3-D151); multi-surah enrollment;
+             # the operational mailer/7-night launch window; PAY-1's Stripe
+             # fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`
+             # (v3-D111/D113/D123); `MacroFacts.litany.rhymeLabel` (v3-D188);
+             # `StripeField.editable` (v3-D204); `corpusHash`'s own zero
+             # fold-side consumer (v3-D206); FR5's own queue-level behavior
+             # for "restart"/"replan"/"makeup" (v3-D217);
+             # `lib/test/build.ts`/`TestIsland.tsx`'s own `test_*` events
+             # still carrying no site coordinate; `selection_determinism_check`
+             # still replaying a committed fixture rather than production
+             # logs — all unchanged. `PlanIsland.tsx#dueToday`'s own
+             # `gateDue` duplication is now CLOSED — remove it from future
+             # "NOT addressed" lists. See DECISIONS.md v3-D228.
              # NOTE (v3-D227, 2026-09-17): `DrillEvent.siteKey` and
              # `DrillEvent.visitOrdinal` — two of the eleven fields build-plan
              # step 10 froze into the wire ONCE, COMPLETE (v3-D10) — had NO

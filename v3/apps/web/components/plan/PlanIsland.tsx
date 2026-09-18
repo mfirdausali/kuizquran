@@ -19,6 +19,7 @@ import type { AtomState } from "@engine/atom.ts";
 import { rebuild } from "@engine/rebuild.ts";
 import { atomKey } from "@engine/atom.ts";
 import { currentBand } from "@engine/strength.ts";
+import { gateDue } from "@engine/gate.ts";
 import { awayDayOffsets, dayIndexOf } from "@engine/awayDays.ts";
 import { DEFAULT_PACE_MODE, paceConfig } from "@engine/pace.ts";
 import { currentTz, getEventsForSurah, useLogState, useWriterStatus } from "@/lib/idb";
@@ -181,8 +182,14 @@ function enrolmentOf(corpus: Corpus, atoms: Map<string, AtomState>, now: number)
 }
 
 /** What is actually due right now — the only day genuinely knowable, which is
- *  precisely why it is the only day that gets named items. */
-function dueToday(corpus: Corpus, atoms: Map<string, AtomState>, now: number) {
+ *  precisely why it is the only day that gets named items.
+ *
+ *  Exported for `test/plan-due-today.test.ts` only, which pins that this
+ *  function delegates to `gate.ts#gateDue()` rather than re-deriving its own
+ *  copy of the predicate — the "tested resolver exists, the caller
+ *  re-derives it inline" shape this build has repeatedly closed elsewhere
+ *  (v3-D227). */
+export function dueToday(corpus: Corpus, atoms: Map<string, AtomState>, now: number) {
   const surah = corpus.meta.surah;
   const gates: { surah: number; ayah: number }[] = [];
   const learn: { surah: number; ayah: number }[] = [];
@@ -196,7 +203,7 @@ function dueToday(corpus: Corpus, atoms: Map<string, AtomState>, now: number) {
       if (learn.length === 0) learn.push({ surah, ayah });
       continue;
     }
-    if (atom.gateDueAt !== null && !atom.gatePassed && atom.gateDueAt <= now) {
+    if (gateDue(atom, now)) {
       gates.push({ surah, ayah });
     } else if (atom.encoded && currentBand(atom, now) !== "carry") {
       reviews += 1;
