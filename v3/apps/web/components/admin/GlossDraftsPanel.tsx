@@ -219,7 +219,8 @@ export function GlossDraftsPanel() {
                           <ul>
                             {row.reviews.map((rev, i) => (
                               <li key={i}>
-                                {rev.fromStatus} → {rev.toStatus} by {rev.actor ?? "—"}
+                                {rev.fromStatus} → {rev.toStatus} by {rev.actor ?? "—"} (
+                                {rev.actorKind === "ai" ? "AI" : "human"})
                                 {" — "}
                                 <span className="ltr-island">{new Date(rev.createdAt).toISOString()}</span>
                                 {rev.note ? `: ${rev.note}` : ""}

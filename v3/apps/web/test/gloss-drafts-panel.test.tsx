@@ -306,6 +306,62 @@ describe("GlossDraftsPanel — the review history is readable, not just current 
     expect(screen.getByText(new Date(secondReviewAt).toISOString())).toBeTruthy();
   });
 
+  it("renders each review entry's own actorKind, not only its actor name — a rejection filed by an AI process is a different fact than one a human reviewer typed", async () => {
+    // `GlossDraftReviewRow.actorKind` (`ai` | `human`) is required and sent
+    // on every review entry (`GlossDraftsController::toWire()`'s `reviews[]`
+    // map) — but unlike `GlossDraftRow.authorKind` (the DRAFT's own current
+    // authorship, rendered as "AI draft"/"human" at v3-D169), the REVIEW
+    // HISTORY's own per-entry `actorKind` was never rendered anywhere. It is
+    // genuinely reachable as "ai": `GlossDraftsController::store()`'s
+    // auto-un-review branch (editing a reviewed row's text) stamps
+    // `actor_kind` from the SAME `authorKind` the draft form lets an admin
+    // pick as "an AI draft, pending human review" — so a review-history
+    // entry can legitimately record an AI-authored edit that knocked a row
+    // back out of `reviewed`, a fact directly load-bearing to v3-D15/D20's
+    // "human review mandatory before reviewed" rule. Two entries below with
+    // DIFFERENT actorKind values, so the assertion cannot pass on one
+    // hardcoded word.
+    const rowWithMixedActorKinds = {
+      ...REVIEWED_ROW,
+      status: "draft",
+      reviewedBy: null,
+      reviews: [
+        {
+          fromStatus: "draft",
+          toStatus: "reviewed",
+          textAtReview: "first draft text",
+          actorKind: "human",
+          actor: "reviewer@example.com",
+          note: "checked against Basmeih",
+          createdAt: 1_700_000_100_000,
+        },
+        {
+          fromStatus: "reviewed",
+          toStatus: "draft",
+          textAtReview: "an ai-authored edit",
+          actorKind: "ai",
+          actor: null,
+          note: "text edited after review — approval was for different bytes",
+          createdAt: 1_700_000_200_000,
+        },
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          ...emptyWorklist(),
+          counts: { draft: 1, reviewed: 0, merged: 0, unauthored: 0 },
+          drafts: [rowWithMixedActorKinds],
+        }),
+      ),
+    );
+    render(<GlossDraftsPanel />);
+    await waitFor(() => expect(screen.getByText("first draft text")).toBeTruthy());
+    expect(screen.getAllByText(/\(human\)/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/\(ai\)/i).length).toBeGreaterThan(0);
+  });
+
   it("renders the row's own createdAt, updatedAt and reviewedAt — the draft row's own timestamps, distinct from any review entry's own createdAt", async () => {
     // `GlossDraftRow.createdAt`/`.updatedAt`/`.reviewedAt` are required
     // (createdAt/updatedAt) or genuinely nullable (reviewedAt) wire fields,

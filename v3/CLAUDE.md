@@ -53,9 +53,149 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2790 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2791 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 398 v3/api + 120 corpus-compiler
-             # + 432 engine + 63 fold-runner + 1475 apps/web. (v3-D230, 2026-09-18)
+             # + 432 engine + 63 fold-runner + 1476 apps/web. (v3-D231, 2026-09-18)
+             # NOTE (v3-D231, 2026-09-18): `GlossDraftReviewRow.actorKind`
+             # (`ai` | `human`) has been required and sent on every entry of
+             # `gloss_draft_reviews`' append-only history since v3-D156
+             # (`GlossDraftsController::toWire()`'s `reviews[]` map) — but
+             # `GlossDraftsPanel.tsx`'s History `<details>` list, the one
+             # screen built to show this trail, rendered `fromStatus`/
+             # `toStatus`/`actor`/`note`/`createdAt` per entry and never
+             # `actorKind`. Distinct from the DRAFT ROW's own `authorKind`
+             # (rendered as "AI draft"/"human" since v3-D169) — that field
+             # names who authored the CURRENT text; this one names who
+             # performed EACH transition in the row's history, and the two
+             # can genuinely disagree on the same draft. Reachable, not
+             # theoretical: `store()`'s auto-un-review branch (editing a
+             # `reviewed` row's text returns it to `draft`, DEFECTS.md#B3's
+             # shape one layer up) stamps the new review row's `actor_kind`
+             # from `$validated['authorKind']` — the SAME field the draft
+             # form's own "Authored by" dropdown lets an admin set to "an AI
+             # draft, pending human review" — while `review()`'s own explicit
+             # approve/reject button always sends `actorKind: "human"` from
+             # this one caller. So `gloss_draft_reviews` genuinely carries
+             # both values today; only the render dropped the distinction.
+             # Material to v3-D15/D20's own rule — "LLM MS... human review
+             # mandatory before `reviewed`" — a reviewer auditing the history
+             # to confirm a `reviewed` status was actually earned by a human
+             # decision, not silently re-stamped by an AI-authored edit that
+             # happened to land on a reviewed row, had no way to read that
+             # fact. Fixed, display-only, no server/wire change: the history
+             # `<li>` gains a trailing `(AI)`/`(human)` clause after the
+             # reviewer's name. RED confirmed directly: `git stash` of
+             # `GlossDraftsPanel.tsx` alone (the new test kept, 16
+             # pre-existing cases in `test/gloss-drafts-panel.test.tsx`
+             # untouched) failed exactly the new case —
+             # `getAllByText(/\(human\)/i)` found nothing, since the
+             # unmodified history `<li>` never prints `actorKind` at all; 16
+             # of 17 passed. The test seeds TWO review entries on the SAME
+             # row with DIFFERENT `actorKind` values (`"human"` then `"ai"`,
+             # each with its own distinct `textAtReview`/`note`), so the
+             # assertion cannot pass by reading one hardcoded value for both
+             # entries. Restored byte-identically (`git diff` empty before
+             # re-implementing), then implemented; reran: 17/17 green (was
+             # 16, +1). `npx vitest run test/gloss-drafts-panel.test.tsx
+             # lib/admin/`: 15 test files, 160/160 green — 17/17 in the
+             # changed file, 143/143 across the other 14 `lib/admin/*.test.ts`
+             # files, unaffected. `TZ=UTC make test`: 2791 passing (was 2790,
+             # +1 — exactly this run's one new test; apps/web 1476, was
+             # 1475; no other suite moved: 255 v2 vitest, 47 v2/api, 398
+             # v3/api, 120 corpus-compiler, 432 engine, 63 fold-runner),
+             # exit 0. `check-test-floor.mjs`: OK, 2791 >= floor 1899 (+892
+             # margin, unmoved, same discipline as every prior entry).
+             # `npm run -s typecheck` across all four v3 node packages
+             # (inside `make test`): clean. `TZ=UTC make build`: exit 0, 30
+             # routes (unchanged — a component-plus-existing-test change, no
+             # new route or component file). `npm run gates`: all green —
+             # locked-css OK (1 documented hunk, 294 v1 lines byte-
+             # identical); fonts degraded-but-non-blocking, pre-existing,
+             # 2/6 UI fonts present; boundaries 318 files (up from 317 —
+             # confirmed via `git status --porcelain` to be the SAME
+             # pre-existing gitignored Next.js `next-env.d.ts` bootstrap-
+             # artifact fluctuation v3-D206's and v3-D227's own entries
+             # already recorded, not a new production file — this diff
+             # touches exactly two existing files); corpus-morphology 362
+             # words / corpus-glyphs 206 codepoints, both unchanged — a
+             # display-only admin-panel fix touches no corpus data. No
+             # `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff produced by running the suite was reverted
+             # before committing, same discipline as every prior entry —
+             # `git status --porcelain -- v1 v2` empty immediately before
+             # committing). No Arabic codepoint (both changed files and the
+             # full diff swept programmatically, in Python, over the Arabic,
+             # Arabic Supplement, Arabic Extended-A and both Presentation
+             # Forms Unicode blocks, plus a `\u06xx`/`\u07xx`/`\u08xx`/
+             # `\uFBxx`/`\uFExx` escape and `fromCharCode`/`fromCodePoint`
+             # sweep — zero matches; every new string is a TypeScript
+             # identifier, the fixed English words "AI"/"human", or a
+             # synthetic English placeholder value matching this file's own
+             # "NO MALAY CONTENT ANYWHERE" convention, never gloss or corpus
+             # text). No oracle/golden-log/fixture/snapshot regenerated.
+             # Session start: fresh container, no `node_modules`/`vendor`/
+             # compiled corpus anywhere; `make setup` ran clean from scratch
+             # (transient proxy timeouts on several Composer dist downloads
+             # recovered automatically via the documented git-mirror source
+             # fallback, no retry flag needed). `HEAD`, local `main` and
+             # `origin/main` all already agreed at `de5bc59` (v3-D230) — no
+             # stale-ref trap this run, confirmed directly via `git fetch
+             # origin main` before any exploration. Found by a field-by-
+             # field re-read of `GlossDraftsController::toWire()`'s
+             # `reviews[]` shape against `GlossDraftsPanel.tsx`'s actual
+             # history-render loop — the same technique that closed the
+             # row-level sibling field (`authorKind`/`authoredBy`, v3-D169)
+             # and the review-entry `createdAt` field (v3-D183) on this
+             # exact panel, applied to the one remaining
+             # `GlossDraftReviewRow` member neither of those runs touched;
+             # independently re-verified directly against `GlossDraft.php`,
+             # `GlossDraftReview.php`, the migration, and
+             # `GlossDraftsController.php`'s `store()`/`review()` bodies
+             # before writing any test — confirming the field is genuinely
+             # reachable as `"ai"` via the auto-un-review branch, not merely
+             # a defensive type with no live divergent value. Also swept
+             # this run and confirmed clean or already-excluded:
+             # `api/app/Console/Commands` (all six commands already fully
+             # wired or deliberately CLI-only); `api/app` has no
+             # `Jobs`/`Listeners`/`Events`/`Notifications`/`Policies`/
+             # `Rules` directories at all (confirmed via `find`, not
+             # assumed); `NightlyWindow.reason`/`windowReason` (already
+             # wired end-to-end, re-confirmed directly); `App\Models\Spec`/
+             # `App\Models\AdminRevealToken` (both already fully consumed by
+             # their own real callers); `lib/library/rows.ts`'s `STATUS_*`
+             # constants and `LibraryRow.practisable`/`.detailed` (already
+             # feed the rendered `status` string, non-gaps matching
+             # v3-D194's own precedent); `lib/legal/attribution.ts` (fully
+             # wired into `/attribution`); `OverrideEditor.tsx`'s
+             # `summarize()` (already renders `questionType` on the
+             # `disable` branch). NOT addressed: every item on v3-D230's own
+             # "NOT addressed" list, unchanged — `DrillPicker.tsx`'s own
+             # unused `now` prop; `session_start`'s own "app-open -> first
+             # drill" latency metric (v0.8); `CorpusVerse.line`; the
+             # streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()`
+             # (v3-D136); `EntitlementMachine::merge()`
+             # (v3-D88..D94/D144/D145); `App\Billing\TrialAttribution`
+             # (v3-D148); `lib/pricing.ts#regionFromCountry()` (v3-D163);
+             # `PaywallGate` as a whole class (v3-D88, v3-D151); multi-surah
+             # enrollment; the operational mailer/7-night launch window;
+             # PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`
+             # (v3-D111/D113/D123); `MacroFacts.litany.rhymeLabel`
+             # (v3-D188); `StripeField.editable` (v3-D204); `corpusHash`'s
+             # own zero fold-side consumer (v3-D206); FR5's own queue-level
+             # behavior for "restart"/"replan"/"makeup" (v3-D217);
+             # `selection_determinism_check` still replaying a committed
+             # fixture rather than production logs; `GlossDraftsPanel.tsx`'s
+             # own hardcoded caption vs. its live `shipping`/
+             # `excludedFromHashV1` booleans (v3-D173);
+             # `lib/test/build.ts`/`TestIsland.tsx`'s own `test_*` events
+             # still carrying no site coordinate (v3-D229's own deliberate
+             # deferral); `AccountExportPanel.tsx`'s stale caption;
+             # `DeterminismP1Alert` not reporting dead letters — all
+             # unchanged. `GlossDraftReviewRow.actorKind` is now CLOSED for
+             # the admin console — remove it from future "no reader"
+             # sweeps. See DECISIONS.md v3-D231.
              # NOTE (v3-D230, 2026-09-18): `nightly_check_runs.report
              # ['deadLetters']` — edge case #130's dead-letter quarantine
              # ("poison event wedges fold -> dead-letter quarantine; fold skips
