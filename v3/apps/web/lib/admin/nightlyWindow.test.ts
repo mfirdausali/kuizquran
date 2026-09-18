@@ -202,6 +202,70 @@ describe("loadNightlyWindow — failure is a STATE, never an exception", () => {
     }
   });
 
+  /** v3-D230: `report['deadLetters']` — edge case #130's quarantine — had
+   *  no admin-facing reader at all. A dead letter never produces a P1 (it
+   *  upgrades a run to WARN) and the ledger counts a WARN night as green,
+   *  so the night carrying it extends the launch-gate streak with nothing
+   *  on screen saying a learner was skipped rather than checked. */
+  it("carries the most recent run's quarantined learners through verbatim (v3-D230)", async () => {
+    const status = {
+      ...readyStatus,
+      lastQuarantine: {
+        night: "2026-09-02",
+        check: "fold_determinism_check",
+        entries: [
+          { subjectPseudonym: "u_abc123", error: "Malformed UTF-8 characters in device_id" },
+          { subjectPseudonym: "u_def456", error: "Inf and NaN cannot be JSON encoded" },
+        ],
+      },
+    };
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify(status), { status: 200 })) as unknown as typeof fetch;
+
+    const load = await loadNightlyWindow();
+    expect(load.state).toBe("ready");
+    if (load.state === "ready") {
+      expect(load.status.lastQuarantine?.night).toBe("2026-09-02");
+      expect(load.status.lastQuarantine?.check).toBe("fold_determinism_check");
+      expect(load.status.lastQuarantine?.entries.map((e) => e.subjectPseudonym)).toEqual([
+        "u_abc123",
+        "u_def456",
+      ]);
+      expect(load.status.lastQuarantine?.entries[1]?.error).toContain("Inf and NaN");
+    }
+  });
+
+  /** The load-bearing half of the pair above: JS does not strip an
+   *  unrecognized JSON property just because a TS interface omits it, so the
+   *  round-trip case can pass through `{...body}` alone. This one cannot —
+   *  only a real `parseLastQuarantine` refuses a half-shaped entry. */
+  it("a malformed lastQuarantine entry degrades the whole object to null (v3-D230)", async () => {
+    const status = {
+      ...readyStatus,
+      lastQuarantine: {
+        night: "2026-09-02",
+        check: "fold_determinism_check",
+        entries: [{ subjectPseudonym: "u_abc123" /* missing error */ }],
+      },
+    };
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify(status), { status: 200 })) as unknown as typeof fetch;
+
+    const load = await loadNightlyWindow();
+    expect(load.state).toBe("ready");
+    if (load.state === "ready") {
+      expect(load.status.lastQuarantine).toBeNull();
+    }
+  });
+
+  it("no quarantine means null, never a fabricated empty object (v3-D230)", async () => {
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify(readyStatus), { status: 200 })) as unknown as typeof fetch;
+
+    const load = await loadNightlyWindow();
+    expect(load.state).toBe("ready");
+    if (load.state === "ready") {
+      expect(load.status.lastQuarantine).toBeNull();
+    }
+  });
+
   it("a network throw becomes `unavailable`, not a rejected promise", async () => {
     globalThis.fetch = vi.fn(async () => {
       throw new TypeError("Failed to fetch");

@@ -20419,3 +20419,203 @@ own hardcoded caption vs. its live `shipping`/`excludedFromHashV1`
 booleans (v3-D173, re-confirmed real but still non-divergent, left
 alone) — all unchanged. `DeterminismP1Alert`'s own trigger gap is now
 CLOSED — remove it from future "NOT addressed" lists.
+
+## v3-D230 (2026-09-18) — a learner the nightly check could not fold was skipped in silence, and the night still counted toward the launch gate
+
+`nightly_check_runs.report['deadLetters']` is edge case #130's dead-letter
+quarantine — BUILD-PLAN's own "poison event wedges fold → dead-letter
+quarantine; fold skips + alerts", closed at v3-D114 (the nightly check) and
+v3-D115 (the admin rebuild). `DeterminismCheckCommand::sampleFromDatabase()`
+writes a real `{userId, error}` pair for every sampled learner whose own
+event/atom rows cannot be `json_encode`d, and has since v3-D114.
+
+**It had no admin-facing reader anywhere.** `grep -rn "deadLetter"
+v3/api/app` returned exactly two consumers before this fix, and neither
+names a learner:
+
+- `App\Support\AtomCacheRebuilder`'s own — a *different* path (the
+  admin-triggered "rebuild atom cache" button), which **v3-D204 already gave
+  a real per-learner reader**: `SystemHealthController` pseudonymizes each
+  entry and `SystemHealthPanel.tsx` prints one line per skipped learner.
+- `Cache::put('health:dead_letter_depth', count($report['deadLetters'] ??
+  []), ...)` — a bare **depth integer**, surfaced on `/settings/health` as
+  one more numeric check row. It names neither the learner nor the reason.
+
+`Admin\NightlyWindowController::findingsFor()` (v3-D178/D179) only ever loads
+the ONE run that produced `lastP1`, and **a dead letter never produces a P1
+by construction**: `runFold()` merges PHP's dead letters into the report,
+upgrades an otherwise-green run to exit 3 / `severity: warn`, and says so in
+its own comment — *"a quarantined learner is never silently green, but is not
+by itself proof of a genuine cache divergence either, so it never pages a P1
+on its own."* So the evidence sat in the run row and reached nobody.
+
+### Why this is sharper than the usual "computed, zero reader"
+
+`NightlyWindowLedger::nights()` scores a night green when every check is
+`green` **or** `warn` — its own rule 3, verbatim: *"a WARN does NOT reset,
+and does not break the chain."* That rule is right (version skew after an
+engine deploy must not make the gate unreachable), but it means a learner
+whose log is unencodable is **skipped, never folded, never compared — and the
+night still counts toward BUILD-PLAN M10's 7-consecutive-green-nights LAUNCH
+GATE.** On `NightlyWindowPanel` that night renders as
+`fold_determinism_check=warn (schedule)` and nothing else.
+
+That is this ledger's own stated failure mode — *"an unobserved night must
+never read as a green one"* — one level down: **per learner instead of per
+night**, with both facts already sitting in the run row. Seven nights in a
+row can pass the gate while the same learner is never checked once.
+
+### The fix
+
+Read-only, no schema change, no ledger change, on
+`SystemHealthController::pseudonymizedDeadLetters()`'s exact template
+(v3-D204 — the sibling rebuild path's own reader):
+
+- `NightlyWindowController::index()` gains `lastQuarantine`: the most recent
+  run **in the window** whose report carries a non-empty `deadLetters`, as
+  `{night, check, entries: [{subjectPseudonym, error}]}`. Each raw `userId`
+  goes through the same HMAC `Pseudonymizer` every other admin finding list
+  uses — the raw integer never reaches the wire. `null`, never a fabricated
+  empty list, when no run in the window quarantined anyone.
+- Window-scoped exactly as `NightlyWindowLedger::nights()` is, including its
+  undeclared-window case, so this screen never points an operator at evidence
+  from a window it is not counting.
+- `NightlyWindowLedger` itself is untouched — it stays learner-identity-free
+  as documented (edge case #169), the same split v3-D178 already drew.
+- `lib/admin/nightlyWindow.ts` gains `NightlyWindowQuarantine`/
+  `NightlyWindowQuarantineEntry` and `parseLastQuarantine()`, degrading a
+  missing **or half-shaped** value to `null` rather than a partial object.
+- `NightlyWindowPanel.tsx` renders it as its **own block** beneath the P1
+  alert — deliberately not inside `lastP1Findings`, because a dead letter is
+  not a P1's evidence — one `<li>` per skipped learner.
+
+### RED, at all three layers
+
+`git stash` of the three production files (every new test kept), restored
+byte-identically after.
+
+- **Backend**: 1 of 13 `NightlyWindowTest` cases failed exactly `Failed
+  asserting that null is identical to '2026-09-02'`. The load-bearing case
+  asserts FIRST that the quarantined night still reads `green: true` and
+  still advances the streak to 2 — the exact lie this fix closes — and only
+  then that the quarantine is named and pseudonymized (`"userId"` absent from
+  the body; both pseudonyms equal `Pseudonymizer::for()`'s own output and
+  differ from each other). Its two negative siblings (no quarantine → null; a
+  quarantine from *before* the window start is not reported) passed vacuously
+  against the unmodified controller, correctly, since a missing key already
+  reads null.
+- **Frontend lib**: 2 of 17 `nightlyWindow.test.ts` cases failed — `expected
+  { night: '2026-09-02', …(2) } to be null` (a half-shaped entry passed
+  straight through) and `expected undefined to be null`. The round-trip case
+  passed **vacuously** and is kept with that noted in its own comment: JS does
+  not strip an unrecognized JSON property just because a TS interface omits
+  it, so `{...body}` already carried `lastQuarantine` through — exactly the
+  trap v3-D225 recorded. Only the malformed-degrades case can be RED here.
+- **Panel**: 1 of 13 `nightly-window-panel.test.tsx` cases failed on
+  `getByText(/u_abc123/)` timing out. It seeds TWO entries with DIFFERENT
+  pseudonyms and DIFFERENT errors, so one hardcoded line cannot satisfy it,
+  and asserts in the same case that the night's own table row still reads
+  `fold_determinism_check=warn (schedule)`. Its negative sibling (no
+  quarantine → no block at all) passed vacuously, correctly — proving the
+  block is a real signal rather than permanent chrome.
+
+Restored, reran: 13/13 backend (was 10, +3; 69 assertions), 17/17 lib (was
+14, +3), 13/13 panel (was 11, +2).
+
+### Verification
+
+`php artisan test` (v3/api): **398 passing** (was 395, +3; 2 incomplete + 6
+skipped unchanged, PAY-1) — re-run IN FULL after a late hardening edit to the
+controller (a null/non-array `report` is a real shape when scanning every run
+in a window, unlike `findingsFor()`'s single known-good run), not merely the
+filtered file. `./vendor/bin/pint --test`: `NightlyWindowController.php`
+passed; `NightlyWindowTest.php` reports the identical pre-existing
+`fully_qualified_strict_types`/`ordered_imports` findings both before and
+after this diff, confirmed by stashing the change and re-running pint —
+pre-existing drift, left alone, same discipline as v3-D219/v3-D225.
+
+`TZ=UTC make test`: **2790 passing**, exit 0 (was 2782, +8 — exactly this
+run's eight new tests: 3 v3/api + 5 apps/web; v3/api 398, was 395; apps/web
+1475, was 1470; no other suite moved: 255 v2 vitest, 47 v2/api, 120
+corpus-compiler, 432 engine, 63 fold-runner). `check-test-floor.mjs`: OK,
+2790 >= floor 1899 (+891 margin, unmoved). `TZ=UTC make build`: exit 0, 30
+routes (unchanged). `npm run gates`: all green — locked-css OK (1 documented
+hunk, 294 v1 lines byte-identical); boundaries OK, 317 files (unchanged
+count — no new production file); fonts degraded-but-non-blocking,
+pre-existing, 2/6 UI fonts; corpus-morphology 362 words; corpus-glyphs 206
+codepoints, both unchanged. `npm run typecheck` across all four v3 node
+packages (inside `make test`): clean.
+
+No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the suite was reverted before committing). No Arabic
+codepoint — all six changed files and the full diff swept programmatically,
+in Python, over the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms blocks, plus a `\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/
+`\uFExx` escape and `fromCharCode`/`fromCodePoint` sweep — zero matches. No
+oracle, golden log, fixture or snapshot regenerated.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled corpus;
+`make setup` ran clean from scratch. `HEAD`, local `main` and `origin/main`
+all already agreed at `fcfe765` (v3-D229) — no stale-local-main trap this
+run, confirmed via `git fetch origin main` **and** `git ls-remote origin
+main` before any exploration.
+
+**Found by** a fresh sweep this run: a PHP-response-key-vs-TS-reader scan
+over all of `api/app` against every `.ts`/`.tsx` in the tree (the reverse of
+v3-D227's wire-field sweeps) surfaced `deadLetter` as a camelCase,
+wire-shaped key with no TypeScript reader anywhere. Independently re-verified
+by reading `DeterminismCheckCommand::runFold()`/`sampleFromDatabase()`,
+`NightlyWindowLedger::nights()`'s own green-includes-warn rule,
+`SystemHealthController::deadLetterDepth()` and
+`NightlyWindowController::findingsFor()` directly before writing any test.
+Also swept, clean or already-excluded: a zero-caller export scan over every
+`packages/engine/src` module (`placement.ts`/`selectFor`/`seedFromKey` all
+already deferred; `rotation.ts#stride` has a real in-file caller); an
+unread-prop scan over every `components/**/*.tsx` (clean); an
+interface-field-vs-external-reader scan over every `apps/web/lib/**` module
+(every hit was an in-file label builder or a JSON-download payload field, not
+a gap); and `lib/landing/claims.ts`'s detector, re-confirmed NOT duplicated
+by `check-boundaries.mjs` clause 11 — that gate EXTRACTS the pattern literals
+from `claims.ts`'s own source text rather than copying them, so there is one
+definition by construction.
+
+**NOT addressed:** every item on v3-D229's own "NOT addressed" list,
+unchanged — `DrillPicker.tsx`'s own unused `now` prop; `session_start`'s own
+"app-open -> first drill" latency metric (v0.8); `CorpusVerse.line`; the
+streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151); multi-surah enrollment; the operational mailer /
+7-night launch window (this fix makes a quarantine VISIBLE on the window
+screen; it still needs a live SMTP account and a host running the schedule);
+PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123);
+`MacroFacts.litany.rhymeLabel` (v3-D188); `StripeField.editable` (v3-D204);
+`corpusHash`'s own zero fold-side consumer (v3-D206); FR5's own queue-level
+behavior for "restart"/"replan"/"makeup" (v3-D217);
+`selection_determinism_check` still replaying a committed fixture rather than
+production logs; `GlossDraftsPanel.tsx`'s own hardcoded caption vs. its live
+`shipping`/`excludedFromHashV1` booleans (v3-D173).
+
+`lib/test/build.ts`/`TestIsland.tsx`'s own `test_*` events still carry no
+site coordinate — investigated directly this run and **left deliberately**,
+with the reason recorded so a future run does not treat it as a one-line
+sibling of v3-D214: `siteKey` alone would be safe, but stamping its sibling
+`visitOrdinal` on a Test item would burn ordinals in the same per-site
+namespace `nextVisitOrdinalForSite`/`replaySelection` read, making a replayed
+production trace diverge against visits nobody was ever served. That is a
+half-fix or a hazard, and it deserves its own night's reasoning.
+
+**NEWLY named and NOT addressed:** `AccountExportPanel.tsx`'s caption
+promises "your profile and every drill event" while `AccountController
+::export` also ships `entitlement`/`entitlementTransitions`/`billingEvents`
+— the FILE itself is complete, so this is not a PDPA gap, only a stale
+one-sentence self-description. And `App\Mail\DeterminismP1Alert` still
+reports no dead letters at all, so a P1 that ALSO quarantined a learner pages
+without that fact — the direct mailer-side sibling of this fix, the same
+shape v3-D229 closed for `trigger`.
+
+The nightly check's own dead-letter quarantine is now CLOSED for the admin
+console — remove it from future "no reader" sweeps.

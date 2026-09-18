@@ -263,6 +263,81 @@ describe("NightlyWindowPanel — three states, never two", () => {
     expect(screen.queryByText(/findings/i)).toBeNull();
   });
 
+  /**
+   * v3-D230 — THE LOAD-BEARING CASE. The night that quarantined a learner is
+   * a WARN night, and the ledger counts a WARN night as GREEN, so the table
+   * row below reads `fold_determinism_check=warn (schedule)` and the streak
+   * advances. Nothing on this screen said a learner had been skipped
+   * entirely rather than checked and found clean. Two entries with DIFFERENT
+   * pseudonyms and DIFFERENT errors, so the panel cannot satisfy this by
+   * rendering one hardcoded line.
+   */
+  it("names each quarantined learner on a WARN night that still counts green (v3-D230)", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse({
+        streak: 2,
+        required: 7,
+        satisfied: false,
+        windowStartedAt: "2026-09-01",
+        windowReason: "test",
+        nights: [
+          {
+            night: "2026-09-02",
+            green: true,
+            severities: { fold_determinism_check: "warn", selection_determinism_check: "green" },
+            triggers: { fold_determinism_check: "schedule" },
+            missing: [],
+          },
+        ],
+        lastP1: null,
+        lastP1Findings: null,
+        lastQuarantine: {
+          night: "2026-09-02",
+          check: "fold_determinism_check",
+          entries: [
+            { subjectPseudonym: "u_abc123", error: "Malformed UTF-8 characters in device_id" },
+            { subjectPseudonym: "u_def456", error: "Inf and NaN cannot be JSON encoded" },
+          ],
+        },
+        blockedBy: "2 of 7 consecutive green nights",
+      }),
+    ) as unknown as typeof fetch;
+    render(<NightlyWindowPanel />);
+
+    await waitFor(() => expect(screen.getByText(/u_abc123/)).toBeTruthy());
+    expect(screen.getByText(/Malformed UTF-8 characters in device_id/)).toBeTruthy();
+    expect(screen.getByText(/u_def456/)).toBeTruthy();
+    expect(screen.getByText(/Inf and NaN cannot be JSON encoded/)).toBeTruthy();
+    expect(screen.getByText(/quarantined on 2026-09-02/)).toBeTruthy();
+    // The night itself still reads green — the reason the block above has to
+    // exist at all.
+    expect(screen.getByText(/fold_determinism_check=warn \(schedule\)/)).toBeTruthy();
+  });
+
+  /** Its negative sibling: a window where nobody was skipped paints no
+   *  quarantine block at all, so the block above is a real signal rather
+   *  than permanent chrome. */
+  it("renders no quarantine block when nobody was skipped (v3-D230)", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse({
+        streak: 7,
+        required: 7,
+        satisfied: true,
+        windowStartedAt: "2026-09-01",
+        windowReason: "test",
+        nights: [],
+        lastP1: null,
+        lastP1Findings: null,
+        lastQuarantine: null,
+        blockedBy: null,
+      }),
+    ) as unknown as typeof fetch;
+    render(<NightlyWindowPanel />);
+
+    await waitFor(() => expect(screen.getByText(/7 of 7/)).toBeTruthy());
+    expect(screen.queryByText(/quarantined/i)).toBeNull();
+  });
+
   it("a night missing one check renders that check as MISSING, not silently dropped", async () => {
     globalThis.fetch = vi.fn(async () =>
       jsonResponse({

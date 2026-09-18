@@ -29,6 +29,14 @@
 // the list is rendered per its own `type` discriminant, never assumed to be
 // the fold shape.
 //
+// v3-D230: `lastQuarantine` (edge case #130's dead-lettered learners) is
+// rendered as its own block, NOT inside the P1 findings list — a dead letter
+// never produces a P1, it upgrades a run to WARN, and the ledger counts a
+// WARN night as green. So the night it happened on extends the launch-gate
+// streak and reads `fold_determinism_check=warn (schedule)` in the table
+// below; without this block nothing on the screen says a learner was skipped
+// entirely rather than checked and found clean.
+//
 // v3-D225: each night's own `triggers` (schedule|manual|ci, per check) is
 // rendered alongside its severity — the one fact that lets an operator tell
 // "the real unattended cron ran" apart from "a human quietly kept the
@@ -108,6 +116,22 @@ export function NightlyWindowPanel() {
                     </li>
                   ),
                 )}
+              </ul>
+            </>
+          ) : null}
+
+          {load.status.lastQuarantine && load.status.lastQuarantine.entries.length > 0 ? (
+            <>
+              <p className="caption" role="status" style={{ margin: "8px 0 4px" }}>
+                learners quarantined on {load.status.lastQuarantine.night} (
+                {load.status.lastQuarantine.check}) — skipped, never checked:
+              </p>
+              <ul className="caption" aria-label="Quarantined learners">
+                {load.status.lastQuarantine.entries.map((e) => (
+                  <li key={e.subjectPseudonym}>
+                    <code>{e.subjectPseudonym}</code> — {e.error}
+                  </li>
+                ))}
               </ul>
             </>
           ) : null}

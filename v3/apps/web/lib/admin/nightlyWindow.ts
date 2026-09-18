@@ -69,6 +69,28 @@ export interface NightlyWindowSelectionFinding {
 
 export type NightlyWindowFinding = NightlyWindowFoldFinding | NightlyWindowSelectionFinding;
 
+/** v3-D230: one quarantined learner from `NightlyCheckRun.report.deadLetters`
+ *  (edge case #130 — "poison event wedges fold → dead-letter quarantine;
+ *  fold skips + alerts"), pseudonymized server-side by
+ *  `Admin\NightlyWindowController::lastQuarantine()`. Never the raw learner
+ *  id, exactly like a fold finding's own `subjectPseudonym`. */
+export interface NightlyWindowQuarantineEntry {
+  subjectPseudonym: string;
+  error: string;
+}
+
+/** v3-D230: the most recent run IN THE WINDOW that skipped at least one
+ *  learner. This is deliberately NOT part of `lastP1Findings`: a dead letter
+ *  never produces a P1 — it upgrades an otherwise-green run to WARN — and
+ *  the ledger counts a WARN night as green, so the night carrying it extends
+ *  the launch-gate streak with nothing else on screen saying a learner was
+ *  never checked at all. */
+export interface NightlyWindowQuarantine {
+  night: string;
+  check: string;
+  entries: readonly NightlyWindowQuarantineEntry[];
+}
+
 export interface NightlyWindowStatus {
   streak: number;
   required: number;
@@ -82,6 +104,11 @@ export interface NightlyWindowStatus {
    *  or malformed value degrades the whole list to null, same discipline
    *  as every other parsed-from-the-wire field in this module. */
   lastP1Findings: readonly NightlyWindowFinding[] | null;
+  /** v3-D230: null when no run in the window quarantined anyone; otherwise
+   *  the most recent run that did, with its own skipped learners. A missing
+   *  or malformed value degrades to null — never a partial list, same
+   *  discipline as `lastP1Findings`. */
+  lastQuarantine: NightlyWindowQuarantine | null;
   blockedBy: string | null;
 }
 
@@ -132,11 +159,18 @@ function isFinding(v: unknown): v is NightlyWindowFinding {
   return isFoldFinding(f) || isSelectionFinding(f);
 }
 
-/** `lastP1Findings` is checked separately (`parseLastP1Findings`), never
- *  here — a malformed value there degrades to null rather than rejecting
- *  the whole payload, same discipline as every other individually-degraded
- *  field this module reads. */
-function isStatus(v: unknown): v is Omit<NightlyWindowStatus, "lastP1Findings"> {
+function isQuarantineEntry(v: unknown): v is NightlyWindowQuarantineEntry {
+  if (typeof v !== "object" || v === null) return false;
+  const e = v as Record<string, unknown>;
+  return typeof e.subjectPseudonym === "string" && typeof e.error === "string";
+}
+
+/** `lastP1Findings` and `lastQuarantine` are checked separately
+ *  (`parseLastP1Findings`/`parseLastQuarantine`), never here — a malformed
+ *  value there degrades to null rather than rejecting the whole payload,
+ *  same discipline as every other individually-degraded field this module
+ *  reads. */
+function isStatus(v: unknown): v is Omit<NightlyWindowStatus, "lastP1Findings" | "lastQuarantine"> {
   if (typeof v !== "object" || v === null) return false;
   const s = v as Record<string, unknown>;
   return (
@@ -194,7 +228,27 @@ export async function loadNightlyWindow(): Promise<NightlyWindowLoad> {
     return { state: "unavailable", reason: "the API's answer carried no window status" };
   }
 
-  return { state: "ready", status: { ...body, lastP1Findings: parseLastP1Findings(body) } };
+  return {
+    state: "ready",
+    status: {
+      ...body,
+      lastP1Findings: parseLastP1Findings(body),
+      lastQuarantine: parseLastQuarantine(body),
+    },
+  };
+}
+
+/** A missing or malformed `lastQuarantine` degrades to `null` — the same
+ *  "nobody was skipped" shape a genuinely-null field reports — rather than
+ *  a half-parsed object whose entries a panel would then render as
+ *  `undefined`. */
+function parseLastQuarantine(body: unknown): NightlyWindowQuarantine | null {
+  const raw = (body as { lastQuarantine?: unknown } | null)?.lastQuarantine;
+  if (typeof raw !== "object" || raw === null) return null;
+  const q = raw as Record<string, unknown>;
+  if (typeof q.night !== "string" || typeof q.check !== "string") return null;
+  if (!Array.isArray(q.entries) || !q.entries.every(isQuarantineEntry)) return null;
+  return { night: q.night, check: q.check, entries: q.entries };
 }
 
 /** A missing or malformed `lastP1Findings` degrades to `null` — the same

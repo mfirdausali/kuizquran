@@ -72,6 +72,35 @@ use Illuminate\Http\JsonResponse;
  * unlike a fold finding there is nothing to pseudonymize; `seed` and
  * `traceKey` (`${siteKey}:${deviceId}:${visitOrdinal}`) are the reproducible
  * evidence a human re-runs to see the divergence again.
+ *
+ * v3-D230: `report['deadLetters']` — edge case #130's quarantine, written by
+ * `DeterminismCheckCommand::sampleFromDatabase()` for every sampled learner
+ * whose own event/atom rows could not be encoded — had no admin-facing
+ * reader at all. `findingsFor()` above only ever loads the run that produced
+ * `lastP1`, and a dead letter NEVER produces a P1 by construction: the
+ * command upgrades an otherwise-green run to exit 3 / `severity: warn` and
+ * says so in its own comment ("never pages a P1 on its own"). The only other
+ * consumer anywhere was `Cache::put('health:dead_letter_depth', count(...))`
+ * — a bare DEPTH on `/settings/health`'s `SystemHealthPanel`, naming neither
+ * the learner nor the reason.
+ *
+ * That gap is load-bearing on THIS screen specifically, because
+ * `NightlyWindowLedger` counts a WARN night as GREEN (its own rule 3: "a
+ * WARN does NOT reset, and does not break the chain"). So a learner who is
+ * quarantined every night is never folded, never compared, and the
+ * seven-night launch gate advances anyway — while the panel renders
+ * `fold_determinism_check=warn (schedule)` and nothing else. The ledger's
+ * own reason for existing is that "an unobserved night must never read as a
+ * green one"; this is the same lie one level down, per learner instead of
+ * per night, and the run row already held both facts.
+ *
+ * Fixed on `SystemHealthController::pseudonymizedDeadLetters()`'s exact
+ * template (v3-D204, which gave the SIBLING rebuild path this same reader):
+ * the most recent run in the window whose report carries a non-empty
+ * `deadLetters` is surfaced as `lastQuarantine`, each entry's raw `userId`
+ * replaced by the same HMAC `Pseudonymizer` every other admin finding list
+ * uses. `null` — never an empty list — when no run in the window quarantined
+ * anyone, the same "no findings" shape `lastP1Findings` already uses.
  */
 class NightlyWindowController extends Controller
 {
@@ -81,8 +110,52 @@ class NightlyWindowController extends Controller
     {
         $status = NightlyWindowLedger::status();
         $status['lastP1Findings'] = $this->findingsFor($status['lastP1']);
+        $status['lastQuarantine'] = $this->lastQuarantine($status['windowStartedAt']);
 
         return response()->json($status);
+    }
+
+    /**
+     * The most recent run IN THE WINDOW that quarantined at least one
+     * learner (edge case #130). Window-scoped exactly as
+     * `NightlyWindowLedger::nights()` is — including the undeclared-window
+     * case, where that method also reads every recorded run — so this screen
+     * never reports a quarantine from before the window it is counting.
+     *
+     * @return array{night:string,check:string,entries:list<array{subjectPseudonym:string,error:string}>}|null
+     */
+    private function lastQuarantine(?string $windowStartedAt): ?array
+    {
+        $query = NightlyCheckRun::query()->orderByDesc('night')->orderByDesc('id');
+        if ($windowStartedAt !== null) {
+            $query->where('night', '>=', $windowStartedAt);
+        }
+
+        foreach ($query->cursor() as $run) {
+            // `report` is a nullable JSON column and this scans EVERY run in
+            // the window, not the one run `findingsFor()` already knows has a
+            // report — so a null/non-array report is a real shape here, and a
+            // bare `$run->report['deadLetters']` would warn on it.
+            $report = $run->report;
+            $entries = is_array($report) ? ($report['deadLetters'] ?? null) : null;
+            if (! is_array($entries) || $entries === []) {
+                continue;
+            }
+
+            return [
+                'night' => (string) $run->night,
+                'check' => (string) $run->check,
+                'entries' => array_values(array_map(
+                    fn (array $d) => [
+                        'subjectPseudonym' => $this->pseudonymizer->for((int) ($d['userId'] ?? 0)),
+                        'error' => (string) ($d['error'] ?? ''),
+                    ],
+                    array_filter($entries, 'is_array'),
+                )),
+            ];
+        }
+
+        return null;
     }
 
     /**

@@ -298,6 +298,102 @@ class NightlyWindowTest extends TestCase
         $this->assertSame(['selection_determinism_check'], $response->json('nights.1.missing'));
     }
 
+    /**
+     * v3-D230 — THE LOAD-BEARING CASE. `report['deadLetters']` (edge case
+     * #130's quarantine) is written whenever a sampled learner's own
+     * event/atom rows cannot be encoded, and it had NO admin-facing reader:
+     * `findingsFor()` only ever loads the run that produced `lastP1`, and a
+     * dead letter never produces a P1 — `DeterminismCheckCommand` upgrades
+     * an otherwise-green run to exit 3 / `severity: warn` and says in its
+     * own comment that it "never pages a P1 on its own".
+     *
+     * That matters on THIS screen because `NightlyWindowLedger` counts a
+     * WARN night as GREEN. This test proves both halves at once: the
+     * quarantined night still advances the streak (so nothing on the old
+     * screen said anything was wrong at all) AND the quarantine is now
+     * named, per learner, pseudonymized.
+     */
+    public function test_a_quarantined_learner_is_named_on_a_warn_night_that_still_counts_green(): void
+    {
+        config(['admin.pseudonym_pepper' => 'test-pepper']);
+        $this->admin();
+        $this->window();
+        $this->night('2026-09-01', 'green');
+        $this->appendRun('2026-09-02', 'fold_determinism_check', 'warn', [
+            'atomsCompared' => 6,
+            'deadLetters' => [
+                ['userId' => 42, 'error' => 'Malformed UTF-8 characters in device_id'],
+                ['userId' => 43, 'error' => 'Inf and NaN cannot be JSON encoded'],
+            ],
+        ], trigger: 'schedule');
+        $this->appendRun('2026-09-02', 'selection_determinism_check', 'green');
+
+        $response = $this->getJson('/api/admin/nightly-window')->assertOk();
+
+        // The night the quarantine happened on still reads green and still
+        // extends the launch-gate streak — the exact reason the quarantine
+        // has to be visible somewhere else on this screen.
+        $this->assertTrue($response->json('nights.1.green'));
+        $this->assertSame(2, $response->json('streak'));
+
+        $this->assertSame('2026-09-02', $response->json('lastQuarantine.night'));
+        $this->assertSame('fold_determinism_check', $response->json('lastQuarantine.check'));
+        $this->assertCount(2, $response->json('lastQuarantine.entries'));
+        $this->assertSame(
+            'Malformed UTF-8 characters in device_id',
+            $response->json('lastQuarantine.entries.0.error'),
+        );
+        $this->assertSame(
+            'Inf and NaN cannot be JSON encoded',
+            $response->json('lastQuarantine.entries.1.error'),
+        );
+
+        // Pseudonymized — the raw integer id must never reach the wire, the
+        // same rule every other admin finding list on this console follows.
+        $this->assertStringNotContainsString('"userId"', $response->getContent());
+        $pseudonymizer = app(\App\Http\Controllers\Admin\Pseudonymizer::class);
+        $this->assertSame($pseudonymizer->for(42), $response->json('lastQuarantine.entries.0.subjectPseudonym'));
+        $this->assertSame($pseudonymizer->for(43), $response->json('lastQuarantine.entries.1.subjectPseudonym'));
+        $this->assertNotSame(
+            $response->json('lastQuarantine.entries.0.subjectPseudonym'),
+            $response->json('lastQuarantine.entries.1.subjectPseudonym'),
+        );
+    }
+
+    /** v3-D230: a window where nobody was ever quarantined reports `null`,
+     *  never an empty list masquerading as "checked, nothing skipped" — the
+     *  same discipline `lastP1Findings` already follows. */
+    public function test_no_quarantine_reports_null(): void
+    {
+        $this->admin();
+        $this->window();
+        $this->night('2026-09-01', 'green');
+        $this->night('2026-09-02', 'green');
+
+        $this->getJson('/api/admin/nightly-window')
+            ->assertOk()
+            ->assertJsonPath('lastQuarantine', null);
+    }
+
+    /** v3-D230: window-scoped exactly as `NightlyWindowLedger::nights()` is.
+     *  A quarantine from before the declared window start belongs to a
+     *  window this screen is not counting, and reporting it here would point
+     *  an operator at evidence that has nothing to do with the streak on
+     *  screen. */
+    public function test_a_quarantine_from_before_the_window_start_is_not_reported(): void
+    {
+        $this->admin();
+        $this->window('2026-09-05');
+        $this->appendRun('2026-09-01', 'fold_determinism_check', 'warn', [
+            'deadLetters' => [['userId' => 42, 'error' => 'before the window']],
+        ]);
+        $this->night('2026-09-05', 'green');
+
+        $this->getJson('/api/admin/nightly-window')
+            ->assertOk()
+            ->assertJsonPath('lastQuarantine', null);
+    }
+
     /** READ-ONLY BY CONSTRUCTION — this screen may never declare or reset
      *  the window; that stays a deliberate human CLI action. */
     public function test_the_route_accepts_no_writes(): void
