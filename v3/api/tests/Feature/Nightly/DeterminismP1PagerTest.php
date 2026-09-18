@@ -260,6 +260,72 @@ class DeterminismP1PagerTest extends TestCase
         $this->assertStringNotContainsString('Learners sampled', $html);
     }
 
+    /**
+     * `NightlyCheckRun.trigger` (schedule|manual|ci) reaches the admin
+     * console's `NightlyWindowPanel` (v3-D225 — "fold_determinism_check=
+     * green (schedule)" vs "(manual)", built precisely so a human watching
+     * that screen can tell real unattended automation from a manual re-run)
+     * but `DeterminismP1Alert::content()` never read `$this->run->trigger`
+     * at all, on EITHER report shape — the constructor takes the whole
+     * model but only extracted `check`/`night`. The pager email is the
+     * highest-severity, most time-critical artifact in this codebase (a
+     * confirmed P1 resets the 7-night launch window), and it could not
+     * answer, from the page itself, whether tonight's P1 is happening to
+     * production right now via the real cron or is a manual/CI run the
+     * on-call may already know about — exactly the fact v3-D225 built for
+     * a DIFFERENT reader (the admin panel) the night before this one.
+     *
+     * Two different triggers on the two report shapes, so neither assertion
+     * can pass on a hardcoded string.
+     */
+    public function test_a_fold_p1_email_renders_its_own_trigger(): void
+    {
+        $run = NightlyCheckRun::create([
+            'check' => 'fold_determinism_check',
+            'night' => '2026-09-18',
+            'severity' => 'p1',
+            'exit_code' => 4,
+            'report' => [
+                'check' => 'fold_determinism_check',
+                'divergentCount' => 1,
+                'skewCount' => 0,
+                'atomsCompared' => 10,
+                'usersChecked' => 1,
+            ],
+            'trigger' => 'schedule',
+            'ran_at' => 0,
+        ]);
+
+        $html = (new DeterminismP1Alert($run))->render();
+
+        $this->assertStringContainsString('<strong>Triggered by:</strong> schedule.', $html);
+    }
+
+    public function test_a_selection_p1_email_renders_its_own_trigger_not_a_fold_one(): void
+    {
+        $run = NightlyCheckRun::create([
+            'check' => 'selection_determinism_check',
+            'night' => '2026-09-18',
+            'severity' => 'p1',
+            'exit_code' => 4,
+            'report' => [
+                'check' => 'selection_determinism_check',
+                'seeds' => [1],
+                'eventsReplayed' => 1,
+                'tracesCompared' => 1,
+                'divergences' => [],
+            ],
+            'trigger' => 'ci',
+            'ran_at' => 0,
+        ]);
+
+        $html = (new DeterminismP1Alert($run))->render();
+
+        $this->assertStringContainsString('<strong>Triggered by:</strong> ci.', $html);
+        $this->assertStringNotContainsString('<strong>Triggered by:</strong> schedule.', $html);
+        $this->assertStringNotContainsString('<strong>Triggered by:</strong> manual.', $html);
+    }
+
     /** The fold branch's own rendered content is unchanged by the fix — a
      *  regression guard alongside the pre-existing `Mail::assertSent` props
      *  check above, which never inspected rendered HTML at all. */

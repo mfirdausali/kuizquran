@@ -29,6 +29,13 @@ use Illuminate\Queue\SerializesModels;
  * builds only the counts the triggering check actually produces — reading
  * the other shape's keys would silently coalesce every one to 0 via `??`,
  * which is exactly the page a confirmed selection P1 sent before this fix.
+ *
+ * `$run->trigger` (v3-D229): already rendered on the admin console's
+ * `NightlyWindowPanel` (v3-D225 — "fold_determinism_check=green (schedule)"
+ * vs "(manual)") but never read here, on either shape, until this fix —
+ * the on-call engineer this page is FOR had no way to tell, from the page
+ * itself, whether tonight's P1 is the real unattended cron happening to
+ * production right now or a manual/CI run they may already know about.
  */
 class DeterminismP1Alert extends Mailable
 {
@@ -66,6 +73,7 @@ class DeterminismP1Alert extends Mailable
                 with: [
                     'check' => $this->check,
                     'night' => $this->night,
+                    'trigger' => $this->run->trigger,
                     'kind' => 'selection',
                     'seedsCompared' => count($report['seeds'] ?? []),
                     'eventsReplayed' => (int) ($report['eventsReplayed'] ?? 0),
@@ -80,6 +88,7 @@ class DeterminismP1Alert extends Mailable
             with: [
                 'check' => $this->check,
                 'night' => $this->night,
+                'trigger' => $this->run->trigger,
                 'kind' => 'fold',
                 'divergentCount' => (int) ($report['divergentCount'] ?? 0),
                 'skewCount' => (int) ($report['skewCount'] ?? 0),

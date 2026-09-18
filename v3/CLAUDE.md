@@ -53,9 +53,126 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2780 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 393 v3/api + 120 corpus-compiler
-             # + 432 engine + 63 fold-runner + 1470 apps/web. (v3-D228, 2026-09-18)
+make test    # 2782 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 395 v3/api + 120 corpus-compiler
+             # + 432 engine + 63 fold-runner + 1470 apps/web. (v3-D229, 2026-09-18)
+             # NOTE (v3-D229, 2026-09-18): `App\Mail\DeterminismP1Alert` — the
+             # mailer `DeterminismCheckCommand::pageOnCall()` sends for every
+             # confirmed P1 (the highest-severity signal in this codebase — it
+             # resets the 7-consecutive-green-nights launch gate) — took the
+             # WHOLE `NightlyCheckRun` model in its constructor but
+             # `content()` never read `$run->trigger` (`schedule`/`manual`/
+             # `ci`) on either of its two report-shape branches. v3-D225 (the
+             # immediately preceding decision) gave that SAME field its first
+             # real reader, the admin console's `NightlyWindowPanel`
+             # (`fold_determinism_check=green (schedule)` vs `...(manual)`),
+             # built precisely so a human could tell real unattended
+             # automation from a manual re-run — but the field never reached
+             # the OTHER real consumer of `NightlyCheckRun`, the page a 3am
+             # on-call engineer actually reads. `grep -n "trigger"
+             # app/Mail/DeterminismP1Alert.php resources/views/emails/
+             # determinism-p1-alert.blade.php` returned nothing but an
+             # unrelated word ("the triggering check") before this fix.
+             # Concretely: an engineer paged at 3am had to separately open
+             # `/settings/health`'s `NightlyWindowPanel` just to learn
+             # whether tonight's P1 is the real unattended cron happening to
+             # production right now or a manual/CI run they might already
+             # know about — a question the page itself already had the data
+             # to answer. Fixed: both `content()` branches gain `'trigger' =>
+             # $this->run->trigger`; the blade view gains one new line,
+             # `<p><strong>Triggered by:</strong> {{ $trigger }}.</p>`,
+             # directly beneath the existing "Night: ... UTC" line. No wire
+             # change, no schema change (the column already existed,
+             # non-null on every real run), no report-shape change on either
+             # FoldCheckReport/SelectionCheckReport — `trigger` lives on the
+             # `NightlyCheckRun` row itself, not inside `report`. RED
+             # confirmed directly: 2 new cases in `DeterminismP1PagerTest.php`
+             # (7 pre-existing cases untouched) — a fold-shaped run built
+             # with `trigger: 'schedule'` and a selection-shaped run built
+             # with `trigger: 'ci'`, run against the unmodified mailer — both
+             # failed exactly `Failed asserting that ... contains
+             # "<strong>Triggered by:</strong> schedule."` / `"...ci."`; the
+             # selection case's own two negative assertions
+             # (`assertStringNotContainsString` for both `schedule.` and
+             # `manual.`) prove the fix reads the RUN'S OWN trigger rather
+             # than a hardcoded default — a hardcoded `'schedule'` string
+             # would fail the selection case's positive assertion, a
+             # hardcoded `'ci'` would fail the fold case's; only reading
+             # `$this->run->trigger` satisfies both. Restored byte-
+             # identically, reran: 9/9 green (was 7, +2), 41 assertions (was
+             # 39). `php artisan test` (v3/api): 395 passing (was 393, +2; 2
+             # incomplete + 6 skipped unchanged, PAY-1). `./vendor/bin/pint
+             # --test` on both changed PHP files: passed. `TZ=UTC make
+             # test`: 2782 passing (was 2780, +2 — exactly this run's two new
+             # tests; v3/api 395, was 393; no other suite moved). `check-
+             # test-floor.mjs`: OK, 2782 >= floor 1899 (+883 margin, unmoved,
+             # same discipline as every prior entry). `TZ=UTC make build`:
+             # exit 0, 30 routes (unchanged — a Laravel-mailer-and-view-only
+             # fix, no apps/web file touched). `npm run gates`: all green
+             # (boundaries 317/318 files — the one-file fluctuation is the
+             # pre-existing gitignored Next.js `next-env.d.ts` bootstrap-
+             # artifact drift this file has recorded before, confirmed via
+             # `git status --porcelain -- v3/apps/web` showing no tracked
+             # apps/web change in this diff at all; fonts degraded-but-non-
+             # blocking, pre-existing, 2/6 UI fonts present; corpus-
+             # morphology 362 words / corpus-glyphs 206 codepoints, both
+             # unchanged — a backend-mailer-only fix, no corpus recompile
+             # touched by this diff's own content). No `v1/**`/`v2/**` edit
+             # (`git status --porcelain -- v1 v2` empty immediately before
+             # committing — a stray `v2/tsconfig.tsbuildinfo` build-cache
+             # diff produced by running the suite was reverted first, same
+             # discipline as every prior entry). No Arabic codepoint (all
+             # three changed files swept programmatically, in Python, over
+             # the Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms Unicode blocks, plus a `\u06xx`/`\u07xx`/
+             # `\u08xx`/`\uFBxx`/`\uFExx` escape and `fromCharCode`/
+             # `fromCodePoint` sweep — zero matches; every new/changed
+             # string is a PHP identifier, a wire-adjacent field name, a
+             # closed-set trigger literal, or a fixed English docblock/prose
+             # sentence, never corpus text). No oracle/golden-log/fixture/
+             # snapshot regenerated. Session start: fresh container, no
+             # `node_modules`/`vendor`/compiled corpus anywhere; `make
+             # setup` ran clean from scratch, no retries needed.
+             # `HEAD`/local `main`/`origin/main` all agreed at `38a55f6`
+             # (v3-D228) once `git fetch origin` refreshed the stale
+             # remote-tracking ref and `git merge --ff-only` fast-forwarded
+             # local `main` — no divergent unpushed work found. Found by a
+             # dedicated fresh-sweep agent (Explore) handed the full
+             # exclusion list carried through v3-D228 and directed one hop
+             # downstream of that same decision's own fix — it checked
+             # whether the SAME `trigger` field reached the OTHER real
+             # consumer of `NightlyCheckRun`, the P1 pager mailer, and found
+             # it did not; independently re-verified by this run directly
+             # against `DeterminismP1Alert.php`, the blade view, and the
+             # migration/model before writing any test. NOT addressed:
+             # every item on v3-D228's own "NOT addressed" list, unchanged
+             # — `DrillPicker.tsx`'s own unused `now` prop; `session_start`'s
+             # own "app-open -> first drill" latency metric (v0.8);
+             # `CorpusVerse.line`; the streak/away-day day-space mismatch
+             # (v3-D209); `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+             # `App\Billing\TrialAttribution` (v3-D148);
+             # `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate`
+             # as a whole class (v3-D88, v3-D151); multi-surah enrollment;
+             # the operational mailer/7-night launch window (this fix makes
+             # the PAGE itself carry the trigger fact — it still needs a
+             # live SMTP account and a host running the schedule to page
+             # anyone at all); PAY-1's Stripe fixtures; surah 67's scene
+             # beats; `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`
+             # (v3-D111/D113/D123); `MacroFacts.litany.rhymeLabel`
+             # (v3-D188); `StripeField.editable` (v3-D204); `corpusHash`'s
+             # own zero fold-side consumer (v3-D206); FR5's own queue-level
+             # behavior for "restart"/"replan"/"makeup" (v3-D217);
+             # `lib/test/build.ts`/`TestIsland.tsx`'s own `test_*` events
+             # still carrying no site coordinate; `selection_determinism_check`
+             # still replaying a committed fixture rather than production
+             # logs; `GlossDraftsPanel.tsx`'s own hardcoded caption vs. its
+             # live `shipping`/`excludedFromHashV1` booleans (v3-D173,
+             # re-confirmed real but still non-divergent, left alone) — all
+             # unchanged. `DeterminismP1Alert`'s own trigger gap is now
+             # CLOSED — remove it from future "NOT addressed" lists. See
+             # DECISIONS.md v3-D229.
              # NOTE (v3-D228, 2026-09-18): `components/plan/PlanIsland.tsx
              # #dueToday` re-derived `packages/engine/src/gate.ts#gateDue()`'s
              # predicate inline (`atom.gateDueAt !== null && !atom.gatePassed

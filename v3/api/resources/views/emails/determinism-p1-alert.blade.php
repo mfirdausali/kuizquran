@@ -5,6 +5,8 @@
 
 <p><strong>Night:</strong> {{ $night }} UTC — this <strong>resets the 7-night launch window</strong>.</p>
 
+<p><strong>Triggered by:</strong> {{ $trigger }}.</p>
+
 @if ($kind === 'selection')
 <p>
 The nightly selection-replay check found that shuffling a committed event
