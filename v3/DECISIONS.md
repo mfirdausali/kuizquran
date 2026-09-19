@@ -20807,3 +20807,182 @@ reporting dead letters — all unchanged.
 
 `GlossDraftReviewRow.actorKind` is now CLOSED for the admin console —
 remove it from future "no reader" sweeps.
+
+## v3-D232 (2026-09-19) — the P1 pager mailer never named its own dead-lettered learners
+
+`App\Mail\DeterminismP1Alert` — the highest-severity artifact in this
+codebase, dispatched on every confirmed P1 (a fold or selection divergence
+that resets the 7-consecutive-green-nights launch gate) — never read
+`report['deadLetters']`, even though it already reads four other keys off
+the exact same `NightlyCheckRun.report` array
+(`divergentCount`/`skewCount`/`atomsCompared`/`usersChecked`).
+
+`deadLetters` is edge case #130's dead-letter quarantine: a real
+`{userId, error}` pair, one per sampled learner
+`DeterminismCheckCommand::sampleFromDatabase()` had to skip for tonight's
+run because their event/atom data would not `json_encode` (invalid UTF-8,
+or a NaN/Infinity float Postgres can genuinely store in `strength`).
+`runFold()` merges these into the fold report and, if the run was
+otherwise clean, upgrades the exit to WARN — "a quarantined learner is
+never silently green, but is not by itself proof of a genuine cache
+divergence either." v3-D230 (the immediately preceding decision) gave this
+same array its first real admin-facing reader, `NightlyWindowController`'s
+`lastQuarantine` (pseudonymized, surfaced on `NightlyWindowPanel`), and its
+own "NOT addressed" list named the mailer as the direct sibling gap it
+deliberately left: "the direct mailer-side sibling of this fix, the same
+shape v3-D229 closed for `trigger`."
+
+Concretely: a P1 that ALSO quarantined a learner paged with no mention of
+that fact at all. An on-call engineer reading "Divergent atoms: 1, Atoms
+compared: 12, Learners sampled: 3" had no way to know from the page itself
+that two OTHER sampled learners were silently excluded from that
+comparison — dead-lettered before the fold-runner ever saw them, not
+merely absent because nothing was wrong with them.
+
+### Fixed
+
+Fold branch only. Dead letters are a fold-only concept —
+`sampleFromDatabase()` is per-learner DB sampling; `runSelection()` always
+replays a committed fixture log (`selection.ts#replaySelection`'s own
+long-standing deferral: no server-side corpus store exists yet to replay a
+real production log), so it has no per-learner sample to quarantine and its
+own `SelectionCheckReport` shape carries no `deadLetters` key at all — the
+same "two shapes share no field names" discipline v3-D215 already
+established for this exact mailer.
+
+- `DeterminismP1Alert::content()`'s fold branch gains
+  `'deadLetterCount' => count($report['deadLetters'] ?? [])`.
+- `resources/views/emails/determinism-p1-alert.blade.php` gains one
+  conditional paragraph inside the fold branch, rendered only when
+  `$deadLetterCount > 0`: names the count and points the reader at the
+  admin System Health page for which learners (pseudonymized there, per
+  v3-D204/v3-D230's own precedent).
+
+NO RAW LEARNER ID. This mailer's own header states its discipline plainly:
+"No PII, no free text from the report... the body carries counts and the
+check/night identity only." The fix carries only a COUNT, never a
+`userId` — the admin console is where the per-learner detail already
+lives, behind the audited reveal path.
+
+### RED confirmed, twice
+
+Three new cases in `DeterminismP1PagerTest.php` (9 pre-existing cases
+untouched), run against the tree before either production file was
+touched:
+
+- The load-bearing positive case seeds two dead letters with distinct,
+  deliberately non-colliding six-digit `userId` values (`410001`/`520002`
+  — chosen so neither collides with any other digit string the email
+  already renders, such as the night date or the other counts) and
+  distinct error strings. It failed exactly
+  `Failed asserting that ... contains "dead-lettered"`.
+- Both negative cases — `deadLetters` key entirely absent, and the key
+  present but explicitly `[]` (the two distinct shapes `runFold()`'s own
+  `array_merge($deadLetters, $report['deadLetters'] ?? [])` can genuinely
+  produce on a clean night) — passed vacuously and correctly, since the
+  unmodified mailer never printed "dead-lettered" for any input.
+
+Re-confirmed a second time by copying the two fixed production files
+aside, `git checkout --`-reverting them to the pre-fix `HEAD` state (the
+three new tests kept, untouched), and rerunning: identical failure, 11 of
+12 passed. The two saved copies were then restored byte-identically (not
+re-typed) and the suite rerun green: 12/12 (was 9, +3), 49 assertions (was
+45, +4 — the load-bearing case alone carries five: the real count, the
+"dead-lettered" and "System Health" strings present, both raw `userId`
+values and the raw error string absent).
+
+### Gates
+
+`php artisan test` (v3/api, full suite): 401 passing (was 398, +3; 2
+incomplete + 6 skipped unchanged, PAY-1). `./vendor/bin/pint --test` on
+both changed PHP files: passed.
+
+`TZ=UTC make test`: 2794 passing (was 2791, +3 — exactly this run's three
+new tests; v3/api 401, was 398; no other suite moved: 255 v2 vitest, 47
+v2/api, 120 corpus-compiler, 432 engine, 63 fold-runner, 1476 apps/web —
+apps/web genuinely unchanged, this diff touches no apps/web file at all),
+exit 0. `check-test-floor.mjs`: OK, 2794 >= floor 1899 (+895 margin,
+unmoved, same discipline as every prior entry).
+
+`TZ=UTC make build`: exit 0, 30 routes (unchanged — a Laravel-mailer-and-
+view-only fix, no apps/web file touched). `npm run gates`: all green
+(locked-css OK, 1 documented hunk, 294 v1 lines byte-identical; fonts
+degraded-but-non-blocking, pre-existing, 2/6 UI fonts present; boundaries
+318 files, unchanged count — no apps/web file in this diff at all;
+corpus-morphology 362 words / corpus-glyphs 206 codepoints, both unchanged
+— a backend-mailer-only fix touches no corpus data). `npx tsc --noEmit`,
+run separately across all four v3 node packages (apps/web,
+packages/engine, packages/corpus-compiler, worker/fold-runner): clean in
+all four.
+
+No `v1/**`/`v2/**` edit — a stray `v2/tsconfig.tsbuildinfo` build-cache
+diff produced by running the suite was reverted before committing, same
+discipline as every prior entry (`git status --porcelain -- v1 v2` empty
+immediately before committing).
+
+No Arabic codepoint — the full diff of all three changed files swept
+programmatically, in Python, over the Arabic, Arabic Supplement, Arabic
+Extended-A and both Presentation Forms Unicode blocks, plus a
+`fromCharCode`/`fromCodePoint` and `\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/
+`\uFExx` escape sweep — zero matches. Every new/changed string is a PHP
+identifier, a wire-adjacent field name, a fixed English docblock/prose
+sentence, or a synthetic six-digit test-fixture `userId` chosen
+specifically to avoid colliding with any other rendered integer in the
+same email — never corpus text.
+
+No oracle/golden-log/fixture/snapshot regenerated.
+
+### Session start
+
+Fresh container, no `node_modules`/`vendor`/compiled corpus anywhere;
+`make setup` ran clean from scratch, no retries needed. `HEAD`, local
+`main` and `origin/main` did NOT already agree: `git fetch origin main`
+advanced `origin/main` from `fcfe765` (v3-D229, this worktree's starting
+`HEAD`) to `6d274b7` (v3-D231) — two commits (v3-D230, v3-D231) genuinely
+pushed by two other sessions since this worktree was created — fast-
+forwarded via `git merge --ff-only` before any exploration, the same
+recurring "stale local main" trap this file has recorded roughly fifty
+times since v3-D77, caught before any implementation work.
+
+### Found by
+
+Re-reading v3-D230's own "NOT addressed" list directly — it already named
+this gap by file, field and reason ("the direct mailer-side sibling of
+this fix, the same shape v3-D229 closed for `trigger`") — rather than
+dispatching a fresh sweep agent. Independently re-verified directly
+against `DeterminismCheckCommand.php`'s `runFold()`/`sampleFromDatabase()`,
+`DeterminismP1Alert.php`, its blade view, and
+`NightlyWindowController.php`'s own `lastQuarantine` reader before writing
+any test — confirming the fold-only scope (selection has no dead letters
+to carry) and the no-raw-userId discipline this mailer's own header
+already states.
+
+### NOT addressed
+
+Every item on v3-D231's own "NOT addressed" list, unchanged —
+`DrillPicker.tsx`'s own unused `now` prop; `session_start`'s own "app-open
+-> first drill" latency metric (v0.8); `CorpusVerse.line`; the
+streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151); multi-surah enrollment; the operational mailer /
+7-night launch window (this fix makes a quarantine visible on BOTH the P1
+page and the admin console; it still needs a live SMTP account and a host
+running the schedule); PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123);
+`MacroFacts.litany.rhymeLabel` (v3-D188); `StripeField.editable`
+(v3-D204); `corpusHash`'s own zero fold-side consumer (v3-D206); FR5's own
+queue-level behavior for "restart"/"replan"/"makeup" (v3-D217);
+`selection_determinism_check` still replaying a committed fixture rather
+than production logs; `GlossDraftsPanel.tsx`'s own hardcoded caption vs.
+its live `shipping`/`excludedFromHashV1` booleans (v3-D173);
+`lib/test/build.ts`/`TestIsland.tsx`'s own `test_*` events still carrying
+no site coordinate (v3-D229's own deliberate deferral);
+`AccountExportPanel.tsx`'s stale caption (v3-D230's own newly-named item,
+still unchanged — a small, real, separate display-only fix, a good
+candidate for a near-future run) — all unchanged.
+
+`DeterminismP1Alert` is now CLOSED for `report['deadLetters']` — remove it
+from future "NOT addressed" lists.

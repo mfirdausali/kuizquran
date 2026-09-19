@@ -36,6 +36,18 @@ use Illuminate\Queue\SerializesModels;
  * the on-call engineer this page is FOR had no way to tell, from the page
  * itself, whether tonight's P1 is the real unattended cron happening to
  * production right now or a manual/CI run they may already know about.
+ *
+ * `report['deadLetters']` (v3-D232 — the direct mailer-side sibling v3-D230
+ * named and left): edge case #130's dead-letter quarantine — a real
+ * `{userId, error}` pair per learner `DeterminismCheckCommand::runFold()`
+ * had to skip because their event/atom data would not `json_encode` — is
+ * merged into the FOLD report only (`sampleFromDatabase()` is a fold-only
+ * concept; the selection check replays a committed fixture, never a
+ * per-learner DB sample, so it has no dead letters of its own to carry).
+ * v3-D230 gave the admin console's `NightlyWindowPanel` a real reader for
+ * this same array (`lastQuarantine`, each `userId` pseudonymized); this
+ * page carries only the COUNT, per this mailer's own no-PII discipline
+ * above, and points the reader at that console for the per-learner detail.
  */
 class DeterminismP1Alert extends Mailable
 {
@@ -94,6 +106,7 @@ class DeterminismP1Alert extends Mailable
                 'skewCount' => (int) ($report['skewCount'] ?? 0),
                 'atomsCompared' => (int) ($report['atomsCompared'] ?? 0),
                 'usersChecked' => (int) ($report['usersChecked'] ?? 0),
+                'deadLetterCount' => count($report['deadLetters'] ?? []),
             ],
         );
     }

@@ -37,6 +37,15 @@ is truth") is broken for at least one learner until this is investigated.
     <li>Atoms compared: {{ $atomsCompared }}</li>
     <li>Learners sampled: {{ $usersChecked }}</li>
 </ul>
+
+@if ($deadLetterCount > 0)
+<p>
+Also tonight: <strong>{{ $deadLetterCount }}</strong> sampled learner(s) were
+dead-lettered (their event/atom data could not be encoded) and skipped by
+this check entirely — never compared, never counted above. Open the admin
+System Health page for which learners, pseudonymized.
+</p>
+@endif
 @endif
 
 <p>

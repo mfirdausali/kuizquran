@@ -359,4 +359,120 @@ class DeterminismP1PagerTest extends TestCase
         $this->assertStringNotContainsString('Seeds compared', $html);
         $this->assertStringNotContainsString('Traces compared', $html);
     }
+
+    /**
+     * v3-D230's own "NOT addressed" list named this exactly: `report
+     * ['deadLetters']` — edge case #130's dead-letter quarantine
+     * (`DeterminismCheckCommand::sampleFromDatabase()`, a REAL per-learner
+     * `{userId, error}` pair for every sampled learner whose event/atom data
+     * cannot be `json_encode`d, merged into the fold report by `runFold()`)
+     * — reached the admin console's `NightlyWindowPanel` (v3-D230's own
+     * `lastQuarantine`) but never this mailer, the direct sibling gap
+     * `trigger` had one night earlier (v3-D229). A P1 that ALSO quarantined
+     * a learner paged with no mention of that fact at all, even though the
+     * count was sitting in the exact `report` array this class already
+     * reads four other keys from.
+     *
+     * No raw `userId` here — this mailer's own header is explicit that an
+     * SMTP-relayed, externally-logged email carries no PII, only counts;
+     * the admin console (already fixed, v3-D230) is where the per-learner
+     * detail lives, behind the audited reveal path. Only a COUNT, plus a
+     * pointer to that console, is safe to page with.
+     */
+    public function test_a_fold_p1_email_names_its_own_dead_lettered_learners(): void
+    {
+        $run = NightlyCheckRun::create([
+            'check' => 'fold_determinism_check',
+            'night' => '2026-09-19',
+            'severity' => 'p1',
+            'exit_code' => 4,
+            'report' => [
+                'check' => 'fold_determinism_check',
+                'divergentCount' => 1,
+                'skewCount' => 0,
+                'atomsCompared' => 12,
+                'usersChecked' => 3,
+                'deadLetters' => [
+                    ['userId' => 410001, 'error' => 'unencodable event/atom data — Malformed UTF-8 characters'],
+                    ['userId' => 520002, 'error' => 'unencodable event/atom data — Inf and NaN cannot be JSON encoded'],
+                ],
+            ],
+            'trigger' => 'schedule',
+            'ran_at' => 0,
+        ]);
+
+        $html = (new DeterminismP1Alert($run))->render();
+
+        // The real count reaches the page — not fabricated, not silently 0.
+        $this->assertStringContainsString('2', $html);
+        $this->assertStringContainsString('dead-lettered', $html);
+        $this->assertStringContainsString('System Health', $html);
+
+        // No raw learner id anywhere — the mailer's own no-PII discipline.
+        $this->assertStringNotContainsString('410001', $html);
+        $this->assertStringNotContainsString('520002', $html);
+        $this->assertStringNotContainsString('Malformed UTF-8', $html);
+    }
+
+    /**
+     * The negative sibling of the case above — proves the new clause is a
+     * real signal, not permanent chrome painted onto every fold email
+     * regardless of whether anyone was actually quarantined.
+     */
+    public function test_a_fold_p1_email_says_nothing_about_dead_letters_when_none_were_quarantined(): void
+    {
+        $run = NightlyCheckRun::create([
+            'check' => 'fold_determinism_check',
+            'night' => '2026-09-19',
+            'severity' => 'p1',
+            'exit_code' => 4,
+            'report' => [
+                'check' => 'fold_determinism_check',
+                'divergentCount' => 1,
+                'skewCount' => 0,
+                'atomsCompared' => 12,
+                'usersChecked' => 3,
+                // No 'deadLetters' key at all — the shape `runFold()` itself
+                // produces whenever `sampleFromDatabase()` quarantined
+                // nobody (its own `array_merge($deadLetters, ...)` can
+                // still leave the key present-but-empty; both must degrade
+                // to silence, so this case and the one below are both
+                // asserted).
+            ],
+            'trigger' => 'schedule',
+            'ran_at' => 0,
+        ]);
+
+        $html = (new DeterminismP1Alert($run))->render();
+
+        $this->assertStringNotContainsString('dead-lettered', $html);
+    }
+
+    /** The same negative case, but with the key genuinely present and
+     *  explicitly empty — the shape `runFold()`'s own `array_merge` most
+     *  often actually produces on a clean night, as opposed to the key
+     *  being entirely absent above. */
+    public function test_a_fold_p1_email_says_nothing_when_the_dead_letter_list_is_present_but_empty(): void
+    {
+        $run = NightlyCheckRun::create([
+            'check' => 'fold_determinism_check',
+            'night' => '2026-09-19',
+            'severity' => 'p1',
+            'exit_code' => 4,
+            'report' => [
+                'check' => 'fold_determinism_check',
+                'divergentCount' => 1,
+                'skewCount' => 0,
+                'atomsCompared' => 12,
+                'usersChecked' => 3,
+                'deadLetters' => [],
+            ],
+            'trigger' => 'schedule',
+            'ran_at' => 0,
+        ]);
+
+        $html = (new DeterminismP1Alert($run))->render();
+
+        $this->assertStringNotContainsString('dead-lettered', $html);
+    }
 }
