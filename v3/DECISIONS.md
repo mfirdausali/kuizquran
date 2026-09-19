@@ -20986,3 +20986,203 @@ candidate for a near-future run) — all unchanged.
 
 `DeterminismP1Alert` is now CLOSED for `report['deadLetters']` — remove it
 from future "NOT addressed" lists.
+
+## v3-D233 (2026-09-19) — a graded event recorded the rung it was graded at, never the class it was graded AS
+
+**The gap.** `DrillEvent.gradeClass` is one of the fields build-plan step 10
+froze into the wire ONCE, COMPLETE (v3-D10). Its own docblock in
+`packages/engine/src/types.ts` states a contract it has never met:
+
+> The GradeClass (`gradeClass.ts`, v3-D11) this event's rung was resolved
+> from, via `gradeClassToWire()` — carried alongside the already-resolved
+> `rung`, never instead of it.
+
+It was never carried. All THIRTEEN event-emit sites in the product hold the
+`GradeClass` literal in their hand, pass it through `gradeClassToWire()` to
+produce `rung`, and then discard the class. Before this fix,
+`grep -rn "gradeClass:" apps/web/{lib,components,app}` minus tests returned
+nothing at all.
+
+**Everything downstream was already built; only the emit was missing** — the
+same shape as `corpusHash` (v3-D206), `locale` (v3-D213), `latency`
+(v3-D222) and `siteKey`/`visitOrdinal` (v3-D227):
+
+- `packages/engine/src/events.ts` declares `MakeEventArgs.gradeClass` (:47)
+  and stamps it (:83).
+- `packages/engine/test/wire-freeze.test.ts` has round-tripped it since step
+  10 and structurally asserts `rebuild.ts` never reads it.
+- Laravel has had an `events.grade_class` column, a `FIELD_MAP` entry
+  (`'gradeClass' => 'grade_class'`), a `NULLABLE_FIELDS` entry, an `Event`
+  `$fillable` entry and a symmetric `toWire()` mapping since the step-14
+  migration. `EventsIngestionTest` even asserts `gradeClass: 's2_partial'`
+  persists as `grade_class`.
+- `EventWireCodec` forwards it to the fold-runner.
+
+Nothing ever sent a value.
+
+**Why this is not cosmetic: the mapping is MANY-TO-ONE.**
+`GRADE_CLASS_TO_RUNG` sends BOTH `gate` and `s3_full` to rung `"S3"`. So a
+stored `rung: "S3"` does not name the class the event was graded as. A
+reader can guess today from the event's own `type` — but that is a CALLER
+CONVENTION (`run.ts` happens to pair `gate` with `gate_result`), not a fact
+the log records, and `gradeClass` is precisely the field built to record it.
+v3-D26 flags the whole mapping "for reconsideration once M4's spec-driven
+question compiler lands"; the day any mapping changes, events written under
+the old one are only interpretable if they carry the class they were graded
+as. An event log is append-only, so a class never written can never be
+backfilled — the same unbackfillable-provenance argument v3-D206 and
+v3-D227 each made.
+
+**The fix.** Three production files, no wire change, no schema change, no
+migration, no backend change (the column, the codec and the round-trip all
+already existed): `lib/session/run.ts` (9 sites), `lib/plan/awayDay.ts` (1),
+`components/test/TestIsland.tsx` (3).
+
+The two completed-pass sites inside `answerAfterTap` now resolve
+`const passClass: GradeClass = adv.full ? "s3_full" : "s2_partial"` ONCE and
+derive both fields from that single binding, so the pair cannot drift. The
+other eleven stamp their own literal beside the `gradeClassToWire()` call
+that consumes it.
+
+**A shared `gradeFields()` pair-helper was the first design and was
+rejected, on a concrete ground.** `lib/session/run.test.ts` mocks
+`@engine/gradeClass.ts` with a `gradeClassToWireSpy` seam, and v3-D83's own
+wiring test proves every emitted rung reflects that override. A helper that
+called `gradeClassToWire` through its module-internal binding would bypass
+that spy and silently vacate the guard. Keeping the thirteen `rung:` keys
+also keeps `check-boundaries.mjs` clause 14 (`no-hardcoded-rung`) covering
+thirteen sites rather than shrinking its surface to zero. Drift is instead
+forbidden MECHANICALLY at runtime, by the log-wide invariant test below,
+rather than by construction at the call site.
+
+**RED confirmed directly, twice.** 5 new cases (3 in
+`lib/session/run.test.ts`, 1 in `lib/plan/awayDay.test.ts`, 1 in
+`test/test-island.test.tsx`) were run against the tree BEFORE any production
+file was touched (`git status --porcelain` on all three confirmed empty at
+the time) and failed exactly as predicted — `expected undefined to be
+"gate"`, `expected [ 's3_full', 's2_partial' ] to include undefined`,
+`expected undefined to be defined`, `expected undefined to be "ungraded"`
+(twice): 4 failed / 98 passed across the first two files, 1 failed / 6
+passed in the third. Then RE-CONFIRMED via `git checkout --` of the three
+production files alone (all 5 new tests kept, restored afterwards from a
+saved copy rather than re-typed): identical failures, 5 failed / 104 passed
+of 109. Restored, reran green: 109/109 (`run.test.ts` 97, was 94; awayDay 5,
+was 4; test-island 7, was 6).
+
+The load-bearing case is the cold gate. It asserts the `gate_result`'s
+`rung` IS `"S3"` and that `gradeClassToWire("s3_full")` equals that same
+rung — demonstrating the ambiguity inside the test itself — and only then
+that `gradeClass` is `"gate"`. It therefore cannot pass on a value the rung
+already determined. A second case proves a real completed pass carries
+`s3_full`/`s2_partial` (never `"ungraded"`, never undefined) and that an
+intermediate tap carries `rc`. The third is the anti-drift invariant: over
+EVERY event a real session wrote, `gradeClassToWire(e.gradeClass) ===
+e.rung`, which forbids the pair diverging at any emit site, present or
+future, without a test going red.
+
+One supporting engine case was added to
+`packages/engine/test/gradeClass.test.ts` and is **honestly not a RED case**:
+it documents the existing mapping's many-to-oneness (`gate` and `s3_full`
+both resolve to `"S3"`, and the distinct-rung count is strictly less than
+the class count). That was already true, and it is the reason the producer
+matters.
+
+**Verification.** `TZ=UTC make test`: 2800 passing (was 2794, +6 — exactly
+this run's six new tests; engine 433, was 432; apps/web 1481, was 1476; no
+other suite moved: 255 v2 vitest, 47 v2/api, 401 v3/api, 120
+corpus-compiler, 63 fold-runner), exit 0. `check-test-floor.mjs`: OK, 2800
+>= floor 1899 (+901 margin, unmoved). `TZ=UTC make build`: exit 0, 30 routes
+(unchanged). `npm run gates`: all green — locked-css OK (1 documented hunk,
+294 v1 lines byte-identical); boundaries 318 files, unchanged count, with
+clause 14 itself passing; fonts degraded-but-non-blocking, pre-existing, 2/6
+UI fonts present; corpus-morphology 362 words / corpus-glyphs 206
+codepoints, both unchanged. `npx tsc --noEmit`, run separately across all
+four v3 node packages: clean in all four. No PHP file changed, so `pint` was
+not applicable. No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff produced by running the suite was reverted before
+committing). No Arabic codepoint: the full diff swept programmatically, in
+Python, over the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks, plus a `\u06xx`/`\u07xx`/`\u08xx`/
+`\uFBxx`/`\uFExx` escape and `fromCharCode`/`fromCodePoint` sweep — zero
+matches across all 215 added lines; every new string is a TypeScript
+identifier, a closed-set `GradeClass` literal, or a fixed English docblock
+sentence. No oracle, golden log, fixture or snapshot regenerated.
+
+**Session start.** Fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; `make setup` ran clean from scratch, no retries needed.
+`HEAD`, local `main` and `origin/main` all already agreed at `a169a16`
+(v3-D232) — no stale-local-main trap this run, confirmed directly via
+`git fetch origin main` AND `git ls-remote origin main` before any
+exploration.
+
+**Four veins swept clean first, recorded as verified negatives so a future
+run does not re-walk them:**
+
+1. Every custom Laravel config key now has a production reader — the vein
+   that produced v3-D149/v3-D150 is exhausted.
+2. Every application migration column has a reader. The only no-reader
+   columns left are Laravel's own framework tables (`cache`, `jobs`,
+   `job_batches`, `sessions`, `personal_access_tokens`), closing the vein
+   that produced v3-D151/D168/D176/D223/D225/D230.
+3. A PHP public-method zero-caller scan over all of `api/app` surfaced only
+   already-deferred items (`TrialAttribution`,
+   `AccountDeletionRequest::isDue`) plus framework hooks
+   (`routeNotificationForMail`).
+4. The client→server→fold field round-trip is complete:
+   `EventsController`'s `NULLABLE_FIELDS` carries every `DrillEvent` field,
+   `toWire()` mirrors it symmetrically, and `EventWireCodec` forwards every
+   field `rebuild.ts` actually reads (verified field-by-field against
+   rebuild's own reads: type/ts/surah/ayah/rung/correct/pretest/stepKind/
+   structured).
+
+A zero-external-caller export scan over every TS package was also run; after
+correcting a filter bug that wrongly excluded `lib/test/` and
+`components/test/` as test directories, every remaining hit was an in-file
+helper, a test-only helper (`attributionStrings`, `findClaimsIn` — both
+genuinely consumed by their own suites), or an already-deferred item.
+
+**NOT addressed**: every item on v3-D232's own list, unchanged —
+`DrillPicker.tsx`'s unused `now` prop; `session_start`'s "app-open → first
+drill" latency metric (v0.8); `CorpusVerse.line`; the streak/away-day
+day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class; multi-surah enrollment; the operational mailer / 7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `StripeField.editable` (v3-D204); `corpusHash`'s zero fold-side
+consumer (v3-D206); FR5's queue-level restart/replan/makeup behavior
+(v3-D217); `selection_determinism_check` still replaying a committed
+fixture; `GlossDraftsPanel.tsx`'s hardcoded caption (v3-D173);
+`lib/test/build.ts`/`TestIsland.tsx`'s `test_*` events still carrying no
+SITE coordinate (v3-D229 — this fix gives those events their grade
+PROVENANCE, a different field, and does not touch that deferral);
+`AccountExportPanel.tsx`'s stale caption (v3-D230).
+
+**NEWLY named and NOT addressed**, so a future run does not re-discover them
+as new:
+
+- `components/macro/MacroPanelIsland.tsx` is the ONE of nine log-reading
+  islands whose `broken` branch discards `state.reason`. Every sibling
+  (`PlanIsland`, `ProgressListIsland`, `AyahStatsIsland`, `GrowthIsland`,
+  `RetentionIsland`, `TestHistoryIsland`, `SurahAyahListIsland`,
+  `MySurahs`) renders `Reason: <code>{state.reason}</code>`, and
+  `ProgressListIsland`'s own comment says why: "'you're in private
+  browsing' and 'another tab is mid-upgrade' are not the same problem."
+  Real, but low-consequence: every page that mounts the macro panel also
+  mounts a sibling island that DOES name the reason.
+- `lib/onboarding/surahs.ts`'s file header still reads "Surah 67 IS NOT IN
+  THIS BUILD... exactly three surahs" — stale since 67 was compiled and
+  added to `OFFERED_SURAHS` — and `WIREFRAME_DEFAULT_SURAH`'s own docblock
+  ("see the header for why it is not offered today") is now false.
+  Documentation-only; `DEFAULT_SURAH = 103` remains a deliberate,
+  separately-reasoned choice.
+- The `atoms`, `corpus` and `sessions` IndexedDB object stores have no
+  writer or reader at all, and `SessionRow`'s docblock names a
+  `/quiz/[sessionId]` route that does not exist. Dead schema — the
+  `CorpusVerse.line` class v3-D194 already excluded, not the target bug
+  class.
+
+`DrillEvent.gradeClass` is now CLOSED — remove it from future "no producer"
+sweeps.

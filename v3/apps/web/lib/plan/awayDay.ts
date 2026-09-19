@@ -33,6 +33,9 @@ export async function setDayAway(
     surah,
     ayah: 0,
     rung: gradeClassToWire("ungraded"),
+    // v3-D233 — the class the rung above was resolved from. An away-day
+    // toggle is evidence-only by construction (invariant #5).
+    gradeClass: "ungraded",
     awayDayIndex: dayIndex,
     away,
   };

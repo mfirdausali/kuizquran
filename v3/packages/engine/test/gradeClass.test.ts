@@ -45,6 +45,20 @@ describe("gradeClassToWire — the ONE place grading-rung is decided (v3-D11)", 
     expect(gradeClassToWire("ungraded")).toBe("S4");
   });
 
+  // v3-D233 — WHY `DrillEvent.gradeClass` has to be stamped on the wire and
+  // cannot be recovered from `rung` later. This mapping is MANY-TO-ONE: a
+  // stored rung "S3" could have come from either class, so an event that
+  // carries only its rung has permanently lost which one graded it. The
+  // event log is append-only, so a class never written can never be
+  // backfilled — which is why the producer (v3-D233) matters rather than
+  // being tidy-up.
+  it("is MANY-TO-ONE — `gate` and `s3_full` both resolve to S3, so a rung alone cannot name its class", () => {
+    expect(gradeClassToWire("gate")).toBe(gradeClassToWire("s3_full"));
+    const all: GradeClass[] = ["pretest", "ungraded", "s2_partial", "s3_full", "rc", "gate"];
+    const rungs = all.map(gradeClassToWire);
+    expect(new Set(rungs).size).toBeLessThan(all.length);
+  });
+
   it("is total over the closed set — every GradeClass value resolves", () => {
     const all: GradeClass[] = ["pretest", "ungraded", "s2_partial", "s3_full", "rc", "gate"];
     for (const gc of all) {

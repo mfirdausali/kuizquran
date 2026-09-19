@@ -29,6 +29,7 @@ import { fileURLToPath } from "node:url";
 
 import type { Corpus } from "@engine/types.ts";
 import { rebuild } from "@engine/rebuild.ts";
+import { gradeClassToWire } from "@engine/gradeClass.ts";
 
 import { DB_NAME, openDb, resetDbForTests, writeLock, getAllEvents } from "@/lib/idb";
 import { resetApiFetchForTests } from "@/lib/sync/apiFetch";
@@ -230,6 +231,29 @@ describe("TestIsland — the mixed self-check, end to end", () => {
     await waitForRunning();
     const events = await getAllEvents();
     expect(events.filter((e) => e.type === "test_start").length).toBe(1);
+  });
+
+  // v3-D233 — a `test_*` event resolves its rung through `gradeClassToWire`
+  // exactly like every other emit site, and must record the class it
+  // resolved FROM. See `lib/session/run.test.ts`'s own v3-D233 block for the
+  // full reasoning; the short version is that `rung` is a MANY-TO-ONE
+  // projection of `GradeClass`, so the rung alone does not name the class.
+  it("appends test_start carrying the GradeClass its rung was resolved from", async () => {
+    installFetch(corpus112);
+    render(<TestIsland surah={112} glossLang="en" />);
+
+    await screen.findByTestId("test-range");
+    fireEvent.click(screen.getByRole("button", { name: /start test/i }));
+
+    await waitForRunning();
+    const events = await getAllEvents();
+    const start = events.find((e) => e.type === "test_start");
+    expect(start).toBeDefined();
+    // The Test plane is a READ-ONLY mirror (invariant #5 — `rebuild.ts` has
+    // no branch for any `test_*` event), and the wire now states that in its
+    // own right rather than leaving it to be inferred from rung "S4".
+    expect(start?.gradeClass).toBe("ungraded");
+    expect(gradeClassToWire("ungraded")).toBe(start?.rung);
   });
 
   it(

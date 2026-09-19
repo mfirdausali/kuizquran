@@ -269,6 +269,9 @@ export function TestIsland({ surah, glossLang }: TestIslandProps) {
         ayah: pool[0]!,
         to: pool[pool.length - 1]!,
         rung: gradeClassToWire("ungraded"),
+        // v3-D233 — the class this rung was resolved from. The Test plane is
+        // a read-only mirror (invariant #5), and the wire now says so.
+        gradeClass: "ungraded",
         structured: false,
         locale: glossLang,
       };
@@ -296,6 +299,9 @@ export function TestIsland({ surah, glossLang }: TestIslandProps) {
         surah,
         ayah: itemAyah(item),
         rung: gradeClassToWire("ungraded"),
+        // v3-D233 — the class this rung was resolved from. The Test plane is
+        // a read-only mirror (invariant #5), and the wire now says so.
+        gradeClass: "ungraded",
         testKind: item.kind,
         choice,
         correct,
@@ -416,6 +422,9 @@ export function TestIsland({ surah, glossLang }: TestIslandProps) {
         ayah: range.from,
         to: range.to,
         rung: gradeClassToWire("ungraded"),
+        // v3-D233 — the class this rung was resolved from. The Test plane is
+        // a read-only mirror (invariant #5), and the wire now says so.
+        gradeClass: "ungraded",
         score: results.length > 0 ? correct / results.length : 0,
         total: results.length,
         structured: false,

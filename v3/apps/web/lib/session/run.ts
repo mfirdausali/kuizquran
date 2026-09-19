@@ -104,7 +104,7 @@ import { paceConfig, candidatesForPace, DEFAULT_PACE_MODE, type PaceMode } from 
 // application code, invisible to check-boundaries.mjs clause 5 (JSX-only) and
 // unasserted by any test until v3-D83 added both. Every rung below is a call,
 // never a literal.
-import { gradeClassToWire } from "@engine/gradeClass.ts";
+import { gradeClassToWire, type GradeClass } from "@engine/gradeClass.ts";
 // v2-BUG-2 / v3-D113 — the ms of the learner's last active day, derived from the
 // append-only log (invariant #2). `activity.ts`'s own header states the intent:
 // deriving it there is so "the session caller has no excuse to hardcode it
@@ -817,6 +817,7 @@ async function startFromQueue(
         surah,
         ayah: queue[0]!.ayah,
         rung: gradeClassToWire("rc"),
+        gradeClass: "rc",
         corpusHash: c.meta.corpusHash,
         locale: glossLang,
       } as DrillEvent,
@@ -1060,6 +1061,7 @@ export async function answerCurrent(
     surah: visited.surah,
     ayah: cur.ayah,
     rung: gradeClassToWire("rc"),
+    gradeClass: "rc",
     position: cur.position,
     choice,
     correct: adv.correct,
@@ -1107,6 +1109,14 @@ async function answerAfterTap(
   if (adv.ayahProduced) {
     const isGateItem = run.queue[run.cursor]?.kind === "gate";
 
+    // v3-D233 — resolve this pass's GradeClass ONCE. Both completed-pass
+    // emit sites below (the rescaffold warm-up and the ordinary completion)
+    // stamp the resolved `rung` AND the class it was resolved from, and
+    // deriving both from this single binding is what stops the pair from
+    // ever disagreeing. A fully-blanked pass encodes as s3_full, a partial
+    // one as s2_partial — the ENGINE decided which, via `adv.full`.
+    const passClass: GradeClass = adv.full ? "s3_full" : "s2_partial";
+
     // v3-D109 — v2-D08's rescaffold rung: the pass that JUST completed was
     // the lighter S2 warm-up (`run.rescaffolding`), not the real cold check.
     // It commits as an ordinary graded `ayah_produced` (S2, since it was not
@@ -1122,7 +1132,8 @@ async function answerAfterTap(
         tz: ctx.tz,
         surah: run.surah,
         ayah: cur.ayah,
-        rung: gradeClassToWire(adv.full ? "s3_full" : "s2_partial"),
+        rung: gradeClassToWire(passClass),
+        gradeClass: passClass,
         structured: true,
         corpusHash: run.corpusHash,
         locale: run.glossLang,
@@ -1156,6 +1167,10 @@ async function answerAfterTap(
           surah: run.surah,
           ayah: cur.ayah,
           rung: gradeClassToWire("gate"),
+          // v3-D233 — `gate` and `s3_full` BOTH resolve to rung "S3", so the
+          // rung above cannot name the class this event was graded as. This
+          // field is the only thing that can.
+          gradeClass: "gate",
           // v3-D107: NEVER `adv.correct` — that is only whether the FINAL,
           // completing tap was right, and a wrong tap never advances
           // (advanceReconstruct), so it is unconditionally `true` here. A
@@ -1180,7 +1195,8 @@ async function answerAfterTap(
           // A fully-blanked pass encodes as S3; a partial one as S2. The ENGINE
           // decided which via `full` — this only resolves that GradeClass to its
           // wire Rung via gradeClassToWire(), never a re-derived ternary (B2).
-          rung: gradeClassToWire(adv.full ? "s3_full" : "s2_partial"),
+          rung: gradeClassToWire(passClass),
+          gradeClass: passClass,
           // Step 20: false ONLY for a victory-lap drill, so the completed pass
           // is evidence the fold records but never grades (nothing damaged).
           // `true` for every ordinary review — the graded path is unchanged.
@@ -1358,6 +1374,7 @@ export async function acknowledgeReentry(
     surah: run.surah,
     ayah: q.ayah,
     rung: gradeClassToWire("ungraded"),
+    gradeClass: "ungraded",
     structured: false,
     resume: decision.action,
     resumeMassed: decision.massed,
@@ -1637,6 +1654,7 @@ export async function acceptGateDemote(
     // DEFECTS.md#B2: never a literal Rung. `gate_demote` is always S3 by
     // gate.ts's own contract ("gates only ever apply to S3-encoded ayat").
     rung: gradeClassToWire("gate"),
+    gradeClass: "gate",
     corpusHash: run.corpusHash,
     locale: run.glossLang,
   } as DrillEvent;
@@ -1758,6 +1776,7 @@ export async function acceptAdoption(
     surah: run.surah,
     ayah: q.ayah,
     rung: gradeClassToWire("s3_full"),
+    gradeClass: "s3_full",
     correct: true,
     structured: true,
     corpusHash: run.corpusHash,
@@ -1772,6 +1791,7 @@ export async function acceptAdoption(
       surah: run.surah,
       ayah: q.ayah,
       rung: gradeClassToWire("s3_full"),
+      gradeClass: "s3_full",
       corpusHash: run.corpusHash,
       locale: run.glossLang,
     } as DrillEvent;

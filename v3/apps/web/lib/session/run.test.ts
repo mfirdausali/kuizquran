@@ -113,6 +113,9 @@ import {
 import { RetryableAppendError } from "@/lib/idb/append";
 import { DEMOTE_OFFER_AFTER_FAILS, RESCAFFOLD_AFTER_FAILS } from "@engine/gate.ts";
 import { TWO_MIN, ONE_HOUR } from "@engine/resume.ts";
+// v3-D233 — asserting that each emitted event's own `gradeClass` resolves,
+// through the ONE mapping, to the `rung` sitting beside it on the same event.
+import { gradeClassToWire, type GradeClass } from "@engine/gradeClass.ts";
 
 // A fixed clock. The frontend is ALLOWED Date.now(); the engine is not. Tests
 // pass time in explicitly so a run is reproducible and TZ-independent — the
@@ -3224,6 +3227,127 @@ describe("v3-D227 — a served question's own Site coordinate and visit ordinal 
     for (const key of trace.keys()) {
       // `${siteKey}:${deviceId}:${visitOrdinal}` — the runner's own trace key.
       expect(key).toMatch(new RegExp(`^${SURAH}:ayah:\\d+:.+:\\d+$`));
+    }
+  });
+});
+
+// v3-D233 — `DrillEvent.gradeClass` HAD NO PRODUCER.
+//
+// ---------------------------------------------------------------------------
+// WHAT WAS MISSING, AND WHY IT IS NOT COSMETIC
+// ---------------------------------------------------------------------------
+// `gradeClass` is one of the fields build-plan step 10 froze into the wire
+// ONCE, COMPLETE (v3-D10). Its own docblock (`types.ts`) says it is "the
+// GradeClass this event's rung was resolved from, via `gradeClassToWire()` —
+// carried ALONGSIDE the already-resolved `rung`, never instead of it." That
+// sentence was false for every event this product has ever written: every
+// emit site in `run.ts`, `lib/plan/awayDay.ts` and `TestIsland.tsx` holds the
+// GradeClass literal in its hand, passes it through `gradeClassToWire()` to
+// produce `rung`, and then THROWS THE CLASS AWAY.
+//
+// Everything downstream of the emit was already built for it and only the
+// emit was missing — the same shape as `corpusHash` (v3-D206), `locale`
+// (v3-D213), `latency` (v3-D222) and `siteKey`/`visitOrdinal` (v3-D227):
+// `engine/events.ts#makeEvent` accepts and stamps it; `wire-freeze.test.ts`
+// round-trips it and structurally asserts `rebuild.ts` never reads it;
+// Laravel has had an `events.grade_class` column, a `FIELD_MAP` entry, a
+// `NULLABLE_FIELDS` entry, an `Event` `$fillable` entry and a `toWire()`
+// mapping since the step-14 migration; and `EventWireCodec` forwards it to
+// the fold-runner. Nothing ever sent a value.
+//
+// THE MAPPING IS MANY-TO-ONE, which is what makes the loss real rather than
+// tidy: `gradeClassToWire("gate")` and `gradeClassToWire("s3_full")` BOTH
+// return "S3". So a stored `rung: "S3"` does not name the class it came
+// from. Today a reader can guess from the event's `type` — but that is a
+// CALLER CONVENTION (`run.ts` happens to pair `gate` with `gate_result`),
+// not a fact the log records, and `gradeClass` is precisely the field built
+// to record it. v3-D26 flags the whole mapping "for reconsideration once
+// M4's spec-driven question compiler lands"; the day any mapping changes,
+// events written under the old one are only interpretable if they carry the
+// class they were graded as — and an event log is append-only, so a class
+// never written can never be backfilled.
+describe("v3-D233 — every emitted event records the GradeClass its rung was resolved from", () => {
+  it("a passed cold gate carries gradeClass 'gate' — the rung 'S3' beside it cannot name the class, because s3_full resolves to S3 too", async () => {
+    const c = corpus();
+    const gatedAyah = 1;
+
+    // Same seed as the B11/v3-D101 test above: the wire event a genuine
+    // Carry-band S3 completion leaves behind, committed through the same
+    // public `append()` every real tap uses. Deliberately carries NO
+    // `gradeClass` — it stands in for the pre-fix events already on disk,
+    // which is why the assertions below scope themselves to day 2.
+    await append(
+      {
+        type: "ayah_produced",
+        ts: T0,
+        tz: TZ,
+        surah: SURAH,
+        ayah: gatedAyah,
+        rung: "S3",
+        structured: true,
+      } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+
+    const day2 = T0 + 86_400_000;
+    const started = await startSession({ surah: SURAH, now: day2, tz: TZ }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    expect(started.run.queue[0]?.kind).toBe("gate");
+
+    await playThrough(started.run, c);
+
+    const events = (await getAllEvents()) as DrillEvent[];
+    const gateResult = events.find((e) => e.type === "gate_result");
+    expect(gateResult).toBeDefined();
+
+    // The load-bearing pair. The rung is genuinely ambiguous...
+    expect(gateResult?.rung).toBe("S3");
+    expect(gradeClassToWire("s3_full")).toBe(gateResult?.rung);
+    // ...and only this field disambiguates it.
+    expect(gateResult?.gradeClass).toBe("gate");
+  });
+
+  it("a completed reconstruct pass carries the class its own rung came from, never a hardcoded one", async () => {
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    await playThrough(started.run, c);
+
+    const events = (await getAllEvents()) as DrillEvent[];
+    const produced = events.filter((e) => e.type === "ayah_produced");
+    expect(produced.length).toBeGreaterThan(0);
+    for (const e of produced) {
+      // A fully-blanked pass encodes as s3_full, a partial one as s2_partial.
+      // Asserting membership rather than one literal keeps this honest about
+      // which the engine actually chose, while still proving a REAL class
+      // (not "ungraded", not undefined) reached the wire.
+      expect(["s3_full", "s2_partial"]).toContain(e.gradeClass);
+    }
+
+    // An intermediate, non-completing tap is its own class.
+    const tap = events.find((e) => e.type === "reconstruct_tap");
+    expect(tap).toBeDefined();
+    expect(tap?.gradeClass).toBe("rc");
+  });
+
+  it("every event a real session emits agrees with itself: gradeClassToWire(gradeClass) === rung", async () => {
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    await playThrough(started.run, c);
+
+    const events = (await getAllEvents()) as DrillEvent[];
+    expect(events.length).toBeGreaterThan(0);
+    for (const e of events) {
+      // Not "is defined somewhere" — every single event the loop wrote must
+      // carry a class, and that class must resolve to the rung sitting next
+      // to it. This is what forbids the two from ever drifting apart at any
+      // emit site, present or future, without a test going red.
+      expect(e.gradeClass).toBeDefined();
+      expect(gradeClassToWire(e.gradeClass as GradeClass)).toBe(e.rung);
     }
   });
 });
