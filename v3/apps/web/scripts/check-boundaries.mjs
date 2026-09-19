@@ -314,8 +314,20 @@ const ENTITLEMENT_TOKENS = /\bEntitlement|\bentitlement|\bPaywall|\bentitled\b/;
 // on the backend. This file only types and passes through whatever the
 // server returns; it contains no gating logic and calls no
 // `permitsIssuance`/`permitsReview`.
+//
+// ADDED (v3-D235): `components/settings/AccountExportPanel.tsx` is the
+// direct UI counterpart of `lib/account/api.ts` above — its own caption
+// names the SAME `entitlement`/`entitlementTransitions` history that file
+// already fetches and this panel already downloads verbatim (proven since
+// v3-D157's own "the downloaded file includes billing/entitlement history"
+// test), so the file was already reading this data before this word ever
+// appeared in its source; only the caption's own honesty about what it
+// downloads was the gap this decision closed. Same reasoning as
+// `lib/account/api.ts`: read-only compliance surface, no gating logic, no
+// call to `permitsIssuance`/`permitsReview`.
 const ENTITLEMENT_ALLOWLIST = new Set([
   "components/session/SessionIsland.tsx",
+  "components/settings/AccountExportPanel.tsx",
   "components/settings/PlanPanel.tsx",
   "lib/account/api.ts",
   "lib/entitlement/cache.ts",

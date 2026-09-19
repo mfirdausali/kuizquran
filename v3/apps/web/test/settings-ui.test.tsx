@@ -162,6 +162,24 @@ describe("AccountExportPanel", () => {
 
     clickSpy.mockRestore();
   });
+
+  /** v3-D230 named this exactly and left it: the panel's own one-sentence
+   *  description of itself ("your profile and every drill event") went
+   *  stale the moment v3-D157 widened the real export to also carry
+   *  `entitlement`/`entitlementTransitions`/`billingEvents` (proven by the
+   *  test immediately above) — the FILE is complete, only the caption
+   *  describing it was never updated to match. A learner reading this
+   *  caption before downloading has no way to know their billing/
+   *  entitlement history is included at all. This is a static-render
+   *  assertion — no fetch/click needed, since the caption is not
+   *  state-derived — and it is the one place a future edit to the caption
+   *  that drops the billing/entitlement mention again would be caught. */
+  it("the caption names the billing/entitlement history it exports, not just drill events", () => {
+    render(<AccountExportPanel />);
+    const caption = screen.getByText(/download everything recorded/i);
+    expect(caption.textContent).toMatch(/billing/i);
+    expect(caption.textContent).toMatch(/entitlement/i);
+  });
 });
 
 describe("AccountDeletionPanel — the three-state status read", () => {

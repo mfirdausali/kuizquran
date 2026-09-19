@@ -21287,3 +21287,166 @@ SITE coordinate (v3-D229); `AccountExportPanel.tsx`'s stale caption
 
 `MacroPanelIsland.tsx`'s own `broken` branch is now CLOSED for its missing
 reason — remove it from future sweeps.
+
+## v3-D235 (2026-09-19) — `AccountExportPanel.tsx`'s own caption undersold its export by three tables
+
+**The gap.** Named explicitly by v3-D230's own "NEWLY named and NOT
+addressed" list and repeated unchanged across every "NOT addressed" list
+from v3-D231 through v3-D234: `AccountExportPanel.tsx`'s one-sentence
+description of the PDPA "right to access" download read `"your profile and
+every drill event"` — true the day the panel shipped, and stale the moment
+v3-D157 widened `AccountController::export()` to also carry
+`entitlement`/`entitlementTransitions`/`billingEvents` alongside
+`account`/`events`. The FILE itself was never the gap — a dedicated
+v3-D157 test (`the downloaded file includes billing/entitlement history,
+not just events`) already proves the downloaded bytes carry all three
+tables verbatim, since the panel serializes `result.data` directly with no
+field-by-field re-assembly to silently drop one. Only the panel's own
+sentence describing itself to the learner reading it before they click
+"Download my data" never caught up — the same "docblock/caption claims X,
+reality is Y" shape v3-D90/v3-D110/v3-D124 each closed, here on a
+learner-facing caption rather than an internal comment. A learner deciding
+whether this export covers their billing history had no way to know it did
+without already knowing the fix landed.
+
+**Fixed.** One sentence, `components/settings/AccountExportPanel.tsx`:
+`"your profile and every drill event"` → `"your profile, every drill
+event, and your billing and entitlement history"` — no other line changed,
+no server/wire change (both tables were already shipped and already
+verified by v3-D157's own test above).
+
+**A second, real catch along the way — `check-boundaries.mjs` clause 9
+(edge case #124, the entitlement-read allowlist).** Adding the word
+"entitlement" to this caption failed `make build`'s own boundaries gate:
+`components/settings/AccountExportPanel.tsx:48: reads entitlement outside
+the allowlist`. This is the gate working as designed — clause 9 exists
+precisely so that "only the files below may even MENTION entitlement, and
+everything else fails the build by name" (its own header), and this
+component genuinely now says the word. Investigated directly rather than
+worded around: `lib/account/api.ts` (this panel's own data-fetching
+counterpart) was ALREADY allowlisted for the identical reason, added at
+v3-D157 with its own comment — "reflects a learner's OWN
+`entitlement`/`entitlementTransitions` rows back to them alongside their
+event log... a read-only compliance surface, not an issuance/ingestion
+decision." `AccountExportPanel.tsx` is that same file's direct UI
+counterpart: it already downloaded this exact data (proven by v3-D157's
+own test, run before this fix and unaffected by it) and calls no
+`permitsIssuance`/`permitsReview` anywhere — the caption catching up to
+that fact is not a new enforcement point, it is the same passive reflection
+`lib/account/api.ts` was allowlisted for one layer up. Added
+`components/settings/AccountExportPanel.tsx` to `ENTITLEMENT_ALLOWLIST`
+with a comment naming this reasoning explicitly, mirroring the v3-D157
+entry's own template — a reviewable act, per the clause's own invitation,
+not a workaround. Rewording the caption to dodge the literal word instead
+was considered and rejected: it would make the caption LESS accurate for
+no real safety gain, since the file's own review comment already
+establishes it is not an enforcement point.
+
+**RED confirmed directly.** A new case in `test/settings-ui.test.tsx`'s
+`AccountExportPanel` describe block (17 pre-existing cases in the file
+untouched), run against the unmodified component, failed exactly as
+predicted: `expected 'Download everything recorded under yo…' to match
+/billing/i` — 1 failed, 16 passed. Restored to green after implementing
+the caption change: 17/17. The test renders the panel with no fetch/click
+at all (the caption is not state-derived, so no stub queue is needed) and
+asserts the caption's own text matches both `/billing/i` and
+`/entitlement/i` — it cannot pass on the old sentence, and it cannot pass
+on a caption that mentions one table but not the other.
+
+**Verification.** `TZ=UTC make test`: 2804 passing (was 2803, +1 —
+exactly this run's one new test; apps/web 1485, was 1484; no other suite
+moved: 255 v2 vitest, 47 v2/api, 401 v3/api, 120 corpus-compiler, 433
+engine, 63 fold-runner), exit 0. `check-test-floor.mjs`: OK, 2804 >= floor
+1899 (+905 margin, unmoved, same discipline as every prior entry). `TZ=UTC
+make build`: exit 0, 30 routes (unchanged — one existing component edited,
+no new route or component file) — first attempt failed on the boundaries
+clause above, second attempt (after the allowlist fix) green. `npm run
+gates`: all green (locked-css OK, 1 documented hunk, 294 v1 lines
+byte-identical; boundaries 319 files, up from 318 — exactly the one new
+test file, no new production file; fonts degraded-but-non-blocking,
+pre-existing, 2/6 UI fonts present; corpus-morphology 362 words /
+corpus-glyphs 206 codepoints, both unchanged — a caption-only fix touches
+no corpus data). `npx tsc --noEmit`, run separately across all four v3
+node packages (apps/web, engine, corpus-compiler, fold-runner): clean in
+all four. No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff produced by running the suite was reverted before
+committing, same discipline as every prior entry — `git status
+--porcelain -- v1 v2` empty immediately before committing). No Arabic
+codepoint (the three changed files' full contents AND, separately, only
+the diff's own added lines, both swept programmatically, in Python, over
+the Arabic, Arabic Supplement, Arabic Extended-A and both Presentation
+Forms Unicode blocks, plus a `\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx`
+escape and `fromCharCode`/`fromCodePoint` sweep — the whole-file sweep of
+`check-boundaries.mjs` hit its own PRE-EXISTING Unicode-range literals
+[the sacred-text clause's own range definitions, unrelated to this diff],
+confirmed by re-running the sweep restricted to only this diff's added
+lines, which came back clean; every new string in the caption and the test
+is a fixed English sentence, never corpus text). No oracle/golden-log/
+fixture/snapshot regenerated.
+
+**Session start.** Fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; `make setup` ran clean from scratch, no retries needed.
+`HEAD`, local `main` and `origin/main` all already agreed at `293adb8`
+(v3-D234) — no stale-ref trap this run, confirmed directly via `git fetch
+origin main` before any exploration.
+
+Found by re-reading v3-D230's own "NEWLY named and NOT addressed" list
+directly (it already named this gap by file and by the exact fields
+missing from the caption) rather than dispatching a fresh sweep agent —
+independently re-verified directly against `AccountExportPanel.tsx`'s real
+source, `AccountController::export()`'s real response shape, and the
+existing v3-D157 test before writing any new test. Two other named
+candidates were investigated first and deliberately set aside this run,
+recorded here so they are not re-investigated from scratch: (1)
+`GlossDraftsPanel.tsx`'s hardcoded caption vs. its live
+`shipping`/`excludedFromHashV1` booleans (v3-D173) — re-confirmed both
+fields are genuinely non-divergent as currently wired: `shipping` is a
+literal `false` on every response (`GlossDraftsController::index()`), and
+`excludedFromHashV1` (`! in_array($lang, HASH_READ_LANGS, true)`, real and
+dynamic on the SERVER) can never be observed as anything but `true` from
+this panel, because `GlossDraftsPanel.tsx` hardcodes `const LANG = "ms"`
+and `"ms"` is never in `HASH_READ_LANGS = ['en']` — wiring the caption to
+these fields today would render a permanently-true chip, not a real
+signal, matching v3-D173's own "left alone" reasoning exactly; (2)
+`packages/engine/src/types.ts#CorpusVerse.line` — re-confirmed still the
+exact non-gap v3-D194 already excluded: the COMPILER's own `Verse` type
+(`packages/corpus-compiler/src/types.ts`) has no `line` field at all, only
+`page`, with its own docblock stating why ("a per-verse line number is not
+well-defined once an ayah crosses a line boundary... the line drill reads
+word-level `Word.line` instead") — the engine's `CorpusVerse.line` is
+declared but genuinely never populated by anything, a dead field rather
+than a computed-and-unconsumed one, a different shape from this bug class
+entirely.
+
+**NOT addressed**: every item on v3-D234's own list, unchanged —
+`DrillPicker.tsx`'s own unused `now` prop (investigated directly this
+run: `buildDrillPreview`/every function under `lib/drill/` takes no `now`
+at all — the atom-readiness decision this picker previews is purely
+`atom.encoded`-based, not time-based, so there is no natural consumer for
+it today; wiring one in would mean inventing a new time-sensitive decision
+in `lib/drill/preview.ts`, real but separate, larger-scoped work, not a
+one-line wiring fix); the unused `atoms`/`corpus`/`sessions` IndexedDB
+object stores (v3-D232, investigated directly this run: genuinely zero
+writer AND zero reader anywhere, not merely an unconsumed computed value —
+`SessionRow`'s own docblock names a `/quiz/[sessionId]` route that does
+not exist, so there is no existing mechanism to wire a caller to; building
+one from scratch is real, separate, larger-scoped work); `session_start`'s
+own "app-open → first drill" latency metric (v0.8); the streak/away-day
+day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class; multi-surah enrollment; the operational mailer / 7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `StripeField.editable` (v3-D204); `corpusHash`'s zero fold-side
+consumer (v3-D206); FR5's queue-level restart/replan/makeup behavior
+(v3-D217); `selection_determinism_check` still replaying a committed
+fixture; `GlossDraftsPanel.tsx`'s hardcoded caption vs. `shipping`/
+`excludedFromHashV1` (v3-D173, re-confirmed above, still non-divergent as
+wired); `lib/test/build.ts`/`TestIsland.tsx`'s `test_*` events still
+carrying no SITE coordinate (v3-D229); `lib/onboarding/surahs.ts`'s stale
+header comment about surah 67 (v3-D232) — all unchanged.
+
+`AccountExportPanel.tsx`'s own caption is now CLOSED for its missing
+billing/entitlement mention — remove it from future sweeps.

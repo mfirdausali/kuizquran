@@ -45,8 +45,9 @@ export function AccountExportPanel() {
   return (
     <div className="stack stack--tight">
       <p className="caption">
-        Download everything recorded under your account — your profile and
-        every drill event — as one JSON file.
+        Download everything recorded under your account — your profile,
+        every drill event, and your billing and entitlement history — as
+        one JSON file.
       </p>
       <button
         type="button"
