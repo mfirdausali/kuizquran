@@ -43,6 +43,7 @@ import { rebuild } from "@engine/rebuild.ts";
 import type { DrillEvent } from "@engine/types.ts";
 import { getAllEvents } from "@/lib/idb/read.ts";
 import { useLogState } from "@/lib/idb/useLogState.ts";
+import type { LogState } from "@/lib/idb/state.ts";
 
 import type { MacroFacts } from "./facts.ts";
 import { buildGraphNodes, type HighlightRef } from "./graphNodes.ts";
@@ -74,6 +75,45 @@ export function MacroPanelIsland({
   const selector = useCallback(() => getAllEvents(), []);
   const state = useLogState(selector, (rows) => rows.length === 0, [surah]);
 
+  return (
+    <MacroPanelView
+      state={state}
+      surah={surah}
+      ayahCount={ayahCount}
+      facts={facts}
+      now={now}
+      highlight={highlight}
+    />
+  );
+}
+
+/**
+ * THE STATE -> VIEW MAPPING, as a pure component.
+ *
+ * Split out of the island — and EXPORTED — for the same reason
+ * `AyahStatsIsland.tsx#AyahStatsView` and
+ * `SurahAyahListIsland.tsx#SurahAyahListView` already are: it is the part
+ * that can be wrong, and a test that only scans this file's source for a
+ * word asserts the word EXISTS, not that the right branch prints it. With
+ * the hook lifted out, a test can hand this component each of the four
+ * LogStates and read what a learner would actually see (v3-D234: this is how
+ * `broken`'s own missing reason was caught).
+ */
+export function MacroPanelView({
+  state,
+  surah,
+  ayahCount,
+  facts,
+  now,
+  highlight = null,
+}: {
+  state: LogState<DrillEvent[]>;
+  surah: number;
+  ayahCount: number;
+  facts: MacroFacts;
+  now?: number;
+  highlight?: HighlightRef;
+}) {
   // ATOMIC renders no panel at all — and that is true before the log resolves,
   // so there is no skeleton flash for a panel that will never appear. The ayah
   // list on the page carries this surah's seams instead (v3-D21 / §A.3).
@@ -86,7 +126,8 @@ export function MacroPanelIsland({
       <Shell>
         <p className="stub-note" role="status">
           Your progress could not be read on this device, so this map is not
-          being drawn. Nothing has been lost — the log is on disk.
+          being drawn. Reason: <code>{state.reason}</code>. Nothing has been
+          lost — the log is on disk.
         </p>
       </Shell>
     );

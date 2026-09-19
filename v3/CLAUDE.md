@@ -53,9 +53,128 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2800 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2803 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 401 v3/api + 120 corpus-compiler
-             # + 433 engine + 63 fold-runner + 1481 apps/web. (v3-D233, 2026-09-19)
+             # + 433 engine + 63 fold-runner + 1484 apps/web. (v3-D234, 2026-09-19)
+             # NOTE (v3-D234, 2026-09-19): `MacroPanelIsland.tsx`'s own `broken`
+             # branch discarded `state.reason` — named explicitly by v3-D232's
+             # own "NEWLY named and NOT addressed" list as the ONE of nine
+             # log-reading islands whose `broken` branch did not render it.
+             # Every sibling (`PlanIsland`, `ProgressListIsland`,
+             # `AyahStatsIsland`, `GrowthIsland`, `RetentionIsland`,
+             # `TestHistoryIsland`, `SurahAyahListIsland`, `MySurahs`) prints
+             # `Reason: <code>{state.reason}</code>` — this panel printed a
+             # single fixed sentence with no reason at all, and
+             # `ProgressListIsland`'s own comment already states why that
+             # matters: "'you're in private browsing' and 'another tab is
+             # mid-upgrade' are not the same problem." Low-consequence but
+             # real — every page that mounts the macro panel also mounts a
+             # sibling island that does name the reason — v3-D232 correctly
+             # scoped it as real but not urgent, not as a non-gap.
+             #
+             # Fixed on the exact `AyahStatsIsland.tsx#AyahStatsView` /
+             # `SurahAyahListIsland.tsx#SurahAyahListView` template: the hook
+             # call stays in `MacroPanelIsland`, and a new EXPORTED pure
+             # `MacroPanelView({state, surah, ayahCount, facts, now,
+             # highlight})` owns the state -> render mapping, so a test can
+             # hand it each `LogState` directly rather than mocking
+             # IndexedDB. The `broken` branch's copy gains one clause,
+             # `Reason: <code>{state.reason}</code>.`, between the existing
+             # two sentences — no other branch changed, no wire/engine
+             # change, `role="status"` on this panel kept as-is (this panel
+             # never used the `role="alert"` banner class its siblings do,
+             # and widening that was not this fix's job).
+             #
+             # RED confirmed directly: `git stash` of the one production
+             # file alone (the new `test/macro-panel-island.test.tsx` kept)
+             # failed all 3 new cases on `MacroPanelView` not existing
+             # (`Element type is invalid... expected undefined`); `git stash
+             # pop` restored the fix byte-identically, 3/3 green. Two of the
+             # three cases seed DIFFERENT reasons (`private-mode` vs.
+             # `another-tab-mid-upgrade`) on separate renders and assert
+             # each one's own reason is present and the other's is absent,
+             # so the fix cannot pass on one hardcoded string; the third
+             # confirms `pending` is unaffected (still the skeleton, never a
+             # number). `npx vitest run test/macro-ring.test.tsx
+             # test/ayah-detail.test.tsx test/surah-ayah-list.test.tsx`:
+             # 88/88 green, unchanged — no regression on any sibling
+             # consumer of `MacroPanel`/`MacroPanelIsland`.
+             #
+             # `TZ=UTC make test`: 2803 passing (was 2800, +3 — exactly this
+             # run's three new tests; apps/web 1484, was 1481; no other
+             # suite moved: 255 v2 vitest, 47 v2/api, 401 v3/api, 120
+             # corpus-compiler, 433 engine, 63 fold-runner), exit 0.
+             # `check-test-floor.mjs`: OK, 2803 >= floor 1899 (+904 margin,
+             # unmoved, same discipline as every prior entry). `TZ=UTC make
+             # build`: exit 0, 30 routes (unchanged — one existing component
+             # edited, no new route or component file). `npm run gates`:
+             # all green (locked-css OK, 1 documented hunk, 294 v1 lines
+             # byte-identical; boundaries 319 files, up from 318 — exactly
+             # the one new test file, no new production file; fonts
+             # degraded-but-non-blocking, pre-existing, 2/6 UI fonts
+             # present; corpus-morphology 362 words / corpus-glyphs 206
+             # codepoints, both unchanged — a display-only client-component
+             # fix touches no corpus data). `npx tsc --noEmit` (apps/web):
+             # clean. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff produced by
+             # running the suite was reverted before committing, same
+             # discipline as every prior entry — `git status --porcelain --
+             # v1 v2` empty immediately before committing). No Arabic
+             # codepoint (both changed/new files swept programmatically, in
+             # Python, over the Arabic, Arabic Supplement, Arabic
+             # Extended-A and both Presentation Forms Unicode blocks, plus a
+             # `\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape and
+             # `fromCharCode`/`fromCodePoint` sweep — zero matches; every
+             # new string is a TypeScript identifier, a fixed English
+             # sentence, or a synthetic closed-set reason placeholder
+             # ("private-mode", "another-tab-mid-upgrade"), never corpus
+             # text). No oracle/golden-log/fixture/snapshot regenerated.
+             # Session start: fresh container, no
+             # `node_modules`/`vendor`/compiled corpus anywhere; `make
+             # setup` ran clean from scratch, no retries needed. `HEAD` was
+             # found detached at `39fea6a` (v3-D233) on a STALE local `main`
+             # branch ref four commits behind (`fcfe765`, v3-D229) — the
+             # recurring "stale local main" trap this file has recorded
+             # roughly fifty times since v3-D77 — caught before any
+             # implementation work via `git fetch origin main` (which
+             # confirmed the TRUE `origin/main` was already at `39fea6a`,
+             # matching `HEAD` exactly — no unpushed work at risk) followed
+             # by `git checkout main && git merge --ff-only origin/main`, a
+             # clean fast-forward. Found by re-reading v3-D232's own
+             # "NEWLY named and NOT addressed" list directly (it already
+             # named this gap by file and by the exact sibling convention it
+             # violates) rather than dispatching a fresh sweep agent —
+             # independently re-verified directly against
+             # `MacroPanelIsland.tsx`'s real source and `useLogState.ts`'s
+             # `LogState`/`broken` shape before writing any test. NOT
+             # addressed: every item on v3-D233's own "NOT addressed" list,
+             # unchanged — `DrillPicker.tsx`'s own unused `now` prop;
+             # `session_start`'s own "app-open -> first drill" latency
+             # metric (v0.8); `CorpusVerse.line`; the streak/away-day
+             # day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+             # `App\Billing\TrialAttribution` (v3-D148);
+             # `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate`
+             # as a whole class (v3-D88, v3-D151); multi-surah enrollment;
+             # the operational mailer/7-night launch window; PAY-1's Stripe
+             # fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`
+             # (v3-D111/D113/D123); `MacroFacts.litany.rhymeLabel`
+             # (v3-D188); `StripeField.editable` (v3-D204); `corpusHash`'s
+             # own zero fold-side consumer (v3-D206); FR5's own queue-level
+             # behavior for "restart"/"replan"/"makeup" (v3-D217);
+             # `selection_determinism_check` still replaying a committed
+             # fixture; `GlossDraftsPanel.tsx`'s own hardcoded caption
+             # (v3-D173); `lib/test/build.ts`/`TestIsland.tsx`'s own
+             # `test_*` events still carrying no SITE coordinate (v3-D229's
+             # own deliberate deferral); `AccountExportPanel.tsx`'s stale
+             # caption (v3-D230); `lib/onboarding/surahs.ts`'s stale
+             # header comment about surah 67 (v3-D232); the unused
+             # `atoms`/`corpus`/`sessions` IndexedDB object stores
+             # (v3-D232) — all unchanged. `MacroPanelIsland.tsx`'s own
+             # `broken` branch is now CLOSED for its missing reason —
+             # remove it from future sweeps. See DECISIONS.md v3-D234.
              # NOTE (v3-D233, 2026-09-19): `DrillEvent.gradeClass` — one of
              # the fields build-plan step 10 froze into the wire ONCE,
              # COMPLETE (v3-D10) — had NO PRODUCER anywhere in the product.
