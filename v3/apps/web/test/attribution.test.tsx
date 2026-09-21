@@ -36,6 +36,7 @@ import {
   SOURCES,
   attributionStrings,
 } from "@/lib/legal/attribution";
+import { findClaimsIn } from "@/lib/landing/claims";
 
 // Each `render` mounts into the same document; without this the second test
 // sees the first test's tables too (12 tables instead of 2).
@@ -142,6 +143,37 @@ describe("the page is reachable and makes no claim it should not", () => {
         `an attribution string implies endorsement: "${claim}"`,
       ).toBe(false);
     }
+  });
+
+  /**
+   * `attributionStrings()`'s own docblock says it exists "so a test can read
+   * the page's claims as data" — the same shape `lib/landing/copy.ts
+   * #landingStrings` uses to feed the shared v3-D19 claim detector
+   * (`lib/landing/claims.ts#findClaims`/`findClaimsIn`). Until this test, the
+   * only caller of `attributionStrings()` anywhere in the repo was the
+   * endorsement-only check above — a narrower, hand-rolled pattern that
+   * catches false-endorsement wording but nothing else the shared detector
+   * exists to catch (a tajwid-teaching or teacher-replacement overclaim,
+   * or the app crediting itself for a learner's memorization). This page is
+   * the one surface whose entire purpose is a scrupulously accurate
+   * statement about someone else's licensed work, so it deserves the SAME
+   * detector every landing/onboarding string is already held to, not a
+   * smaller one.
+   */
+  it("makes no v3-D19-prohibited claim, per the SHARED detector every landing string is held to", () => {
+    const strings = attributionStrings();
+    // Guard against the vacuous-pass shape this build has shipped before:
+    // an empty `attributionStrings()` would pass the assertion below by
+    // having nothing to check.
+    expect(strings.length).toBeGreaterThan(5);
+
+    const hits = findClaimsIn(strings);
+    expect(
+      hits,
+      hits
+        .map((h) => `  [${h.kind}] "${h.matched}" in: ${strings[h.index]?.slice(0, 140)}`)
+        .join("\n"),
+    ).toEqual([]);
   });
 
   /**

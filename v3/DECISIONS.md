@@ -21627,3 +21627,139 @@ scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
 
 `lib/onboarding/surahs.ts`'s stale header is now CLOSED, and guarded against
 re-drifting rather than merely corrected — remove it from future sweeps.
+
+## v3-D237 (2026-09-21) — `attributionStrings()` was fed to a narrower, unaudited detector instead of the shared v3-D19 one
+
+`apps/web/lib/legal/attribution.ts#attributionStrings()` was built specifically
+— per its own docblock — "so a test can read the page's claims as data
+instead of scraping markup," the same shape `lib/landing/copy.ts
+#landingStrings()` uses to feed the SHARED v3-D19 claim detector
+(`lib/landing/claims.ts#findClaims`/`findClaimsIn` — "the app never claims to
+teach tajwid or replace a teacher... CI asserts no landing or onboarding
+string makes either claim"). `grep -rn "attributionStrings"` across the whole
+repo returns exactly the definition and ONE call site:
+`test/attribution.test.tsx`'s "claims no endorsement" case, which does not
+call the shared detector at all — it runs its own single, unscoped regex
+(`/\bendorsed by\b|\bapproved by\b|\bcertified by\b|\bin partnership with\b/i`)
+over it, catching only false-endorsement wording, never a tajwid-teaching/
+pronunciation overclaim or the app crediting itself for a learner's own
+memorization — the two other categories `findClaims` exists to catch.
+
+Every other landing/onboarding string in this product is held to the ONE
+reviewed, heavily-negation-tested detector, at TWO layers
+(`test/landing-claims.test.ts`'s runtime check over `landingStrings()`, and
+`check-boundaries.mjs` clause 11's source-level scan). `/attribution` — the
+one page whose entire purpose is a scrupulously accurate statement about
+someone else's GPL-licensed work — was held to neither, because
+`attributionStrings()`'s only reader reimplemented a much smaller slice of
+the same idea inline rather than importing the real thing.
+
+Not cosmetic: a future edit to `lib/legal/attribution.ts` adding, say, "helps
+you master tajwid using QAC's own morphology" would ship silently — not
+caught by clause 11 (its `CLAIM_SCOPE` is deliberately landing/onboarding-only,
+v3-D19's own literal text, and `lib/legal/` is correctly not in it — widening
+that scope is a separate, debatable product decision this run did NOT make),
+not by `landing-claims.test.ts` (reads `landingStrings()` only), and not by the
+old endorsement-only regex (wrong pattern family entirely).
+
+**Fixed with ONE new test case, no production code change, no new file, no
+scope widening:** `test/attribution.test.tsx` imports `findClaimsIn` from
+`lib/landing/claims.ts` (the identical import `landing-claims.test.ts` already
+uses) and asserts `findClaimsIn(attributionStrings())` is empty, guarded by
+`expect(strings.length).toBeGreaterThan(5)` against the vacuous-pass shape
+this build has shipped before (an emptied `attributionStrings()` would pass
+trivially).
+
+**RED confirmed by mutation**, not by a live defect — there was none; the
+current attribution copy is clean, so this is a coverage fix, the same
+"test-only, no live behavior change" shape as
+`lib/pricing-config-agreement.test.ts` (v3-D158),
+`lib/entitlement/cache-config-agreement.test.ts` (v3-D150) and
+`lib/macro/facts-agreement.test.ts` (v3-D137). A single sentence, "This app
+teaches tajwid while you memorize.", was appended to `CORRECTIONS` (the one
+string every existing test in the file already reads, so the mutation could
+not accidentally dodge an unrelated code path); the new test failed exactly as
+predicted — `expected [ {…} ] to deeply equal []`, naming the caught sentence
+and the matched fragment "teaches tajwid" — while the other 9 pre-existing
+cases in the file stayed green, unaffected. Reverted byte-identically
+(`git diff --stat lib/legal/attribution.ts` empty before re-running), reran:
+**10/10** green (was 9, +1).
+
+**Verification.** `TZ=UTC make test`: **2807 passing** (was 2806, +1 — exactly
+this run's one new test; apps/web **1488**, was 1487; no other suite moved:
+255 v2 vitest, 47 v2/api, 401 v3/api, 120 corpus-compiler, 433 engine, 63
+fold-runner), exit 0. `check-test-floor.mjs`: OK, 2807 >= floor 1899 (+908
+margin, unmoved, same discipline as every prior entry). `TZ=UTC make build`:
+exit 0, **30 routes** (unchanged — one existing test file edited, no new
+route, component or production file). `npm run gates`: all green (locked-css
+OK, 1 documented hunk, 294 v1 lines byte-identical; boundaries 319 files — the
+`make build` prebuild chain itself reported 318 on the FIRST build in this
+fresh container (no `next-env.d.ts` yet), then 319 on a standalone `npm run
+gates` afterward — the same pre-existing gitignored Next.js bootstrap-artifact
+fluctuation v3-D206/D227/D231/D236 each already recorded, confirmed via `git
+status --porcelain --ignored` showing that path as `!!`; no new production
+file either way, since this diff is one test file; fonts
+degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology 362 words / corpus-glyphs 206 codepoints across 4 artifacts,
+both unchanged — a test-only fix touches no corpus data). `npx tsc --noEmit`
+(apps/web): clean, exit 0. No PHP file changed, so `pint` was not applicable.
+No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the suite was reverted before committing, same discipline
+as every prior entry — `git status --porcelain -- v1 v2` empty immediately
+before committing). No Arabic codepoint (swept programmatically, in Python,
+over the diff's own added lines, across the Arabic, Arabic Supplement, Arabic
+Extended-A and both Presentation Forms Unicode blocks, plus a
+`fromCharCode`/`fromCodePoint` mention check: CLEAN — every new string is a
+TypeScript identifier, a fixed English docblock/assertion sentence, or the
+mutation's own synthetic English probe sentence, never corpus text; the probe
+sentence itself was never committed). No oracle/golden-log/fixture/snapshot
+regenerated — this diff touches one test file only.
+
+**Session start.** Fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; `make setup` ran clean from scratch, no retries needed. The
+stale-local-`main` trap recurred again, the same shape this file has recorded
+roughly fifty times since v3-D77: `HEAD` was found detached at `9561e2b`
+(v3-D236), which `git fetch origin main` then confirmed IS the true
+`origin/main` tip (`git ls-remote origin main` agreed) — while the local
+`main` branch ref sat three commits behind at `fcfe765` (v3-D229). No work was
+at risk and nothing was unpushed; caught before any exploration via `git fetch
+origin main`, then `git checkout main && git merge --ff-only origin/main`, a
+clean fast-forward.
+
+Found by a dedicated fresh-sweep agent (Explore) handed the full exclusion
+list carried through v3-D236 and directed at Console Commands, Middleware,
+`worker/fold-runner/src`, `packages/corpus-compiler/src`, `apps/web/lib
+/library`/`onboarding`/`idb`, Eloquent model relations, and a
+zero-external-caller export scan across `apps/web/lib/**` — most candidates
+were already-closed or already-excluded (recorded in the agent's own report so
+a future sweep does not re-walk them); this was the one genuine,
+previously-unreported instance, independently re-verified this run directly
+against `attribution.ts`'s real source, `attribution.test.tsx`'s real test
+list, `lib/landing/claims.ts`'s real exports and `check-boundaries.mjs` clause
+11's own `CLAIM_SCOPE` before writing any test.
+
+**NOT addressed**: every item on v3-D236's own "NOT addressed" list, unchanged
+— `DrillPicker.tsx`'s own unused `now` prop; the unused `atoms`/`corpus`/
+`sessions` IndexedDB object stores (v3-D232); `session_start`'s own "app-open →
+first drill" latency metric (v0.8); the streak/away-day day-space mismatch
+(v3-D209); `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`;
+`App\Billing\TrialAttribution` (v3-D148); `lib/pricing.ts#regionFromCountry()`
+(v3-D163); `PaywallGate` as a whole class; multi-surah enrollment; the
+operational mailer / 7-night launch window; PAY-1's Stripe fixtures; surah
+67's scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy drift
+(v3-D127); `packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `StripeField.editable` (v3-D204); `corpusHash`'s zero fold-side
+consumer (v3-D206); FR5's queue-level restart/replan/makeup behavior
+(v3-D217); `selection_determinism_check` still replaying a committed fixture;
+`GlossDraftsPanel.tsx`'s hardcoded caption vs. `shipping`/`excludedFromHashV1`
+(v3-D173, still non-divergent as wired); `lib/test/build.ts`/`TestIsland.tsx`'s
+`test_*` events still carrying no SITE coordinate (v3-D229) — all unchanged.
+Also newly recorded as a verified negative (not a gap): widening
+`check-boundaries.mjs` clause 11's `CLAIM_SCOPE` to include `lib/legal/` was
+considered and deliberately NOT done — v3-D19's own text scopes the rule to
+"landing or onboarding string," and `lib/legal/attribution.ts` is neither; the
+build-time half of this gap is a real, separate, smaller widening a human
+should decide, not silently fold into a "fix the missing reader" run.
+
+`attributionStrings()` is now held to the shared v3-D19 detector — remove it
+from future "second/narrower detector" sweeps.
