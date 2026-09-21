@@ -426,6 +426,51 @@ describe("screen 5 — the surahs actually offered", () => {
   it("the default is one of the offered surahs", () => {
     expect(OFFERED_SURAHS.some((s) => s.surah === DEFAULT_SURAH)).toBe(true);
   });
+
+  // -------------------------------------------------------------------------
+  // WHAT THE FILE SAYS ABOUT ITSELF (v3-D236)
+  // -------------------------------------------------------------------------
+  // The three cases above pin what `surahs.ts` DOES. Nothing pinned what it
+  // SAYS, and it drifted: the header was written when the manifest carried
+  // 12/103/112 only, and still declared "Surah 67 IS NOT IN THIS BUILD.
+  // Verified against ... exactly three surahs" long after BUILD-PLAN Q3 was
+  // answered (v3-D59, 2026-08-11), 67 was compiled, and 67 was added to
+  // `OFFERED_SURAHS` sixty lines below that claim — by the very drift the
+  // adjacent biconditional test was written to force a human to decide.
+  //
+  // These two guard the AGREEMENT, not a wording: each claim is forbidden only
+  // for a surah this same module actually offers, so the prose stays correct
+  // by construction for one that is genuinely absent.
+  const SURAHS_SRC = resolve(HERE, "../lib/onboarding/surahs.ts");
+
+  it("never describes a surah it offers as one this build does not have", () => {
+    const src = readFileSync(SURAHS_SRC, "utf8");
+    for (const s of OFFERED_SURAHS) {
+      expect(
+        src,
+        `surah ${s.surah} is in OFFERED_SURAHS, so this file must not also say it is absent`,
+      ).not.toMatch(
+        new RegExp(String.raw`surah\s+${s.surah}\b[\s\S]{0,160}?not in this build`, "i"),
+      );
+    }
+  });
+
+  it("`WIREFRAME_DEFAULT_SURAH`'s own docblock says it is unoffered IFF it is", () => {
+    // Same biconditional shape as the manifest test above, applied to the
+    // prose: a docblock that sends a reader to "the header for why it is not
+    // offered today" is exactly as wrong when the surah IS offered as an
+    // unexplained one would be when it is not.
+    const src = readFileSync(SURAHS_SRC, "utf8");
+    const decl = src.indexOf("export const WIREFRAME_DEFAULT_SURAH");
+    expect(decl).toBeGreaterThan(-1);
+    const docblockStart = src.lastIndexOf("/**", decl);
+    expect(docblockStart).toBeGreaterThan(-1);
+    const docblock = src.slice(docblockStart, decl);
+
+    const claimsUnoffered = /not\s+offered/i.test(docblock);
+    const offered = OFFERED_SURAHS.some((s) => s.surah === WIREFRAME_DEFAULT_SURAH);
+    expect(claimsUnoffered).toBe(!offered);
+  });
 });
 
 // ---------------------------------------------------------------------------

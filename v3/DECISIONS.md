@@ -21450,3 +21450,180 @@ header comment about surah 67 (v3-D232) — all unchanged.
 
 `AccountExportPanel.tsx`'s own caption is now CLOSED for its missing
 billing/entitlement mention — remove it from future sweeps.
+
+---
+
+## v3-D236 (2026-09-21) — `lib/onboarding/surahs.ts` told a reader, in its own header, that a surah it offers is not in this build
+
+**The gap.** Named explicitly by v3-D232's own "NEWLY named and NOT
+addressed" list ("`lib/onboarding/surahs.ts`'s file header still says 'Surah
+67 IS NOT IN THIS BUILD... exactly three surahs', stale since 67 was compiled
+and added to `OFFERED_SURAHS`, and `WIREFRAME_DEFAULT_SURAH`'s own docblock
+['see the header for why it is not offered today'] is now false") and repeated
+unchanged on every "NOT addressed" list from v3-D233 through v3-D235. The one
+module that decides what a learner may enrol in opened with two flat,
+confident, false statements:
+
+1. **line 9-12** — `"Surah 67 IS NOT IN THIS BUILD. Verified against
+   packages/corpus-compiler/output/manifest.json, which carries exactly three
+   surahs: 12 ..., 103 ..., 112 ..."`. The manifest carries **four**
+   (12/67/103/112, confirmed this run by `make build`'s own corpus-glyphs gate:
+   "4 corpus artifact(s) (surahs 12, 67, 103, 112)"), and surah 67 sits in
+   `OFFERED_SURAHS` **sixty lines below that claim**, in the same file.
+2. **line 32-33** — `WIREFRAME_DEFAULT_SURAH`'s docblock: `"see the header for
+   why it is not offered today"`. It *is* offered, and has been since v3-D59
+   (2026-08-11, BUILD-PLAN Q3 ratified by Firdaus; 67 vendored and compiled the
+   same day). The docblock actively sent a reader to a paragraph that would
+   mislead them.
+
+Documentation-only — no learner-facing behavior was ever wrong, `OFFERED_SURAHS`
+and `DEFAULT_SURAH` are both correct and were not touched — but it is the same
+"docblock claims X, reality is Y" shape v3-D90/v3-D110/v3-D124/v3-D235 each
+closed, here on the *header* of the module rather than a caption or a comment
+one layer in. Sharper than most of that class for one reason: the adjacent
+test (`offers the wireframe's default IFF it is compiled`) was **written to
+fail the day 67 compiled**, precisely so a human would decide rather than drift
+— and it did fail, and a human did decide, and that run updated the TEST's own
+comment ("only the title and this comment moved, because the WORLD changed, not
+the rule") while leaving the SOURCE file's header asserting the opposite. The
+mechanism designed to stop exactly this drift worked, and the prose drifted
+anyway, because nothing pinned the prose.
+
+**Fixed, in the file itself.** `lib/onboarding/surahs.ts`, two hunks, no
+behavior change — `OFFERED_SURAHS`, `DEFAULT_SURAH`, `ONBOARDING_HREF`,
+`surahLabel()` and `WIREFRAME_DEFAULT_SURAH`'s own *value* are all
+byte-identical:
+
+- The header's stale snapshot is replaced by the real history (written when
+  Al-Mulk had no corpus; BUILD-PLAN Q3 answered with Al-Mulk, v3-D59; 67
+  compiled and joined the list the same day *with no component change*, which
+  is the whole point of the list living here rather than in JSX) and then by
+  the **rule** rather than a membership count: *a surah is offered IFF it is
+  compiled*, asserted in both directions by `test/onboarding.test.tsx` against
+  the real `output/manifest.json`. It now says, in as many words, **DO NOT
+  restate the current membership in this comment** — a restated snapshot is
+  precisely what went stale, and the un-stale-able version of this paragraph
+  is the one that states the rule and points at the list. This is the
+  substantive choice of the run: the fix is not "correct the number to four",
+  which would go stale again the next time the launch set moves, it is
+  "stop making a claim that can go stale."
+- `WIREFRAME_DEFAULT_SURAH`'s docblock now says why the constant exists (the
+  biconditional test asserts against it, and it has been on both sides of that
+  biconditional), that it *is* in `OFFERED_SURAHS` today, and that it is still
+  not `DEFAULT_SURAH` — a separate choice, whose own reasoning at
+  `DEFAULT_SURAH`'s declaration (Al-Asr at 3 ayat reaches the first cold gate
+  fastest, and the gate passing is what proves the mechanism) is **unchanged
+  and still correct**, exactly as v3-D232 already noted when it named this gap.
+
+**RED confirmed directly, twice.** Two new cases in
+`test/onboarding.test.tsx`'s existing `screen 5 — the surahs actually offered`
+describe block (its 3 pre-existing cases, and the 28 others in the file,
+untouched), run against the **completely unmodified** source before either hunk
+was written (`git status --porcelain` showed only the test file at the time):
+
+- `never describes a surah it offers as one this build does not have` —
+  failed exactly `surah 67 is in OFFERED_SURAHS, so this file must not also
+  say it is absent: expected '// WHAT SCREEN 5 IS ALLOWED TO OFFER.…' not to
+  match /surah\s+67\b[\s\S]{0,160}?not in this build/i`.
+- `` `WIREFRAME_DEFAULT_SURAH`'s own docblock says it is unoffered IFF it is ``
+  — failed exactly `expected true to be false`.
+
+2 failed / 31 passed. Then **re-confirmed** via `git checkout --` of the
+production file alone (both new tests kept, the fix restored afterward from a
+saved copy, not re-typed): identical two failures, 2 failed / 31 passed again.
+Restored byte-identically, reran: **33/33** (was 31, +2).
+
+Both guards pin the **agreement**, never a wording, and both are scoped to
+`OFFERED_SURAHS` itself — so the header stays correct by construction for a
+surah that is genuinely absent, and neither case can be satisfied by deleting
+prose. The second is a true biconditional, the same shape as the neighbouring
+manifest test it sits beside: a docblock that claims the wireframe's default is
+unoffered is exactly as wrong when it IS offered as an unexplained one would be
+when it is not, so the assertion is `claimsUnoffered === !offered` rather than a
+one-directional `not.toMatch`, and it cannot pass vacuously in either
+direction. The first would have failed on the day 67 was added to the list,
+which is the day this drift began.
+
+**Verification.** `TZ=UTC make test`: **2806 passing** (was 2804, +2 — exactly
+this run's two new tests; apps/web **1487**, was 1485; no other suite moved:
+255 v2 vitest, 47 v2/api, 401 v3/api, 120 corpus-compiler, 433 engine, 63
+fold-runner), exit 0. `check-test-floor.mjs`: OK, 2806 >= floor 1899 (+907
+margin, unmoved, same discipline as every prior entry). `TZ=UTC make build`:
+exit 0, **30 routes** (unchanged — two existing files edited, no new route,
+component or production file). `npm run gates`: all green (locked-css OK, 1
+documented hunk, 294 v1 lines byte-identical; boundaries **319** files, matching
+v3-D235's own count exactly — this run adds no file at all, and the 318 the
+`prebuild` chain reported inside `make build` is the same pre-existing
+gitignored `next-env.d.ts` Next.js bootstrap-artifact fluctuation v3-D206,
+v3-D227 and v3-D231 each already recorded, confirmed directly here two ways:
+`git status --porcelain --ignored` shows that path as `!!`, and a SECOND
+`TZ=UTC make build` on this same tree — run after the first build had created
+the artifact — reported 319 from inside `prebuild` itself; fonts
+degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology 362 words / corpus-glyphs 206 codepoints across 4 artifacts,
+both unchanged — a comment-only fix touches no corpus data). `npx tsc
+--noEmit`, run separately across all four v3 node packages (apps/web, engine,
+corpus-compiler, fold-runner): clean in all four. No PHP file changed this run,
+so `pint` was not applicable. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite was
+reverted before committing, same discipline as every prior entry — `git status
+--porcelain -- v1 v2` empty immediately before committing). No Arabic codepoint
+(swept programmatically, in Python, twice — over both changed files' full
+contents AND, separately, over only the diff's own added lines — across the
+Arabic, Arabic Supplement, Arabic Extended-A and both Presentation Forms
+Unicode blocks, plus a `\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape and
+`fromCharCode`/`fromCodePoint` sweep: CLEAN on all three passes. Every new
+string is a fixed English sentence, a TypeScript identifier or a surah-number
+integer, never corpus text — and unlike most files in this tree, the *test*
+file here needed no coordinate fixtures at all, since both new cases read
+source text). No oracle/golden-log/fixture/snapshot regenerated — nothing under
+`fixtures/`, `docs/qa-samples/` or any `*.json` artifact is in this diff at
+all.
+
+**Session start.** Fresh container, no `node_modules`/`vendor`/compiled corpus
+anywhere; `make setup` ran clean from scratch (exit 0 — several Composer dist
+downloads for `v3/api` hit transient proxy timeouts and recovered automatically
+via the documented git-mirror source fallback, no retry flag needed). **The
+stale-local-`main` trap recurred**, the same shape this file has recorded
+roughly fifty times since v3-D77: `HEAD` was found **detached at `ba7be06`**,
+which `git fetch origin main` then confirmed IS the true `origin/main` tip
+(`git ls-remote origin main` agreed) — while the local `main` *branch ref* sat
+six commits behind at `fcfe765` (v3-D229). No work was at risk and nothing was
+unpushed; caught before any exploration via `git fetch origin main`, then
+`git checkout main && git merge --ff-only origin/main`, a clean fast-forward.
+
+Found by re-reading v3-D232's own "NEWLY named and NOT addressed" list
+directly — it already named this gap by file, by the exact false sentence, and
+by the second false docblock — rather than dispatching a fresh sweep agent, and
+independently re-verified against the real source of `surahs.ts`, the real
+`OFFERED_SURAHS` membership, the neighbouring test's own comment, and the
+compiled manifest's real surah set before writing either test. A repo-wide
+grep for the same shape was also run and is recorded here as a verified
+negative so a future run does not re-walk it: `grep -rn "three surahs|IS NOT IN
+THIS BUILD|not in this build|not offered today"` across every `.ts`/`.tsx`/
+`.php`/`.mjs` in `v3/` returned exactly three hits — the two stale claims this
+entry fixes, plus `lib/library/rows.ts:105`'s `STATUS_UNAVAILABLE = "not in
+this build yet"`, which is a **live, dynamically-selected status string for a
+surah that genuinely is not compiled**, not a stale comment, and is correctly
+left alone. This class of stale-prose gap has no other instance in the v3 tree
+today.
+
+**NOT addressed**: every item on v3-D235's own list, unchanged —
+`DrillPicker.tsx`'s own unused `now` prop; the unused `atoms`/`corpus`/
+`sessions` IndexedDB object stores (v3-D232); `session_start`'s own "app-open →
+first drill" latency metric (v0.8); the streak/away-day day-space mismatch
+(v3-D209); `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`;
+`App\Billing\TrialAttribution` (v3-D148); `lib/pricing.ts#regionFromCountry()`
+(v3-D163); `PaywallGate` as a whole class; multi-surah enrollment; the
+operational mailer / 7-night launch window; PAY-1's Stripe fixtures; surah 67's
+scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel` (v3-D188);
+`StripeField.editable` (v3-D204); `corpusHash`'s zero fold-side consumer
+(v3-D206); FR5's queue-level restart/replan/makeup behavior (v3-D217);
+`selection_determinism_check` still replaying a committed fixture;
+`GlossDraftsPanel.tsx`'s hardcoded caption vs. `shipping`/`excludedFromHashV1`
+(v3-D173, still non-divergent as wired); `lib/test/build.ts`/`TestIsland.tsx`'s
+`test_*` events still carrying no SITE coordinate (v3-D229) — all unchanged.
+
+`lib/onboarding/surahs.ts`'s stale header is now CLOSED, and guarded against
+re-drifting rather than merely corrected — remove it from future sweeps.

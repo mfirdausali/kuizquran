@@ -6,17 +6,24 @@
 // WIREFRAME §17 screen 5 names Al-Mulk (surah 67, 30 ayat, ~5 weeks) as the
 // pre-selected default and calls this "the learner's one real choice."
 //
-// Surah 67 IS NOT IN THIS BUILD. Verified against
-// `packages/corpus-compiler/output/manifest.json`, which carries exactly three
-// surahs: 12 (111 ayat, authored distractors, mental model), 103 (3 ayat) and
-// 112 (4 ayat). Offering Al-Mulk would enroll a learner in a surah the app
-// cannot serve a single ayah of — they would finish onboarding, land on the
-// dashboard, and find nothing to do. That is worse than a shorter list.
+// The list lives here because the list MOVES. When this file was written,
+// Al-Mulk had no corpus, and offering it would have enrolled a learner in a
+// surah the app could not serve a single ayah of — they would finish
+// onboarding, land on the dashboard, and find nothing to do, which is worse
+// than a shorter list. Then BUILD-PLAN Q3 was answered with Al-Mulk (ratified
+// by Firdaus 2026-08-11, v3-D59), 67 was vendored and compiled the same day,
+// and it joined `OFFERED_SURAHS` below — with NO change to any component,
+// which is exactly the point of the list living here rather than in JSX.
 //
-// So the list is what is actually compiled, and the wireframe's default is
-// recorded here as an intent that the data does not yet support. The day 67
-// compiles, it appears in this list and becomes the default WITHOUT a change to
-// any component — which is the point of putting it here rather than in JSX.
+// So the rule this file holds is a BICONDITIONAL, never a snapshot: a surah is
+// offered IFF it is compiled. `test/onboarding.test.tsx` asserts both
+// directions against the real `output/manifest.json` — a stranded learner and
+// a finished-but-hidden surah both fail loudly. DO NOT restate the current
+// membership in this comment: a restated snapshot is what went stale here for
+// five weeks after 67 landed (v3-D236). Read the list below, or the manifest.
+//
+// `DEFAULT_SURAH` — which of the offered surahs is PRE-SELECTED — is a
+// separate question from membership, answered at its own declaration.
 //
 // ---------------------------------------------------------------------------
 // WHY THE LIST IS STATIC DATA AND NOT A MANIFEST FETCH
@@ -29,8 +36,11 @@
 // are corpus META and not Quranic text — and the test asserts they match the
 // compiled manifest, so a drift fails rather than misleads.
 
-/** The surah §17 names as the default. Recorded so the intent is not lost when
- *  the data catches up — see the header for why it is not offered today. */
+/** The surah §17 names as the default. Kept as a named constant because the
+ *  offered-IFF-compiled test asserts against it, and it has been on both sides
+ *  of that biconditional: absent when this file was written, offered since
+ *  v3-D59. It is in `OFFERED_SURAHS` today. It is still not `DEFAULT_SURAH` —
+ *  a separate choice, reasoned at that constant's own declaration. */
 export const WIREFRAME_DEFAULT_SURAH = 67;
 
 /**
