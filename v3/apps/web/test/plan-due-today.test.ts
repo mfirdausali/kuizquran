@@ -17,6 +17,21 @@
 // This test pins the BEHAVIOR the inline copy got wrong for a synthetic,
 // currently-unreachable atom shape — proving the fix is a real delegation,
 // not a coincidentally-matching rewrite.
+//
+// ALSO GUARDS a second, sharper gap in the same function (v3-D238):
+// `dueToday`'s own comment read "Only the first, because the Steady pace
+// unlocks one new ayah a day" — true only for Steady. `pace.ts` defines
+// three real ceilings (`STEADY.newAyahCeiling = 1`, `SPRINT.newAyahCeiling =
+// 3`, `MAINTAIN.newAyahCeiling = 0`) and the real session assembler
+// (`lib/session/run.ts`, wired at v3-D138) grants a Sprint learner up to 3
+// new ayat and a Maintain learner none — but `dueToday` hardcoded exactly
+// one `learn` candidate regardless of which mode was passed in, so `/plan`'s
+// forecast silently undercounted a Sprint learner's real capacity and
+// fabricated a "Learn N" item (plus a phantom future cold-gate projection,
+// `forecast.ts`'s own `concreteItems`) for a Maintain learner who can never
+// structurally unlock one. Fixed by delegating to the same
+// `pace.ts#candidatesForPace()` the session assembler already uses, rather
+// than a second, pace-blind cap.
 
 import { describe, expect, it } from "vitest";
 
@@ -70,5 +85,43 @@ describe("PlanIsland#dueToday agrees with gate.ts#gateDue()", () => {
     ]);
     const result = dueToday(stubCorpus(1), atoms, NOW);
     expect(result.gates).toEqual([{ surah: SURAH, ayah: 1 }]);
+  });
+});
+
+describe("PlanIsland#dueToday's learn list respects the learner's real pace ceiling", () => {
+  // No atoms at all — every one of these ayat is a genuine, real learn
+  // candidate, exactly `learnCandidatesFor()`'s own shape in run.ts.
+  const NO_ATOMS = new Map<string, AtomState>();
+
+  it("defaults to Steady's ceiling of 1 when no pace is given — the pre-existing behavior", () => {
+    const result = dueToday(stubCorpus(5), NO_ATOMS, NOW);
+    expect(result.learn).toEqual([{ surah: SURAH, ayah: 1 }]);
+  });
+
+  it("Sprint's ceiling of 3 lists up to three ayat, in mushaf order — never just one", () => {
+    const result = dueToday(stubCorpus(5), NO_ATOMS, NOW, "sprint");
+    expect(result.learn).toEqual([
+      { surah: SURAH, ayah: 1 },
+      { surah: SURAH, ayah: 2 },
+      { surah: SURAH, ayah: 3 },
+    ]);
+  });
+
+  it("Sprint never lists more than the corpus actually has left to learn", () => {
+    const result = dueToday(stubCorpus(2), NO_ATOMS, NOW, "sprint");
+    expect(result.learn).toEqual([
+      { surah: SURAH, ayah: 1 },
+      { surah: SURAH, ayah: 2 },
+    ]);
+  });
+
+  it("Maintain's ceiling of 0 lists no learn candidate at all — reviews only, never a fabricated unlock", () => {
+    const result = dueToday(stubCorpus(5), NO_ATOMS, NOW, "maintain");
+    expect(result.learn).toEqual([]);
+  });
+
+  it("Steady named explicitly still lists exactly one, matching the default", () => {
+    const result = dueToday(stubCorpus(5), NO_ATOMS, NOW, "steady");
+    expect(result.learn).toEqual([{ surah: SURAH, ayah: 1 }]);
   });
 });

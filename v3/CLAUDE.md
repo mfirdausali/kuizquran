@@ -53,9 +53,117 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2807 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2812 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 401 v3/api + 120 corpus-compiler
-             # + 433 engine + 63 fold-runner + 1488 apps/web. (v3-D237, 2026-09-21)
+             # + 433 engine + 63 fold-runner + 1493 apps/web. (v3-D238, 2026-09-21)
+             # NOTE (v3-D238, 2026-09-21): `components/plan/PlanIsland.tsx
+             # #dueToday()`'s own comment read "Only the first, because the
+             # Steady pace unlocks one new ayah a day" — true only for Steady.
+             # `pace.ts` defines three real ceilings (Steady=1, Sprint=3,
+             # Maintain=0) and the real session assembler already threads the
+             # learner's actual pace through `candidatesForPace()` — but
+             # `dueToday()` hardcoded exactly one `learn` candidate regardless
+             # of mode, so `/plan`'s forecast silently undercounted a Sprint
+             # learner's real capacity and fabricated a "Learn N" item (plus a
+             # phantom future cold-gate projection, `forecast.ts
+             # #concreteItems`) for a Maintain learner who can never
+             # structurally unlock one — the "every ETA lies" class WIREFRAME
+             # §14/E-06 exist to prevent, and the same "tested resolver
+             # exists, the caller re-derives a narrower copy" shape as
+             # `gateDue()` (v3-D227) and `gateStateOf()` (v3-D211/D212) on
+             # this exact component. Fixed: `dueToday()` gains a
+             # `pace: PaceMode = DEFAULT_PACE_MODE` parameter, collects every
+             # unencoded ayah (mirroring `run.ts#learnCandidatesFor()`) and
+             # hands them to `candidatesForPace()` instead of hand-capping at
+             # the first one; `PlanIsland` gains a `paceMode` state resolved
+             # in the same `readChoices()` effect v3-D221 already built
+             # (`minutesPerDay` alone can't carry this — Maintain and Steady
+             # share an 8 min/day budget but differ completely in what they
+             # may unlock).
+             #
+             # RED confirmed directly: 5 new cases in
+             # `test/plan-due-today.test.ts` (2 pre-existing `gateDue`
+             # delegation cases untouched), run against the unmodified
+             # function — 3 of 5 failed exactly as predicted (Sprint listing
+             # only 1 instead of 3; Maintain listing 1 instead of 0; a
+             # corpus-length-clamped Sprint case), while the 2 Steady-mode
+             # cases passed vacuously, correctly, since Steady's ceiling of 1
+             # was already the pre-existing behavior. Reran: 7/7 green (was
+             # 2, +5). `npx vitest run test/plan-due-today.test.ts
+             # test/plan-island.test.tsx test/plan-calendar.test.tsx
+             # test/session-island.test.tsx`: 78/78 green — no regression on
+             # any sibling `/plan`/`/session` consumer.
+             #
+             # `TZ=UTC make test`: 2812 passing (was 2807, +5 — exactly this
+             # run's five new tests; apps/web 1493, was 1488; no other suite
+             # moved: 255 v2 vitest, 47 v2/api, 401 v3/api, 120
+             # corpus-compiler, 433 engine, 63 fold-runner), exit 0.
+             # `check-test-floor.mjs`: OK, 2812 >= floor 1899 (+913 margin,
+             # unmoved, same discipline as every prior entry). `TZ=UTC make
+             # build`: exit 0, 30 routes (unchanged — one existing component
+             # edited, no new route, component or production file). `npm run
+             # gates`: all green (locked-css OK, 1 documented hunk, 294 v1
+             # lines byte-identical; boundaries 319 files, unchanged count —
+             # no new production file; fonts degraded-but-non-blocking,
+             # pre-existing, 2/6 UI fonts present; corpus-morphology 362
+             # words / corpus-glyphs 206 codepoints across 4 artifacts, both
+             # unchanged — a plan-screen-only pace-wiring fix touches no
+             # corpus data). `npx tsc --noEmit`, run separately across all
+             # four v3 node packages: clean in all four. No PHP file changed,
+             # so `pint` was not applicable. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff produced by running
+             # the suite was reverted twice before committing, same
+             # discipline as every prior entry — `git status --porcelain --
+             # v1 v2` empty immediately before committing). No Arabic
+             # codepoint (swept programmatically, in Python, over the diff's
+             # own added lines, across the Arabic, Arabic Supplement, Arabic
+             # Extended-A and both Presentation Forms Unicode blocks, plus a
+             # `fromCharCode`/`fromCodePoint` mention check: CLEAN — every
+             # new string is a TypeScript identifier or a fixed English
+             # docblock/assertion sentence, never corpus text). No
+             # oracle/golden-log/fixture/snapshot regenerated — this diff
+             # touches one production file and one test file. Session start:
+             # fresh container, no `node_modules`/`vendor`/compiled corpus
+             # anywhere; `make setup` ran clean from scratch, no retries
+             # needed. THE STALE-LOCAL-`main` TRAP RECURRED AGAIN: `HEAD` was
+             # found detached at `a882c53` (v3-D237), which `git fetch origin
+             # main` then confirmed IS the true `origin/main` tip, while the
+             # local `main` branch ref sat eight commits behind at `fcfe765`
+             # (v3-D229). No work was at risk and nothing was unpushed;
+             # caught before any exploration via `git fetch origin main`,
+             # then `git checkout main && git merge --ff-only origin/main`, a
+             # clean fast-forward. Found by a dedicated fresh-sweep agent
+             # (Explore) handed the full exclusion list carried through
+             # v3-D237 and directed at recently-landed code, fold-runner,
+             # corpus-compiler, and cross-file consistency between sibling
+             # implementations of the same decision; it also independently
+             # verified and ruled out `CorpusMeta.generatedFrom` (real,
+             # shipped, genuinely undeclared and unread anywhere — left for a
+             # future run, lower-consequence than a Plan-screen dishonesty
+             # bug). NOT addressed: `CorpusMeta.generatedFrom` (above);
+             # `DrillPicker.tsx`'s own unused `now` prop; the unused
+             # `atoms`/`corpus`/`sessions` IndexedDB object stores (v3-D232);
+             # `session_start`'s own "app-open → first drill" latency metric
+             # (v0.8); the streak/away-day day-space mismatch (v3-D209);
+             # `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution` (v3-D148);
+             # `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate`
+             # as a whole class; multi-surah enrollment; the operational
+             # mailer/7-night launch window; PAY-1's Stripe fixtures; surah
+             # 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+             # taxonomy drift (v3-D127); `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel` (v3-D188);
+             # `StripeField.editable` (v3-D204); `corpusHash`'s zero
+             # fold-side consumer (v3-D206); FR5's queue-level
+             # restart/replan/makeup behavior (v3-D217);
+             # `selection_determinism_check` still replaying a committed
+             # fixture; `GlossDraftsPanel.tsx`'s hardcoded caption vs.
+             # `shipping`/`excludedFromHashV1` (v3-D173, still non-divergent
+             # as wired); `lib/test/build.ts`/`TestIsland.tsx`'s `test_*`
+             # events still carrying no SITE coordinate (v3-D229) — all
+             # unchanged. `PlanIsland.tsx#dueToday()`'s own pace-ceiling gap
+             # is now CLOSED — remove it from future sweeps. See
+             # DECISIONS.md v3-D238.
              # NOTE (v3-D237, 2026-09-21): `apps/web/lib/legal/attribution.ts
              # #attributionStrings()` — built specifically, per its own docblock,
              # "so a test can read the page's claims as data instead of scraping

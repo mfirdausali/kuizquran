@@ -21,7 +21,7 @@ import { atomKey } from "@engine/atom.ts";
 import { currentBand } from "@engine/strength.ts";
 import { gateDue } from "@engine/gate.ts";
 import { awayDayOffsets, dayIndexOf } from "@engine/awayDays.ts";
-import { DEFAULT_PACE_MODE, paceConfig } from "@engine/pace.ts";
+import { candidatesForPace, DEFAULT_PACE_MODE, paceConfig, type PaceMode } from "@engine/pace.ts";
 import { currentTz, getEventsForSurah, useLogState, useWriterStatus } from "@/lib/idb";
 import type { LocalEventRow } from "@/lib/idb";
 import { readChoices } from "@/lib/onboarding/choices";
@@ -60,12 +60,19 @@ export function PlanIsland({ corpus, now, tz, minutesPerDay: fallbackMinutesPerD
   // on it, and never re-runs on `refreshNonce` (a pace change persists
   // through onboarding's own screens, not through an away-day toggle).
   const [minutesPerDay, setMinutesPerDay] = useState(fallbackMinutesPerDay);
+  // v3-D238: the raw mode too, not just its minute budget — `dueToday` below
+  // needs `newAyahCeiling` (Sprint=3, Maintain=0), a fact `minutesPerDay`
+  // alone cannot carry (Maintain and Steady share the same 8 min/day but
+  // differ completely in what they may unlock).
+  const [paceMode, setPaceMode] = useState<PaceMode>(DEFAULT_PACE_MODE);
   useEffect(() => {
     let alive = true;
     void (async () => {
       const choices = await readChoices();
       if (!alive) return;
-      setMinutesPerDay(paceConfig(choices?.pace ?? DEFAULT_PACE_MODE).budgetMin);
+      const mode = choices?.pace ?? DEFAULT_PACE_MODE;
+      setMinutesPerDay(paceConfig(mode).budgetMin);
+      setPaceMode(mode);
     })();
     return () => {
       alive = false;
@@ -139,7 +146,7 @@ export function PlanIsland({ corpus, now, tz, minutesPerDay: fallbackMinutesPerD
             tz,
             minutesPerDay,
             enrolled: [enrolmentOf(corpus, atoms, now)],
-            dueToday: dueToday(corpus, atoms, now),
+            dueToday: dueToday(corpus, atoms, now, paceMode),
             // v3-D207: read straight off the same log this island already
             // holds — the day_marked_away toggle `handleToggleAway` writes.
             awayDays: awayDayOffsets(state.data, now),
@@ -184,23 +191,32 @@ function enrolmentOf(corpus: Corpus, atoms: Map<string, AtomState>, now: number)
 /** What is actually due right now — the only day genuinely knowable, which is
  *  precisely why it is the only day that gets named items.
  *
- *  Exported for `test/plan-due-today.test.ts` only, which pins that this
- *  function delegates to `gate.ts#gateDue()` rather than re-deriving its own
- *  copy of the predicate — the "tested resolver exists, the caller
- *  re-derives it inline" shape this build has repeatedly closed elsewhere
- *  (v3-D227). */
-export function dueToday(corpus: Corpus, atoms: Map<string, AtomState>, now: number) {
+ *  Exported for `test/plan-due-today.test.ts` only, which pins two
+ *  delegations: (1) `gate.ts#gateDue()` rather than re-deriving its own copy
+ *  of the predicate, and (2) `pace.ts#candidatesForPace()` for how many new
+ *  ayat the `learn` list may name — Steady's ceiling of 1 is NOT universal
+ *  (Sprint=3, Maintain=0) — rather than a second, pace-blind cap. Both are
+ *  the "tested resolver exists, the caller re-derives it inline" shape this
+ *  build has repeatedly closed elsewhere (v3-D227, v3-D238). `pace` defaults
+ *  to Steady so every pre-existing caller/test is unchanged. */
+export function dueToday(
+  corpus: Corpus,
+  atoms: Map<string, AtomState>,
+  now: number,
+  pace: PaceMode = DEFAULT_PACE_MODE,
+) {
   const surah = corpus.meta.surah;
   const gates: { surah: number; ayah: number }[] = [];
-  const learn: { surah: number; ayah: number }[] = [];
+  const learnCandidates: number[] = [];
   let reviews = 0;
 
   for (let ayah = 1; ayah <= corpus.meta.ayahCount; ayah++) {
     const atom = atoms.get(atomKey(surah, "ayah", ayah));
     if (!atom) {
-      // The next unencoded ayah is the one that gets learned. Only the first,
-      // because the Steady pace unlocks one new ayah a day.
-      if (learn.length === 0) learn.push({ surah, ayah });
+      // Every unencoded ayah is a real candidate — mirroring `run.ts
+      // #learnCandidatesFor`'s own shape — capped below to the mode's actual
+      // ceiling, never to a hardcoded 1.
+      learnCandidates.push(ayah);
       continue;
     }
     if (gateDue(atom, now)) {
@@ -209,5 +225,6 @@ export function dueToday(corpus: Corpus, atoms: Map<string, AtomState>, now: num
       reviews += 1;
     }
   }
+  const learn = candidatesForPace(learnCandidates, pace).map((ayah) => ({ surah, ayah }));
   return { gates, reviews, learn };
 }

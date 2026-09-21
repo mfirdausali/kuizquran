@@ -21763,3 +21763,140 @@ should decide, not silently fold into a "fix the missing reader" run.
 
 `attributionStrings()` is now held to the shared v3-D19 detector — remove it
 from future "second/narrower detector" sweeps.
+
+## v3-D238 (2026-09-21) — `/plan`'s `dueToday()` hardcoded Steady's new-ayah ceiling for every pace mode
+
+`components/plan/PlanIsland.tsx#dueToday()`'s own comment read "Only the
+first, because the Steady pace unlocks one new ayah a day" — true only for
+Steady. `packages/engine/src/pace.ts` defines three real, distinct
+`newAyahCeiling` values (Steady=1, Sprint=3, Maintain=0), and the real
+session assembler (`lib/session/run.ts`, wired at v3-D138/D221) already
+threads the learner's actual pace through `pace.ts#candidatesForPace()` so a
+Sprint learner can genuinely start up to 3 new ayat in one sitting and a
+Maintain learner gets none — but `dueToday()` took no pace parameter at all
+and unconditionally pushed exactly one `learn` candidate regardless of which
+mode the SAME component had already read via `readChoices()` one screen
+component up (v3-D221's own fix, which wired `minutesPerDay` correctly but
+left `dueToday()` untouched one function away).
+
+Consequence, not cosmetic: `forecast.ts#concreteItems()` turns every entry of
+`dueToday().learn` into a "Learn N" item on today's row AND projects it
+forward as tomorrow's cold gate (`concreteItems`'s own comment: "the ayat
+learned today become tomorrow's cold gates") — so a Sprint learner's Plan
+screen silently capped at showing 1 new ayah today/1 projected future gate
+when the real session loop would actually grant 3, and — sharper — a
+Maintain learner (`newAyahCeiling: 0`, structurally can never unlock a new
+ayah) still saw a fabricated "Learn N" item and a phantom future cold-gate
+projection: exactly the "every ETA lies" dishonesty class WIREFRAME §14 and
+E-06 exist to prevent, on the one screen whose own header promises "this
+file decides nothing" about the numbers it prints and delegates that
+decision to the fold + the engine.
+
+Same shape as the two direct precedents on this exact function:
+`gateDue()` delegation (v3-D227) and `gateStateOf()`'s two-copies drift
+(v3-D211/D212) — a tested resolver (`candidatesForPace`) already exists, one
+caller re-derived a narrower, pace-blind copy of its own decision instead of
+calling it.
+
+**Fixed**, `PlanIsland.tsx` only, no engine/wire change: `dueToday()` gains a
+`pace: PaceMode = DEFAULT_PACE_MODE` parameter (defaulting to Steady so every
+pre-existing caller — including both existing `plan-due-today.test.ts` cases
+— is unchanged); it now collects EVERY unencoded ayah in mushaf order
+(mirroring `run.ts#learnCandidatesFor()`'s own shape) and hands them to
+`candidatesForPace()` instead of hand-capping at the first one. `PlanIsland`
+itself gains a second piece of state, `paceMode` (alongside the existing
+`minutesPerDay`), resolved in the SAME `readChoices()` effect v3-D221 already
+built — `minutesPerDay` alone cannot carry this fact, since Maintain and
+Steady share an identical 8 min/day budget but differ completely in what they
+may unlock.
+
+**RED confirmed directly**: 5 new cases in a new `describe` block in
+`test/plan-due-today.test.ts` (the file's own 2 pre-existing `gateDue`
+delegation cases untouched), run against the unmodified function — 3 of 5
+failed exactly as predicted (`expected [ 112:1 ] to deeply equal [ 112:1,
+112:2, 112:3 ]` for Sprint; `expected [ 112:1 ] to deeply equal [] `for
+Maintain; a corpus-length-clamped Sprint case), while the two Steady-mode
+cases (the default call site and Steady named explicitly) passed vacuously,
+correctly, since Steady's ceiling of 1 was already the pre-existing
+behavior. Reran after implementing: 7/7 green (was 2, +5).
+`npx vitest run test/plan-due-today.test.ts test/plan-island.test.tsx
+test/plan-calendar.test.tsx test/session-island.test.tsx`: 78/78 green — no
+regression on any sibling `/plan` or `/session` consumer.
+
+**Verification.** `TZ=UTC make test`: **2812 passing** (was 2807, +5 —
+exactly this run's five new tests; apps/web **1493**, was 1488; no other
+suite moved: 255 v2 vitest, 47 v2/api, 401 v3/api, 120 corpus-compiler, 433
+engine, 63 fold-runner), exit 0. `check-test-floor.mjs`: OK, 2812 >= floor
+1899 (+913 margin, unmoved, same discipline as every prior entry). `TZ=UTC
+make build`: exit 0, **30 routes** (unchanged — one existing component
+edited, no new route, component or production file). `npm run gates`: all
+green (locked-css OK, 1 documented hunk, 294 v1 lines byte-identical;
+boundaries 319 files, unchanged count — no new production file, one existing
+component edited plus one existing test file; fonts
+degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology 362 words / corpus-glyphs 206 codepoints across 4
+artifacts, both unchanged — a plan-screen-only pace-wiring fix touches no
+corpus data). `npx tsc --noEmit`, run separately across all four v3 node
+packages: clean in all four. No PHP file changed, so `pint` was not
+applicable. No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff produced by running the suite was reverted twice before
+committing, same discipline as every prior entry — `git status --porcelain --
+v1 v2` empty immediately before committing). No Arabic codepoint (swept
+programmatically, in Python, over the diff's own added lines, across the
+Arabic, Arabic Supplement, Arabic Extended-A and both Presentation Forms
+Unicode blocks, plus a `fromCharCode`/`fromCodePoint` mention check: CLEAN —
+every new string is a TypeScript identifier or a fixed English docblock/
+assertion sentence, never corpus text). No oracle/golden-log/fixture/
+snapshot regenerated — this diff touches one production file and one test
+file.
+
+**Session start.** Fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; `make setup` ran clean from scratch, no retries needed.
+`HEAD`, local `main` and `origin/main` did NOT already agree: `HEAD` was
+found detached at `a882c53` (v3-D237), which `git fetch origin main` then
+confirmed IS the true `origin/main` tip, while the local `main` branch ref
+sat eight commits behind at `fcfe765` (v3-D229) — the recurring
+stale-local-`main` trap this file has recorded roughly fifty times since
+v3-D77. No work was at risk and nothing was unpushed; caught before any
+exploration via `git fetch origin main`, then `git checkout main && git
+merge --ff-only origin/main`, a clean fast-forward.
+
+Found by a dedicated fresh-sweep agent (Explore) handed the full exclusion
+list carried through v3-D237 and directed at recently-landed code (the last
+~30 commits), `worker/fold-runner/src`, `packages/corpus-compiler/src`, and
+cross-file consistency between sibling implementations of the same decision.
+It also independently verified and ruled out `CorpusMeta.generatedFrom`
+(real per-surah build provenance, computed and shipped to the browser via
+`stage-corpus.mjs#slim()`'s wholesale `meta` spread, but genuinely
+undeclared on the engine's own `Corpus["meta"]` type and read by nothing at
+all, not even `corpus-compiler/src/report.ts#buildReport()`) as a second,
+weaker candidate — real, but lower-consequence than a Plan-screen
+dishonesty bug, left for a future run rather than fixed in the same commit
+to keep this one narrowly scoped. Independently re-verified this run
+directly against `pace.ts`, `run.ts#learnCandidatesFor`/`candidatesForPace`
+usage, and `forecast.ts#concreteItems` before writing any test.
+
+**NOT addressed**: `CorpusMeta.generatedFrom` (above, real but deliberately
+left — same "shipped, undeclared, zero reader" shape as `distractorOrigin`/
+`kernelYield`/`droppedCollisions`/`mentalModel`/`corpusHash`, none of which
+named it); every item on v3-D237's own "NOT addressed" list, unchanged —
+`DrillPicker.tsx`'s own unused `now` prop; the unused `atoms`/`corpus`/
+`sessions` IndexedDB object stores (v3-D232); `session_start`'s own
+"app-open → first drill" latency metric (v0.8); the streak/away-day
+day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class; multi-surah enrollment; the operational mailer / 7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `StripeField.editable` (v3-D204); `corpusHash`'s zero fold-side
+consumer (v3-D206); FR5's queue-level restart/replan/makeup behavior
+(v3-D217); `selection_determinism_check` still replaying a committed
+fixture; `GlossDraftsPanel.tsx`'s hardcoded caption vs.
+`shipping`/`excludedFromHashV1` (v3-D173, still non-divergent as wired);
+`lib/test/build.ts`/`TestIsland.tsx`'s `test_*` events still carrying no
+SITE coordinate (v3-D229) — all unchanged.
+
+`PlanIsland.tsx#dueToday()`'s own pace-ceiling gap is now CLOSED — remove it
+from future sweeps.
