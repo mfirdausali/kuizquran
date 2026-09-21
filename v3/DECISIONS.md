@@ -21900,3 +21900,153 @@ SITE coordinate (v3-D229) — all unchanged.
 
 `PlanIsland.tsx#dueToday()`'s own pace-ceiling gap is now CLOSED — remove it
 from future sweeps.
+
+## v3-D239 (2026-09-21) — `CorpusMeta.generatedFrom` was shipped to every browser and read by nothing
+
+`corpus-compiler/src/io.ts#readInputs` assembles `generatedFrom: string[]` —
+the exact raw source files (verses/geometry/ruku/mental-model, plus the QAC
+morphology file and its version tag) that actually fed a compile — as a
+REQUIRED field on the compiler's own `CorpusMeta` (`corpus-compiler/src/
+types.ts`), on every single compile. `buildCorpus.ts` carries it straight
+through, and `stage-corpus.mjs#slim()` passes `meta` through wholesale, so
+every staged `public/corpus/<surah>.json` genuinely ships it — confirmed
+directly against the real staged artifact: `public/corpus/67.json`'s own
+`meta.generatedFrom` names its four real source files, including the QAC
+version tag. But the engine's own `Corpus["meta"]` (`packages/engine/src/
+types.ts`) never declared a place for the field to land, so no
+TypeScript-typed reader anywhere in `apps/web` could reach it even by
+accident — `grep -rln "generatedFrom" apps/web/lib apps/web/components
+apps/web/app` (excluding `public/corpus/*.json` and test-fixture object
+literals that merely construct the field, never read it back) returned
+nothing before this fix. Same "shipped, never declared on the consuming
+type" shape `Corpus.lookalikes` (v3-D181), `CorpusWord.line` (v3-D191) and
+`CorpusMeta.distractorOrigin`/`.kernelYield` (v3-D192) already closed on
+sibling fields of the identical `meta` object — this is the one sibling
+field none of those runs, nor v3-D193/D202 (`droppedCollisions`/
+`mentalModel`, the two other siblings closed since), ever named or fixed.
+
+This exact field was independently found and deliberately left, not merely
+overlooked: v3-D238's own sweep agent verified it directly ("real, shipped,
+genuinely undeclared and unread anywhere") and its closing note recorded it
+by name as lower-consequence than that night's own fix, left for a future
+run. This is that future run.
+
+**Not cosmetic.** `/workbench` is the one screen that already audits a
+compiled corpus's own build provenance for a reviewer — `corpusHash`
+(v3-D206), `hashSpecVersion`, `distractorOrigin`/`kernelYield` (v3-D192),
+`droppedCollisions` (v3-D193) and `mentalModel` (v3-D202) all exist
+specifically so a qari or admin can tell what actually produced the content
+in front of them, alongside the workbench's own provenance-sensitive
+signing ceremony (TOCTOU-proof hash recompute at sign time). `generatedFrom`
+is precisely that same class of fact — WHICH raw files, and which QAC
+version, fed this compile — and it was the one such fact the compiler
+already computed and shipped but that no reviewer could ever see without
+reading `output/<surah>/corpus.json` by hand.
+
+**Fixed**, mirroring `MentalModelPanel.tsx`'s own template exactly (the
+closest sibling: a surah-level, not per-ayah, diagnostic): `Corpus["meta"]`
+gains an optional `generatedFrom?: string[]` (optional for the same reason
+every sibling diagnostic field is — an older corpus subset could in
+principle predate it, though the engine's own frozen fixture does not); a
+new `components/workbench/GeneratedFromPanel.tsx` renders the list (or an
+honest "No provenance recorded for this corpus subset." when absent or
+empty — never fabricated), wired into `WorkbenchIsland.tsx` beside
+`MentalModelPanel`. Read-only, no write path, no learner-facing
+consequence — every string rendered is a file path or a version tag the
+compiler itself recorded, never Arabic.
+
+**RED confirmed directly.** 2 new cases in a dedicated
+`test/workbench-ui.test.tsx` describe block (49 pre-existing cases in the
+file untouched), run against the tree BEFORE either production file was
+touched (`git status --porcelain` at the time showed only the test file
+changed) — both failed exactly as predicted: `screen.findByRole("region",
+{name: /provenance/i})` timed out, since no such region existed anywhere in
+the render. The positive case uses the frozen engine fixture's OWN real,
+pre-existing `generatedFrom` value (`packages/engine/test/fixtures/12.json`
+already carries four genuine v2-era source-file paths — verified directly
+via a throwaway Python read before writing the assertion, not assumed) and
+asserts the panel renders all four verbatim, so it cannot pass on a
+fabricated or hardcoded list; the negative case deletes the field via
+destructuring (`const {generatedFrom: _drop, ...rest} = corpus.meta`) and
+asserts both the honest fallback sentence AND the absence of the fixture's
+own real paths, proving the fallback is a real distinct branch rather than
+the positive case's own list leaking through by coincidence. Implemented,
+reran: 51/51 green in the file (was 49, +2).
+
+**Verification.** `TZ=UTC make test`: **2814 passing** (was 2812, +2 —
+exactly this run's two new tests; apps/web **1495**, was 1493; no other
+suite moved: 255 v2 vitest, 47 v2/api, 401 v3/api, 120 corpus-compiler, 433
+engine, 63 fold-runner), exit 0. `check-test-floor.mjs`: OK, 2814 >= floor
+1899 (+915 margin, unmoved, same discipline as every prior entry). `TZ=UTC
+make build`: exit 0, **30 routes** (unchanged — one new component, no new
+route). `npm run gates`: all green (locked-css OK, 1 documented hunk, 294 v1
+lines byte-identical; boundaries **320 files**, up from 318 — confirmed
+this is ONE genuine new production file (`GeneratedFromPanel.tsx`) plus the
+same pre-existing gitignored `next-env.d.ts` Next.js bootstrap-artifact
+fluctuation v3-D206/D227/D231/D236 each already recorded (confirmed via
+`git status --porcelain --ignored` showing that path as `!!`, and by the
+fact the FIRST `make build` in this fresh container, before `next-env.d.ts`
+existed, reported 318 for the identical unmodified tree); fonts
+degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology 362 words / corpus-glyphs 206 codepoints across 4
+artifacts, both unchanged — a diagnostic-only workbench-panel addition
+carries no new corpus data). `npx tsc --noEmit`, run separately across all
+four v3 node packages (`apps/web`, `packages/engine`, `packages/
+corpus-compiler`, `worker/fold-runner` — widening a shared engine type can
+silently break a sibling package's own typecheck without touching its
+source): clean in all four. No PHP file changed, so `pint` was not
+applicable. No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff produced by running the suite was reverted before
+committing, same discipline as every prior entry — `git status --porcelain
+-- v1 v2` empty immediately before committing). No Arabic codepoint (swept
+programmatically, in Python, over every changed/new file's full contents,
+across the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks, plus a `\uXXXX`-escape and
+`fromCharCode`/`fromCodePoint` mention check: CLEAN — every new string is a
+TypeScript identifier, a docblock sentence, or a file-path/version-tag
+string the compiler itself already recorded, never corpus text). No
+oracle/golden-log/fixture/snapshot regenerated — this diff touches one
+engine type file, one new component file, one existing component file, and
+one existing test file; nothing under `fixtures/`, `docs/qa-samples/`, or
+any compiled corpus artifact is in this diff.
+
+**Session start.** Fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; `make setup` ran clean from scratch, no retries needed.
+`HEAD`, local `main` and `origin/main` did NOT already agree: `HEAD` was
+found detached at `5f98eba` (v3-D238), which `git fetch origin main` then
+confirmed IS the true `origin/main` tip, while the local `main` branch ref
+sat one commit behind at `fcfe765` (v3-D229) — the recurring
+stale-local-`main` trap this file has recorded roughly fifty times since
+v3-D77. No work was at risk and nothing was unpushed; caught before any
+exploration via `git fetch origin main`, then `git checkout main && git
+merge --ff-only origin/main`, a clean fast-forward.
+
+Found by directly re-reading v3-D238's own closing note (it already named
+`CorpusMeta.generatedFrom` by field, by shape, and by its own independent
+verification that the field is real, shipped and unread) rather than
+dispatching a fresh sweep agent — independently re-verified this run
+directly against `corpus-compiler/src/io.ts`, `buildCorpus.ts`, `stage-
+corpus.mjs`, the real staged `public/corpus/67.json`, the engine's
+`types.ts`, and the frozen `12.json` test fixture's own real
+`generatedFrom` value before writing any test.
+
+**NOT addressed**: every item on v3-D238's own "NOT addressed" list,
+unchanged — `DrillPicker.tsx`'s own unused `now` prop; the unused
+`atoms`/`corpus`/`sessions` IndexedDB object stores (v3-D232); `session_start`'s
+own "app-open → first drill" latency metric (v0.8); the streak/away-day
+day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class; multi-surah enrollment; the operational mailer / 7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `StripeField.editable` (v3-D204); `corpusHash`'s zero fold-side
+consumer (v3-D206); FR5's queue-level restart/replan/makeup behavior
+(v3-D217); `selection_determinism_check` still replaying a committed
+fixture; `GlossDraftsPanel.tsx`'s hardcoded caption vs.
+`shipping`/`excludedFromHashV1` (v3-D173, still non-divergent as wired);
+`lib/test/build.ts`/`TestIsland.tsx`'s `test_*` events still carrying no
+SITE coordinate (v3-D229) — all unchanged.
+
+`CorpusMeta.generatedFrom` is now CLOSED — remove it from future sweeps.

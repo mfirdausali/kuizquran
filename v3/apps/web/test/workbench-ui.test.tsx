@@ -1099,6 +1099,84 @@ describe("WorkbenchIsland — a surah's own mental-model summary reaches the rev
   });
 });
 
+describe("WorkbenchIsland — a corpus's own generation provenance reaches the reviewer", () => {
+  // `corpus-compiler/src/io.ts#readInputs` assembles `generatedFrom: string[]`
+  // (the raw file paths — verses/geometry/ruku/mental-model/QAC morphology —
+  // that actually fed this compile) on EVERY compile, and `buildCorpus.ts`
+  // carries it through as a REQUIRED field on the compiler's own
+  // `CorpusMeta`. `stage-corpus.mjs#slim()` passes `meta` through wholesale,
+  // so every staged `public/corpus/<surah>.json` genuinely ships it —
+  // confirmed directly: `public/corpus/67.json`'s own `meta.generatedFrom`
+  // names its four real source files. But the engine's own `Corpus["meta"]`
+  // (`packages/engine/src/types.ts`) never declared a place for it to land,
+  // so no TypeScript-typed reader in `apps/web` could reach it even by
+  // accident — the same "shipped, never declared on the consuming type"
+  // shape `Corpus.lookalikes` (v3-D181), `CorpusWord.line` (v3-D191) and
+  // `CorpusMeta.distractorOrigin`/`.kernelYield` (v3-D192) already closed.
+  //
+  // Consequence: a reviewer on `/workbench` — the one screen that already
+  // audits `corpusHash`/`hashSpecVersion`/`droppedCollisions` for exactly
+  // this kind of build provenance — had no way to see WHICH raw files (and
+  // which QAC version) actually produced the corpus in front of them,
+  // despite the compiler already knowing and already shipping the answer.
+  //
+  // The frozen fixture used throughout this file predates `meta.mentalModel`
+  // and `meta.macro`, but it does NOT predate `generatedFrom` — verified
+  // directly below — so the positive case uses the fixture's own real,
+  // non-fabricated provenance list rather than attaching a synthetic one.
+  beforeEach(() => {
+    resetApiFetchForTests();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const readyFrontier = () =>
+    new Response(
+      JSON.stringify({
+        frontier: { "1": { qari: "verified", admin: "verified" } },
+        verifications: [],
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+
+  it("renders the corpus's own real, compiler-recorded source file list", async () => {
+    globalThis.fetch = vi.fn(async () => readyFrontier()) as unknown as typeof fetch;
+    // The frozen fixture genuinely carries this field — not fabricated here.
+    expect(corpus.meta.generatedFrom).toEqual([
+      "kuizquran/data/yusuf-verses.json",
+      "kuizquran/data/yusuf-mcq-items.json",
+      "kuizquran/data/yusuf-mental-model.json",
+      "data/raw/quran-morphology.txt (QAC v0.4)",
+    ]);
+
+    render(<WorkbenchIsland surah={12} corpus={corpus} macro={macroFactsFor(corpus)} />);
+
+    const section = await screen.findByRole("region", { name: /provenance/i });
+    expect(section.textContent).toMatch(/yusuf-verses\.json/);
+    expect(section.textContent).toMatch(/yusuf-mcq-items\.json/);
+    expect(section.textContent).toMatch(/yusuf-mental-model\.json/);
+    expect(section.textContent).toMatch(/quran-morphology\.txt \(QAC v0\.4\)/);
+  });
+
+  it("says so honestly when the corpus subset carries no recorded provenance", async () => {
+    globalThis.fetch = vi.fn(async () => readyFrontier()) as unknown as typeof fetch;
+    const { generatedFrom: _drop, ...metaWithoutProvenance } = corpus.meta;
+    const withoutProvenance: Corpus = { ...corpus, meta: metaWithoutProvenance };
+
+    render(
+      <WorkbenchIsland surah={12} corpus={withoutProvenance} macro={macroFactsFor(corpus)} />,
+    );
+
+    const section = await screen.findByRole("region", { name: /provenance/i });
+    expect(section.textContent).toMatch(/no provenance recorded/i);
+    // Never fabricates the fixture's own real paths for a subset that
+    // (per this case's own construction) carries none.
+    expect(section.textContent).not.toMatch(/yusuf-verses\.json/);
+  });
+});
+
 describe("the workbench route reads the corpus through loadEffectiveCorpus (SSR override gap)", () => {
   // WorkbenchIsland's `explain(corpus, spec)` traces a spec against whatever
   // corpus it is handed — so an admin previewing a site must see the

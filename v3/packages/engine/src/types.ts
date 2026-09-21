@@ -170,6 +170,19 @@ export interface Corpus {
      *  staged before this field existed, or one with no manifest entry
      *  (e.g. a frozen test fixture) — never fabricated. */
     corpusHash?: string;
+    /** The raw source files (verses/geometry/ruku/mental-model, plus the
+     *  QAC morphology file and its version tag) `corpus-compiler/src/io.ts
+     *  #readInputs` actually read to produce this compile — a required
+     *  field on the compiler's own `CorpusMeta`
+     *  (`corpus-compiler/src/types.ts`), computed on every compile and
+     *  shipped to the browser verbatim by `stage-corpus.mjs#slim()` (it
+     *  passes `meta` through wholesale). Optional here for the same reason
+     *  every other `meta` diagnostic field is: an older corpus subset (the
+     *  engine's own frozen test fixture predates several sibling fields,
+     *  though not this one) could in principle predate it too. Reviewer
+     *  diagnostic only — never rendered to a learner, never used for
+     *  selection or grading. */
+    generatedFrom?: string[];
   };
   verses: CorpusVerse[];
   words: CorpusWord[];

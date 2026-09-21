@@ -45,6 +45,7 @@ import { LookAlikesPanel } from "./LookAlikesPanel";
 import { SceneBeatsPanel } from "./SceneBeatsPanel";
 import { MacroClassificationPanel } from "./MacroClassificationPanel";
 import { MentalModelPanel } from "./MentalModelPanel";
+import { GeneratedFromPanel } from "./GeneratedFromPanel";
 import { DistractorYieldPanel } from "./DistractorYieldPanel";
 import { DroppedCollisionsPanel } from "./DroppedCollisionsPanel";
 
@@ -153,6 +154,8 @@ export function WorkbenchIsland({ surah, corpus, macro }: WorkbenchIslandProps) 
       <DistractorYieldPanel meta={corpus.meta} />
 
       <MentalModelPanel mentalModel={corpus.meta.mentalModel} />
+
+      <GeneratedFromPanel generatedFrom={corpus.meta.generatedFrom} />
 
       <section className="card" aria-labelledby="spec-h">
         <div className="card-header">
