@@ -45,6 +45,21 @@ function isStructured(e: DrillEvent): boolean {
   return (e as { structured?: boolean }).structured !== false;
 }
 
+/**
+ * Edge case #111 ("fold clamps spacing at received_at"): the timestamp this
+ * fold should treat the event as having happened at. `e.receivedAt` is only
+ * ever present on the server-side fold (the fold-runner reading real
+ * `events` rows) and only ever CLAMPS `ts` DOWNWARD — a `ts` that sits ahead
+ * of `receivedAt` means the emitting device's clock was skewed forward of
+ * the server's own receipt of the event, so `receivedAt` is used instead.
+ * An ordinary late-arriving event (`ts` behind `receivedAt` — an offline
+ * device syncing hours or days later) is legitimate and left untouched: only
+ * a `ts` genuinely AHEAD of `receivedAt` is ever substituted.
+ */
+function effectiveTs(e: DrillEvent): number {
+  return e.receivedAt !== undefined && e.receivedAt < e.ts ? e.receivedAt : e.ts;
+}
+
 /** Apply a single event to the atoms map (mutates the map, replaces atom values). */
 export function applyEvent(atoms: AtomsMap, e: DrillEvent, cfg?: DayConfig): void {
   const key = atomKey(e.surah, "ayah", e.ayah);
@@ -57,7 +72,7 @@ export function applyEvent(atoms: AtomsMap, e: DrillEvent, cfg?: DayConfig): voi
     const outcome: RetrievalOutcome = {
       kind: RUNG_KIND[e.rung],
       correct: false,
-      ts: e.ts,
+      ts: effectiveTs(e),
       pretest: e.pretest === true,
       structured: isStructured(e),
     };
@@ -73,13 +88,13 @@ export function applyEvent(atoms: AtomsMap, e: DrillEvent, cfg?: DayConfig): voi
     const outcome: RetrievalOutcome = {
       kind: RUNG_KIND[e.rung],
       correct: true,
-      ts: e.ts,
+      ts: effectiveTs(e),
       structured: isStructured(e),
     };
     let updated = update(atom, outcome, { cfg });
     // Completing S3 = the ayah was produced whole → schedule the day-1 cold gate.
     if (e.rung === "S3" && isStructured(e)) {
-      updated = scheduleGate(updated, e.ts, cfg);
+      updated = scheduleGate(updated, effectiveTs(e), cfg);
     }
     atoms.set(key, updated);
     return;
@@ -91,11 +106,11 @@ export function applyEvent(atoms: AtomsMap, e: DrillEvent, cfg?: DayConfig): voi
     const outcome: RetrievalOutcome = {
       kind: "gate",
       correct: passed,
-      ts: e.ts,
+      ts: effectiveTs(e),
       structured: isStructured(e),
     };
     const updated = update(atom, outcome, { cfg });
-    atoms.set(key, applyGateResult(updated, passed, e.ts, cfg));
+    atoms.set(key, applyGateResult(updated, passed, effectiveTs(e), cfg));
     return;
   }
 
@@ -121,7 +136,7 @@ export function applyEvent(atoms: AtomsMap, e: DrillEvent, cfg?: DayConfig): voi
     const outcome: RetrievalOutcome = {
       kind: "review",
       correct: e.correct === true,
-      ts: e.ts,
+      ts: effectiveTs(e),
       structured: isStructured(e),
     };
     atoms.set(connKey, update(conn, outcome, { cfg }));
@@ -142,7 +157,7 @@ export function applyEvent(atoms: AtomsMap, e: DrillEvent, cfg?: DayConfig): voi
     const outcome: RetrievalOutcome = {
       kind: "review",
       correct: e.correct === true,
-      ts: e.ts,
+      ts: effectiveTs(e),
       structured: isStructured(e),
     };
     atoms.set(k, update(atom, outcome, { cfg }));

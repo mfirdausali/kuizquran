@@ -22330,3 +22330,197 @@ which has no implementation anywhere (v3-D240) — all unchanged.
 `PrivacyPanel.tsx`'s own discarded `"failed"` reveal outcome is now CLOSED — remove
 it from future "computed, discarded one join short of a reader" sweeps. See
 DECISIONS.md v3-D241.
+
+## v3-D242 (2026-09-22) — edge case #111's other half: the fold never clamped a far-future `ts` at `received_at`, so a skewed device clock could permanently poison an atom's own spacing
+
+BUILD-PLAN.md's own edge-case register (#111, "Far-future client ts") names three
+parts to the resolution: "accept + flag; fold clamps spacing at received_at; skew
+measured client-now vs server-now, not per-event." v3-D240 (the previous night)
+built the first part — `merge.ts`'s `futureTs` flag now actually reaches
+`SyncStatus` — and, in the course of that work, swept for the second part and
+recorded a verified negative: "`received_at` is not even a column on `events`."
+That specific claim was wrong (`received_at` has been a real, non-nullable,
+server-stamped column on `events` since the table's very first migration,
+confirmed directly by reading it), but the underlying finding — nothing anywhere
+clamps spacing with it — was correct, and is what this run closes.
+
+Three things were true simultaneously, each hiding the others: (1) `received_at`
+genuinely exists on every stored row, stamped by `EventsController::store()` at
+ingest (`(int) round(microtime(true) * 1000)`); (2) `rebuild.ts#applyEvent` — the
+ONE fold every atom's state passes through, client and server alike — used raw
+`e.ts` unconditionally for every `RetrievalOutcome.ts`, `next.lastRetrieval`, and
+both `scheduleGate()`/`applyGateResult()` calls, so a device with a clock skewed
+months into the future would have that poisoned timestamp become the atom's own
+`lastRetrieval` and the day-1 cold gate's `gateDueAt` — permanently, since
+invariant #2 forbids ever rewriting the stored `ts` itself (`merge.ts`'s own
+comment: "clamping is the FOLD's job, not the merge's... and `received_at` is a
+server column absent from the wire shape — so the client could not clamp to it
+even if it wanted to"); (3) `EventWireCodec::toWire()` — the one function BOTH
+`AtomCacheRebuilder` (admin rebuild) and `DeterminismCheckCommand::sampleFromDatabase()`
+(nightly DB-sampling fold) use to hand real events to the Node fold-runner —
+never forwarded `received_at` at all, so even a fold-runner willing to clamp had
+nothing to clamp against. Concretely: a learner whose device clock jumped forward
+(a common real-world failure — a bad NTP sync, a manually-mis-set clock, a timezone
+misconfiguration that overflows) would, on the next server-side rebuild, have
+their `lastRetrieval`/`gateDueAt` frozen months or years in the future — the cold
+gate would never come due again, and every later spacing computation for that
+atom would be measured against a lie the log itself could never correct.
+
+**Scope, deliberately narrow.** `received_at` is NOT a wire field — it is never
+sent to the client and never sent by it (`DrillEvent.receivedAt`'s own new
+docblock states this explicitly) — so this is purely a server-side fold
+enrichment, present only when the Node fold-runner assembles events read
+directly from Postgres/SQLite. The CLIENT-side fold (every real-time scheduling
+decision on-device) is untouched by construction: `receivedAt` is `undefined`
+there, `effectiveTs()` degrades to plain `e.ts`, identical to today's behavior.
+Canonical fold ORDER (`canonicalOrder.ts`, `(ts, deviceId, deviceSeq, uuid)`) is
+also untouched — the edge case's own wording scopes the fix to "spacing," not to
+reordering the log, and `canonicalOrder.ts` correctly still sorts on the raw,
+unclamped `ts` (the event's own claimed position in time), only the SPACING
+MATH inside `update()`'s call sites is clamped.
+
+**The clamp direction is asymmetric, deliberately.** `effectiveTs(e)` substitutes
+`receivedAt` for `ts` ONLY when `receivedAt < ts` — a device clock genuinely ahead
+of the server's own receipt of the event. An ORDINARY late-arriving event (an
+offline device committing at `ts`, syncing hours or days later, so `receivedAt`
+sits well AFTER `ts`) is the common, legitimate case this build's own append-only,
+local-first design exists to support, and is left completely untouched — clamping
+that direction would corrupt every offline-then-synced learner's real spacing to
+"just now" on every sync, a strictly worse bug than the one being fixed.
+
+**Fixed**, four files, no wire/schema change (`received_at` was already a real
+column; no migration needed):
+
+- `packages/engine/src/types.ts` — `DrillEvent` gains `receivedAt?: number`,
+  documented explicitly as server-only, never a wire field, undefined for every
+  client-side fold.
+- `packages/engine/src/rebuild.ts` — a new `effectiveTs(e)` helper
+  (`e.receivedAt !== undefined && e.receivedAt < e.ts ? e.receivedAt : e.ts`); all
+  seven raw `e.ts` reads inside `applyEvent()` (five `RetrievalOutcome.ts`
+  constructions, the `scheduleGate()` call on an S3 completion, the
+  `applyGateResult()` call on a `gate_result`) now route through it — so a
+  poisoned completion's `lastRetrieval`, a poisoned S3's day-1 gate scheduling,
+  and a poisoned gate FAIL's re-arm date are all clamped alike, not just one of
+  the three.
+- `v3/api/app/Support/EventWireCodec.php` — `toWire()` now unconditionally adds
+  `receivedAt` (the codec's one shared conversion, already the SAME function both
+  `AtomCacheRebuilder` and `DeterminismCheckCommand::sampleFromDatabase()` call —
+  extracted specifically, per its own docblock, so there is never a second copy
+  that could drift — so this single change reaches both the admin rebuild path
+  and the nightly determinism check at once). Kept out of the existing
+  null-skipping `$optional` loop and added as its own unconditional line, with a
+  comment explaining why it is NOT part of the frozen wire shape above it.
+
+**RED confirmed independently at both layers**, each via `git stash` of the one
+source file, test(s) kept, restored byte-identically after: engine level, 4 of 6
+new `packages/engine/test/receivedAtClamp.test.ts` cases failed against the
+unmodified `rebuild.ts` — a poisoned S3 completion's `lastRetrieval` read the raw
+~400-days-future `ts` instead of `receivedAt` (`expected 36288000000 to be
+1814400000`), its gate `gateDueAt` was ~400 days out instead of clamped, a
+poisoned gate FAIL's re-arm date was likewise unclamped, and a poisoned slip's
+`lastRetrieval` was unclamped too; the other 2 (no `receivedAt` at all; an
+ordinary LATE-arrival event with `receivedAt` well AFTER `ts`) passed vacuously
+and correctly against the unfixed code, since neither ever depended on the fix —
+proving the fix is genuinely a clamp on one specific direction, not a rewrite of
+every `lastRetrieval`. Restored, reran: 439/439 green in the full engine suite
+(was 433, +6). PHP/integration level, `EventWireCodec.php`'s one-line addition
+reverted alone: the new, load-bearing `EventsAtomCacheRefoldTest
+::test_a_far_future_ts_is_clamped_to_received_at_not_trusted_for_spacing` — which
+posts a real event with `ts` ~400 days in the future through `/api/events`,
+through the REAL fold-runner subprocess (v3-D08: PHP never folds), and asserts
+`atom_cache.last_retrieval` equals the just-stored row's own `received_at`, is
+strictly less than the poisoned `ts`, and that the cold gate's `gate_due_at` is
+within 2 days of `received_at` — failed exactly as predicted (`Failed asserting
+that 1824665168427 is identical to 1790105168438` — the poisoned value reached
+the cache verbatim). Restored, reran: 5/5 green in that file (was 4, +1), 402/402
+in the full `v3/api` suite (was 401, +1; 2 incomplete + 6 skipped unchanged,
+PAY-1). The test also asserts the STORED `events.ts` is still the poisoned value
+verbatim — invariant #2, the log itself is never rewritten, only the derived
+cache is clamped.
+
+**Verification.** Session start: fresh container, no `node_modules`/`vendor`/
+compiled corpus anywhere. `TZ=UTC make setup` ran from scratch; `v2/api` and
+`v3/api`'s composer installs both hit the documented transient proxy timeout
+cloning dist archives via `api.github.com` and recovered automatically through
+the git-mirror fallback (no retry flag needed, matching the pattern this file has
+recorded roughly a dozen times before). `git fetch origin main` confirmed
+`origin/main` and local `main` disagreed by twelve commits (`fcfe765` v3-D229 vs.
+the real tip `bc7e08e` v3-D241) — the recurring stale-local-`main` trap this file
+has recorded roughly fifty times since v3-D77 (HEAD was correctly detached at the
+real tip; only the local branch ref was stale) — caught before any exploration
+via `git checkout main && git merge --ff-only origin/main`, a clean fast-forward,
+no work at risk. `TZ=UTC make test`: **2830 passing** (was 2823, +7 — exactly this
+run's new tests: 6 engine + 1 v3/api; engine 439, was 433; v3/api 402, was 401; no
+other suite moved: 255 v2 vitest, 47 v2/api, 120 corpus-compiler, 63 fold-runner,
+1504 apps/web — apps/web genuinely unchanged, this diff touches no apps/web file
+at all), exit 0. `check-test-floor.mjs` (run as part of `make test`): OK, 2830 >=
+floor 1899 (+931 margin, unmoved, same discipline as every prior entry). `TZ=UTC
+make build`: exit 0, 30 routes (unchanged — this diff touches no apps/web/route
+file at all). `npm run gates` (via `make build`'s own `prebuild` chain): all green
+— locked-css OK, 1 documented hunk, 294 v1 lines byte-identical; boundaries 319
+files, unchanged count — no apps/web file in this diff; fonts
+degraded-but-non-blocking, pre-existing, 2/6 UI fonts present; corpus-morphology
+362 words / corpus-glyphs 206 codepoints across 4 artifacts, both unchanged — a
+fold-spacing-only fix touches no corpus data. `npx tsc --noEmit`, run separately
+across all four v3 node packages (`apps/web`, `packages/engine`,
+`packages/corpus-compiler`, `worker/fold-runner` — widening a shared engine type
+can silently break a sibling package's own typecheck without touching its
+source): clean in all four. `worker/fold-runner`'s own suite: 63/63, unchanged (it
+imports `rebuild()` directly from `packages/engine`, so the new optional field
+needed no fold-runner-side test change). `./vendor/bin/pint --test` on both
+changed PHP files: passed. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite was
+reverted before committing, same discipline as every prior entry — `git status
+--porcelain -- v1 v2` empty immediately before committing). No Arabic codepoint
+(every changed/new file swept programmatically, in Python, over the Arabic,
+Arabic Supplement, Arabic Extended-A and both Presentation Forms Unicode blocks,
+plus a `\u06xx`-escape and `fromCharCode`/`fromCodePoint` mention check: CLEAN —
+every new string is a TypeScript/PHP identifier, a docblock sentence, or a
+millisecond arithmetic result, never corpus text). No oracle/golden-log/fixture/
+snapshot regenerated — this diff touches four existing production files and two
+existing test files, plus one new engine test file; `golden-log-parity.test.ts`
+(3 cases, unchanged) still passes unmodified, since the frozen fixture carries no
+`receivedAt` and the fix is a pure no-op absent it.
+
+Found by reading v3-D240's own closing note directly — it had already isolated
+edge case #111's "fold clamps spacing at received_at" clause as "a real, separate,
+larger gap than this run's own scope (server-side clamping needs a new column and
+a fold-side read of it, not a client wiring fix)" and left it explicitly rather
+than absorbing it silently. Independently re-verified before writing any test:
+`received_at`'s real column definition (the migration, contradicting v3-D240's
+own "not even a column" claim — corrected here, not left to propagate); its real
+stamping site (`EventsController::store()`); its one shared wire-conversion
+chokepoint (`EventWireCodec::toWire()`, confirmed via its own docblock and a grep
+of both real callers); and every one of `rebuild.ts#applyEvent`'s seven raw `e.ts`
+reads, read line by line before choosing where the clamp needed to apply (not just
+the first, most obvious site).
+
+**NOT addressed**: edge case #111's THIRD clause — "skew measured client-now vs
+server-now, not per-event" — remains genuinely unimplemented anywhere in the
+tree (confirmed by grep: every existing use of the word "skew" in this codebase
+refers to fold-runner ENGINE-VERSION skew, `foldCheck.ts`'s own WARN taxonomy, a
+completely different concept from a device's CLOCK skew). This reads as a
+separate, smaller feature — an aggregate per-device skew ESTIMATE (comparing a
+device's own reported "now" against the server's at sync time), distinct from
+both the per-event `futureTs` flag v3-D240 already built and the per-event clamp
+this run built — left for a future run to scope deliberately rather than
+absorbed here. Every item on v3-D241's own "NOT addressed" list, unchanged —
+`DrillPicker.tsx`'s own unused `now` prop; the unused `atoms`/`corpus`/`sessions`
+IndexedDB object stores (v3-D232); `session_start`'s own "app-open → first drill"
+latency metric (v0.8); the streak/away-day day-space mismatch (v3-D209);
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`;
+`App\Billing\TrialAttribution` (v3-D148); `lib/pricing.ts#regionFromCountry()`
+(v3-D163); `PaywallGate` as a whole class; multi-surah enrollment; the
+operational mailer / 7-night launch window; PAY-1's Stripe fixtures; surah 67's
+scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel` (v3-D188);
+`StripeField.editable` (v3-D204); `corpusHash`'s zero fold-side consumer
+(v3-D206); FR5's queue-level restart/replan/makeup behavior (v3-D217);
+`selection_determinism_check` still replaying a committed fixture;
+`GlossDraftsPanel.tsx`'s hardcoded caption vs. `shipping`/`excludedFromHashV1`
+(v3-D173, still non-divergent as wired); `lib/test/build.ts`/`TestIsland.tsx`'s
+`test_*` events still carrying no SITE coordinate (v3-D229) — all unchanged.
+
+Edge case #111's "fold clamps spacing at received_at" is now CLOSED — remove it
+from future sweeps; only its third clause (skew measurement) remains open. See
+DECISIONS.md v3-D242.

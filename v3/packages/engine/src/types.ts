@@ -451,4 +451,18 @@ export interface DrillEvent {
    *  earlier mark. A later event for the same `awayDayIndex` always wins
    *  (append-only toggle, never edited in place). */
   away?: boolean;
+  /** SERVER-ONLY enrichment (edge case #111: "fold clamps spacing at
+   *  received_at") — NEVER a wire field, never sent by the client and never
+   *  sent to it. Populated only when the Node fold-runner assembles events
+   *  read directly from the `events` table's own `received_at` column
+   *  (stamped server-side at ingest, present on every stored row since the
+   *  table's original migration); undefined for every client-side fold,
+   *  since a locally-committed event has no analogous "arrived later than
+   *  it claims" fact to clamp against. `rebuild.ts#applyEvent` uses this to
+   *  cap a `ts` that sits AHEAD of it — a badly-skewed-forward device clock
+   *  — so a poisoned future timestamp can never permanently corrupt an
+   *  atom's `lastRetrieval`/gate scheduling. Never used to correct an
+   *  ordinary LATE-arriving `ts` (receivedAt after ts): that is the normal,
+   *  legitimate offline-then-synced case and must pass through untouched. */
+  receivedAt?: number;
 }

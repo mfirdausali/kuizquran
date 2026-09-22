@@ -49,6 +49,18 @@ class EventWireCodec
         // (rebuild.ts/applyEvent depend only on structural coordinates).
         // Sending it would push sacred text through a subprocess pipe and
         // into a stored JSON report for no benefit whatsoever.
+
+        // `receivedAt` is NOT part of the frozen wire shape above — it is
+        // never sent to or received from the client (DrillEvent.receivedAt's
+        // own docblock). It exists ONLY so this fold-runner-bound payload can
+        // carry it: edge case #111 ("fold clamps spacing at received_at")
+        // needs the server's own receipt time to cap a `ts` a skewed-forward
+        // device clock pushed into the future. `received_at` is a real,
+        // non-nullable column on every stored row (the migration's own
+        // "server-stamped epoch ms"), so this is unconditional, not part of
+        // the null-skipping `$optional` loop above.
+        $wire['receivedAt'] = (int) $e->received_at;
+
         return $wire;
     }
 }

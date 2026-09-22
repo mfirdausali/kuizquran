@@ -53,9 +53,166 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2823 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 401 v3/api + 120 corpus-compiler
-             # + 433 engine + 63 fold-runner + 1504 apps/web. (v3-D241, 2026-09-22)
+make test    # 2830 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 402 v3/api + 120 corpus-compiler
+             # + 439 engine + 63 fold-runner + 1504 apps/web. (v3-D242, 2026-09-22)
+             # NOTE (v3-D242, 2026-09-22): edge case #111's own register entry
+             # ("Far-future client ts... accept + flag; fold clamps spacing at
+             # received_at; skew measured client-now vs server-now, not
+             # per-event") had only its first clause built. v3-D240 (the prior
+             # night) built the "flag" half (`merge.ts`'s `futureTs` now
+             # reaches `SyncStatus`) and, sweeping for the second clause,
+             # recorded a verified negative: "`received_at` is not even a
+             # column on `events`." That claim was WRONG — `received_at` has
+             # been a real, non-nullable, server-stamped column since the
+             # table's first migration — but the underlying finding (nothing
+             # clamps spacing with it) was right. `rebuild.ts#applyEvent`
+             # used raw `e.ts` unconditionally for every
+             # `RetrievalOutcome.ts`/`lastRetrieval`/`scheduleGate()`/
+             # `applyGateResult()` call, so a device with a clock skewed
+             # months into the future would have that poisoned timestamp
+             # become the atom's own `lastRetrieval` and the day-1 gate's
+             # `gateDueAt` PERMANENTLY — invariant #2 forbids ever rewriting
+             # the stored `ts`, and `merge.ts`'s own comment already said so:
+             # "clamping is the FOLD's job, not the merge's... `received_at`
+             # is a server column absent from the wire shape — so the client
+             # could not clamp to it even if it wanted to." And even a
+             # willing fold-runner had nothing to clamp against:
+             # `EventWireCodec::toWire()` — the one shared conversion BOTH
+             # `AtomCacheRebuilder` and `DeterminismCheckCommand
+             # ::sampleFromDatabase()` use to hand real events to the Node
+             # fold-runner — never forwarded `received_at` at all.
+             #
+             # Fixed, four files, no wire/schema change (the column already
+             # existed): `DrillEvent` gains `receivedAt?: number`, documented
+             # explicitly as SERVER-ONLY — never sent to or from the client,
+             # undefined for every client-side fold, which is therefore a
+             # complete no-op under this fix. `rebuild.ts` gains
+             # `effectiveTs(e)` (`e.receivedAt !== undefined && e.receivedAt
+             # < e.ts ? e.receivedAt : e.ts`) and all seven raw `e.ts` reads
+             # inside `applyEvent()` now route through it. The clamp is
+             # ASYMMETRIC and deliberately so: it fires only when
+             # `receivedAt < ts` (a device clock genuinely ahead of the
+             # server) — an ORDINARY late-arriving event (`ts` behind
+             # `receivedAt`, the common offline-then-synced case) is left
+             # completely untouched, since clamping that direction would
+             # corrupt every honest offline learner's real spacing to "just
+             # now" on every sync, a strictly worse bug than the one being
+             # fixed. `canonicalOrder.ts`'s own fold ORDER is also untouched
+             # by design — the edge case's own wording scopes the fix to
+             # "spacing," never to reordering the log.
+             # `EventWireCodec::toWire()` gains an unconditional `receivedAt`
+             # field, outside the existing null-skipping `$optional` loop
+             # (never null on a real row) — since this is the one shared
+             # chokepoint both fold-runner callers already route through,
+             # one change reaches both the admin rebuild and the nightly
+             # determinism check at once.
+             #
+             # RED confirmed independently at both layers, each via `git
+             # stash` of the one source file with its test(s) kept, restored
+             # byte-identically after: engine level, 4 of 6 new
+             # `receivedAtClamp.test.ts` cases failed against the unmodified
+             # `rebuild.ts` — a poisoned S3 completion's `lastRetrieval` read
+             # the raw ~400-days-future `ts` (`expected 36288000000 to be
+             # 1814400000`), its `gateDueAt` was ~400 days out, a poisoned
+             # gate FAIL's re-arm date was likewise unclamped, and a poisoned
+             # slip's `lastRetrieval` was unclamped too; the 2 negative cases
+             # (no `receivedAt` at all; an ORDINARY late-arrival event) passed
+             # vacuously and correctly, proving the fix clamps one specific
+             # direction only. Reran: 439/439 engine (was 433, +6). PHP/
+             # integration level, `EventWireCodec.php`'s one-line addition
+             # reverted alone: the load-bearing
+             # `EventsAtomCacheRefoldTest::test_a_far_future_ts_is_clamped_to_received_at_not_trusted_for_spacing`
+             # — posts a real event with `ts` ~400 days in the future through
+             # `/api/events`, through the REAL fold-runner subprocess (v3-D08:
+             # PHP never folds), asserts `atom_cache.last_retrieval` equals
+             # the stored row's own `received_at` and is strictly less than
+             # the poisoned `ts`, and that `gate_due_at` is within 2 days of
+             # `received_at` — failed exactly as predicted (`Failed asserting
+             # that 1824665168427 is identical to 1790105168438`). Reran: 5/5
+             # in that file (was 4, +1), 402/402 v3/api (was 401, +1; 2
+             # incomplete + 6 skipped unchanged, PAY-1). The test also asserts
+             # the STORED `events.ts` is still the poisoned value verbatim —
+             # invariant #2, the log is never rewritten, only the derived
+             # cache is clamped.
+             #
+             # `TZ=UTC make test`: 2830 passing (was 2823, +7 — exactly this
+             # run's new tests: 6 engine + 1 v3/api; no other suite moved —
+             # apps/web genuinely unchanged at 1504, this diff touches no
+             # apps/web file at all). `check-test-floor.mjs`: OK, 2830 >=
+             # floor 1899 (+931 margin, unmoved). `TZ=UTC make build`: exit
+             # 0, 30 routes (unchanged). `npm run gates`: all green
+             # (locked-css OK, 1 documented hunk, 294 v1 lines byte-
+             # identical; boundaries 319 files, unchanged count — no
+             # apps/web file in this diff; fonts degraded-but-non-blocking,
+             # pre-existing, 2/6 UI fonts present; corpus-morphology 362
+             # words / corpus-glyphs 206 codepoints across 4 artifacts, both
+             # unchanged — a fold-spacing-only fix touches no corpus data).
+             # `npx tsc --noEmit`, run separately across all four v3 node
+             # packages: clean in all four. `worker/fold-runner`'s own
+             # suite: 63/63, unchanged (imports `rebuild()` directly, no
+             # fold-runner-side test needed). `./vendor/bin/pint --test` on
+             # both changed PHP files: passed. No `v1/**`/`v2/**` edit (a
+             # stray `v2/tsconfig.tsbuildinfo` build-cache diff produced by
+             # running the suite was reverted before committing, same
+             # discipline as every prior entry). No Arabic codepoint (every
+             # changed/new file swept programmatically, in Python, over the
+             # Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms Unicode blocks, plus a `\u06xx`-escape and
+             # `fromCharCode`/`fromCodePoint` mention check: CLEAN — every
+             # new string is a TypeScript/PHP identifier, a docblock
+             # sentence, or a millisecond arithmetic result, never corpus
+             # text). No oracle/golden-log/fixture/snapshot regenerated —
+             # `golden-log-parity.test.ts` (3 cases, unchanged) still passes
+             # unmodified, since the frozen fixture carries no `receivedAt`
+             # and the fix is a pure no-op absent it. Session start: fresh
+             # container, no `node_modules`/`vendor`/compiled corpus
+             # anywhere; `make setup` ran clean from scratch (both v2/api and
+             # v3/api composer installs hit the documented transient
+             # api.github.com proxy timeout and recovered automatically via
+             # the git-mirror fallback, no retry flag needed). THE
+             # STALE-LOCAL-`main` TRAP RECURRED AGAIN: `HEAD` was correctly
+             # detached at the real tip `bc7e08e` (v3-D241, matching
+             # `origin/main` exactly), but the local `main` branch ref sat
+             # twelve commits behind at `fcfe765` (v3-D229) — caught before
+             # any exploration via `git fetch origin main` + `git checkout
+             # main && git merge --ff-only origin/main`, a clean
+             # fast-forward, no work lost or at risk. Found by reading
+             # v3-D240's own closing note directly (it had already isolated
+             # this exact gap and left it, "a real, separate, larger gap...
+             # needs a new column and a fold-side read of it") rather than
+             # dispatching a fresh sweep agent — independently re-verified
+             # the real column, the real stamping site, the real shared
+             # codec chokepoint, and all seven of `applyEvent()`'s raw `e.ts`
+             # reads before writing any test. NOT addressed: edge case
+             # #111's THIRD clause — "skew measured client-now vs
+             # server-now, not per-event" — remains genuinely unimplemented
+             # anywhere (every existing use of "skew" in this tree means
+             # fold-runner ENGINE-VERSION skew, a different concept); a
+             # separate, smaller feature, left for a future run.
+             # `DrillPicker.tsx`'s own unused `now` prop; the unused
+             # `atoms`/`corpus`/`sessions` IndexedDB object stores
+             # (v3-D232); `session_start`'s own "app-open → first drill"
+             # latency metric (v0.8); the streak/away-day day-space mismatch
+             # (v3-D209); `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()`; `App\Billing\TrialAttribution`
+             # (v3-D148); `lib/pricing.ts#regionFromCountry()` (v3-D163);
+             # `PaywallGate` as a whole class; multi-surah enrollment; the
+             # operational mailer / 7-night launch window; PAY-1's Stripe
+             # fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel` (v3-D188); `StripeField.editable`
+             # (v3-D204); `corpusHash`'s zero fold-side consumer (v3-D206);
+             # FR5's queue-level restart/replan/makeup behavior (v3-D217);
+             # `selection_determinism_check` still replaying a committed
+             # fixture; `GlossDraftsPanel.tsx`'s hardcoded caption vs.
+             # `shipping`/`excludedFromHashV1` (v3-D173, still non-divergent
+             # as wired); `lib/test/build.ts`/`TestIsland.tsx`'s `test_*`
+             # events still carrying no SITE coordinate (v3-D229) — all
+             # unchanged. Edge case #111's "fold clamps spacing at
+             # received_at" is now CLOSED — remove it from future sweeps.
+             # See DECISIONS.md v3-D242.
              # NOTE (v3-D241, 2026-09-22): `lib/admin/reveal.ts#revealIdentity()`
              # has a real, reachable `{state: "failed", reason}` outcome —
              # a thrown network error, or a genuine non-ok/non-422/non-404

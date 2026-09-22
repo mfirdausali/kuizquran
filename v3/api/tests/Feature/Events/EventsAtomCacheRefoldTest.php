@@ -119,6 +119,45 @@ class EventsAtomCacheRefoldTest extends TestCase
         Log::shouldHaveReceived('error')->once();
     }
 
+    /**
+     * Edge case #111 ("fold clamps spacing at received_at"): a `ts` from a
+     * badly-skewed-forward device clock must never permanently poison the
+     * refolded cache with a far-future `lastRetrieval`. Drives a real event
+     * through `/api/events` with `ts` ~400 days ahead of "now", through the
+     * REAL fold-runner subprocess (v3-D08), and asserts the resulting
+     * `atom_cache.last_retrieval` is the server's own `received_at` for that
+     * row — not the poisoned client `ts` — proving `EventWireCodec::toWire()`
+     * actually carries `receivedAt` to the runner and `rebuild.ts` actually
+     * clamps with it, not merely that the field exists somewhere unused.
+     */
+    public function test_a_far_future_ts_is_clamped_to_received_at_not_trusted_for_spacing(): void
+    {
+        $user = $this->actingUser();
+        $farFutureTs = (int) round((microtime(true) + 400 * 86400) * 1000);
+
+        $this->postJson('/api/events', ['events' => [[
+            'id' => 'ev-refold-skew', 'type' => 'rung_complete', 'ts' => $farFutureTs,
+            'surah' => 112, 'ayah' => 1, 'rung' => 'S3', 'correct' => true,
+        ]]])->assertOk()->assertJson(['accepted' => 1, 'ignored' => 0]);
+
+        $storedEvent = DB::table('events')->where('user_id', $user->id)->where('uuid', 'ev-refold-skew')->first();
+        $this->assertNotNull($storedEvent);
+        $this->assertSame($farFutureTs, (int) $storedEvent->ts, 'the poisoned ts is stored verbatim — invariant #2, the log is never rewritten');
+
+        $row = DB::table('atom_cache')->where('user_id', $user->id)->where('surah', 112)->where('ref', 1)->first();
+        $this->assertNotNull($row);
+        $this->assertSame(
+            (int) $storedEvent->received_at,
+            (int) $row->last_retrieval,
+            'lastRetrieval must be the server receipt time, not the far-future client ts',
+        );
+        $this->assertLessThan($farFutureTs, (int) $row->last_retrieval, 'the poisoned ts must never reach the cache');
+        // The day-1 cold gate scheduled off this completion must also be
+        // clamped — due tomorrow from received_at, never ~400 days out.
+        $this->assertNotNull($row->gate_due_at);
+        $this->assertLessThan((int) $storedEvent->received_at + 2 * 86_400_000, (int) $row->gate_due_at);
+    }
+
     /** An idempotent replay (nothing new accepted) is still a plain success. */
     public function test_an_idempotent_replay_never_needs_a_working_fold_runner(): void
     {
