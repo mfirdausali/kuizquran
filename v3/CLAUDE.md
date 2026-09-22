@@ -53,9 +53,114 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2821 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2823 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 401 v3/api + 120 corpus-compiler
-             # + 433 engine + 63 fold-runner + 1502 apps/web. (v3-D240, 2026-09-22)
+             # + 433 engine + 63 fold-runner + 1504 apps/web. (v3-D241, 2026-09-22)
+             # NOTE (v3-D241, 2026-09-22): `lib/admin/reveal.ts#revealIdentity()`
+             # has a real, reachable `{state: "failed", reason}` outcome —
+             # a thrown network error, or a genuine non-ok/non-422/non-404
+             # HTTP status (the backend's own `DB::transaction()` closure has
+             # no catch, so a real DB error there surfaces as a plain 500) —
+             # computed on every real failure path since this module's own
+             # header ("FAILURE IS A STATE, NEVER AN EXCEPTION") was written.
+             # `PrivacyPanel.tsx` rendered every OTHER member of that union
+             # (revealed/anonymous/not-found/pii-warning/rejected) but had no
+             # branch for `"failed"` at all — confirmed directly, `grep -n
+             # '"failed"' PrivacyPanel.tsx` returned nothing before this fix.
+             # An operator who hit a real server error or a dropped
+             # connection mid-reveal saw the button simply re-enable, with no
+             # error text anywhere — on the one screen whose entire job is
+             # showing an admin whether a privacy-sensitive request
+             # succeeded. The established convention on every sibling admin
+             # panel (verified directly against `FlagsPanel.tsx`'s three
+             # action handlers) is to surface every outcome unconditionally;
+             # this was the one panel, and the one action (`reveal`, not the
+             # already-correct `re-check`), that broke it. Fixed: one new
+             # conditional block, `{result?.state === "failed" ? <p
+             # role="alert" className="caption">{result.reason}</p> : null}`,
+             # mirroring the adjacent `"rejected"` branch's own shape — no
+             # server/wire change, no new state invented.
+             #
+             # RED confirmed directly: 2 new cases in
+             # `test/privacy-panel.test.tsx` (7 pre-existing cases
+             # untouched), run against the tree before the production file
+             # was touched — both failed identically, `screen.findByRole
+             # ("alert")` timing out (a mocked 500 response, and a mocked
+             # `fetch` throwing `TypeError`), since no such element existed
+             # for either outcome; the first case also asserts neither the
+             # `reveal-result` nor `pii-warning` testid leaked in, proving
+             # the fix renders `"failed"`'s own message rather than falling
+             # through to a different branch. Reran: 9/9 green (was 7, +2).
+             #
+             # `TZ=UTC make test`: 2823 passing (was 2821, +2 — exactly this
+             # run's two new tests; apps/web 1504, was 1502; no other suite
+             # moved: 255 v2 vitest, 47 v2/api, 401 v3/api, 120
+             # corpus-compiler, 433 engine, 63 fold-runner), exit 0.
+             # `check-test-floor.mjs`: OK, 2823 >= floor 1899 (+924 margin,
+             # unmoved). `TZ=UTC make build`: exit 0, 30 routes (unchanged —
+             # one existing component edited, no new route). `npm run
+             # gates`: all green (locked-css OK, 1 documented hunk, 294 v1
+             # lines byte-identical; boundaries 319 files, unchanged count —
+             # no new production file; fonts degraded-but-non-blocking,
+             # pre-existing, 2/6 UI fonts present; corpus-morphology 362
+             # words / corpus-glyphs 206 codepoints across 4 artifacts, both
+             # unchanged — a client-side render-branch fix touches no corpus
+             # data). `npx tsc --noEmit`, run separately across all four v3
+             # node packages: clean in all four. No PHP file changed, so
+             # `pint` was not applicable. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff produced by running
+             # the suite was reverted before committing, same discipline as
+             # every prior entry). No Arabic codepoint (both changed files
+             # swept programmatically, in Python, over the Arabic, Arabic
+             # Supplement, Arabic Extended-A and both Presentation Forms
+             # Unicode blocks, plus a `\uXXXX`-escape and
+             # `fromCharCode`/`fromCodePoint` mention check: CLEAN — every
+             # new string is a TypeScript identifier or a fixed English
+             # test-fixture message, never corpus text). No oracle/
+             # golden-log/fixture/snapshot regenerated. Session start: fresh
+             # container, no `node_modules`/`vendor`/compiled corpus
+             # anywhere; `make setup` ran clean from scratch, no retries
+             # needed. `HEAD`, local `main` and `origin/main` all already
+             # agreed at `12eaddb` (v3-D240) — no stale-local-`main` trap
+             # this run. Found by reading `PrivacyPanel.tsx`'s full render
+             # tree directly against `RevealResult`'s own declared union,
+             # after verifying the "surface every outcome" convention first
+             # against three real sibling call sites. Also checked and ruled
+             # out before landing on this candidate:
+             # `NightlyWindowLedger`/`Admin\NightlyWindowController`
+             # (re-confirmed fully wired); `AdminRole`/
+             # `Admin\AdminRolesController` (re-confirmed fully wired);
+             # `Spec`/`SpecsController` (still deliberately unwired, larger
+             # re-architecture scope, v3-D190); `AdminRevealToken`'s other
+             # fields (`created_at_ms` genuinely internal-only, no reader
+             # warranted); E-07 (re-checked directly against the current
+             # route table — still genuinely unreachable, every real route
+             # still fetches exactly one surah per page load). NOT
+             # addressed: every item on v3-D240's own "NOT addressed" list,
+             # unchanged — `DrillPicker.tsx`'s own unused `now` prop; the
+             # unused `atoms`/`corpus`/`sessions` IndexedDB object stores
+             # (v3-D232); `session_start`'s own "app-open → first drill"
+             # latency metric (v0.8); the streak/away-day day-space mismatch
+             # (v3-D209); `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()`; `App\Billing\TrialAttribution`
+             # (v3-D148); `lib/pricing.ts#regionFromCountry()` (v3-D163);
+             # `PaywallGate` as a whole class; multi-surah enrollment; the
+             # operational mailer/7-night launch window; PAY-1's Stripe
+             # fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel` (v3-D188); `StripeField.editable`
+             # (v3-D204); `corpusHash`'s zero fold-side consumer (v3-D206);
+             # FR5's queue-level restart/replan/makeup behavior (v3-D217);
+             # `selection_determinism_check` still replaying a committed
+             # fixture; `GlossDraftsPanel.tsx`'s hardcoded caption vs.
+             # `shipping`/`excludedFromHashV1` (v3-D173, still non-divergent
+             # as wired); `lib/test/build.ts`/`TestIsland.tsx`'s `test_*`
+             # events still carrying no SITE coordinate (v3-D229); edge case
+             # #111's "fold clamps spacing at received_at" half, unimplemented
+             # anywhere (v3-D240) — all unchanged. `PrivacyPanel.tsx`'s own
+             # discarded `"failed"` reveal outcome is now CLOSED — remove it
+             # from future sweeps. See DECISIONS.md v3-D241.
              # NOTE (v3-D239, 2026-09-21): `corpus-compiler/src/io.ts
              # #readInputs` assembles `generatedFrom: string[]` (the raw
              # verses/geometry/ruku/mental-model files, plus the QAC

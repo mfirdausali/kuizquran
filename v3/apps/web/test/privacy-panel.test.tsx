@@ -151,6 +151,37 @@ describe("PrivacyPanel — reveal", () => {
     expect(bodies[1]).toMatchObject({ acknowledge_pii_warning: true });
   });
 
+  it("v3-D241 — a failed reveal request (a real 500, or a dropped connection) is shown to the admin, never silently swallowed", async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse({ error: "internal error" }, 500)) as unknown as typeof fetch;
+
+    render(<PrivacyPanel />);
+    fireEvent.change(screen.getByLabelText(/User id/i), { target: { value: "42" } });
+    fireEvent.change(screen.getByLabelText(/Details/i), { target: { value: "investigating ticket 4821" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reveal" }));
+
+    const failure = await screen.findByRole("alert");
+    expect(failure.textContent ?? "").toMatch(/500/);
+    // Neither an identity nor the pii-warning/not-found sentences leaked in —
+    // "failed" must render its OWN honest message, not one borrowed from a
+    // different outcome.
+    expect(screen.queryByTestId("reveal-result")).toBeNull();
+    expect(screen.queryByTestId("pii-warning")).toBeNull();
+  });
+
+  it("v3-D241 — a network-level failure (apiFetch throws) is shown to the admin too, not only a bad HTTP status", async () => {
+    globalThis.fetch = vi.fn(async () => {
+      throw new TypeError("network request failed");
+    }) as unknown as typeof fetch;
+
+    render(<PrivacyPanel />);
+    fireEvent.change(screen.getByLabelText(/User id/i), { target: { value: "42" } });
+    fireEvent.change(screen.getByLabelText(/Details/i), { target: { value: "investigating ticket 4821" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reveal" }));
+
+    const failure = await screen.findByRole("alert");
+    expect(failure.textContent ?? "").toMatch(/network request failed/);
+  });
+
   it("re-check reports the server's own verdict, never a client-derived one", async () => {
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
       if (String(input).includes("/reveal/tok_1")) {

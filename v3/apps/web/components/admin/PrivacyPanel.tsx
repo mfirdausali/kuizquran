@@ -210,6 +210,19 @@ export function PrivacyPanel() {
             </p>
           ) : null}
 
+          {/* v3-D241: `revealIdentity()` returns a real `{state: "failed",
+              reason}` for a genuine network failure or a bad HTTP status
+              (lib/admin/reveal.ts's own header: "FAILURE IS A STATE, NEVER AN
+              EXCEPTION") — every other outcome (revealed/anonymous/not-found/
+              pii-warning/rejected) already has a render branch; this one did
+              not, so a real failure left the admin staring at an unchanged
+              form with no indication anything went wrong. */}
+          {result?.state === "failed" ? (
+            <p role="alert" className="caption">
+              {result.reason}
+            </p>
+          ) : null}
+
           <button type="button" className="btn" onClick={onReveal} disabled={!canSubmit}>
             Reveal
           </button>

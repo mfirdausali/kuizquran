@@ -22196,3 +22196,137 @@ silently into this one.
 
 `CycleResult.futureTs` is now CLOSED — remove it from future "computed, discarded
 one join short of a reader" sweeps. See DECISIONS.md v3-D240.
+
+## v3-D241 (2026-09-22) — a failed reveal-identity request left the admin staring at an unchanged form, with no indication anything went wrong
+
+`lib/admin/reveal.ts#revealIdentity()` — the client half of `Admin\RevealController`
+(build-plan step 24, M8, WIREFRAME §16), wired into `PrivacyPanel.tsx` at v3-D128 —
+has a real, reachable `{state: "failed", reason: string}` outcome, computed on two
+genuinely live paths: a thrown network error (`apiFetch` rejects — a dropped
+connection, a DNS failure) and a non-ok, non-422, non-404 HTTP status (a real `500`
+from the server, which this exact backend can return — `AdminRevealController
+::reveal()`'s own `DB::transaction()` closure has no catch of its own, so any
+database error there surfaces as a plain 500). The module's own header states this
+explicitly as the whole point of the design: "FAILURE IS A STATE, NEVER AN
+EXCEPTION — same discipline as `lib/admin/flags.ts`/`lib/admin/health.ts`." But
+`PrivacyPanel.tsx` never rendered it. `RevealResultView` (the component `result ?
+<RevealResultView result={result} now={now} /> : null` delegates to) branches on
+`"revealed"`/`"anonymous"`/`"not-found"` and falls through to `null` for anything
+else; the panel itself separately hand-renders `"pii-warning"` and `"rejected"`
+above the button. `"failed"` was covered by neither — `grep -n '"failed"'
+PrivacyPanel.tsx` returned nothing before this fix. An operator who typed a reason,
+clicked Reveal, and hit a real server error or a network drop saw the button simply
+stop being disabled again, with no error text, no banner, nothing distinguishing
+that outcome from having never clicked at all — on the one screen in this codebase
+whose entire job is showing an admin whether a privacy-sensitive request succeeded.
+
+This is the exact "computed on every real failure path, discarded one render branch
+short of the reader who should see it" shape this build has closed roughly 160
+times since v3-D82 — usually on a wire field silently dropped between a Laravel
+response and a TypeScript type, here on a CLIENT-SIDE computed state silently
+dropped between a typed union and its own render switch. The established
+convention across every sibling admin panel in this tree is to surface every real
+outcome, success or failure, verbatim: `FlagsPanel.tsx`'s kill/enable/acknowledge
+handlers all call `setMessage(outcome.message)` unconditionally, regardless of
+`outcome.ok`, and that message is always rendered — confirmed directly by reading
+the three call sites before writing any test. `PrivacyPanel.tsx` was the one
+surface that broke that convention, and specifically on its `reveal` action, not
+its `re-check` action (`onRecheck`'s own `check.state === "valid" ? ... : ...
+check.reason` already threads a `"failed"` `check.reason` through the else branch
+correctly — verified directly, this half was never broken).
+
+**Fixed**, one file, one new conditional block, mirroring the adjacent `"rejected"`
+branch's own shape exactly — no server change, no wire change, no new state
+invented (`"failed"` was already a real member of `RevealResult`):
+`PrivacyPanel.tsx` gains `{result?.state === "failed" ? <p role="alert"
+className="caption">{result.reason}</p> : null}`, placed directly beneath the
+existing `"rejected"` block and above the Reveal button, so a failure from either a
+fresh submission or (structurally, since both share the same `result` state) any
+future caller reads the same honest sentence `revealIdentity()` already
+constructed (`` `request failed: ${err.message}` `` for a thrown error, `` `the API
+answered ${status}` `` for a bad HTTP status) rather than silence.
+
+**RED confirmed directly**, two new cases in `test/privacy-panel.test.tsx` (7
+pre-existing cases untouched), both run against the tree BEFORE the production file
+was touched (`git status --porcelain` at the time showed only the two test cases
+added): a mocked `500` response and a mocked `fetch` throwing `TypeError("network
+request failed")` both failed identically — `screen.findByRole("alert")` timing
+out, since no `role="alert"` element existed anywhere in the rendered tree for
+either outcome. The first case also asserts the rendered text contains the real
+status code (`/500/`) and that neither `reveal-result` nor `pii-warning` leaked in
+— proving the fix must render `"failed"`'s OWN message, not borrow one of the other
+branches' testids or fall through to a different one by accident. Implemented,
+reran: 9/9 green (was 7, +2).
+
+**Verification.** `TZ=UTC make setup` from a fresh container, no
+`node_modules`/`vendor`/compiled corpus anywhere; ran clean, no retries needed. `git
+fetch origin main` confirmed `origin/main` and local `main` already agreed at
+`12eaddb` (v3-D240) — no stale-local-`main` trap this run. `TZ=UTC make test`:
+**2823 passing** (was 2821, +2 — exactly this run's two new tests; apps/web
+**1504**, was 1502; no other suite moved: 255 v2 vitest, 47 v2/api, 401 v3/api, 120
+corpus-compiler, 433 engine, 63 fold-runner), exit 0. `check-test-floor.mjs` (run as
+part of `make test`): OK, 2823 >= floor 1899 (+924 margin, unmoved, same discipline
+as every prior entry). `TZ=UTC make build`: exit 0, 30 routes (unchanged — no new
+route, one existing component edited). `npm run gates` (via `make build`'s own
+`prebuild` chain): all green — locked-css OK, 1 documented hunk, 294 v1 lines
+byte-identical; boundaries 319 files, unchanged count — no new production file, one
+existing file edited plus one existing test file; fonts degraded-but-non-blocking,
+pre-existing, 2/6 UI fonts present; corpus-morphology 362 words / corpus-glyphs 206
+codepoints across 4 artifacts, both unchanged — a client-side render-branch fix
+touches no corpus data. `npx tsc --noEmit`, run separately across all four v3 node
+packages (`apps/web`, `packages/engine`, `packages/corpus-compiler`,
+`worker/fold-runner`): clean in all four. No PHP file changed, so `pint` was not
+applicable. No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache
+diff produced by running the suite was reverted before committing, same discipline
+as every prior entry — `git status --porcelain -- v1 v2` empty immediately before
+committing). No Arabic codepoint (both changed files swept programmatically, in
+Python, over the Arabic, Arabic Supplement, Arabic Extended-A and both Presentation
+Forms Unicode blocks, plus a `\uXXXX`-escape and `fromCharCode`/`fromCodePoint`
+mention check: CLEAN — every new string is a TypeScript identifier, a docblock
+sentence, or a fixed English test-fixture message, never corpus text). No
+oracle/golden-log/fixture/snapshot regenerated — this diff touches one existing
+production file and one existing test file.
+
+Found by reading `PrivacyPanel.tsx`'s full render tree directly against
+`RevealResult`'s own declared union in `lib/admin/reveal.ts` — the same
+field-by-field / state-by-state technique this build's sweeps have used
+throughout, applied here to a client-computed discriminated union rather than a
+server wire type. Verified the established convention first, directly against
+three real call sites in `FlagsPanel.tsx`, before concluding this was a genuine
+deviation rather than an intentional design choice. Also checked and ruled out
+before landing on this candidate: `NightlyWindowLedger`/`Admin\NightlyWindowController`
+(re-confirmed fully wired, including `lastQuarantine`/`lastP1Findings`); `AdminRole`/
+`Admin\AdminRolesController` (re-confirmed fully wired — `granted_at`/`granted_by`
+both reach `AdminRolesPanel.tsx`); `Spec`/`SpecsController` (still deliberately
+unwired into any learner-facing route — the same larger re-architecture scope
+v3-D190 already named, not a one-night gap); `AccountDeletionRequest` and
+`PurgeLedgerEntry` (both fully wired since v3-D142); every field on
+`AdminRevealToken` (`expires_at`/`created_at_ms` are both genuinely internal-only —
+`created_at_ms` has no reader anywhere and none is warranted, since `expiresAt` is
+the one fact the wire response and `check()` already carry forward). E-07 (per-surah
+corpus fetch, unguarded) was re-checked directly against the current route table
+(`app/(app)/surah/[surah]/...`, `/plan`, `/progress`, `/drill`, `/practice`,
+`/workbench`, `/test`, `/home`) and remains genuinely unreachable — every real route
+still calls `loadCorpus`/`fetchCorpus`/`loadEffectiveCorpus` for exactly one surah
+per page load; multi-surah enrollment still does not exist. NOT addressed: every
+item on v3-D240's own "NOT addressed" list, unchanged — `DrillPicker.tsx`'s own
+unused `now` prop; the unused `atoms`/`corpus`/`sessions` IndexedDB object stores
+(v3-D232); `session_start`'s own "app-open → first drill" latency metric (v0.8);
+the streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole class;
+multi-surah enrollment; the operational mailer / 7-night launch window; PAY-1's
+Stripe fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy drift (v3-D127); `packages/engine/src/placement.ts`;
+`MacroFacts.litany.rhymeLabel` (v3-D188); `StripeField.editable` (v3-D204);
+`corpusHash`'s zero fold-side consumer (v3-D206); FR5's queue-level restart/replan/
+makeup behavior (v3-D217); `selection_determinism_check` still replaying a
+committed fixture; `GlossDraftsPanel.tsx`'s hardcoded caption vs.
+`shipping`/`excludedFromHashV1` (v3-D173, still non-divergent as wired);
+`lib/test/build.ts`/`TestIsland.tsx`'s `test_*` events still carrying no SITE
+coordinate (v3-D229); edge case #111's "fold clamps spacing at received_at" half,
+which has no implementation anywhere (v3-D240) — all unchanged.
+
+`PrivacyPanel.tsx`'s own discarded `"failed"` reveal outcome is now CLOSED — remove
+it from future "computed, discarded one join short of a reader" sweeps. See
+DECISIONS.md v3-D241.
