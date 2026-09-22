@@ -93,6 +93,14 @@ export interface MergeResult {
  *
  * One year ahead of the merge's `now`. Generous on purpose — this flags a
  * clock set to 2030, not a device a few hours off.
+ *
+ * All THREE clauses of this register entry are now built: "accept + flag" is
+ * `futureTs` below (v3-D240); "fold clamps spacing at received_at" is
+ * `packages/engine/src/rebuild.ts#effectiveTs` (v3-D242); "skew measured
+ * client-now vs server-now, not per-event" — the one this docblock used to
+ * merely quote — is `lib/sync/clockSkew.ts#measureClockSkew`, wired through
+ * `sync.ts#pullFromServer`'s own `PullResult.clockSkewMs` (v3-D243). Remove
+ * edge case #111 from future "still unimplemented" sweeps.
  */
 export const FUTURE_TS_TOLERANCE_MS = 365 * 24 * 60 * 60 * 1000;
 

@@ -34,8 +34,9 @@
 // no field for, so it is read directly from `token.ts` at the moment each
 // cycle finishes, the only point this file has a reliable "did this device's
 // bearer token just die" answer — PLUS #111's own far-future-timestamp flag
-// (v3-D240), which DOES live on `CycleResult` (via `pull.futureTs`) and
-// simply passes straight through with the rest of `result`. Reporting is the
+// (v3-D240) and its own device-level clock-skew measurement (v3-D243), both
+// of which DO live on `CycleResult` (via `pull.futureTs`/`pull.clockSkewMs`)
+// and simply pass straight through with the rest of `result`. Reporting is the
 // only thing this component does with a cycle's result beyond deciding
 // whether to retry; nothing here reads the summary back, and nothing about
 // #103's "never blocks" contract changes — `report()` is a synchronous,

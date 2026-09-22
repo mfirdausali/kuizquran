@@ -21,11 +21,12 @@ beforeEach(() => {
 });
 
 describe("starts at zero", () => {
-  it("current() is {cannotSync: 0, divergences: 0, futureTs: 0, authDead: false} before any report", () => {
+  it("current() is {cannotSync: 0, divergences: 0, futureTs: 0, clockSkewMs: null, authDead: false} before any report", () => {
     expect(syncSummary.current).toEqual({
       cannotSync: 0,
       divergences: 0,
       futureTs: 0,
+      clockSkewMs: null,
       authDead: false,
     });
   });
@@ -44,6 +45,7 @@ describe("report() overwrites, never accumulates", () => {
       cannotSync: 1,
       divergences: 0,
       futureTs: 0,
+      clockSkewMs: null,
       authDead: false,
     });
 
@@ -55,6 +57,7 @@ describe("report() overwrites, never accumulates", () => {
       cannotSync: 0,
       divergences: 0,
       futureTs: 0,
+      clockSkewMs: null,
       authDead: false,
     });
   });
@@ -69,6 +72,7 @@ describe("report() overwrites, never accumulates", () => {
       cannotSync: 0,
       divergences: 0,
       futureTs: 0,
+      clockSkewMs: null,
       authDead: true,
     });
 
@@ -77,6 +81,7 @@ describe("report() overwrites, never accumulates", () => {
       cannotSync: 0,
       divergences: 0,
       futureTs: 0,
+      clockSkewMs: null,
       authDead: false,
     });
   });
@@ -88,6 +93,7 @@ describe("v3-D240 — futureTs (#111 far-future timestamps, accepted and flagged
       cannotSync: 0,
       divergences: 0,
       futureTs: 0,
+      clockSkewMs: null,
       authDead: false,
     });
   });
@@ -114,8 +120,64 @@ describe("v3-D240 — futureTs (#111 far-future timestamps, accepted and flagged
       cannotSync: 0,
       divergences: 0,
       futureTs: 1,
+      clockSkewMs: null,
       authDead: false,
     });
+  });
+});
+
+// v3-D243: edge case #111's own third clause — "skew measured client-now vs
+// server-now, not per-event" — a DEVICE-level measurement independent of any
+// one event's own `ts`. See `lib/sync/clockSkew.ts`'s own header for why
+// this is a genuinely different fact from `futureTs` above.
+describe("v3-D243 — clockSkewMs (#111's device-level clock-skew measurement)", () => {
+  it("starts at null, never a fabricated 0", () => {
+    expect(syncSummary.current.clockSkewMs).toBeNull();
+  });
+
+  it("reflects exactly the last reported cycle's measurement, overwriting rather than accumulating", () => {
+    syncSummary.report({ quarantined: [], divergences: [], clockSkewMs: 42_000 }, false);
+    expect(syncSummary.current.clockSkewMs).toBe(42_000);
+
+    // A LATER cycle whose response carried no readable Date header must DROP
+    // the earlier measurement, not keep reporting a stale one — the same
+    // "current state, not a latch" property `authDead` already has.
+    syncSummary.report({ quarantined: [], divergences: [], clockSkewMs: null }, false);
+    expect(syncSummary.current.clockSkewMs).toBeNull();
+  });
+
+  it("is null when `report()`'s caller omits it entirely — a pre-v3-D243 call site keeps compiling and simply reports null", () => {
+    syncSummary.report({ quarantined: [], divergences: [] }, false);
+    expect(syncSummary.current.clockSkewMs).toBeNull();
+  });
+
+  it("a NEGATIVE skew (this device's clock is BEHIND the server) round-trips as-is, never clamped to zero", () => {
+    syncSummary.report({ quarantined: [], divergences: [], clockSkewMs: -15_000 }, false);
+    expect(syncSummary.current.clockSkewMs).toBe(-15_000);
+  });
+
+  it("notifies subscribers when only clockSkewMs changes", () => {
+    syncSummary.report({ quarantined: [], divergences: [] }, false);
+    const fn = vi.fn();
+    syncSummary.subscribe(fn);
+    fn.mockClear();
+    syncSummary.report({ quarantined: [], divergences: [], clockSkewMs: 90_000 }, false);
+    expect(fn).toHaveBeenCalledWith({
+      cannotSync: 0,
+      divergences: 0,
+      futureTs: 0,
+      clockSkewMs: 90_000,
+      authDead: false,
+    });
+  });
+
+  it("does NOT notify subscribers when clockSkewMs is unchanged, including null === null", () => {
+    syncSummary.report({ quarantined: [], divergences: [] }, false);
+    const fn = vi.fn();
+    syncSummary.subscribe(fn);
+    fn.mockClear();
+    syncSummary.report({ quarantined: [], divergences: [], clockSkewMs: null }, false);
+    expect(fn).not.toHaveBeenCalled();
   });
 });
 
@@ -128,6 +190,7 @@ describe("subscribe()", () => {
       cannotSync: 1,
       divergences: 0,
       futureTs: 0,
+      clockSkewMs: null,
       authDead: false,
     });
   });
@@ -141,6 +204,7 @@ describe("subscribe()", () => {
       cannotSync: 0,
       divergences: 1,
       futureTs: 0,
+      clockSkewMs: null,
       authDead: false,
     });
   });
@@ -158,6 +222,7 @@ describe("subscribe()", () => {
       cannotSync: 0,
       divergences: 0,
       futureTs: 0,
+      clockSkewMs: null,
       authDead: true,
     });
   });

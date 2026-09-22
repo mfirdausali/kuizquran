@@ -47,6 +47,20 @@
 // on `SyncSummary` itself) so no pre-existing call site needed touching —
 // the same "additive, no fixture churn" precedent `resumeMassed` set at
 // v3-D218.
+//
+// v3-D243 ADDS A FIFTH FACT: `clockSkewMs`, edge case #111's own THIRD
+// clause — "skew measured client-now vs server-now, NOT per-event" — quoted
+// verbatim by `merge.ts#FUTURE_TS_TOLERANCE_MS`'s own docblock and left
+// unbuilt by both v3-D240 (the per-EVENT `futureTs` flag above) and v3-D242
+// (the fold-side spacing clamp). This is a DEVICE-level measurement: how far
+// this device's own clock sits from the server's, read from the pull
+// response's own HTTP `Date` header (`clockSkew.ts`), independent of
+// whether any particular event happens to carry a bad `ts` on a given
+// cycle. Same wiring shape as `futureTs` — `pullFromServer` computes it on
+// every cycle (`PullResult.clockSkewMs`), `syncCycle()` already carries it
+// on `CycleResult` (this run widened both in the same pass, so there was no
+// "reaches one, not the other" gap to repeat), and it was one join short of
+// this module until now.
 
 import { useEffect, useState } from "react";
 import type { CycleResult } from "./sync.ts";
@@ -60,13 +74,26 @@ export interface SyncSummary {
    *  (accepted, never rejected, never rewritten — a clock-skew signal, not a
    *  sync failure). */
   futureTs: number;
+  /** #111's own THIRD clause: how far ahead (positive) or behind (negative)
+   *  this device's clock is from the server's, measured from the last pull
+   *  response's own `Date` header (`clockSkew.ts`) — a DEVICE-level fact,
+   *  independent of any one event's own `ts`, distinct from `futureTs`
+   *  above. `null` when it could not be measured on the last cycle — never a
+   *  fabricated 0. */
+  clockSkewMs: number | null;
   /** True once a 401 has been observed and not yet recovered from
    *  (`token.ts#isTokenDead()`). Every future cycle is wedged until a
    *  re-mint succeeds. */
   authDead: boolean;
 }
 
-const ZERO: SyncSummary = { cannotSync: 0, divergences: 0, futureTs: 0, authDead: false };
+const ZERO: SyncSummary = {
+  cannotSync: 0,
+  divergences: 0,
+  futureTs: 0,
+  clockSkewMs: null,
+  authDead: false,
+};
 
 class SyncSummaryStore {
   private value: SyncSummary = ZERO;
@@ -97,10 +124,20 @@ class SyncSummaryStore {
    * v3-D240 keeps compiling unchanged and simply reports zero. Re-appending
    * identical values is a no-op (no listener re-render for an unchanged
    * value).
+   *
+   * v3-D243 ADDS A FIFTH FACT: `clockSkewMs`, edge case #111's own third
+   * clause ("skew measured client-now vs server-now, not per-event") — see
+   * `clockSkew.ts`'s own header. Same "current state, not a latch" shape as
+   * `authDead`: a later cycle whose response carried no readable `Date`
+   * header must be able to report `null` again, dropping a stale earlier
+   * measurement. `result.clockSkewMs` is OPTIONAL (never
+   * `SyncSummary.clockSkewMs` itself) so a caller built before v3-D243 keeps
+   * compiling unchanged and simply reports `null`.
    */
   report(
     result: Pick<CycleResult, "quarantined" | "divergences"> & {
       futureTs?: readonly string[];
+      clockSkewMs?: number | null;
     },
     authDead: boolean,
   ): void {
@@ -108,12 +145,14 @@ class SyncSummaryStore {
       cannotSync: result.quarantined.length,
       divergences: result.divergences.length,
       futureTs: (result.futureTs ?? []).length,
+      clockSkewMs: result.clockSkewMs ?? null,
       authDead,
     };
     if (
       next.cannotSync === this.value.cannotSync &&
       next.divergences === this.value.divergences &&
       next.futureTs === this.value.futureTs &&
+      next.clockSkewMs === this.value.clockSkewMs &&
       next.authDead === this.value.authDead
     ) {
       return;

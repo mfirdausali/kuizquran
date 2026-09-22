@@ -49,10 +49,23 @@
 // device on this account has a badly-skewed clock, worth a learner's
 // attention on its own account. Defaults to the live count from
 // `lib/sync/summary.ts` when omitted, same discipline as the other three.
+//
+// `clockSkewMs` (v3-D243) is a FIFTH, distinct fact: edge case #111's own
+// THIRD clause — "skew measured client-now vs server-now, not per-event"
+// (`lib/sync/clockSkew.ts`). Unlike `futureTs` above, this is never derived
+// from any event's contents — it is this DEVICE's own clock, measured
+// directly against the server's on every sync cycle. Escalated only past
+// `CLOCK_SKEW_ALERT_MS`: an ordinary device drifts by seconds, and painting
+// an alarming message on every sync over a few seconds of transport noise
+// would train exactly the deafness this codebase's own determinism-check
+// severity taxonomy (`worker/fold-runner/src/severity.ts`) is built to
+// avoid at the nightly-monitor layer. Defaults to the live value from
+// `lib/sync/summary.ts` when omitted, same discipline as the other four.
 
 import { useCallback } from "react";
 import { useLogState } from "@/lib/idb/useLogState";
 import { countPending } from "@/lib/sync/outbox";
+import { CLOCK_SKEW_ALERT_MS } from "@/lib/sync/clockSkew";
 import { useSyncSummary } from "@/lib/sync/summary";
 
 export interface SyncStatusProps {
@@ -66,17 +79,35 @@ export interface SyncStatusProps {
   /** #111 far-future-timestamp events, accepted and flagged on the pull.
    *  Defaults to the live count from `lib/sync/summary.ts` when omitted. */
   futureTs?: number;
+  /** #111's own device-level clock-skew measurement, in milliseconds ahead
+   *  (positive) or behind (negative) the server. `null` = could not be
+   *  measured. Defaults to the live value from `lib/sync/summary.ts` when
+   *  omitted. */
+  clockSkewMs?: number | null;
   /** True once this device's bearer token has 401'd and not yet recovered
    *  (`token.ts#isTokenDead()`). Defaults to the live value from
    *  `lib/sync/summary.ts` when omitted. */
   authDead?: boolean;
 }
 
-export function SyncStatus({ cannotSync, divergences, futureTs, authDead }: SyncStatusProps) {
+export function SyncStatus({
+  cannotSync,
+  divergences,
+  futureTs,
+  clockSkewMs,
+  authDead,
+}: SyncStatusProps) {
   const live = useSyncSummary();
   const effectiveCannotSync = cannotSync ?? live.cannotSync;
   const effectiveDivergences = divergences ?? live.divergences;
   const effectiveFutureTs = futureTs ?? live.futureTs;
+  // NOT `??`: unlike the other props, `null` is a legitimate EXPLICIT value
+  // for this one ("measured, and there is no skew" is never the same claim
+  // as "not measurable" — but here the caller is deliberately overriding the
+  // live value with a KNOWN null, e.g. a test asserting "no escalation").
+  // `??` would treat that explicit `null` exactly like an omitted prop and
+  // silently fall through to the live summary instead of honouring it.
+  const effectiveClockSkewMs = clockSkewMs !== undefined ? clockSkewMs : live.clockSkewMs;
   const effectiveAuthDead = authDead ?? live.authDead;
 
   // Stable identity: an inline arrow would be a new function every render and
@@ -97,6 +128,9 @@ export function SyncStatus({ cannotSync, divergences, futureTs, authDead }: Sync
     effectiveCannotSync > 0 ? `${effectiveCannotSync} cannot sync` : null,
     effectiveDivergences > 0 ? `${effectiveDivergences} need review` : null,
     effectiveFutureTs > 0 ? `${effectiveFutureTs} future-dated` : null,
+    effectiveClockSkewMs !== null && Math.abs(effectiveClockSkewMs) > CLOCK_SKEW_ALERT_MS
+      ? `clock off by ${Math.round(Math.abs(effectiveClockSkewMs) / 60_000)}m`
+      : null,
   ].filter((f): f is string => f !== null);
   const escalation =
     facts.length > 0 ? (

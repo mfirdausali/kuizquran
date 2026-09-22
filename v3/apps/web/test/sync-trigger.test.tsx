@@ -166,6 +166,7 @@ describe("v3-D161 — every completed cycle reports to lib/sync/summary.ts", () 
       cannotSync: 0,
       divergences: 0,
       futureTs: 0,
+      clockSkewMs: null,
       authDead: false,
     });
 
@@ -176,6 +177,7 @@ describe("v3-D161 — every completed cycle reports to lib/sync/summary.ts", () 
       cannotSync: 1,
       divergences: 0,
       futureTs: 0,
+      clockSkewMs: null,
       authDead: false,
     });
   });
@@ -224,6 +226,7 @@ describe("v3-D240 — every completed cycle also reports #111 far-future timesta
       cannotSync: 0,
       divergences: 0,
       futureTs: 0,
+      clockSkewMs: null,
       authDead: false,
     });
 
@@ -234,6 +237,7 @@ describe("v3-D240 — every completed cycle also reports #111 far-future timesta
       cannotSync: 0,
       divergences: 0,
       futureTs: 1,
+      clockSkewMs: null,
       authDead: false,
     });
   });
@@ -271,6 +275,7 @@ describe("v3-D162 — every completed cycle also reports isTokenDead() into sync
       cannotSync: 0,
       divergences: 0,
       futureTs: 0,
+      clockSkewMs: null,
       authDead: true,
     });
   });
@@ -332,6 +337,71 @@ describe("v3-D162 — every completed cycle also reports isTokenDead() into sync
       await vi.advanceTimersByTimeAsync(10 * 60_000);
     });
     expect(syncSummary.current.authDead).toBe(false);
+  });
+});
+
+describe("v3-D243 — every completed cycle also reports the pull's own clock-skew measurement into syncSummary", () => {
+  it("carries a real Date-header-derived skew into syncSummary.clockSkewMs, so SyncStatus can escalate it", async () => {
+    // A real HTTP response, real `Date` header, read back through the real
+    // `syncCycle → pullFromServer → measureClockSkew` chain — never a
+    // stubbed number handed straight to the summary.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const path = String(url);
+        if (path.startsWith("/api/events") && (init?.method ?? "GET") === "GET") {
+          // This device's clock reads 12 minutes AHEAD of the server's own
+          // Date header.
+          return new Response(JSON.stringify({ events: [], nextCursor: 0, hasMore: false }), {
+            status: 200,
+            headers: { Date: new Date(Date.now() - 12 * 60_000).toUTCString() },
+          });
+        }
+        if (path === "/api/events" && init?.method === "POST") {
+          return new Response(JSON.stringify({ accepted: 0, ignored: 0 }), { status: 200 });
+        }
+        return new Response("{}", { status: 200 });
+      }),
+    );
+
+    expect(syncSummary.current.clockSkewMs).toBeNull();
+
+    render(<SyncTrigger />);
+
+    await waitFor(() => expect(syncSummary.current.clockSkewMs).not.toBeNull());
+    // Wide tolerance: the test itself calls Date.now() again to build the
+    // header and again to compare, so a few ms of real wall-clock drift
+    // between those two calls is expected and irrelevant to the property
+    // under test (that a REAL header value reaches the summary at all).
+    expect(syncSummary.current.clockSkewMs).toBeGreaterThan(11 * 60_000);
+    expect(syncSummary.current.clockSkewMs).toBeLessThan(13 * 60_000);
+  });
+
+  it("reports null again on a LATER cycle whose response carries no Date header", async () => {
+    let withDateHeader = true;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const path = String(url);
+        if (path.startsWith("/api/events") && (init?.method ?? "GET") === "GET") {
+          return new Response(
+            JSON.stringify({ events: [], nextCursor: 0, hasMore: false }),
+            {
+              status: 200,
+              headers: withDateHeader ? { Date: new Date(Date.now() - 60_000).toUTCString() } : {},
+            },
+          );
+        }
+        return new Response("{}", { status: 200 });
+      }),
+    );
+
+    render(<SyncTrigger />);
+    await waitFor(() => expect(syncSummary.current.clockSkewMs).not.toBeNull());
+
+    withDateHeader = false;
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => expect(syncSummary.current.clockSkewMs).toBeNull());
   });
 });
 

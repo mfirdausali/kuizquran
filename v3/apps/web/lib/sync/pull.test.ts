@@ -393,3 +393,40 @@ describe("#50 divergences and #111 flags surface from the pull", () => {
     expect(result.futureTs).toEqual(["future"]);
   });
 });
+
+// v3-D243: edge case #111's own third clause — "skew measured client-now vs
+// server-now, not per-event" — a DEVICE-level measurement, from the pull
+// response's own HTTP `Date` header, independent of any event's own `ts`.
+describe("v3-D243 — clockSkewMs, measured from the pull response's own Date header", () => {
+  it("measures a real skew from the response's Date header against ctx.now", async () => {
+    const requests: string[] = [];
+    vi.stubGlobal("fetch", async (url: string) => {
+      requests.push(String(url));
+      // The server's own clock reads 40s BEHIND this device's `now` — this
+      // device is running fast.
+      return new Response(JSON.stringify({ events: [], nextCursor: 0, hasMore: false }), {
+        status: 200,
+        headers: { Date: new Date(NOW - 40_000).toUTCString() },
+      });
+    });
+    const result = await pullFromServer({ now: NOW });
+    expect(result.clockSkewMs).toBe(40_000);
+  });
+
+  it("degrades to null, never a fabricated 0, when the response carries no Date header", async () => {
+    // `installPullServer`'s stub (used throughout this file) never sets one —
+    // exactly the ordinary case for a bare `new Response(...)` in a test.
+    installPullServer([{ ingestId: 1, event: ev({ id: "e1", ts: 1 }) }]);
+    const result = await pullFromServer({ now: NOW });
+    expect(result.clockSkewMs).toBeNull();
+  });
+
+  it("is null on a cycle whose pull never receives a response at all", async () => {
+    vi.stubGlobal("fetch", async () => {
+      throw new TypeError("network down");
+    });
+    const result = await pullFromServer({ now: NOW });
+    expect(result.degraded).toBe("network");
+    expect(result.clockSkewMs).toBeNull();
+  });
+});

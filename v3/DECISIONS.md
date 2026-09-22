@@ -22524,3 +22524,184 @@ scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
 Edge case #111's "fold clamps spacing at received_at" is now CLOSED — remove it
 from future sweeps; only its third clause (skew measurement) remains open. See
 DECISIONS.md v3-D242.
+
+## v3-D243 (2026-09-22) — edge case #111's own third clause, closed: a per-device clock-skew measurement, independent of any one event's `ts`
+
+v3-D242's own closing note scoped this exactly: "an aggregate per-device skew
+ESTIMATE (comparing a device's own reported 'now' against the server's at sync
+time), distinct from both the per-event `futureTs` flag v3-D240 already built
+and the per-event clamp [v3-D242] built — left for a future run to scope
+deliberately rather than absorbed here." This is that run. Grep-reconfirmed
+before writing any code: every existing use of the word "skew" in this tree
+means either fold-runner ENGINE-VERSION skew (`worker/fold-runner/src/
+foldCheck.ts`'s WARN taxonomy) or #111's own per-event clock-skew SIGNAL
+(v3-D240/D242) — nothing anywhere measures THIS device's clock against the
+server's directly, independent of whether any particular event happens to
+carry a bad timestamp.
+
+**Why this is a genuinely different fact, not a rename of `futureTs`.** A
+device whose clock is wrong but has not yet pulled or pushed anything with a
+`ts` more than `FUTURE_TS_TOLERANCE_MS` (a year) away from now would never
+trip `merge.ts#futureTs` at all — the skew could be minutes, hours, or months,
+comfortably under that generous bound, and still be real, still be worth a
+learner's attention (a wrong clock corrupts spacing measurement in smaller,
+harder-to-notice ways long before it reaches "implausible"), and still
+invisible to every existing mechanism. `futureTs` is a property of an EVENT
+that happened to be pulled; this is a property of the DEVICE, measurable on
+every sync cycle regardless of whether anything was pulled that looked wrong.
+
+**The mechanism.** Every HTTP response carries a standard `Date` response
+header (RFC 9110 §6.6.1), stamped by the server at the moment it wrote the
+response — no new endpoint, no new wire field added to any event or response
+body. New `apps/web/lib/sync/clockSkew.ts#measureClockSkew(response, now)`
+reads it back (`Date.parse`) and returns `now - serverMs`: positive means this
+device is ahead, negative means behind, `null` when the header is absent or
+unparseable (a test double, or a stripping proxy) — never a fabricated `0`,
+since "could not measure" and "measured zero skew" are different claims. A new
+`CLOCK_SKEW_ALERT_MS` (5 minutes — two orders of magnitude below
+`FUTURE_TS_TOLERANCE_MS`, deliberately: this is meant to notice a badly-set
+clock long before it could ever reach the threshold that poisons an event's
+own spacing, not to flag ordinary transport noise) gates when it is worth
+surfacing to a learner at all.
+
+**Wired through the exact same chain `futureTs` (v3-D240) already uses**, so
+this run added no new plumbing shape: `sync.ts#pullFromServer` measures it
+once per successfully-received page (overwritten on each page, so the
+cycle's final value is the most recent measurement — the same "current
+state, not a delta" discipline every other field on `PullResult` already
+has) and carries it as a new `PullResult.clockSkewMs: number | null`;
+`CycleResult` mirrors it; `lib/sync/summary.ts#SyncSummary` gains a fifth
+field, `clockSkewMs`, optional on `report()`'s own input (never on
+`SyncSummary` itself) so no pre-existing call site needed touching, same
+"additive, no fixture churn" precedent `resumeMassed`/`futureTs` set;
+`SyncTrigger.tsx` needed no code change at all beyond a doc comment — it
+already passes the WHOLE `CycleResult` through to `report()`, so widening the
+type was sufficient; `SyncStatus.tsx` gains a fifth escalation fact,
+`clock off by Nm`, rendered only when `|clockSkewMs| > CLOCK_SKEW_ALERT_MS`,
+alongside (never folded into) the existing four.
+
+**One real bug caught while wiring the prop, not just the plumbing.** Every
+other `SyncStatusProps` field defaults via `prop ?? live.value` — correct for
+`cannotSync`/`divergences`/`futureTs` (numbers where an explicit `0` is a
+real override and `??` only triggers on `null`/`undefined`) and for
+`authDead` (a boolean, same reasoning). `clockSkewMs` is different: its
+domain legitimately INCLUDES `null` as a real value ("measured: no skew" is
+never claimed — "not measured" is the honest default), so an explicit
+`clockSkewMs={null}` prop — exactly what a test asserting "no escalation"
+would pass — collided with the OMITTED-prop sentinel, which is ALSO
+`undefined ?? live...`-shaped via `??`'s own null-coalescing. `??` cannot
+distinguish "caller explicitly said null" from "caller said nothing." Caught
+directly by RED: a test rendering `<SyncStatus clockSkewMs={null} />` against
+a live summary reporting a real 20-minute skew still showed the escalation —
+`expected <span>...</span> to be null` — because `null ?? live.clockSkewMs`
+evaluated to the live value, not `null`. Fixed with an explicit
+`clockSkewMs !== undefined ? clockSkewMs : live.clockSkewMs` check instead of
+`??`, the one prop on this component that needs it, with the reasoning
+recorded in-line so a future prop of this exact nullable-with-meaningful-null
+shape does not repeat the same `??` mistake.
+
+**A second, smaller catch: test-DOM collision, not a source bug.** This
+file's own established convention (`test/sync-status.test.tsx`'s header
+comment, "this file never unmounts between tests") means every `render()`
+across the whole file accumulates in the same `document.body`, confirmed by a
+throwaway repro against the *unmodified* file before writing any new test —
+which is why several of the file's own pre-existing tests already pick
+appendEvents() counts no OTHER unscoped query in the file reuses. One of this
+run's own first-drafted tests reused `appendEvents(2)` (already used, unscoped,
+by both an earlier "three states" test and the later `#103` test), and it
+broke the LATTER, unrelated, pre-existing `#103` test with `TestingLibraryElementError:
+Found multiple elements` once both renders had fully resolved — confirmed by
+running the isolated repro and by re-reading `getNodeText`'s own real source
+(`@testing-library/dom`, direct-child-TEXT-NODES only, not full
+`textContent` — verified directly rather than assumed) to understand exactly
+why a scoped query in the NEW test was not enough to protect an unrelated,
+unscoped query elsewhere in the same file. Fixed by picking an unused count
+(9) for that one test, with the reasoning recorded in a comment so a future
+addition to this file does not reintroduce the same collision.
+
+**RED confirmed independently at every layer**, each before any production
+file was touched: `lib/sync/clockSkew.test.ts` (6 cases) failed on the module
+not existing at all; `lib/sync/pull.test.ts`'s new `v3-D243` block (3 cases)
+failed on `result.clockSkewMs` reading `undefined` against the unmodified
+`pullFromServer`; `lib/sync/summary.test.ts` (6 new cases, plus 11
+pre-existing `toEqual` assertions across the file widened to include the new
+field, since `toEqual` fails on a missing expected key just as it does on an
+extra one) failed identically; `test/sync-status.test.tsx` (6 new cases) and
+`test/sync-trigger.test.tsx` (2 new cases, plus 5 pre-existing `toEqual`
+assertions widened) failed on `undefined` where `null` or a real number was
+expected. The load-bearing `sync-trigger.test.tsx` case drives a REAL
+`SyncTrigger` mount through a REAL `syncCycle → pullFromServer →
+measureClockSkew` chain against a stubbed `fetch` that sets a genuine `Date`
+header 12 minutes behind `Date.now()`, and asserts the measured value lands
+within a wide (12–13 minute) tolerance band — never a stubbed number handed
+straight to the summary. Restored, reran green throughout.
+
+`TZ=UTC make test` (full monorepo, all seven suites, fresh `make setup` +
+`make compile-corpus` on a clean checkout, apps/web's own `npm install` run
+directly rather than waiting on the full sequential `make setup` chain — the
+`@engine` alias resolves to source via `tsconfig`/`vitest.config.ts` path
+aliases, not an installed package, so this is a legitimate shortcut, not a
+skipped dependency): **2853 passing** (was 2830, +23 — exactly this run's new
+tests: 6 in `clockSkew.test.ts` + 3 in `pull.test.ts` + 6 in `summary.test.ts`
++ 6 in `sync-status.test.tsx` + 2 in `sync-trigger.test.tsx`; 255 v2 vitest +
+47 v2/api + 402 v3/api + 120 corpus-compiler + 439 engine + 63 fold-runner +
+**1527 apps/web**, was 1504; no other suite moved — this diff touches no
+PHP/engine/fold-runner file at all). `check-test-floor.mjs`: OK, 2853 >= floor
+1899 (+954 margin, unmoved, same discipline as every prior entry). `TZ=UTC
+make build`: exit 0, 30 routes (unchanged — no new route, no new component,
+this diff touches only existing `lib/sync/`+`components/shell/` files plus
+one new lib module). `npm run gates`: all green (locked-css OK, 1 documented
+hunk, 294 v1 lines byte-identical; boundaries 321 files, unchanged count — no
+new production file outside `lib/sync/clockSkew.ts`, and that module sits
+under the already-exempt `lib/sync/` egress surface, so no boundary clause
+needed touching; fonts degraded-but-non-blocking, pre-existing, 2/6 UI fonts
+present; corpus-morphology 362 words / corpus-glyphs 206 codepoints across 4
+artifacts, both unchanged — a transport-layer clock measurement touches no
+corpus data at all). `npx tsc --noEmit`: clean. No `v1/**`/`v2/**` edit (a
+stray `v2/tsconfig.tsbuildinfo` build-cache diff produced by running the
+suite was reverted before committing, same discipline as every prior entry —
+`git status --porcelain -- v1 v2` empty immediately before committing). No
+Arabic codepoint (every new/changed file swept programmatically, in Python,
+over the Arabic, Arabic Supplement, Arabic Extended-A and both Presentation
+Forms Unicode blocks, plus a `\u06xx`-escape and `fromCharCode`/
+`fromCodePoint` mention check: CLEAN — every new string is a TypeScript
+identifier, a docblock sentence, a millisecond arithmetic result, or a fixed
+English test-fixture message, never corpus text). No oracle/golden-log/
+fixture/snapshot regenerated — this diff touches no fixture, no golden log,
+no compiled corpus content (`make compile-corpus`/`make build` recompiled all
+four launch surahs as part of the gate chain and reproduced byte-identical
+`corpusHash` values to what CLAUDE.md's own running comment already records,
+confirmed directly rather than assumed). Session start: fresh container, no
+`node_modules`/`vendor`/compiled corpus anywhere; `HEAD`, local `main` and
+`origin/main` all agreed at `0f62b2f` (v3-D242) EXCEPT the local `main`
+BRANCH REF, which sat thirteen commits behind at `fcfe765` (v3-D229) — the
+recurring stale-local-`main` trap this file has recorded roughly fifty times
+since v3-D77 — caught before any exploration via `git fetch origin main` +
+`git checkout main && git merge --ff-only origin/main`, a clean fast-forward,
+no work lost or at risk. Found by reading v3-D242's own closing note directly
+(it had already scoped this exact gap by name, by mechanism, and by the
+concept it is distinct from) rather than dispatching a fresh sweep agent —
+independently re-verified the real absence of any client-now-vs-server-now
+measurement anywhere in the tree, and the real shape of `PullResult`/
+`CycleResult`/`SyncSummary`/`SyncStatusProps`, before writing any test. NOT
+addressed: `DrillPicker.tsx`'s own unused `now` prop; the unused
+`atoms`/`corpus`/`sessions` IndexedDB object stores (v3-D232);
+`session_start`'s own "app-open → first drill" latency metric (v0.8); the
+streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class; multi-surah enrollment; the operational mailer / 7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel` (v3-D188);
+`StripeField.editable` (v3-D204); `corpusHash`'s zero fold-side consumer
+(v3-D206); FR5's queue-level restart/replan/makeup behavior (v3-D217);
+`selection_determinism_check` still replaying a committed fixture;
+`GlossDraftsPanel.tsx`'s hardcoded caption vs. `shipping`/`excludedFromHashV1`
+(v3-D173, still non-divergent as wired); `lib/test/build.ts`/`TestIsland.tsx`'s
+`test_*` events still carrying no SITE coordinate (v3-D229) — all unchanged.
+
+Edge case #111 is now **fully CLOSED** — all three of its register clauses
+("accept + flag" / v3-D240, "fold clamps spacing at received_at" / v3-D242,
+"skew measured client-now vs server-now, not per-event" / this entry) are
+built and tested. Remove edge case #111 from all future sweeps entirely.

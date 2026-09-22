@@ -35,6 +35,7 @@ import { apiFetch, SyncAuthError, setIdentityChangeHandler } from "./apiFetch.ts
 import { getIdentity, getToken, hasLiveToken } from "./token.ts";
 import { readPullCursor, resetPullCursor } from "./cursor.ts";
 import { mergeFromServer, type Divergence } from "./merge.ts";
+import { measureClockSkew } from "./clockSkew.ts";
 import {
   advanceLowWaterIfProven,
   chunk,
@@ -73,6 +74,16 @@ export interface PullResult {
   skipped: number;
   divergences: Divergence[];
   futureTs: string[];
+  /** Edge case #111's own third clause: "skew measured client-now vs
+   *  server-now, not per-event" — how far ahead (positive) or behind
+   *  (negative) this device's clock is from the server's, measured from the
+   *  pull response's own HTTP `Date` header via `clockSkew.ts`. `null` when
+   *  no page was ever successfully received (a network failure, or a
+   *  server that never got the chance to answer) or the header was
+   *  unreadable — never a fabricated 0. Overwritten by each successfully
+   *  received page within the same cycle, mirroring `futureTs`'s own
+   *  "current state, not a delta" discipline one field above. */
+  clockSkewMs: number | null;
   cursor: number;
   degraded?: "auth" | "network" | "server";
 }
@@ -235,6 +246,7 @@ export async function pullFromServer(ctx: SyncContext): Promise<PullResult> {
     skipped: 0,
     divergences: [],
     futureTs: [],
+    clockSkewMs: null,
     cursor,
   };
 
@@ -253,6 +265,13 @@ export async function pullFromServer(ctx: SyncContext): Promise<PullResult> {
       result.degraded = "server";
       return result;
     }
+
+    // #111's third clause, measured once per RECEIVED page from the
+    // response's own transport-level `Date` header — never derived from any
+    // event's own `ts`. Overwritten on each page so the cycle's final value
+    // reflects the most recent measurement, the same "current state" shape
+    // every other field on this result already has.
+    result.clockSkewMs = measureClockSkew(response, ctx.now);
 
     const body = (await response.json()) as PullResponse;
     const events = Array.isArray(body.events) ? body.events : [];
@@ -303,6 +322,9 @@ export interface CycleResult {
    *  `PullResult.futureTs`, which this mirrors exactly (`divergences`'/
    *  `quarantined`'s own precedent one line above). */
   futureTs: string[];
+  /** #111's third clause — see `PullResult.clockSkewMs`, which this mirrors
+   *  exactly. `null` when the cycle's pull never received a page at all. */
+  clockSkewMs: number | null;
 }
 
 /**
@@ -349,6 +371,7 @@ export async function syncCycle(ctx: SyncContext): Promise<CycleResult> {
     divergences: pull?.divergences ?? [],
     quarantined: push?.quarantined ?? [],
     futureTs: pull?.futureTs ?? [],
+    clockSkewMs: pull?.clockSkewMs ?? null,
   };
 }
 

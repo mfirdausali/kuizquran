@@ -102,6 +102,48 @@ describe("the three states the count can be in", () => {
     expect(scoped.getByText(/4 need review/i)).toBeTruthy();
   });
 
+  // v3-D243: #111's own device-level clock-skew measurement (as opposed to
+  // v3-D240's own PER-EVENT futureTs count above) — a fifth, distinct fact.
+  // Escalates only PAST CLOCK_SKEW_ALERT_MS; an ordinary few seconds of
+  // transport noise must never paint an alarming message on every sync.
+  it("escalates a badly-skewed device clock, distinct from every other fact", async () => {
+    await appendEvents(1);
+    // 20 minutes is comfortably past CLOCK_SKEW_ALERT_MS (5 min).
+    const { container } = render(<SyncStatus clockSkewMs={20 * 60 * 1000} />);
+    const scoped = within(container);
+    await waitFor(() => expect(scoped.getByText(/1 waiting to sync/i)).toBeTruthy());
+    expect(scoped.getByText(/clock off by 20m/i)).toBeTruthy();
+  });
+
+  it("says nothing about a small, ordinary clock skew — transport noise, not a real problem", async () => {
+    // A count no other UNSCOPED query in this file uses (this file never
+    // unmounts between tests, so an accumulated render from an earlier or
+    // later test using the same count would make an unscoped query elsewhere
+    // in the suite ambiguous — see the v3-D161 block's own comment on this).
+    await appendEvents(9);
+    // 30 seconds is well under CLOCK_SKEW_ALERT_MS.
+    const { container } = render(<SyncStatus clockSkewMs={30_000} />);
+    const scoped = within(container);
+    await waitFor(() => expect(scoped.getByText(/9 waiting to sync/i)).toBeTruthy());
+    expect(scoped.queryByText(/clock off by/i)).toBeNull();
+  });
+
+  it("escalates a NEGATIVE skew (this device's clock is BEHIND the server) by its magnitude, not its sign", async () => {
+    await appendEvents(1);
+    const { container } = render(<SyncStatus clockSkewMs={-15 * 60 * 1000} />);
+    const scoped = within(container);
+    await waitFor(() => expect(scoped.getByText(/1 waiting to sync/i)).toBeTruthy());
+    expect(scoped.getByText(/clock off by 15m/i)).toBeTruthy();
+  });
+
+  it("says nothing when the skew could not be measured at all (null, never a fabricated 0)", async () => {
+    await appendEvents(1);
+    const { container } = render(<SyncStatus clockSkewMs={null} />);
+    const scoped = within(container);
+    await waitFor(() => expect(scoped.getByText(/1 waiting to sync/i)).toBeTruthy());
+    expect(scoped.queryByText(/clock off by/i)).toBeNull();
+  });
+
   // v3-D162: a dead token is a THIRD, distinct fact — not folded into
   // "cannot sync" (a quarantined event never syncs at all; a dead token
   // recovers on its own once a re-mint succeeds) and not silently absorbed
@@ -193,6 +235,25 @@ describe("v3-D161 — a REAL mount (no props) escalates from the live SyncTrigge
     const scoped = within(container);
     await waitFor(() => expect(scoped.getByText(/1 waiting to sync/i)).toBeTruthy());
     expect(scoped.queryByText(/future-dated/i)).toBeNull();
+  });
+
+  // v3-D243's own live-summary counterpart to the cases above.
+  it("renders the live clockSkewMs measurement from lib/sync/summary.ts when unprompted by a prop", async () => {
+    await appendEvents(1);
+    syncSummary.report({ quarantined: [], divergences: [], clockSkewMs: 20 * 60 * 1000 }, false);
+    const { container } = render(<SyncStatus />);
+    const scoped = within(container);
+    await waitFor(() => expect(scoped.getByText(/1 waiting to sync/i)).toBeTruthy());
+    expect(scoped.getByText(/clock off by 20m/i)).toBeTruthy();
+  });
+
+  it("an explicit clockSkewMs prop still overrides the live summary", async () => {
+    await appendEvents(1);
+    syncSummary.report({ quarantined: [], divergences: [], clockSkewMs: 20 * 60 * 1000 }, false);
+    const { container } = render(<SyncStatus clockSkewMs={null} />);
+    const scoped = within(container);
+    await waitFor(() => expect(scoped.getByText(/1 waiting to sync/i)).toBeTruthy());
+    expect(scoped.queryByText(/clock off by/i)).toBeNull();
   });
 });
 
