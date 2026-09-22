@@ -40,6 +40,15 @@
 // own once a re-mint succeeds, whereas a quarantined event never syncs at
 // all). Defaults to the live value from `lib/sync/summary.ts`, same
 // `?? ` — not a default-parameter — discipline as the other two props.
+//
+// `futureTs` (v3-D240) is a FOURTH, distinct fact: edge case #111's own
+// "accept + flag" for a pulled event whose `ts` sits over a year past this
+// device's clock. Never a sync failure and never folded into "cannot sync"
+// (the event synced fine — it is accepted, never rejected) or "need review"
+// (it is not a #50 payload disagreement) — it is its own signal, that some
+// device on this account has a badly-skewed clock, worth a learner's
+// attention on its own account. Defaults to the live count from
+// `lib/sync/summary.ts` when omitted, same discipline as the other three.
 
 import { useCallback } from "react";
 import { useLogState } from "@/lib/idb/useLogState";
@@ -54,16 +63,20 @@ export interface SyncStatusProps {
   /** #50 payload divergences observed on the pull. Defaults to the live
    *  count from `lib/sync/summary.ts` when omitted. */
   divergences?: number;
+  /** #111 far-future-timestamp events, accepted and flagged on the pull.
+   *  Defaults to the live count from `lib/sync/summary.ts` when omitted. */
+  futureTs?: number;
   /** True once this device's bearer token has 401'd and not yet recovered
    *  (`token.ts#isTokenDead()`). Defaults to the live value from
    *  `lib/sync/summary.ts` when omitted. */
   authDead?: boolean;
 }
 
-export function SyncStatus({ cannotSync, divergences, authDead }: SyncStatusProps) {
+export function SyncStatus({ cannotSync, divergences, futureTs, authDead }: SyncStatusProps) {
   const live = useSyncSummary();
   const effectiveCannotSync = cannotSync ?? live.cannotSync;
   const effectiveDivergences = divergences ?? live.divergences;
+  const effectiveFutureTs = futureTs ?? live.futureTs;
   const effectiveAuthDead = authDead ?? live.authDead;
 
   // Stable identity: an inline arrow would be a new function every render and
@@ -83,6 +96,7 @@ export function SyncStatus({ cannotSync, divergences, authDead }: SyncStatusProp
     effectiveAuthDead ? "sync paused, reconnecting" : null,
     effectiveCannotSync > 0 ? `${effectiveCannotSync} cannot sync` : null,
     effectiveDivergences > 0 ? `${effectiveDivergences} need review` : null,
+    effectiveFutureTs > 0 ? `${effectiveFutureTs} future-dated` : null,
   ].filter((f): f is string => f !== null);
   const escalation =
     facts.length > 0 ? (

@@ -33,11 +33,13 @@
 // `isTokenDead()` state (v3-D162) — a third fact `CycleResult` itself carries
 // no field for, so it is read directly from `token.ts` at the moment each
 // cycle finishes, the only point this file has a reliable "did this device's
-// bearer token just die" answer. Reporting is the only thing this component
-// does with a cycle's result beyond deciding whether to retry; nothing here
-// reads the summary back, and nothing about #103's "never blocks" contract
-// changes — `report()` is a synchronous, side-effect-free write to a module
-// value, not a second network call.
+// bearer token just die" answer — PLUS #111's own far-future-timestamp flag
+// (v3-D240), which DOES live on `CycleResult` (via `pull.futureTs`) and
+// simply passes straight through with the rest of `result`. Reporting is the
+// only thing this component does with a cycle's result beyond deciding
+// whether to retry; nothing here reads the summary back, and nothing about
+// #103's "never blocks" contract changes — `report()` is a synchronous,
+// side-effect-free write to a module value, not a second network call.
 //
 // BACKOFF, NOT A SPIN LOOP. `pushOutbox`/`pullFromServer` never throw into
 // `syncCycle` (every failure becomes a `degraded` field per-result) and

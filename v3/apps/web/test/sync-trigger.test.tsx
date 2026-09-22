@@ -162,12 +162,80 @@ describe("v3-D161 — every completed cycle reports to lib/sync/summary.ts", () 
       { now: 1_700_000_000_000, tz: "UTC" },
     );
 
-    expect(syncSummary.current).toEqual({ cannotSync: 0, divergences: 0, authDead: false });
+    expect(syncSummary.current).toEqual({
+      cannotSync: 0,
+      divergences: 0,
+      futureTs: 0,
+      authDead: false,
+    });
 
     render(<SyncTrigger />);
 
     await waitFor(() => expect(syncSummary.current.cannotSync).toBeGreaterThan(0));
-    expect(syncSummary.current).toEqual({ cannotSync: 1, divergences: 0, authDead: false });
+    expect(syncSummary.current).toEqual({
+      cannotSync: 1,
+      divergences: 0,
+      futureTs: 0,
+      authDead: false,
+    });
+  });
+});
+
+describe("v3-D240 — every completed cycle also reports #111 far-future timestamps into syncSummary", () => {
+  it("carries a real far-future PULLED event into syncSummary.futureTs, so SyncStatus can escalate it", async () => {
+    // A genuinely far-future row — over FUTURE_TS_TOLERANCE_MS (one year) past
+    // this device's own clock — pulled from the server, the same way a
+    // second device with a badly-skewed clock could actually produce one
+    // (#111: "accept + flag", never reject, never rewrite `ts`).
+    const farFutureTs = Date.now() + 400 * 24 * 60 * 60 * 1000;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const path = String(url);
+        if (path.startsWith("/api/events") && (init?.method ?? "GET") === "GET") {
+          return new Response(
+            JSON.stringify({
+              events: [
+                {
+                  type: "tap",
+                  ts: farFutureTs,
+                  surah: 112,
+                  ayah: 1,
+                  rung: "S1",
+                  id: "future-1",
+                  deviceId: "other-device",
+                  deviceSeq: 1,
+                },
+              ],
+              nextCursor: 1,
+              hasMore: false,
+            }),
+            { status: 200 },
+          );
+        }
+        if (path === "/api/events" && init?.method === "POST") {
+          return new Response(JSON.stringify({ accepted: 0, ignored: 0 }), { status: 200 });
+        }
+        return new Response("{}", { status: 200 });
+      }),
+    );
+
+    expect(syncSummary.current).toEqual({
+      cannotSync: 0,
+      divergences: 0,
+      futureTs: 0,
+      authDead: false,
+    });
+
+    render(<SyncTrigger />);
+
+    await waitFor(() => expect(syncSummary.current.futureTs).toBeGreaterThan(0));
+    expect(syncSummary.current).toEqual({
+      cannotSync: 0,
+      divergences: 0,
+      futureTs: 1,
+      authDead: false,
+    });
   });
 });
 
@@ -199,7 +267,12 @@ describe("v3-D162 — every completed cycle also reports isTokenDead() into sync
     render(<SyncTrigger />);
 
     await waitFor(() => expect(syncSummary.current.authDead).toBe(true));
-    expect(syncSummary.current).toEqual({ cannotSync: 0, divergences: 0, authDead: true });
+    expect(syncSummary.current).toEqual({
+      cannotSync: 0,
+      divergences: 0,
+      futureTs: 0,
+      authDead: true,
+    });
   });
 
   it("clears authDead again once a LATER cycle's re-mint succeeds", async () => {

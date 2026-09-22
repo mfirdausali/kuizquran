@@ -22050,3 +22050,149 @@ fixture; `GlossDraftsPanel.tsx`'s hardcoded caption vs.
 SITE coordinate (v3-D229) — all unchanged.
 
 `CorpusMeta.generatedFrom` is now CLOSED — remove it from future sweeps.
+
+## v3-D240 (2026-09-22) — `syncCycle()`'s own `CycleResult` never carried edge case #111's far-future-timestamp flag
+
+`lib/sync/merge.ts#mergeFromServer` has computed a real, per-page `futureTs: string[]`
+on every pull since the sync layer shipped — edge case #111's own "accept + flag": a
+pulled event whose `ts` sits more than a year past this device's clock is accepted
+into the log unconditionally (never rejected, never rewritten — rewriting a wire
+field would only manufacture a #50 digest divergence against the very row it came
+from), and its id is pushed onto the result so *something* downstream can flag it.
+`pullFromServer` carries that array on its own `PullResult.futureTs` faithfully,
+page after page. But `syncCycle()` — the one function that assembles the `CycleResult`
+every real reconciliation actually returns — built its return object field by field
+(`divergences: pull?.divergences ?? []`, `quarantined: push?.quarantined ?? []`) and
+never mentioned `futureTs` at all; `CycleResult`'s own interface didn't even declare
+the field. So the flag computed on every real pull had nowhere further to go: it
+never reached `lib/sync/summary.ts` (the module v3-D161/v3-D162 built specifically so
+`SyncTrigger`, the one place a real cycle runs, could report escalations to
+`SyncStatus`, the one place a learner reads them), and therefore never reached
+`SyncStatus.tsx`, and never reached any admin surface either — `grep -rln
+"futureTs" v3` (outside `merge.ts`/`sync.ts` and their own tests) returned nothing.
+A learner whose account had a device with a badly-skewed clock had no way to learn
+that fact from anywhere in the product, despite the sync layer already knowing it on
+every single pull.
+
+This is the exact "computed on every real cycle, discarded one join short of a
+reader" shape v3-D161 closed for `quarantined`/`divergences` and v3-D162 closed for
+`authDead` — on the one sibling field neither of those two runs' own field-by-field
+reads of `CycleResult`/`PullResult` happened to name (v3-D161's own header lists
+"the #110 quarantine / #50 divergence counts"; v3-D162 added a third, unrelated fact
+sourced from `token.ts`, not from `CycleResult` at all). Not cosmetic: #111 is a
+first-class edge case in BUILD-PLAN's own table, its own two words are "accept +
+flag", and the accept half worked while the flag half silently did nothing for
+every real learner who ever pulled a far-future row.
+
+**Fixed**, four files, no schema/wire change (the field already existed on
+`PullResult`, computed since the sync layer shipped): `CycleResult` gains
+`futureTs: string[]`; `syncCycle()`'s return object gains `futureTs: pull?.futureTs
+?? []`, mirroring `divergences`/`quarantined` exactly. `lib/sync/summary.ts`'s
+`SyncSummary` gains `futureTs: number`; `report()`'s own input type widens to `Pick<
+CycleResult, "quarantined" | "divergences"> & { futureTs?: readonly string[] }` —
+`futureTs` deliberately OPTIONAL on the input (never on `SyncSummary` itself), the
+same "additive, no fixture churn" precedent v3-D218 set for `resumeMassed`, so every
+pre-existing `report()` call site in both component test files kept compiling
+unchanged and simply reports zero; only the exact-shape `toEqual` assertions in
+`lib/sync/summary.test.ts` needed a `futureTs: 0` added, the same churn v3-D162's own
+`authDead` addition already caused there. `SyncTrigger.tsx` needed no code change at
+all — it already forwards the whole `result` object to `report()`, so widening
+`CycleResult` reaches it automatically; only its own docblock was updated to name
+the fourth fact. `SyncStatus.tsx` gains a `futureTs?: number` prop (same `??`-not-
+default-parameter discipline as the other three), and the escalation line gains one
+more clause, `"{n} future-dated"`, present only when the count is greater than
+zero, alongside — never in place of — `"{n} cannot sync"` and `"{n} need review"`:
+a far-future row is neither a #110 quarantine (it synced fine) nor a #50 divergence
+(its payload agrees with the server), so it earns its own word rather than being
+folded into either existing count.
+
+**RED confirmed directly, at all three layers**, each run against the tree BEFORE
+any production file was touched (`git status --porcelain` at the time showed only
+the three test files changed): the store-level cases in `lib/sync/summary.test.ts`
+(3 new, in a dedicated `v3-D240` describe block; 8 pre-existing untouched) failed
+exactly `expected undefined to be 2` / a missing `futureTs` key on the exact-shape
+`toEqual` — `report()`'s call ignored the extra `futureTs` array silently, since the
+field didn't exist on `SyncSummary` at all; 3 failed / 8 passed. The component-level
+wiring proof in `test/sync-trigger.test.tsx` (1 new case, mirroring v3-D161's own
+"carries a real #110 oversize quarantine" test exactly, but for a genuinely far-
+future PULLED event — a mocked `GET /api/events` response carrying one row with
+`ts: Date.now() + 400 days`, never a stubbed flag) failed on `expected
+syncSummary.current.futureTs to be greater than 0` timing out — the real cycle ran,
+merged the row, and its own computed `futureTs` array vanished at `syncCycle()`'s own
+return statement; 1 failed / 11 passed. The render-level proof in
+`test/sync-status.test.tsx` (3 new cases: an explicit prop renders the count
+alongside a *different* divergences count so neither can satisfy the other's
+assertion; the live-summary case proves the same wiring `cannotSync`/`divergences`/
+`authDead` already have, an explicit prop still overriding it) failed on
+`getByText(/future-dated/i)`/`getByText(/2 future-dated/i)` finding nothing; 3
+failed / 12 passed. All three restored to green after implementing, with the three
+pre-existing exact-shape assertions in `summary.test.ts` also updated to include
+`futureTs: 0` (unaffected in substance — none of those scenarios ever produce a
+far-future row): 11/11, 12/12, 15/15.
+
+**Verification.** `TZ=UTC make setup` from a fresh container, no
+`node_modules`/`vendor`/compiled corpus anywhere; ran clean, no retries needed. `git
+fetch origin main` confirmed `origin/main` and local `main` already agreed at
+`887c439` (v3-D239) — no stale-local-`main` trap this run. `TZ=UTC make test`:
+**2821 passing** (was 2814, +7 — exactly this run's new tests: 3 in
+`lib/sync/summary.test.ts`, 1 in `test/sync-trigger.test.tsx`, 3 in
+`test/sync-status.test.tsx`; apps/web **1502**, was 1495; no other suite moved: 255
+v2 vitest, 47 v2/api, 401 v3/api, 120 corpus-compiler, 433 engine, 63 fold-runner),
+exit 0. `check-test-floor.mjs` (run as part of `make test`): OK, 2821 >= floor 1899
+(+922 margin, unmoved). `TZ=UTC make build`: exit 0, 30 routes (unchanged — no new
+route, edits confined to the existing `lib/sync`/`components/shell` modules). `npm
+run gates` (via `make build`'s own `prebuild` chain): all green — locked-css OK, 1
+documented hunk, 294 v1 lines byte-identical; boundaries 319 files, unchanged count
+— no new production file, five existing files edited plus two existing test files;
+fonts degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology 362 words / corpus-glyphs 206 codepoints across 4 artifacts, both
+unchanged — a sync-layer-only wiring fix touches no corpus data. `npx tsc --noEmit`
+(apps/web): clean, exit 0. No PHP file changed, so `pint` was not applicable. No
+`v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff produced by
+running the suite was reverted before committing, same discipline as every prior
+entry — `git status --porcelain -- v1 v2` empty immediately before committing). No
+Arabic codepoint (every changed file swept programmatically, in Python, over the
+Arabic, Arabic Supplement, Arabic Extended-A and both Presentation Forms Unicode
+blocks, plus a `\uXXXX`-escape and `fromCharCode`/`fromCodePoint` mention check:
+CLEAN — every new string is a TypeScript identifier, a docblock sentence, or a
+synthetic test-fixture id/coordinate, never corpus text). No oracle/golden-log/
+fixture/snapshot regenerated — this diff touches five existing production files
+and two existing test files, no fixture directory at all.
+
+Found by a fresh field-by-field sweep of `lib/sync/`'s own wire-adjacent result
+types (`PullResult`, `PushResult`, `CycleResult`, `SyncSummary`) against every real
+join between them — the same technique that closed `quarantined`/`divergences`
+(v3-D161) and `authDead` (v3-D162) on this exact chain, applied to the one field
+those two runs' own docblocks never named. Independently re-verified this run
+directly against `merge.ts#mergeFromServer`'s real `#111` branch, `sync.ts`'s real
+`pullFromServer`/`syncCycle` bodies, and `summary.ts`/`SyncStatus.tsx`'s real source
+before writing any test — confirming the field was genuinely computed on every real
+pull and genuinely absent from every downstream type, not merely unread by one lazy
+caller.
+
+**NOT addressed**: every item on v3-D239's own "NOT addressed" list, unchanged —
+`DrillPicker.tsx`'s own unused `now` prop; the unused `atoms`/`corpus`/`sessions`
+IndexedDB object stores (v3-D232); `session_start`'s own "app-open → first drill"
+latency metric (v0.8); the streak/away-day day-space mismatch (v3-D209);
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`; `App\Billing\TrialAttribution`
+(v3-D148); `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class; multi-surah enrollment; the operational mailer / 7-night launch window;
+PAY-1's Stripe fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy drift (v3-D127); `packages/engine/src/placement.ts`;
+`MacroFacts.litany.rhymeLabel` (v3-D188); `StripeField.editable` (v3-D204);
+`corpusHash`'s zero fold-side consumer (v3-D206); FR5's queue-level restart/replan/
+makeup behavior (v3-D217); `selection_determinism_check` still replaying a
+committed fixture; `GlossDraftsPanel.tsx`'s hardcoded caption vs.
+`shipping`/`excludedFromHashV1` (v3-D173, still non-divergent as wired);
+`lib/test/build.ts`/`TestIsland.tsx`'s `test_*` events still carrying no SITE
+coordinate (v3-D229) — all unchanged. Also newly recorded as a verified negative,
+so a future run does not re-open it: edge case #111's OTHER stated half, "fold
+clamps spacing at received_at," has no implementation anywhere in
+`packages/engine/src` or the Laravel ingestion path (`received_at` is not even a
+column on `events`) — a real, separate, larger gap than this run's own scope
+(server-side clamping needs a new column and a fold-side read of it, not a client
+wiring fix), left for a future run to decide deliberately rather than absorbed
+silently into this one.
+
+`CycleResult.futureTs` is now CLOSED — remove it from future "computed, discarded
+one join short of a reader" sweeps. See DECISIONS.md v3-D240.

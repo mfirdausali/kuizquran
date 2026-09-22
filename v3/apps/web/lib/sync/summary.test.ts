@@ -21,8 +21,13 @@ beforeEach(() => {
 });
 
 describe("starts at zero", () => {
-  it("current() is {cannotSync: 0, divergences: 0, authDead: false} before any report", () => {
-    expect(syncSummary.current).toEqual({ cannotSync: 0, divergences: 0, authDead: false });
+  it("current() is {cannotSync: 0, divergences: 0, futureTs: 0, authDead: false} before any report", () => {
+    expect(syncSummary.current).toEqual({
+      cannotSync: 0,
+      divergences: 0,
+      futureTs: 0,
+      authDead: false,
+    });
   });
 });
 
@@ -35,13 +40,23 @@ describe("report() overwrites, never accumulates", () => {
       },
       false,
     );
-    expect(syncSummary.current).toEqual({ cannotSync: 1, divergences: 0, authDead: false });
+    expect(syncSummary.current).toEqual({
+      cannotSync: 1,
+      divergences: 0,
+      futureTs: 0,
+      authDead: false,
+    });
 
     // A LATER cycle with fewer quarantined rows (the operator fixed it, or a
     // stale row finally aged past this device's log) must DROP the old
     // count, not add to it.
     syncSummary.report({ quarantined: [], divergences: [] }, false);
-    expect(syncSummary.current).toEqual({ cannotSync: 0, divergences: 0, authDead: false });
+    expect(syncSummary.current).toEqual({
+      cannotSync: 0,
+      divergences: 0,
+      futureTs: 0,
+      authDead: false,
+    });
   });
 
   // v3-D162: `authDead` is likewise the CURRENT state, not a latch — a later
@@ -50,10 +65,57 @@ describe("report() overwrites, never accumulates", () => {
   // already have.
   it("reflects exactly the last reported cycle's authDead value, in both directions", () => {
     syncSummary.report({ quarantined: [], divergences: [] }, true);
-    expect(syncSummary.current).toEqual({ cannotSync: 0, divergences: 0, authDead: true });
+    expect(syncSummary.current).toEqual({
+      cannotSync: 0,
+      divergences: 0,
+      futureTs: 0,
+      authDead: true,
+    });
 
     syncSummary.report({ quarantined: [], divergences: [] }, false);
-    expect(syncSummary.current).toEqual({ cannotSync: 0, divergences: 0, authDead: false });
+    expect(syncSummary.current).toEqual({
+      cannotSync: 0,
+      divergences: 0,
+      futureTs: 0,
+      authDead: false,
+    });
+  });
+});
+
+describe("v3-D240 — futureTs (#111 far-future timestamps, accepted and flagged)", () => {
+  it("starts at zero", () => {
+    expect(syncSummary.current).toEqual({
+      cannotSync: 0,
+      divergences: 0,
+      futureTs: 0,
+      authDead: false,
+    });
+  });
+
+  it("reflects exactly the last reported cycle's count, overwriting rather than accumulating", () => {
+    syncSummary.report({ quarantined: [], divergences: [], futureTs: ["a", "b"] }, false);
+    expect(syncSummary.current.futureTs).toBe(2);
+
+    // A LATER cycle whose page carried no far-future rows must DROP the old
+    // count, not add to it — the same "current state, not a delta" property
+    // `cannotSync`/`divergences` already have, for the same reason:
+    // `pullFromServer`'s own loop re-derives `futureTs` fresh on every page.
+    syncSummary.report({ quarantined: [], divergences: [], futureTs: [] }, false);
+    expect(syncSummary.current.futureTs).toBe(0);
+  });
+
+  it("notifies subscribers when only futureTs changes", () => {
+    syncSummary.report({ quarantined: [], divergences: [], futureTs: [] }, false);
+    const fn = vi.fn();
+    syncSummary.subscribe(fn);
+    fn.mockClear();
+    syncSummary.report({ quarantined: [], divergences: [], futureTs: ["a"] }, false);
+    expect(fn).toHaveBeenCalledWith({
+      cannotSync: 0,
+      divergences: 0,
+      futureTs: 1,
+      authDead: false,
+    });
   });
 });
 
@@ -62,7 +124,12 @@ describe("subscribe()", () => {
     syncSummary.report({ quarantined: [{ id: "a", bytes: 9_000 }], divergences: [] }, false);
     const fn = vi.fn();
     syncSummary.subscribe(fn);
-    expect(fn).toHaveBeenCalledWith({ cannotSync: 1, divergences: 0, authDead: false });
+    expect(fn).toHaveBeenCalledWith({
+      cannotSync: 1,
+      divergences: 0,
+      futureTs: 0,
+      authDead: false,
+    });
   });
 
   it("notifies subscribers on a real change", () => {
@@ -70,7 +137,12 @@ describe("subscribe()", () => {
     syncSummary.subscribe(fn);
     fn.mockClear();
     syncSummary.report({ quarantined: [], divergences: [DIVERGENCE] }, false);
-    expect(fn).toHaveBeenCalledWith({ cannotSync: 0, divergences: 1, authDead: false });
+    expect(fn).toHaveBeenCalledWith({
+      cannotSync: 0,
+      divergences: 1,
+      futureTs: 0,
+      authDead: false,
+    });
   });
 
   // v3-D162: a change in ONLY authDead — the two counts unchanged — must
@@ -82,7 +154,12 @@ describe("subscribe()", () => {
     syncSummary.subscribe(fn);
     fn.mockClear();
     syncSummary.report({ quarantined: [], divergences: [] }, true);
-    expect(fn).toHaveBeenCalledWith({ cannotSync: 0, divergences: 0, authDead: true });
+    expect(fn).toHaveBeenCalledWith({
+      cannotSync: 0,
+      divergences: 0,
+      futureTs: 0,
+      authDead: true,
+    });
   });
 
   it("does NOT notify subscribers when the reported counts are unchanged", () => {

@@ -32,6 +32,21 @@
 // offline/pending — a dead token stops EVERY future cycle from doing
 // anything at all, not just this one — so it gets its own field, same
 // discipline as keeping `cannotSync` and `divergences` from sharing a number.
+//
+// v3-D240 ADDS A FOURTH FACT: `futureTs`, edge case #111's own "accept +
+// flag" — `lib/sync/merge.ts#mergeFromServer` has flagged every PULLED event
+// whose own `ts` sits more than a year past this device's clock since the
+// sync layer shipped (`FUTURE_TS_TOLERANCE_MS`), and `pullFromServer` has
+// carried the count on its own `PullResult.futureTs` for exactly as long —
+// but `syncCycle()`'s own `CycleResult` never named the field at all, so it
+// could not reach even THIS module, let alone a screen: the same "computed
+// on every real cycle, discarded one join short of a reader" shape v3-D161
+// closed for `quarantined`/`divergences`, on the one sibling field neither
+// that run's nor v3-D162's own field-by-field read of `CycleResult`/
+// `PullResult` happened to name. Optional on `report()`'s own input (never
+// on `SyncSummary` itself) so no pre-existing call site needed touching —
+// the same "additive, no fixture churn" precedent `resumeMassed` set at
+// v3-D218.
 
 import { useEffect, useState } from "react";
 import type { CycleResult } from "./sync.ts";
@@ -41,13 +56,17 @@ export interface SyncSummary {
   cannotSync: number;
   /** #50 payload divergences observed on the last pull. */
   divergences: number;
+  /** #111: PULLED events accepted with a far-future `ts` on the last pull
+   *  (accepted, never rejected, never rewritten — a clock-skew signal, not a
+   *  sync failure). */
+  futureTs: number;
   /** True once a 401 has been observed and not yet recovered from
    *  (`token.ts#isTokenDead()`). Every future cycle is wedged until a
    *  re-mint succeeds. */
   authDead: boolean;
 }
 
-const ZERO: SyncSummary = { cannotSync: 0, divergences: 0, authDead: false };
+const ZERO: SyncSummary = { cannotSync: 0, divergences: 0, futureTs: 0, authDead: false };
 
 class SyncSummaryStore {
   private value: SyncSummary = ZERO;
@@ -70,19 +89,31 @@ class SyncSummaryStore {
    * row on every call, and a divergence is only ever current-pull-scoped.
    * `authDead` is likewise the CURRENT token state at the moment this cycle
    * finished, never latched — a later cycle whose re-mint succeeded must
-   * report `false` again, not leave a stale `true` behind. Re-appending
+   * report `false` again, not leave a stale `true` behind. `futureTs` is the
+   * same shape as `cannotSync`/`divergences`: `pullFromServer`'s own loop
+   * re-derives it fresh on every page, so a later cycle whose page carried
+   * no far-future rows must drop the old count too. `result.futureTs` is
+   * OPTIONAL (never `SyncSummary.futureTs` itself) so a caller built before
+   * v3-D240 keeps compiling unchanged and simply reports zero. Re-appending
    * identical values is a no-op (no listener re-render for an unchanged
    * value).
    */
-  report(result: Pick<CycleResult, "quarantined" | "divergences">, authDead: boolean): void {
+  report(
+    result: Pick<CycleResult, "quarantined" | "divergences"> & {
+      futureTs?: readonly string[];
+    },
+    authDead: boolean,
+  ): void {
     const next: SyncSummary = {
       cannotSync: result.quarantined.length,
       divergences: result.divergences.length,
+      futureTs: (result.futureTs ?? []).length,
       authDead,
     };
     if (
       next.cannotSync === this.value.cannotSync &&
       next.divergences === this.value.divergences &&
+      next.futureTs === this.value.futureTs &&
       next.authDead === this.value.authDead
     ) {
       return;

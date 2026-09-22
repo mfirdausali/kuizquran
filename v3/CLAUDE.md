@@ -53,9 +53,9 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2814 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2821 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 401 v3/api + 120 corpus-compiler
-             # + 433 engine + 63 fold-runner + 1495 apps/web. (v3-D239, 2026-09-21)
+             # + 433 engine + 63 fold-runner + 1502 apps/web. (v3-D240, 2026-09-22)
              # NOTE (v3-D239, 2026-09-21): `corpus-compiler/src/io.ts
              # #readInputs` assembles `generatedFrom: string[]` (the raw
              # verses/geometry/ruku/mental-model files, plus the QAC

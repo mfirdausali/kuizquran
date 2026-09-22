@@ -86,6 +86,22 @@ describe("the three states the count can be in", () => {
     await waitFor(() => expect(screen.getByText(/2 need review/i)).toBeTruthy());
   });
 
+  // v3-D240: #111's own "accept + flag" — a far-future-timestamp event is
+  // NOT a #50 divergence (its payload agrees with the server) and NOT a
+  // #110 quarantine (it synced fine) — its own distinct fact, its own
+  // distinct number.
+  it("surfaces #111 far-future timestamps as their own count, distinct from divergences", async () => {
+    // Scoped to this render, not the ambient `screen` — this file never
+    // unmounts between tests, and an earlier case already renders its own
+    // "2 need review" text into the accumulated DOM.
+    await appendEvents(1);
+    const { container } = render(<SyncStatus futureTs={3} divergences={4} />);
+    const scoped = within(container);
+    await waitFor(() => expect(scoped.getByText(/3 future-dated/i)).toBeTruthy());
+    // Both counts render side by side — neither absorbs the other.
+    expect(scoped.getByText(/4 need review/i)).toBeTruthy();
+  });
+
   // v3-D162: a dead token is a THIRD, distinct fact — not folded into
   // "cannot sync" (a quarantined event never syncs at all; a dead token
   // recovers on its own once a re-mint succeeds) and not silently absorbed
@@ -158,6 +174,25 @@ describe("v3-D161 — a REAL mount (no props) escalates from the live SyncTrigge
     const scoped = within(container);
     await waitFor(() => expect(scoped.getByText(/1 waiting to sync/i)).toBeTruthy());
     expect(scoped.queryByText(/sync paused/i)).toBeNull();
+  });
+
+  // v3-D240's own live-summary counterpart to the cases above.
+  it("renders the live futureTs count from lib/sync/summary.ts when unprompted by a prop", async () => {
+    await appendEvents(1);
+    syncSummary.report({ quarantined: [], divergences: [], futureTs: ["a", "b"] }, false);
+    const { container } = render(<SyncStatus />);
+    const scoped = within(container);
+    await waitFor(() => expect(scoped.getByText(/1 waiting to sync/i)).toBeTruthy());
+    expect(scoped.getByText(/2 future-dated/i)).toBeTruthy();
+  });
+
+  it("an explicit futureTs prop still overrides the live summary", async () => {
+    await appendEvents(1);
+    syncSummary.report({ quarantined: [], divergences: [], futureTs: ["a"] }, false);
+    const { container } = render(<SyncStatus futureTs={0} />);
+    const scoped = within(container);
+    await waitFor(() => expect(scoped.getByText(/1 waiting to sync/i)).toBeTruthy());
+    expect(scoped.queryByText(/future-dated/i)).toBeNull();
   });
 });
 

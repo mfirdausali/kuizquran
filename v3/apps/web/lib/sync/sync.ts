@@ -299,6 +299,10 @@ export interface CycleResult {
   pending: number;
   divergences: Divergence[];
   quarantined: QuarantinedEvent[];
+  /** #111: PULLED events accepted this cycle with a far-future `ts` — see
+   *  `PullResult.futureTs`, which this mirrors exactly (`divergences`'/
+   *  `quarantined`'s own precedent one line above). */
+  futureTs: string[];
 }
 
 /**
@@ -344,6 +348,7 @@ export async function syncCycle(ctx: SyncContext): Promise<CycleResult> {
     pending,
     divergences: pull?.divergences ?? [],
     quarantined: push?.quarantined ?? [],
+    futureTs: pull?.futureTs ?? [],
   };
 }
 
