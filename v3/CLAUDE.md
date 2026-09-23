@@ -53,9 +53,156 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2853 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2854 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 402 v3/api + 120 corpus-compiler
-             # + 439 engine + 63 fold-runner + 1527 apps/web. (v3-D243, 2026-09-22)
+             # + 439 engine + 63 fold-runner + 1528 apps/web. (v3-D244, 2026-09-23)
+             # NOTE (v3-D244, 2026-09-23): `lib/session/run.ts`'s own docblock,
+             # directly above `weakSpotOfferFor` (FR6 Door 2, v3-D106), still said
+             # "Door 3 (open practice) and the cold-success-adoption offer remain
+             # unwired, named here so a future run does not re-discover them as
+             # new." True the night it was written; false since v3-D117 wired Door
+             # 3 (`startOpenPractice`, exported later in this same file) and false
+             # since v3-D118 wired cold-success adoption
+             # (`adoptionOfferFor`/`acceptAdoption`, also in this file) — both
+             # confirmed real, both confirmed called from
+             # `components/session/SessionIsland.tsx`. The SAME file's own import-
+             # block comment, forty lines earlier, was correctly updated when each
+             # of those nights landed; only the older, more-detailed docblock
+             # directly above the function itself never caught up. Same "docblock
+             # says X, reality is Y" shape v3-D90/D110/D123/D236 each already
+             # closed elsewhere in this tree — sharper than most, since this
+             # sentence's own stated purpose was "named here so a future run does
+             # not re-discover them as new": a future run trusting this file's own
+             # comments in isolation would have been steered, by the ONE line whose
+             # entire job was preventing exactly that, into rebuilding something
+             # that already ships — the same failure shape v3-D77 Finding 0 and
+             # v3-D167's own process note both already named for a stale signpost
+             # costing real time.
+             #
+             # With DEFECTS.md's B1-B13/E-01..E-08 all closed (only PAY-1 open, by
+             # design) and every item on v3-D243's own "NOT addressed" list re-
+             # confirmed as genuinely larger-scope or already non-divergent, this
+             # run's own fresh sweep — a zero-external-caller pass over every
+             # `apps/web/lib/**` export (two false-positive shapes found and
+             # discarded: same-file-only usage, and a route registered via
+             # Laravel's `[Controller::class, 'method']` array syntax that a
+             # literal-call grep misses); a zero-caller pass over
+             # `packages/engine/src`, `packages/corpus-compiler/src` and
+             # `worker/fold-runner/src` (all three clean, matching every prior
+             # night); a public-method-vs-route-table pass over every
+             # `api/app/Http/Controllers/**` class; and a fresh security read of
+             # the two newest admin surfaces, `AdminBillingController::override()`/
+             # `AdminRolesController::index()`, against LAUNCH-CHECKLIST.md §16's
+             # own five-finding rubric (both already sound: no fabricated provider
+             # relationship, both raw ids pseudonymized, the write routed through
+             # the same guarded `EntitlementMachine::apply()` every webhook uses) —
+             # came back clean or already-closed everywhere except this one stale
+             # docblock.
+             #
+             # Fixed: one docblock, no production behavior change (both doors were
+             # already correctly wired) — the stale sentence replaced with a
+             # pointer to where each door's own real wiring lives and the nights
+             # that landed each, plus a dated CORRECTED note in
+             # v3-D90/D110/D123/D236's own style.
+             #
+             # RED confirmed directly, mirroring v3-D236's own AGREEMENT-not-
+             # wording technique: a new `describe` block in
+             # `lib/session/run.test.ts` locates the docblock by scanning the
+             # file's real source text, asserts it does not match `/door
+             # 3[\s\S]{0,120}remain unwired/i` or `/cold-success-adoption
+             # offer[\s\S]{0,40}remain unwired/i`, and — the biconditional half —
+             # separately asserts `SessionIsland.tsx`'s own real source text DOES
+             # reference `startOpenPractice`, `adoptionOfferFor` and
+             # `acceptAdoption`, so the check cannot pass by a docblock edit alone
+             # if the doors were somehow un-wired again. Run against the unmodified
+             # source (`git stash` of `run.ts` alone, the new test kept) it failed
+             # exactly as predicted, the docblock's own real text printed verbatim
+             # in the failure. Restored byte-identically, reran:
+             # `lib/session/run.test.ts` 98/98 green (was 97, +1).
+             #
+             # `TZ=UTC npx vitest run` (apps/web, full suite, `npm install` run
+             # directly rather than waiting on the sequential `make setup` chain —
+             # the `@engine` alias resolves to source via tsconfig/vitest.config.ts
+             # path aliases, not an installed package, the same shortcut v3-D243
+             # itself took): 1528 passing (was 1527, +1 — exactly this run's one
+             # new test; 108 files, all green). `check-test-floor.mjs`: OK, 2854 >=
+             # floor 1899 (+955 margin, unmoved). `TZ=UTC make build`: exit 0, 30
+             # routes (unchanged — one existing `lib/` file and its own test file,
+             # no new route or component). `npm run gates`: all green (locked-css
+             # OK, 1 documented hunk, 294 v1 lines byte-identical; boundaries 321
+             # files, unchanged count — no new production file; fonts degraded-but-
+             # non-blocking, pre-existing, 2/6 UI fonts present; corpus-morphology
+             # 362 words / corpus-glyphs 206 codepoints across 4 artifacts, both
+             # unchanged — a comment-only fix touches no corpus data). `npx tsc
+             # --noEmit` (apps/web): clean. `packages/engine` 439/439,
+             # `packages/corpus-compiler` 120/120, `worker/fold-runner` 63/63, `v2`
+             # vitest 255/255, `v2/api` 47/47, `v3/api` 402/402 (+2
+             # incomplete/PAY-1, +6 skipped) — all unchanged, this diff touches no
+             # PHP/engine/fold-runner/v1/v2 file at all. `TZ=UTC make test`: 2854
+             # passing (was 2853, +1 — exactly this run's one new test), exit 0.
+             #
+             # No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-
+             # cache diff produced by running the suite was reverted before
+             # committing, same discipline as every prior entry — `git status
+             # --porcelain -- v1 v2` empty immediately before committing). No
+             # Arabic codepoint (both changed files swept programmatically, in
+             # Python, over the Arabic, Arabic Supplement, Arabic Extended-A and
+             # both Presentation Forms Unicode blocks, plus a `\u06xx`-escape and
+             # `fromCharCode`/`fromCodePoint` mention check: CLEAN — every new
+             # string is a TypeScript identifier, a docblock sentence, or a regex
+             # literal, never corpus text). No oracle/golden-log/fixture/snapshot
+             # regenerated.
+             #
+             # Session start: fresh container, no `node_modules`/`vendor`/compiled
+             # corpus anywhere; `HEAD` and `origin/main` agreed at `0efabd6`
+             # (v3-D243), but the local `main` branch ref sat fourteen commits
+             # behind at `fcfe765` (v3-D229) — the recurring stale-local-`main`
+             # trap this file has recorded roughly fifty times since v3-D77 —
+             # caught before any exploration via `git fetch origin main` + `git
+             # checkout main && git merge --ff-only origin/main`, a clean fast-
+             # forward, no work lost or at risk. `make setup` failed partway on its
+             # first attempt (v2/api's own `composer install` hit the documented
+             # transient proxy timeout then a 300s git-mirror clone timeout on
+             # `laravel/pint`); every OTHER install (apps/web, engine, corpus-
+             # compiler, fold-runner, v2's own npm) is PHP-independent and was run
+             # directly and successfully in parallel; both v2/api's and v3/api's
+             # composer installs then completed cleanly on a retry with
+             # `COMPOSER_PROCESS_TIMEOUT=900`, the same recovery this file's
+             # history has recorded before, no code or config change.
+             #
+             # Found by re-reading v3-D117/v3-D118's own closing notes directly
+             # against every docblock in `run.ts` that references either door,
+             # after the mechanical zero-caller/security sweep above came back
+             # otherwise exhausted. NOT addressed: `DrillPicker.tsx`'s own unused
+             # `now` prop; the unused `atoms`/`corpus`/`sessions` IndexedDB object
+             # stores (v3-D232); `session_start`'s own "app-open -> first drill"
+             # latency metric (v0.8); the streak/away-day day-space mismatch
+             # (v3-D209); `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()`; `App\Billing\TrialAttribution`
+             # (v3-D148); `lib/pricing.ts#regionFromCountry()` (v3-D163);
+             # `PaywallGate` as a whole class — `PaywallGate::permitsReview()` re-
+             # confirmed this run as still having zero callers anywhere, including
+             # from `permitsIssuance()` in the same class, the same open product-
+             # design question v3-D88/D151/D219 already named, not a wiring gap;
+             # multi-surah enrollment; the operational mailer / 7-night launch
+             # window; PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+             # `packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+             # (v3-D188); `StripeField.editable` (v3-D204); `corpusHash`'s zero
+             # fold-side consumer (v3-D206); FR5's queue-level
+             # restart/replan/makeup behavior (v3-D217);
+             # `selection_determinism_check` still replaying a committed fixture;
+             # `GlossDraftsPanel.tsx`'s hardcoded caption vs.
+             # `shipping`/`excludedFromHashV1` (v3-D173, re-confirmed still non-
+             # divergent as wired); `lib/test/build.ts`/`TestIsland.tsx`'s `test_*`
+             # events still carrying no SITE coordinate (v3-D229) — all unchanged.
+             # This run's own zero-caller sweep across `apps/web/lib/**`,
+             # `packages/engine/src`, `packages/corpus-compiler/src` and
+             # `worker/fold-runner/src` came back genuinely clean beyond the one
+             # instance fixed here — a future run should not expect another same-
+             # shaped finding without a genuinely fresh corner or a willingness to
+             # take on one of the larger, deliberately-deferred items above. See
+             # DECISIONS.md v3-D244.
              # NOTE (v3-D243, 2026-09-22): edge case #111's own register entry
              # ("Far-future client ts... accept + flag; fold clamps spacing at
              # received_at; skew measured client-now vs server-now, not

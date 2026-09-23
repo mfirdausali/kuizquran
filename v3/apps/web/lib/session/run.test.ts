@@ -972,6 +972,51 @@ describe("v3-D106 — Door 2, 'weak-spot gym' after the assembled queue is done"
   });
 });
 
+// ---------------------------------------------------------------------------
+// v3-D106's OWN DOCBLOCK WENT STALE (nightly run, 2026-09-23)
+// ---------------------------------------------------------------------------
+// The docblock above `weakSpotOfferFor` (this file, "FR6 Door 2") said, in as
+// many words, "Door 3 (open practice) and the cold-success-adoption offer
+// remain unwired, named here so a future run does not re-discover them as
+// new." Both were wired two nights later — Door 3 at v3-D117
+// (`startOpenPractice`, exported below) and cold-success adoption at v3-D118
+// (`adoptionOfferFor`/`acceptAdoption`, also below) — but the ONE comment
+// whose entire purpose is steering a future run away from re-deriving an
+// already-closed gap never caught up. Same "docblock says X, reality is Y"
+// shape v3-D90/D110/D123/D236 each already closed elsewhere in this tree.
+// Left alone, this was exactly the trap those entries exist to prevent: a
+// future agent reading this file's own comments in isolation, top to bottom,
+// would have been pointed at work that already ships.
+//
+// Guarded the same way v3-D236 guarded `surahs.ts`'s own stale header: this
+// pins the AGREEMENT, not a wording — the claim is wrong precisely when a
+// real external caller exists, so the check reads BOTH files, and cannot
+// pass by merely deleting the sentence while leaving the doors genuinely
+// unwired again.
+describe("this file's own docblocks do not claim a wired door is unwired", () => {
+  const RUN_SRC = resolve(HERE, "run.ts");
+  const SESSION_ISLAND_SRC = resolve(HERE, "../../components/session/SessionIsland.tsx");
+
+  it("weakSpotOfferFor's docblock never claims Door 3 / cold-success adoption remain unwired", () => {
+    const runSrc = readFileSync(RUN_SRC, "utf8");
+    const decl = runSrc.indexOf("export async function weakSpotOfferFor");
+    expect(decl).toBeGreaterThan(-1);
+    const docblockStart = runSrc.lastIndexOf("/**", decl);
+    expect(docblockStart).toBeGreaterThan(-1);
+    const docblock = runSrc.slice(docblockStart, decl);
+
+    expect(docblock).not.toMatch(/door 3[\s\S]{0,120}remain unwired/i);
+    expect(docblock).not.toMatch(/cold-success-adoption offer[\s\S]{0,40}remain unwired/i);
+
+    // The biconditional half: the claim above is honest only if these two
+    // doors genuinely have no caller. Assert the opposite is real.
+    const islandSrc = readFileSync(SESSION_ISLAND_SRC, "utf8");
+    expect(islandSrc).toMatch(/\bstartOpenPractice\b/);
+    expect(islandSrc).toMatch(/\badoptionOfferFor\b/);
+    expect(islandSrc).toMatch(/\bacceptAdoption\b/);
+  });
+});
+
 // FR6's diminishing-returns nudge (`packages/engine/src/freeplay.ts#diminishingReturns`)
 // was real and unit-tested (`freeplay.test.ts`) since freeplay landed but had
 // ZERO production callers — v3-D106's own header named it out of scope: "the

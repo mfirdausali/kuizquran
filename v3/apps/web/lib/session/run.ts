@@ -1479,9 +1479,18 @@ export function startExtraLearn(run: SessionRun, c: Corpus, ayah: number): Sessi
  * (v3-D98), but had zero production callers — that entry's own header named
  * Door 2 and Door 3 explicitly out of scope: "each need[s] a real UI surface
  * of their own (a ranked list, an any-ayah picker) that does not exist." This
- * is that surface for Door 2 only; Door 3 (open practice) and the
- * cold-success-adoption offer remain unwired, named here so a future run
- * does not re-discover them as new.
+ * is that surface for Door 2. Door 3 (open practice, `startOpenPractice`
+ * below) and cold-success adoption (`adoptionOfferFor`/`acceptAdoption`,
+ * near the bottom of this file) were each wired in their own later runs —
+ * v3-D117 and v3-D118 respectively.
+ *
+ * CORRECTED (nightly run, 2026-09-23): this sentence used to still say both
+ * "remain unwired, named here so a future run does not re-discover them as
+ * new" — true when it was written, false from the night v3-D117 landed, and
+ * never caught up. Same "docblock says X, reality is Y" shape v3-D90/D110/
+ * D123/D236 each already closed elsewhere in this tree — the one comment
+ * whose entire job is steering a future run away from re-deriving an
+ * already-closed gap had become the thing steering it wrong.
  *
  * Only "ayah" atoms are offered: a "connection" atom (n→n+1) has no
  * reconstruct surface in v3 — `bridge.ts` was atticked at the engine port and

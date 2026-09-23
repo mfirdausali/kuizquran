@@ -22705,3 +22705,168 @@ Edge case #111 is now **fully CLOSED** — all three of its register clauses
 ("accept + flag" / v3-D240, "fold clamps spacing at received_at" / v3-D242,
 "skew measured client-now vs server-now, not per-event" / this entry) are
 built and tested. Remove edge case #111 from all future sweeps entirely.
+
+
+---
+
+## v3-D244 (2026-09-23) — `lib/session/run.ts`'s own docblock claimed a wired door was still unwired
+
+**Reconciliation first.** Local `main` was found detached (`0efabd6`, matching
+`origin/main`'s real tip, v3-D243) with the local `main` BRANCH REF fourteen
+commits behind at `fcfe765` (v3-D229) — the recurring stale-local-`main` trap
+this file has recorded roughly fifty times since v3-D77 — caught before any
+exploration via `git fetch origin main` + `git checkout main && git merge
+--ff-only origin/main`, a clean fast-forward, no work lost or at risk.
+
+**The sweep.** With DEFECTS.md's B1–B13/E-01…E-08 all CLOSED (the only open
+line is PAY-1, correctly incomplete by design), and every item on v3-D243's
+own "NOT addressed" list re-confirmed as either genuinely larger-scope
+(multi-surah enrollment, the live-Stripe-gated `TrialAttribution`/`PaywallGate`
+class, the SMTP/staging-gated operational mailer and 7-night window, surah
+67's human-authored scene beats, `rhymeClassOf()`'s missing vendored rhyme
+data) or already re-verified non-divergent (`GlossDraftsPanel.tsx`'s caption
+vs. `shipping`/`excludedFromHashV1`, v3-D173), this run swept for a fresh
+instance of the same "mechanism built and tested, zero production caller"
+class by hand rather than dispatching a fresh Explore sweep: a zero-external-
+caller pass over every exported `apps/web/lib/**` function (corrected for two
+false-positive shapes — a function used only elsewhere WITHIN its own
+defining file, and a route registered via Laravel's `[Controller::class,
+'method']` array syntax rather than a literal `Controller::method(` call,
+both of which produced false "zero caller" hits on a first pass and were
+individually re-verified before being discarded); a zero-caller pass over
+`packages/engine/src`, `packages/corpus-compiler/src` and
+`worker/fold-runner/src` (all three came back clean, matching every prior
+night's own conclusion); a public-method-vs-route-table pass over every
+`api/app/Http/Controllers/**` class; and a fresh reading of
+`AdminBillingController::override()`/`AdminRolesController::index()` (the two
+newest admin write/read surfaces, built after LAUNCH-CHECKLIST.md's own
+"security review of admin routes" §16 was last updated) against that
+section's own five-finding rubric (raw-id-by-value lookups, missing audit
+rows, versionless concurrency checks, unenforced append-only grants,
+role-gating bypasses) — both are already sound: `override()` never lets an
+admin fabricate a `provider`/`provider_subscription_id` relationship or
+backdate `current_period_end`/`grace_until`, both raw ids are pseudonymized
+on the way out, and the write is routed through the same guarded
+`EntitlementMachine::apply()` every webhook already uses. All of the above
+came back clean or already-closed — genuinely exhausted, not merely
+unchecked.
+
+**What DID survive.** `lib/session/run.ts`'s own docblock, immediately above
+`weakSpotOfferFor` (FR6 Door 2, v3-D106), still said — in as many words —
+"Door 2 and Door 3 explicitly out of scope... this is that surface for Door 2
+only; Door 3 (open practice) and the cold-success-adoption offer remain
+unwired, named here so a future run does not re-discover them as new." That
+was true the night it was written. It has been false since v3-D117 wired
+Door 3 (`startOpenPractice`, exported later in the same file) and false since
+v3-D118 wired cold-success adoption (`adoptionOfferFor`/`acceptAdoption`,
+also in this file) — both confirmed real, both confirmed called from
+`components/session/SessionIsland.tsx` (`startOpenPractice` from the Door 3
+free-play flow, `adoptionOfferFor`/`acceptAdoption` from the post-Door-3
+summary screen's adoption offer). The SAME file's own import-block comment,
+forty lines earlier, was correctly updated when each of those two nights
+landed ("Cold-success adoption (v3-D117's own deferral, wired here)... See
+`adoptionOfferFor`/`acceptAdoption` near the bottom of this file for the full
+write-up") — only the older, more-detailed docblock sitting directly above
+the function itself never got the memo.
+
+Same "docblock says X, reality is Y" shape v3-D90/D110/D123/D236 each already
+closed elsewhere in this tree — and a sharper instance of it than most: this
+particular sentence's own stated PURPOSE was "named here so a future run does
+not re-discover them as new." A future run trusting this file's own history,
+read top to bottom, in isolation — exactly the working method NIGHTLY.md
+itself prescribes when HANDOVER.md or a stale note is unavailable — would
+have been told, by the one comment whose entire job was to prevent exactly
+that, to go build something that already ships. That is the same failure
+shape v3-D77 Finding 0 named for a stale `NIGHTLY.md` line ("cost a run
+several hours of reconciliation") and v3-D167's own process note named for a
+stale local-`main` reconciliation — a wrong signpost is not a neutral defect
+in this codebase, it is the one thing this build's own discipline has
+repeatedly gone out of its way to prevent.
+
+**Fixed, one docblock, no production behavior change (both doors were
+already correctly wired — only the comment describing them was wrong):**
+the stale sentence is replaced with a pointer to where each door's own real
+wiring lives (`startOpenPractice` below; `adoptionOfferFor`/`acceptAdoption`
+near the bottom of the file) and the nights that landed each
+(v3-D117/v3-D118), plus an explicit CORRECTED note dated and reasoned exactly
+like v3-D90/D110/D123/D236's own corrections.
+
+**RED confirmed directly**, mirroring v3-D236's own AGREEMENT-not-wording
+technique exactly (a wrong sentence is forbidden, but only conditionally on
+the code it describes actually being wrong — so the test cannot pass by
+merely deleting prose while leaving the doors genuinely unwired): a new
+`describe` block in `lib/session/run.test.ts` locates `weakSpotOfferFor`'s
+own docblock by scanning the file's real source text between its nearest
+preceding `/**` and the function's own declaration, asserts it does not
+match `/door 3[\s\S]{0,120}remain unwired/i` or
+`/cold-success-adoption offer[\s\S]{0,40}remain unwired/i`, and — the
+biconditional half — separately asserts `SessionIsland.tsx`'s own real
+source text DOES reference `startOpenPractice`, `adoptionOfferFor` and
+`acceptAdoption`, so the check cannot be satisfied by a docblock edit alone
+if those doors were somehow un-wired again. Run against the UNMODIFIED
+source (`git stash` of `run.ts` alone, the new test kept) it failed exactly
+as predicted: `expected '/**\n * FR6 Door 2 — "weak-spot gym" …' not to match
+/door 3[\s\S]{0,120}remain unwired/i` — the docblock's own real text, printed
+verbatim in the failure. Restored the fix byte-identically (`git diff`
+empty before reapplying), reran: `lib/session/run.test.ts` 98/98 green (was
+97, +1 — exactly this run's one new test).
+
+`TZ=UTC npx vitest run` (apps/web, full suite, from a fresh `npm install` run
+directly rather than waiting on the sequential `make setup` chain — the
+`@engine` alias resolves to source via `tsconfig`/`vitest.config.ts` path
+aliases, not an installed package, the same legitimate shortcut v3-D243's own
+entry took): **1528 passing** (was 1527, +1 — exactly this run's one new
+test; 108 test files, all green). `check-test-floor.mjs`: OK, 2854 >=
+floor 1899 (+955 margin, unmoved, same discipline as every prior
+entry). `TZ=UTC make build`: exit 0, 30 routes (unchanged — no new route, no
+new component; this diff touches one existing `lib/` file and its own test
+file only). `npm run gates`: all green (locked-css OK, 1 documented hunk, 294
+v1 lines byte-identical; boundaries 321 files, unchanged count — no new
+production file; fonts degraded-but-non-blocking, pre-existing, 2/6 UI fonts
+present; corpus-morphology 362 words / corpus-glyphs 206 codepoints across 4
+artifacts, both unchanged — a comment-only fix touches no corpus data at
+all). `npx tsc --noEmit` (apps/web): clean. `packages/engine`'s own suite:
+439/439, unchanged (this diff touches no engine file).
+`packages/corpus-compiler`'s own suite: 120/120, unchanged (unrelated).
+`worker/fold-runner`'s own suite: 63/63, unchanged (unrelated). `v2/api`'s own suite: 47/47, unchanged (unrelated). `v3/api`'s own suite: 402/402 passing (+2 incomplete, PAY-1, by design; +6 skipped, unchanged), unchanged (unrelated — this diff touches no PHP file at all). `v2`'s own vitest suite: 255/255, unchanged (unrelated). `TZ=UTC make test` (the full seven-suite aggregate,`check-test-floor.mjs`): 2854 passing (was 2853, +1 — exactly this run's one new test), OK, 2854 >= floor 1899 (+955 margin, unmoved, same discipline as every prior entry).
+
+No `v1/**`/`v2/**` edit (`git status --porcelain -- v1 v2` empty immediately
+before committing). No Arabic codepoint (both changed files swept
+programmatically, in Python, over the Arabic, Arabic Supplement, Arabic
+Extended-A and both Presentation Forms Unicode blocks, plus a `\u06xx`-escape
+and `fromCharCode`/`fromCodePoint` mention check: CLEAN — every new string is
+a TypeScript identifier, a docblock sentence, or a regular-expression
+literal, never corpus text). No oracle/golden-log/fixture/snapshot
+regenerated — this diff touches no fixture, no golden log, no compiled
+corpus content at all.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled corpus
+anywhere. `make setup` failed partway through on its first attempt — `v2/api`'s own `composer install` hit the documented transient proxy timeout (`curl error 28`, "Proxy CONNECT aborted due to timeout") on a single dist download and then exceeded a 300-second git-mirror-fallback clone timeout for `laravel/pint`, exiting `make setup` with error 1 before it ever reached `v3/api`. Every OTHER dependency install in this run (`apps/web`, `packages/engine`, `packages/corpus-compiler`, `worker/fold-runner`, `v2`'s own `npm install`) is independent of PHP/Composer and was run directly and successfully in parallel while the retry was in flight — none of those five were blocked by the Composer failure, and running them ahead of the full sequential chain is the same legitimate shortcut named above. Both `v2/api` and `v3/api`'s `composer install` then completed cleanly on a retry with `COMPOSER_PROCESS_TIMEOUT=900` (15 minutes) — the same recovery this file's own history has recorded before — with no code or config change; `v3/api`'s retry additionally benefited from the shared Composer cache `v2/api`'s own install had just warmed with several overlapping PHPUnit-toolchain packages, finishing markedly faster.
+
+NOT addressed: `DrillPicker.tsx`'s own unused `now` prop; the unused
+`atoms`/`corpus`/`sessions` IndexedDB object stores (v3-D232 — `SessionRow`'s
+own docblock still names a `/quiz/[sessionId]` route that does not exist, and
+building a real caller for it is separate, larger-scoped work, re-confirmed
+this run); `session_start`'s own "app-open → first drill" latency metric
+(v0.8); the streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()`
+(v3-D136); `EntitlementMachine::merge()`; `App\Billing\TrialAttribution`
+(v3-D148); `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a
+whole class — `PaywallGate::permitsReview()` re-confirmed this run as still
+having zero callers anywhere, including from `permitsIssuance()` in the same
+class, the same open product-design question v3-D88/D151/D219 each already
+named, not a wiring gap; multi-surah enrollment; the operational mailer /
+7-night launch window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `StripeField.editable` (v3-D204); `corpusHash`'s zero fold-side
+consumer (v3-D206); FR5's queue-level restart/replan/makeup behavior
+(v3-D217); `selection_determinism_check` still replaying a committed
+fixture; `GlossDraftsPanel.tsx`'s hardcoded caption vs.
+`shipping`/`excludedFromHashV1` (v3-D173, re-confirmed still non-divergent
+as wired); `lib/test/build.ts`/`TestIsland.tsx`'s `test_*` events still
+carrying no SITE coordinate (v3-D229) — all unchanged. This run's own
+zero-caller sweep across `apps/web/lib/**`, `packages/engine/src`,
+`packages/corpus-compiler/src` and `worker/fold-runner/src` came back
+genuinely clean beyond the one instance fixed here — a future run should not
+expect another same-shaped finding without a genuinely fresh corner or a
+willingness to take on one of the larger, deliberately-deferred items above.
