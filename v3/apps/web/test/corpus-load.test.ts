@@ -51,7 +51,7 @@ describe("AVAILABLE_SURAHS covers the launch set, not a single fixture surah", (
 
 describe("loadCorpus reads the FROZEN compiled artifact, never the engine's test fixture", () => {
   for (const surah of LAUNCH_SURAHS) {
-    it(`surah ${surah}: byte-identical to packages/corpus-compiler/output/${surah}/corpus.json`, async () => {
+    it(`surah ${surah}: identical to packages/corpus-compiler/output/${surah}/corpus.json, modulo v3-D245's morphology strip`, async () => {
       const outPath = resolve(OUTPUT_ROOT, String(surah), "corpus.json");
       if (!existsSync(outPath)) {
         throw new Error(
@@ -60,11 +60,23 @@ describe("loadCorpus reads the FROZEN compiled artifact, never the engine's test
         );
       }
       const expected = JSON.parse(readFileSync(outPath, "utf8"));
+      // v3-D245: loadCorpus() now nulls lemma/root/class (GPL-licensed QAC
+      // morphology, never meant to reach a browser). Mirror that exact
+      // transformation on the raw file's own words before comparing, so this
+      // stays byte-identical on every OTHER field — a shape-only check would
+      // stay green even if loadCorpus re-derived or truncated something else.
+      const expectedStripped = {
+        ...expected,
+        words: expected.words.map((w: Record<string, unknown>) => ({
+          ...w,
+          lemma: null,
+          root: null,
+          class: null,
+        })),
+      };
       const actual = await loadCorpus(surah);
       expect(actual).not.toBeNull();
-      // Byte-identical, not merely "same shape" — a shape-only check would
-      // stay green even if loadCorpus re-derived or truncated the corpus.
-      expect(JSON.stringify(actual)).toBe(JSON.stringify(expected));
+      expect(JSON.stringify(actual)).toBe(JSON.stringify(expectedStripped));
     });
   }
 
@@ -83,5 +95,59 @@ describe("loadCorpus reads the FROZEN compiled artifact, never the engine's test
 
   it("returns null for a surah outside the launch set, never a throw", async () => {
     await expect(loadCorpus(999)).resolves.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v3-D245 — QAC morphology (GPL-licensed, v3-D24) must never reach a browser
+// via the SSR path either, not only the client-fetch path.
+// ---------------------------------------------------------------------------
+//
+// `scripts/stage-corpus.mjs#stripMorphology` strips `lemma`/`root`/`class`
+// from the CLIENT-FETCHED bundle (`public/corpus/*.json`), and
+// `check-corpus-morphology.mjs` (gate 18) enforces that — but ONLY over
+// files actually written under `public/`, by its own explicit design. This
+// module (`loadCorpus`/`loadEffectiveCorpus`) is the SEPARATE SSR read path
+// every server-rendered route uses (`/plan`, `/progress`, `/progress/list`,
+// `/surah/[surah]`, `/surah/[surah]/[ayah]`, `/drill`, `/practice`,
+// `/workbench`), and it read the raw compiled `output/<surah>/corpus.json`
+// straight into a `"use client"` component's own prop
+// (`PlanIsland`/`DrillPicker`/`SurahAyahListIsland`/`RetentionIsland`/
+// `ProgressListIsland`/`PracticePicker`) — which Next.js serializes whole
+// into the page's own RSC payload regardless of which fields that component
+// actually reads. The gate that is supposed to guard this never looked here.
+describe("loadCorpus never lets QAC morphology reach a browser via the SSR path (v3-D245)", () => {
+  it("the RAW compiled artifact genuinely carries non-null lemma/root — proving this isn't a vacuous check", async () => {
+    const outPath = resolve(OUTPUT_ROOT, "112", "corpus.json");
+    if (!existsSync(outPath)) {
+      throw new Error(`No compiled corpus at ${outPath}. Run \`make compile-corpus\` first.`);
+    }
+    const raw = JSON.parse(readFileSync(outPath, "utf8"));
+    const withRoot = raw.words.filter((w: { root: unknown }) => w.root !== null);
+    expect(withRoot.length).toBeGreaterThan(0);
+  });
+
+  for (const surah of LAUNCH_SURAHS) {
+    it(`surah ${surah}: loadCorpus() carries no lemma/root/class value on any word`, async () => {
+      const corpus = await loadCorpus(surah);
+      expect(corpus).not.toBeNull();
+      for (const w of corpus!.words) {
+        expect(w.lemma).toBeNull();
+        expect(w.root).toBeNull();
+        expect(w.class).toBeNull();
+      }
+    });
+  }
+
+  it("does not touch anything else — text_uthmani, gloss and line are untouched", async () => {
+    const outPath = resolve(OUTPUT_ROOT, "112", "corpus.json");
+    const raw = JSON.parse(readFileSync(outPath, "utf8"));
+    const corpus = await loadCorpus(112);
+    expect(corpus).not.toBeNull();
+    for (let i = 0; i < raw.words.length; i++) {
+      expect(corpus!.words[i]!.text_uthmani).toBe(raw.words[i].text_uthmani);
+      expect(corpus!.words[i]!.gloss).toEqual(raw.words[i].gloss);
+      expect(corpus!.words[i]!.line).toBe(raw.words[i].line);
+    }
   });
 });

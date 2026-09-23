@@ -55,6 +55,47 @@ import type { Corpus } from "@engine/types.ts";
 import { applyOverrides, type DisabledQuestion } from "@engine/overrides.ts";
 import { fetchServerOverrides } from "@/lib/overrides/fetchServer.ts";
 
+/**
+ * v3-D245 — GPL-licensed QAC morphological annotations (`v1/data/raw/SOURCES.md`)
+ * feed distractor generation at BUILD time only (v3-D24: "stripped from the
+ * learner artifact... GPL exposure in a paid bundle is real") and must never
+ * reach a browser.
+ *
+ * `scripts/stage-corpus.mjs#stripMorphology` already strips `lemma`/`root`/
+ * `class` from the CLIENT-FETCHED bundle (`public/corpus/*.json`), and
+ * `check-corpus-morphology.mjs` (gate 18) enforces that — but that gate reads
+ * "the artifacts that are ACTUALLY IN `public/`" BY ITS OWN EXPLICIT DESIGN.
+ * This module is a SEPARATE path: it reads the raw compiled
+ * `output/<surah>/corpus.json` straight into a server component's props, and
+ * every real caller (`/plan`, `/progress`, `/progress/list`,
+ * `/surah/[surah]`, `/surah/[surah]/[ayah]`, `/drill`, `/practice`,
+ * `/workbench`) hands that whole `Corpus` object to a `"use client"` island
+ * (`PlanIsland`/`RetentionIsland`/`ProgressListIsland`/
+ * `SurahAyahListIsland`/`DrillPicker`/`PracticePicker`/`WorkbenchIsland`) as
+ * a prop. Next.js serializes a client component's props into the page's own
+ * RSC payload WHOLE, regardless of which fields that component actually
+ * reads — confirmed live (not assumed): a real `next build` + `next start` +
+ * `curl /plan` reproduced the raw QAC `lemma`/`root` VALUES (Kais Dukes'
+ * copyrighted morphological analysis, never quoted in this comment on the
+ * same sacred-text/no-literal-Arabic principle the fix itself enforces)
+ * verbatim inside the served HTML, for a route the gate above never
+ * inspects at all.
+ *
+ * Nothing in `apps/web` reads `.lemma`/`.root`/`.class` at runtime (grep-
+ * confirmed) — those three fields exist only to feed the COMPILER's own
+ * distractor generation, already done by the time this module ever runs —
+ * so nulling them here costs no real caller anything. Both fields are
+ * already nullable on `CorpusWord` (a word legitimately has no QAC
+ * annotation sometimes), so a stripped value is indistinguishable in type
+ * from a genuinely-absent one and no downstream type changes anywhere.
+ */
+function stripMorphology(corpus: Corpus): Corpus {
+  return {
+    ...corpus,
+    words: corpus.words.map((w) => ({ ...w, lemma: null, root: null, class: null })),
+  };
+}
+
 /** The surahs this build can actually serve — the launch set
  *  (`content-freeze.mjs`'s `LAUNCH_SURAHS`, v3-D59/v3-D63). Order matters:
  *  callers that need a default (`/plan`, `/progress`, `/drill`) take
@@ -85,7 +126,7 @@ export async function loadCorpus(surah: number): Promise<Corpus | null> {
 
   try {
     const raw = await readFile(path.join(OUTPUT_ROOT, String(surah), "corpus.json"), "utf8");
-    const corpus = JSON.parse(raw) as Corpus;
+    const corpus = stripMorphology(JSON.parse(raw) as Corpus);
     cache.set(surah, corpus);
     return corpus;
   } catch {

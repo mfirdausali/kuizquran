@@ -53,9 +53,115 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2854 passing (+2 incomplete, PAY-1, by design), typechecks first.
+make test    # 2860 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 402 v3/api + 120 corpus-compiler
-             # + 439 engine + 63 fold-runner + 1528 apps/web. (v3-D244, 2026-09-23)
+             # + 439 engine + 63 fold-runner + 1534 apps/web. (v3-D245, 2026-09-23)
+             # NOTE (v3-D245, 2026-09-23): v3-D24 ("QAC `lemma`/`root`/`class` are
+             # BUILD-TIME ONLY... stripped from the learner artifact") was only ever
+             # implemented for the CLIENT-FETCH path
+             # (`stage-corpus.mjs#stripMorphology`, enforced by
+             # `check-corpus-morphology.mjs`, gate 18) — that gate's own header says
+             # plainly it "reads the artifacts that are ACTUALLY IN `public/`."
+             # `lib/corpus/load.ts` (`loadCorpus`/`loadEffectiveCorpus`, v3-D76) is a
+             # SEPARATE SSR read path behind `/plan`, `/progress`, `/progress/list`,
+             # `/surah/[surah]`, `/surah/[surah]/[ayah]`, `/drill`, `/practice` and
+             # `/workbench`, and it served the raw compiled corpus — morphology
+             # intact — straight into a `"use client"` island's own props on every
+             # one of those routes. Next.js serializes a client component's props
+             # into the page's own RSC payload WHOLE regardless of which fields the
+             # component reads, so the GPL-licensed QAC morphological analysis
+             # (Kais Dukes' copyrighted work) was reaching any browser that loaded
+             # one of seven routes, entirely outside the one gate built to stop it.
+             # Confirmed LIVE, not assumed: a real `next build` + `next start` +
+             # `curl /plan`/`curl /drill` on the unfixed tree reproduced the real,
+             # non-null QAC values verbatim in the served HTML.
+             #
+             # Fixed: one `stripMorphology()` in `lib/corpus/load.ts`, applied
+             # inside `loadCorpus()` before caching, so `loadEffectiveCorpus()` and
+             # all seven callers get it with no other call site touched — nulls
+             # `lemma`/`root`/`class` (both already nullable on `CorpusWord`, so no
+             # downstream type change) rather than deleting the keys.
+             #
+             # RED confirmed directly: a new describe block in
+             # `test/corpus-load.test.ts` first proves the RAW compiled artifact
+             # genuinely carries non-null `root` values (non-vacuous), then asserts
+             # `loadCorpus()` returns null morphology on every word of all four
+             # launch surahs, then asserts every OTHER field is untouched. Against
+             # the unmodified `load.ts`, all four per-surah cases failed exactly as
+             # predicted, printing the real leaked QAC value on failure (not
+             # reproduced in this comment — same no-literal-Arabic principle the fix
+             # itself enforces). The file's own pre-existing "byte-identical to the
+             # compiled artifact" test was updated, not weakened: it now compares
+             # against a copy of the raw file with the same three fields nulled, so
+             # it still proves nothing ELSE about `loadCorpus`'s output drifted.
+             # Reran: `corpus-load.test.ts` 14/14 (was 8, +6).
+             #
+             # A real mistake caught before committing: this fix's own first-draft
+             # docblock quoted the two leaked Arabic strings verbatim as evidence —
+             # exactly the Absolute B violation the fix exists to prevent, one level
+             # up. `npm run gates`' own boundaries clause 4 caught it immediately
+             # (`lib/corpus/load.ts:79: literal Arabic codepoint`); reworded to
+             # describe the leak without quoting it, reran clean.
+             #
+             # Re-verified live after the final fix: a fresh `next build` + `next
+             # start`, `curl /plan`, `curl /drill` and `curl /surah/12` all now show
+             # nulled morphology in the served HTML — holds across every affected
+             # route, not only the two originally reproduced. `TZ=UTC make test`:
+             # 2860 passing (was 2854, +6 — exactly this run's six new tests;
+             # apps/web 1534, was 1528; no other suite moved). `check-test-floor.mjs`:
+             # OK, 2860 >= floor 1899 (+961 margin, unmoved). `TZ=UTC make build`:
+             # exit 0, 30 routes (unchanged — one existing `lib/` file edited, no new
+             # route). `npm run gates`: all green (locked-css OK, 1 documented hunk,
+             # 294 v1 lines byte-identical; boundaries 322 files, clean after the
+             # docblock fix above; fonts degraded-but-non-blocking, pre-existing,
+             # 2/6 UI fonts present; corpus-morphology OK — unaffected by this diff,
+             # since that gate scans `public/`, not `lib/corpus/load.ts`'s SSR path;
+             # corpus-glyphs OK, 206 codepoints across 4 artifacts, unchanged). `npx
+             # tsc --noEmit`: clean. No `v1/**`/`v2/**` edit. No Arabic codepoint in
+             # the final diff (all three changed files swept programmatically, in
+             # Python, over the Arabic, Arabic Supplement, Arabic Extended-A and
+             # both Presentation Forms Unicode blocks, plus a `\u06xx`-escape and
+             # `fromCharCode`/`fromCodePoint` mention check: CLEAN — the one
+             # violation caught along the way was fixed before this check and
+             # before committing). No oracle/golden-log/fixture/snapshot
+             # regenerated.
+             #
+             # Session start: fresh container, `make setup` ran clean from scratch
+             # (both `v2/api` and `v3/api` `composer install` succeeded first try,
+             # no retry needed); `HEAD` was found detached at `758fbae` (v3-D244),
+             # the same commit `origin/main` was already at, on a stale LOCAL `main`
+             # branch ref fourteen commits behind (`fcfe765`, v3-D229) — the
+             # recurring stale-local-`main` trap this file has recorded roughly
+             # fifty times since v3-D77 — caught before any exploration via `git
+             # fetch origin main` + `git checkout main && git merge --ff-only
+             # origin/main`, a clean fast-forward, no work lost or at risk.
+             #
+             # Found by re-reading `lib/corpus/load.ts`'s own header against
+             # `check-corpus-morphology.mjs`'s own header side by side, after this
+             # run's own extensive zero-caller/stale-docblock sweep (matching
+             # v3-D196/D197's own "exhausted" conclusion) came back clean — the two
+             # headers together named a gap between "what this gate covers" and
+             # "every place a browser can actually receive corpus data" that no
+             # prior sweep had crossed, since every prior sweep of this bug class
+             # looked for a MISSING reader, not an EXTRA one. NOT addressed:
+             # `DrillPicker.tsx`'s own unused `now` prop; the unused
+             # `atoms`/`corpus`/`sessions` IndexedDB object stores (v3-D232);
+             # `session_start`'s own latency metric (v0.8); the streak/away-day
+             # day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()`; `App\Billing\TrialAttribution`
+             # (v3-D148, re-confirmed still correctly scoped to M7's unbuilt
+             # checkout flow); `lib/pricing.ts#regionFromCountry()` (v3-D163);
+             # `PaywallGate` as a whole class (v3-D88/D151/D219); multi-surah
+             # enrollment; the operational mailer/7-night launch window; PAY-1's
+             # Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+             # `packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+             # (v3-D188); `corpusHash`'s zero fold-side consumer (v3-D206); FR5's
+             # queue-level restart/replan/makeup behavior (v3-D217);
+             # `selection_determinism_check` still replaying a committed fixture;
+             # `lib/test/build.ts`/`TestIsland.tsx`'s `test_*` events still carrying
+             # no SITE coordinate (v3-D229) — all unchanged. See DECISIONS.md
+             # v3-D245.
              # NOTE (v3-D244, 2026-09-23): `lib/session/run.ts`'s own docblock,
              # directly above `weakSpotOfferFor` (FR6 Door 2, v3-D106), still said
              # "Door 3 (open practice) and the cold-success-adoption offer remain

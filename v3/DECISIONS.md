@@ -22870,3 +22870,156 @@ zero-caller sweep across `apps/web/lib/**`, `packages/engine/src`,
 genuinely clean beyond the one instance fixed here — a future run should not
 expect another same-shaped finding without a genuinely fresh corner or a
 willingness to take on one of the larger, deliberately-deferred items above.
+
+## v3-D245 (2026-09-23) — v3-D24's GPL-morphology strip was never implemented for the SSR read path, only for the client-fetch path: `lib/corpus/load.ts` served raw QAC `lemma`/`root`/`class` straight into every learner-facing page's own RSC payload
+
+**What.** v3-D24 (ratified 2026-08-10) says, verbatim: "`lemma`/`root`/
+`class` feed distractor generation and are **stripped from the learner
+artifact**... GPL exposure in a paid bundle is real." `scripts/
+stage-corpus.mjs#stripMorphology` implements that strip, and
+`check-corpus-morphology.mjs` (gate 18, part of `npm run gates`) enforces it
+— but that gate's own header says exactly what it covers: "this gate reads
+the artifacts that are ACTUALLY IN `public/`." `lib/corpus/load.ts`
+(`loadCorpus`/`loadEffectiveCorpus`) is a completely separate read path,
+built at v3-D76 to serve `/plan`, `/progress`, `/progress/list`,
+`/surah/[surah]`, `/surah/[surah]/[ayah]`, `/drill`, `/practice` and
+`/workbench` — and it read the raw compiled `output/<surah>/corpus.json`
+(morphology intact) straight off disk, then every one of those routes
+handed the whole `Corpus` object as a prop to a `"use client"` island
+(`PlanIsland`/`RetentionIsland`/`ProgressListIsland`/`SurahAyahListIsland`/
+`DrillPicker`/`PracticePicker`/`WorkbenchIsland`). Next.js serializes a
+client component's props into the page's own RSC payload WHOLE, regardless
+of which fields that component actually reads (confirmed by grep: nothing
+in `apps/web` reads `.lemma`/`.root`/`.class` anywhere at runtime) — so the
+GPL-licensed QAC morphological analysis (Kais Dukes' copyrighted work) was
+shipping to any browser that loaded one of seven learner/admin routes,
+completely outside the one gate built to stop exactly this.
+
+**Verified live, not assumed.** `TZ=UTC npx next build && npx next start`,
+then `curl /plan` and `curl "/drill?surah=112"` against the UNFIXED tree:
+both responses' own HTML embedded the real, non-null QAC `lemma`/`root`
+values verbatim (confirmed by inspecting the raw bytes directly, never
+trusted from a byte count alone) for every word of the served corpus. A
+second, independent Python check confirmed the raw compiled artifact
+(`packages/corpus-compiler/output/112/corpus.json`) genuinely carries
+non-null `root` on a majority of its words, so the RED case is not vacuous.
+
+**Fixed:** one new `stripMorphology()` in `lib/corpus/load.ts`, applied
+inside `loadCorpus()` right after parsing, before caching — so
+`loadEffectiveCorpus()` (which delegates to `loadCorpus`) and every one of
+its seven callers get it too, with no other call site to touch. Nulls
+`lemma`/`root`/`class` rather than deleting the keys (`stage-corpus.mjs`'s
+own convention, in plain JS with no type to satisfy) — both fields are
+already nullable on `CorpusWord` (a word legitimately has no QAC annotation
+sometimes), so a stripped value is indistinguishable in type from a
+genuinely-absent one and no downstream type or component needed touching.
+
+**RED confirmed directly**, mirroring `corpus-load.test.ts`'s own existing
+byte-identity-against-the-compiled-artifact technique: a new describe block
+(6 cases) first proves the RAW compiled artifact genuinely carries non-null
+`root` values (so the check cannot pass vacuously), then asserts
+`loadCorpus()` returns `null` for `lemma`/`root`/`class` on every word of
+all four launch surahs, then asserts every OTHER field (`text_uthmani`,
+`gloss`, `line`) is untouched. Run against the unmodified `load.ts`, all
+four per-surah cases failed exactly as predicted — each failure printed the
+real, non-null QAC value it received where `null` was expected, confirming
+the leak was genuine QAC data and not a placeholder (that raw failure
+output is not reproduced here, on the same no-literal-Arabic principle the
+fix itself enforces). Implemented the fix, reran: 14/14 green (was 8, +6). The file's own pre-existing "byte-identical to
+`packages/corpus-compiler/output/<surah>/corpus.json`" test needed a real
+update, not a weakening: it now builds an "expected, stripped" copy of the
+raw file (nulling the same three fields) before comparing, so it still
+proves nothing ELSE about `loadCorpus`'s output drifted from the compiled
+artifact. `test/corpus-load-effective.test.ts`'s own title/comment claiming
+"`loadCorpus` itself is UNCHANGED — still the raw corpus, byte-identical"
+was corrected to state what is actually still true post-fix (no override
+merge leaks into `loadCorpus`'s own return) rather than the now-false
+byte-identical claim; its assertions needed no change.
+
+**A real mistake caught before committing:** the first draft of this
+fix's own docblock quoted the two leaked Arabic strings verbatim as
+evidence — exactly the Absolute B violation this whole fix exists to
+prevent, one level up (writing the copyrighted bytes into a comment instead
+of a served page). `npm run gates`' own boundaries clause 4 caught it
+immediately (`lib/corpus/load.ts:79: literal Arabic codepoint`); reworded
+to describe the leak without quoting it, reran clean.
+
+**Verification, full numbers.** Live end-to-end re-check after the final
+docblock fix: a fresh `next build` + `next start`, `curl /plan`,
+`curl "/drill?surah=112"` and `curl /surah/12` all now show `"lemma":null,
+"root":null,"class":null` on every word in the served HTML — the fix holds
+across every affected route, not only the two originally reproduced.
+`TZ=UTC make test` (full seven-suite run, from a fresh `make setup` on this
+session's container — both `v2/api` and `v3/api` `composer install`
+succeeded on the first attempt, no retry needed): **2860 passing** (was
+2854, +6 — exactly this run's six new tests; apps/web 1534, was 1528; no
+other suite moved: 255 v2 vitest, 47 v2/api, 402 v3/api, 120
+corpus-compiler, 439 engine, 63 fold-runner), typecheck-v3 clean across all
+four v3 node packages (run as part of `make test`), exit 0.
+`check-test-floor.mjs`: OK, 2860 >= floor 1899 (+961 margin, unmoved).
+`TZ=UTC make build`: exit 0, 30 routes (unchanged — no new route, one
+existing `lib/` file edited). `npm run gates`: all green (locked-css OK, 1
+documented hunk, 294 v1 lines byte-identical; boundaries 322 files, clean
+after the docblock fix above; fonts degraded-but-non-blocking,
+pre-existing, 2/6 UI fonts present; corpus-morphology OK — unaffected by
+this diff, since that gate scans `public/`, not `lib/corpus/load.ts`'s SSR
+path; corpus-glyphs OK, 206 codepoints across 4 artifacts, unchanged). No
+`v1/**`/`v2/**` edit (`git status --porcelain -- v1 v2` empty throughout).
+No Arabic codepoint in the final diff (all three changed files swept
+programmatically, in Python, over the Arabic, Arabic Supplement, Arabic
+Extended-A and both Presentation Forms Unicode blocks, plus a `\u06xx`-
+escape and `fromCharCode`/`fromCodePoint` mention check: CLEAN — the one
+violation caught along the way, in an intermediate draft, was fixed before
+this check and before committing). No oracle/golden-log/fixture/snapshot
+regenerated — this diff touches no compiled-corpus content, no golden log,
+only a read-path transform and its own tests.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; `HEAD` was found detached at `758fbae`, the same commit
+`origin/main` was already at, on a stale LOCAL `main` branch ref fourteen
+commits behind (`fcfe765`, v3-D229) — the recurring "stale local main" trap
+this file has recorded roughly fifty times since v3-D77 — caught before any
+exploration via `git fetch origin main` + `git checkout main && git merge
+--ff-only origin/main`, a clean fast-forward, no work lost or at risk. Both
+`v2/api` and `v3/api`'s `composer install` succeeded on the first attempt
+this run (no documented proxy-timeout retry needed).
+
+**Found by:** re-reading `lib/corpus/load.ts`'s own header ("This reads the
+FROZEN, compiled corpus... the same artifact `scripts/stage-corpus.mjs`
+copies into `public/corpus/` for client islands") against
+`check-corpus-morphology.mjs`'s own header ("this gate reads the artifacts
+that are ACTUALLY IN `public/`") side by side, after this run's own
+extensive zero-caller/stale-docblock sweep across `apps/web/lib/**`,
+`packages/engine/src`, `packages/corpus-compiler/src` and every PHP
+controller/model relation came back clean (matching v3-D196/D197's own
+"exhausted" conclusion) — the two headers together named a gap between "what
+this gate covers" and "every place a browser can actually receive corpus
+data" that no prior sweep had crossed, since every prior sweep of this bug
+class looked for a MISSING reader, not an EXTRA one. Independently verified
+against the real route table, the real client-component prop lists, and a
+live `curl` of the unfixed build before writing any test, per NIGHTLY.md's
+own rule never to trust a claim without re-deriving it from the repo.
+
+**NOT addressed**, named so a future run doesn't re-discover it as new:
+`DrillPicker.tsx`'s own unused `now` prop; the unused `atoms`/`corpus`/
+`sessions` IndexedDB object stores (v3-D232); `session_start`'s own
+"app-open → first drill" latency metric (v0.8); the streak/away-day
+day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148,
+including its own upstream gap — nothing anywhere creates the first
+`Entitlement` row for a real user, re-confirmed this run, still correctly
+scoped to M7's unbuilt checkout flow); `lib/pricing.ts#regionFromCountry()`
+(v3-D163); `PaywallGate` as a whole class (v3-D88, v3-D151, v3-D219 — still
+a genuine open product-design question, not a wiring gap); multi-surah
+enrollment; the operational mailer/7-night launch window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy drift (v3-D127); `packages/engine/src/placement.ts`;
+`MacroFacts.litany.rhymeLabel` (v3-D188); `corpusHash`'s zero fold-side
+consumer (v3-D206); FR5's queue-level restart/replan/makeup behavior
+(v3-D217); `selection_determinism_check` still replaying a committed
+fixture; `lib/test/build.ts`/`TestIsland.tsx`'s `test_*` events still
+carrying no SITE coordinate (v3-D229) — all unchanged. This run's own
+zero-caller/stale-docblock sweep across the usual set came back clean
+beyond this one instance; a future run should look for the next gap in the
+same "gate covers path A, a second path B silently exists" shape this
+entry closes, rather than re-walking the exhausted zero-caller list above.

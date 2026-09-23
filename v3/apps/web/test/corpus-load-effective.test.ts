@@ -162,11 +162,14 @@ describe("loadEffectiveCorpus applies overrides server-side — the SSR read hal
     expect(other?.gloss.en).toBe(originalOther?.gloss.en);
   });
 
-  it("`loadCorpus` itself is UNCHANGED — still the raw corpus, byte-identical, no override merge", async () => {
-    // loadCorpus's own test (corpus-load.test.ts) asserts byte-identity
-    // against the compiled artifact; this test pins that loadEffectiveCorpus
-    // is a NEW, additive function rather than a behavior change to the
-    // existing one every other route still calls directly.
+  it("`loadCorpus` itself carries no override merge — unaffected by loadEffectiveCorpus existing", async () => {
+    // loadCorpus's own test (corpus-load.test.ts) asserts identity against
+    // the compiled artifact (modulo v3-D245's own morphology strip, which
+    // both functions share since loadEffectiveCorpus delegates to
+    // loadCorpus for its read); this test pins that loadEffectiveCorpus is a
+    // NEW, additive function rather than a behavior change to the existing
+    // one every other route still calls directly — an override never leaks
+    // into loadCorpus's own return.
     installFetch([
       {
         id: 1,
