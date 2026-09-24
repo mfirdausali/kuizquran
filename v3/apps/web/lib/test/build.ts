@@ -26,6 +26,7 @@
 import type { Corpus, GlossLang } from "@engine/types.ts";
 import { ayahWords } from "@engine/corpus.ts";
 import { isQuestionDisabled, type DisabledQuestion } from "@engine/overrides.ts";
+import { siteKey as siteKeyOf, type Site } from "@engine/site.ts";
 import {
   clozeItem,
   junctionTestItem,
@@ -162,6 +163,35 @@ export function itemAyah(item: TestItem): number {
   if (item.kind === "junction") return item.from;
   if (item.kind === "reorder") return item.ayahs[0]!;
   return item.ayah;
+}
+
+/**
+ * v3-D229's own deferred half of the `test_*` site-coordinate gap, closed:
+ * the Site (WIREFRAME §23) a `test_answer` was served from — a junction is
+ * the SEAM at its own `from` (the same `kind: "connection"` -> `"seam"`
+ * mapping `lib/session/run.ts#siteForItem` uses for a real graded gate),
+ * every other kind (including reorder, which spans several ayat but is
+ * wire-stamped against its own first ayah by `itemAyah` above) the ayah
+ * site at that same number.
+ *
+ * Deliberately `siteKey` ONLY — never a `visitOrdinal`. A Test item is never
+ * chosen by `selection.ts#selectFor`'s lane/variant rotation at all (this
+ * file's own header: item SELECTION here is a real `Math.random`, not the
+ * seeded rotation a graded visit uses); stamping a `visitOrdinal` on it would
+ * claim the SAME per-site ordinal namespace `replaySelection` folds against
+ * `selectFor` decided something for this "visit", when nothing did. `siteKey`
+ * alone carries no such claim — it only names which site a read-only,
+ * ungraded answer was ABOUT, the same honest fact `ExplainTrace.tsx` already
+ * shows an admin for a workbench preview.
+ */
+export function itemSite(surah: number, item: TestItem): Site {
+  return { kind: item.kind === "junction" ? "seam" : "ayah", surah, ayah: itemAyah(item) };
+}
+
+/** `site.ts#siteKey()` of `itemSite()` — the literal string a `test_answer`
+ *  event's own `siteKey` field is stamped with. */
+export function itemSiteKey(surah: number, item: TestItem): string {
+  return siteKeyOf(itemSite(surah, item));
 }
 
 /** A short reading-order snippet of one ayah's surface text, for a reorder

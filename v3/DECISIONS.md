@@ -23463,3 +23463,136 @@ think to check, or a willingness to take on one of the larger,
 already-named architectural items (`PaywallGate`, `EntitlementMachine::merge()`,
 multi-surah enrollment, `rhymeClassOf()`, FR5's own "replan"/"makeup"
 queue-level behavior).
+
+### v3-D249 — `test_*` events now carry their own served-Site coordinate (`siteKey`), the half of v3-D229's own deferred gap that was safe to close (2026-09-24)
+
+**The gap, named and deliberately left open since v3-D229.** `DrillEvent.siteKey`/
+`.visitOrdinal` (v3-D227) had a real producer for every graded, structured event
+in the real session loop — but `lib/test/build.ts`/`TestIsland.tsx`'s own
+`test_start`/`test_answer`/`test_result` events (the Test self-check, v2 Phase 4,
+a deliberately read-only/ungraded mirror, invariant #5) stamped neither field at
+all, despite `siteKey`'s own docblock contract being unconditional on event
+TYPE: "Set for events tied to a served question; absent for pure evidence events
+(interruption, session_start, ...)." v3-D229 investigated this directly and
+recorded the reason it did NOT fix it that night: `siteKey` alone would be safe,
+but its sibling `visitOrdinal` would not — a full sibling fix "worth its own
+night's reasoning," and every one of D230 through D248's own "NOT addressed"
+lists repeated the item unchanged since.
+
+**Why `siteKey` is safe and `visitOrdinal` is not — verified directly, not
+assumed.** Read `packages/engine/src/selection.ts#selectFor`/`replaySelection`
+and `lib/test/build.ts`'s own header side by side before writing any code.
+`visitOrdinal` exists for exactly one purpose: feeding `selectFor`'s deterministic
+lane/variant ROTATION, and `replaySelection` folds a log by re-running `selectFor`
+against every event's own recorded `(siteKey, deviceId, visitOrdinal)` to prove a
+production trace is reproducible from the log alone. But a Test item is never
+chosen by `selectFor` at all — `lib/test/build.ts`'s own header states plainly
+that Test item SELECTION is a real, unpredictable `Math.random`, deliberately
+unlike a graded visit's seeded rotation. Stamping a `visitOrdinal` on a
+`test_answer` would therefore claim, falsely, that `selectFor`'s rotation decided
+something for that "visit" — and because `visitOrdinal` is drawn from the SAME
+per-site ordinal counter (`nextVisitOrdinalForSite`) a real graded visit to that
+site draws from, a replayed trace would carry an ordinal slot with no
+`selectFor`-decided variant behind it at all: exactly the "visits nobody was
+served" corruption v3-D229 named. `siteKey` carries no such claim — it is a
+plain, honest fact about WHICH site a read-only, ungraded answer was about,
+the identical fact `ExplainTrace.tsx` already shows an admin for an unrelated
+workbench preview — and `replaySelection` itself only processes events that
+already carry `visitOrdinal` (`if (e.visitOrdinal === undefined || !e.deviceId)
+continue`), so a `test_answer` with `siteKey` but no `visitOrdinal` is silently,
+correctly skipped by the one consumer that could otherwise misread it.
+
+**Fixed, two files:** `lib/test/build.ts` gains `itemSite(surah, item): Site` +
+`itemSiteKey(surah, item): string` — a junction item's site is the SEAM at its
+own `from` (mirroring `lib/session/run.ts#siteForItem`'s own `kind ===
+"connection" -> "seam"` mapping exactly, so a junction's `test_answer` is never
+filed under the ayah site sharing that number), a reorder item's site is the
+AYAH site at its own first ayah (the same coordinate `itemAyah` already stamps
+on the event's own `ayah` field), every other kind its own `ayah`. `TestIsland
+.tsx#recordAnswer` stamps `siteKey: itemSiteKey(surah, item)` on `test_answer`
+only — `test_start`/`test_result` are deliberately left without a `siteKey`,
+matching the field's own docblock example list: like `session_start`, both span
+the WHOLE Test (a range, not one served question), not a single site. No
+`visitOrdinal` is added anywhere in this file, on purpose — the reasoning above,
+not an oversight.
+
+**RED confirmed directly:** `git stash` of the two production files alone (4 new
+`lib/test/build.test.ts` cases + 1 new `test/test-island.test.tsx` case kept, 29
+other pre-existing cases across both files untouched) failed exactly the 4 new
+cases on `itemSite`/`itemSiteKey is not a function`, and the new component case
+on `expected undefined to be '112:ayah:4'` — the real `test_answer` event's own
+`siteKey` field genuinely absent against the unmodified component. One test
+needed a genuine fix along the way, not a weakening: the first draft of the
+junction unit test reused this file's own pre-existing 2-ayah pool (`[1, 2]`),
+the same pool the pre-existing `itemAyah` test above it uses — but `KIND_ORDER`
+is `[vocab, cloze, junction, locate, produce]`, so a 2-item pool never reaches
+index 2 at all and the assertion never ran; the pre-existing `itemAyah` test
+tolerates this silently (`if (junction?.kind === "junction") { ... }`, a no-op
+when none is found), but this run's own test used a hard `throw` instead and
+caught the vacuous pool immediately, before any implementation was written —
+fixed by widening to a 3-ayah pool (`[1, 2, 3]`, still within 112's real 4-ayah
+range), which genuinely reaches `junction`. Restored byte-identically after
+confirming RED, reran: `lib/test/build.test.ts` 26/26 (was 22, +4),
+`test/test-island.test.tsx` 8/8 (was 7, +1).
+
+**`TZ=UTC make test`** (fresh container: `make setup`'s `v2/api`/`v3/api`
+`composer install` calls both hit the documented transient proxy/git-mirror
+timeout mid-run and recovered on the same invocation without a retry flag,
+after the four PHP-independent `npm install`s — `packages/engine`, `apps/web`,
+`packages/corpus-compiler`, `worker/fold-runner`, plus `v2`'s own — ran directly
+and successfully in parallel, the same recovery this file's history has
+recorded roughly a dozen times before): **2868 passing** (was 2863 at v3-D248,
++5 — exactly this run's five new tests, 4 in `lib/test/build.test.ts` + 1 in
+`test/test-island.test.tsx`; apps/web 1542, was 1537, +5, matching exactly;
+no other suite moved: 255 v2 vitest, 47 v2/api, 402 v3/api [2
+incomplete/PAY-1 + 6 skipped, both environment-dependent, unrelated to this
+diff], 120 corpus-compiler, 439 engine, 63 fold-runner), exit 0.
+`check-test-floor.mjs`: OK, 2868 >= floor 1899 (+969 margin, unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 30 routes,
+unchanged (no route added — this is a `lib/`+existing-component-only change).
+`npm run gates` (via `prebuild`): all green — locked-css OK, 1 documented hunk,
+294 v1 lines byte-identical; boundaries OK, 321 files, unchanged count (no new
+production file); fonts degraded-but-non-blocking, pre-existing, 2/6 UI fonts
+present; corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints
+across 4 artifacts — all unchanged, this diff carries no new corpus data. `npx
+tsc --noEmit` (apps/web): clean, exit 0. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite was
+reverted before committing, same discipline as every prior entry — `git status
+--porcelain -- v1 v2` empty immediately before committing). No Arabic codepoint
+(the full diff of all four changed files swept programmatically, in Python,
+over the Arabic, Arabic Supplement, Arabic Extended-A and both Presentation
+Forms Unicode blocks, plus a `\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape
+and `fromCharCode`/`fromCodePoint` sweep: CLEAN — every new string is a
+TypeScript identifier, a wire field name, or a fixed English docblock/assertion
+sentence, never corpus text). No oracle/golden-log/fixture/snapshot
+regenerated — this diff touches no fixture, no `output/`, no `docs/qa-samples/`
+file at all.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled corpus
+anywhere. `HEAD`/local `main`/`origin/main` did NOT already agree: `git fetch
+origin main` advanced `origin/main` from a stale cached ref to `8c00f79`
+(v3-D248, already the real tip — nothing unpushed at risk), while the local
+`main` BRANCH REF sat 19 commits behind at `fcfe765` (v3-D229 era) — the
+recurring stale-local-`main` trap this file has recorded roughly fifty times
+since v3-D77, caught before any exploration via `git checkout main && git merge
+--ff-only origin/main`, a clean fast-forward.
+
+**NOT addressed, unchanged:** every item on v3-D248's own "NOT addressed" list
+except this one — "replan"/"makeup" (FR5's own queue-level behavior);
+`DrillPicker.tsx`'s own unused `now` prop; the unused `atoms`/`corpus`/`sessions`
+IndexedDB object stores (v3-D232); `session_start`'s own "app-open → first
+drill" latency metric (v0.8); the streak/away-day day-space mismatch (v3-D209);
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`;
+`App\Billing\TrialAttribution` (v3-D148); `lib/pricing.ts#regionFromCountry()`
+(v3-D163); `PaywallGate` as a whole class (v3-D88, v3-D151, v3-D219);
+`App\Flags\FlagService::enabled()` (v3-D197); multi-surah enrollment; the
+operational mailer/7-night launch window; PAY-1's Stripe fixtures; surah 67's
+scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel` (v3-D188);
+`corpusHash`'s zero fold-side consumer (v3-D206); `selection_determinism_check`
+still replaying a committed fixture — all unchanged. `lib/test/build.ts`/
+`TestIsland.tsx`'s own site-coordinate gap is now CLOSED for `siteKey` — remove
+it from future sweeps; `visitOrdinal` was never added, deliberately, and should
+not be re-attempted without a genuinely new argument for why it would be safe,
+since the one made here (Test never calls `selectFor`) is a structural fact,
+not a scoping choice that a future night could simply widen.

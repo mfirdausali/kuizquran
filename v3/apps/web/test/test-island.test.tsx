@@ -399,6 +399,63 @@ describe("TestIsland — the mixed self-check, end to end", () => {
     },
   );
 
+  // v3-D229 named this exactly as the one thing left unaddressed after
+  // v3-D213/D214 wired `locale` here: `test_*` events still carried no site
+  // coordinate at all, and reasoned that `siteKey` alone is safe to add —
+  // `visitOrdinal` is not, since a Test item never goes through
+  // `selection.ts#selectFor`'s rotation (this file's own header: item
+  // SELECTION here is a real `Math.random`, never the seeded rotation a
+  // graded visit uses), so stamping one would falsely claim
+  // `replaySelection`'s per-site ordinal namespace decided something for it.
+  // This is the seam-level proof of `lib/test/build.ts#itemSite`'s own unit
+  // tests: a REAL `test_answer` reaching the REAL log carries the coordinate,
+  // `test_start`/`test_result` (evidence for the whole Test, not one served
+  // question — the same shape `session_start` already has no siteKey for)
+  // stay absent, and NO test_* event of any kind ever carries `visitOrdinal`.
+  it(
+    "v3-D249: stamps every test_answer with its own Site coordinate, never test_start/test_result, " +
+      "and never a visitOrdinal on any test_* event",
+    async () => {
+      installFetch(corpus112);
+      render(<TestIsland surah={112} glossLang="en" />);
+
+      await screen.findByTestId("test-range");
+      fireEvent.click(screen.getByRole("button", { name: /start test/i }));
+      await waitForRunning();
+
+      await completeTest();
+      await screen.findByTestId("test-result");
+      fireEvent.click(screen.getByRole("button", { name: /^done$/i }));
+      await waitFor(async () => {
+        const evs = await getAllEvents();
+        expect(evs.filter((e) => e.type === "test_result").length).toBe(1);
+      });
+
+      const events = await getAllEvents();
+      const answers = events.filter((e) => e.type === "test_answer");
+      expect(answers.length).toBeGreaterThan(0);
+      for (const a of answers) {
+        const expectedKind = a.testKind === "junction" ? "seam" : "ayah";
+        expect(a.siteKey).toBe(`112:${expectedKind}:${a.ayah}`);
+      }
+
+      const starts = events.filter((e) => e.type === "test_start");
+      const results = events.filter((e) => e.type === "test_result");
+      expect(starts.length).toBe(1);
+      expect(results.length).toBe(1);
+      for (const e of [...starts, ...results]) {
+        expect(e.siteKey).toBeUndefined();
+      }
+
+      const testEvents = events.filter(
+        (e) => e.type === "test_start" || e.type === "test_answer" || e.type === "test_result",
+      );
+      for (const e of testEvents) {
+        expect(e.visitOrdinal).toBeUndefined();
+      }
+    },
+  );
+
   // The seam-level proof for the disable override. `buildTestItems`' own unit
   // tests prove the FILTER; this proves the WIRING — that a row served by the
   // real `/api/overrides` read path actually reaches the real builder through

@@ -15,7 +15,15 @@ import type { Corpus } from "@engine/types.ts";
 import { ayahWords } from "@engine/corpus.ts";
 import type { DisabledQuestion } from "@engine/overrides.ts";
 
-import { buildTestItems, itemAyah, ayahSnippet, itemDisableKey, type Shuffle } from "./build";
+import {
+  buildTestItems,
+  itemAyah,
+  itemSite,
+  itemSiteKey,
+  ayahSnippet,
+  itemDisableKey,
+  type Shuffle,
+} from "./build";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SURAH = 112;
@@ -267,6 +275,44 @@ describe("itemAyah", () => {
         expect(itemAyah(item)).toBe(item.ayah);
       }
     }
+  });
+});
+
+describe("itemSite / itemSiteKey", () => {
+  it("a junction item's site is the SEAM at its own `from`, never the ayah site sharing that number", () => {
+    // KIND_ORDER is [vocab, cloze, junction, locate, produce] — a 2-ayah pool
+    // never reaches index 2 at all (that is exactly the shape the
+    // pre-existing "itemAyah > reads a junction item's from" test above
+    // quietly tolerates by not asserting when none is found); a 3-ayah pool
+    // over 112 (4 ayat, so ayah 3's own seam is real) guarantees one.
+    const items = buildTestItems(corpus, SURAH, [1, 2, 3], "en", NONE_DISABLED, identityShuffle);
+    const junction = items.find((i) => i.kind === "junction");
+    if (junction?.kind !== "junction") throw new Error("expected a junction item in this pool");
+    expect(itemSite(SURAH, junction)).toEqual({ kind: "seam", surah: SURAH, ayah: junction.from });
+    expect(itemSiteKey(SURAH, junction)).toBe(`${SURAH}:seam:${junction.from}`);
+    expect(itemSiteKey(SURAH, junction)).not.toBe(`${SURAH}:ayah:${junction.from}`);
+  });
+
+  it("a reorder item's site is the AYAH site at its first ayah", () => {
+    const items = buildTestItems(corpus, SURAH, [1, 2, 3, 4], "en", NONE_DISABLED, identityShuffle);
+    const reorder = items.find((i) => i.kind === "reorder");
+    if (reorder?.kind !== "reorder") throw new Error("expected a reorder item in this pool");
+    expect(itemSite(SURAH, reorder)).toEqual({ kind: "ayah", surah: SURAH, ayah: reorder.ayahs[0] });
+    expect(itemSiteKey(SURAH, reorder)).toBe(`${SURAH}:ayah:${reorder.ayahs[0]}`);
+  });
+
+  it("every other kind's site is the AYAH site at its own `ayah` field", () => {
+    const items = buildTestItems(corpus, SURAH, [1, 2, 3, 4], "en", NONE_DISABLED, identityShuffle);
+    for (const item of items) {
+      if (item.kind === "junction" || item.kind === "reorder") continue;
+      expect(itemSite(SURAH, item)).toEqual({ kind: "ayah", surah: SURAH, ayah: item.ayah });
+    }
+  });
+
+  it("two different surahs sharing an ayah number never collide", () => {
+    const items = buildTestItems(corpus, SURAH, [1], "en", NONE_DISABLED, identityShuffle);
+    const item = items[0]!;
+    expect(itemSiteKey(SURAH, item)).not.toBe(itemSiteKey(SURAH + 1, item));
   });
 });
 

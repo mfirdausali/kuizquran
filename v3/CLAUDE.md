@@ -53,10 +53,110 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2863 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 2868 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 402 v3/api + 120 corpus-compiler
-             # + 439 engine + 63 fold-runner + 1537 apps/web. (v3-D248, 2026-09-24)
+             # + 439 engine + 63 fold-runner + 1542 apps/web. (v3-D249, 2026-09-24)
+             # NOTE (v3-D249, 2026-09-24): `lib/test/build.ts`/`TestIsland.tsx`'s
+             # `test_*` events carried no site coordinate at all — v3-D229's own
+             # deferred gap, left open through nineteen consecutive nights'
+             # "NOT addressed" lists (v3-D230..D248) with the exact reason it
+             # wasn't a one-line fix: `siteKey` alone is safe to stamp, but its
+             # sibling `visitOrdinal` is not, since a Test item is never chosen by
+             # `selection.ts#selectFor`'s rotation (`lib/test/build.ts`'s own
+             # header: Test item SELECTION is a real `Math.random`, unlike a
+             # graded visit's seeded rotation) — stamping a `visitOrdinal` would
+             # falsely claim `replaySelection`'s per-site ordinal namespace
+             # decided something for a "visit" nothing decided anything for.
+             #
+             # Fixed the safe half: `lib/test/build.ts` gains `itemSite(surah,
+             # item)`/`itemSiteKey(surah, item)` — a junction item's site is the
+             # SEAM at its own `from` (mirroring `lib/session/run.ts
+             # #siteForItem`'s own `connection -> seam` mapping exactly), a
+             # reorder item's site is the AYAH site at its own first ayah
+             # (`itemAyah`'s own coordinate), every other kind its own `ayah`.
+             # `TestIsland.tsx#recordAnswer` stamps `siteKey` on `test_answer`
+             # ONLY — `test_start`/`test_result` stay without one, the same
+             # "spans the whole activity, not one served question" shape
+             # `session_start` already has no `siteKey` for. No `visitOrdinal`
+             # added anywhere, on purpose — the reasoning above is structural,
+             # not a scoping choice a future night could simply widen.
+             #
+             # RED confirmed directly: `git stash` of the two production files
+             # alone (4 new `lib/test/build.test.ts` cases + 1 new `test/
+             # test-island.test.tsx` case kept, 29 other pre-existing cases
+             # untouched) failed exactly the 4 new cases on `itemSite`/
+             # `itemSiteKey is not a function`, and the new component case on
+             # `expected undefined to be '112:ayah:4'` — a real `test_answer`
+             # event's own `siteKey` genuinely absent against the unmodified
+             # component. One test needed a real fix along the way: the first
+             # draft's junction unit test reused this file's own pre-existing
+             # 2-ayah pool (the same one the pre-existing `itemAyah` test
+             # silently tolerates finding no junction in), which never reaches
+             # `KIND_ORDER`'s junction slot (index 2) at all — caught by using a
+             # hard `throw` instead of that test's own silent skip, fixed by
+             # widening to a 3-ayah pool that genuinely reaches it. Restored
+             # byte-identically, reran: `lib/test/build.test.ts` 26/26 (was 22,
+             # +4), `test/test-island.test.tsx` 8/8 (was 7, +1).
+             #
+             # `TZ=UTC make test`: 2868 passing (was 2863, +5 — exactly this
+             # run's new tests; apps/web 1542, was 1537; no other suite moved:
+             # 255 v2 vitest, 47 v2/api, 402 v3/api [2 incomplete/PAY-1 + 6
+             # skipped, both environment-dependent], 120 corpus-compiler, 439
+             # engine, 63 fold-runner), exit 0. `check-test-floor.mjs`: OK, 2868
+             # >= floor 1899 (+969 margin, unmoved). `TZ=UTC make build`: exit 0,
+             # 30 routes, unchanged (no route added). `npm run gates`: all green
+             # (locked-css OK, 1 documented hunk, 294 v1 lines byte-identical;
+             # boundaries OK, 321 files, unchanged count; fonts degraded-but-
+             # non-blocking, pre-existing, 2/6 UI fonts present; corpus-
+             # morphology OK, 362 words; corpus-glyphs OK, 206 codepoints across
+             # 4 artifacts — all unchanged, no new corpus data). `npx tsc
+             # --noEmit`: clean. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted before
+             # committing). No Arabic codepoint (the full diff of all four
+             # changed files swept programmatically, in Python, over the
+             # Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms Unicode blocks, plus a `\u06xx`/`\u07xx`/
+             # `\u08xx`/`\uFBxx`/`\uFExx` escape and `fromCharCode`/
+             # `fromCodePoint` sweep: CLEAN). No oracle/golden-log/fixture/
+             # snapshot regenerated.
+             #
+             # Session start: fresh container, no `node_modules`/`vendor`/
+             # compiled corpus anywhere. `HEAD`/local `main`/`origin/main` did
+             # NOT already agree: local `main` sat 19 commits behind at
+             # `fcfe765` — the recurring stale-local-`main` trap this file has
+             # recorded roughly fifty times since v3-D77 — caught before any
+             # exploration via `git fetch origin main` + `git checkout main &&
+             # git merge --ff-only origin/main`, a clean fast-forward, no work
+             # lost or at risk. `make setup`'s two `composer install` calls both
+             # hit the documented transient proxy/git-mirror timeout and
+             # recovered on the same invocation, after the four PHP-independent
+             # `npm install`s (`packages/engine`, `apps/web`, `packages/
+             # corpus-compiler`, `worker/fold-runner`, plus `v2`'s own) ran
+             # directly and successfully in parallel, the same recovery this
+             # file's history has recorded roughly a dozen times before.
+             #
+             # NOT addressed: every item on v3-D248's own "NOT addressed" list
+             # except this one — "replan"/"makeup"; `DrillPicker.tsx`'s own
+             # unused `now` prop; the unused `atoms`/`corpus`/`sessions`
+             # IndexedDB object stores (v3-D232); `session_start`'s own latency
+             # metric (v0.8); the streak/away-day day-space mismatch (v3-D209);
+             # `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution` (v3-D148);
+             # `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as
+             # a whole class (v3-D88, v3-D151, v3-D219);
+             # `App\Flags\FlagService::enabled()` (v3-D197); multi-surah
+             # enrollment; the operational mailer/7-night launch window; PAY-1's
+             # Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+             # `packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+             # (v3-D188); `corpusHash`'s zero fold-side consumer (v3-D206);
+             # `selection_determinism_check` still replaying a committed
+             # fixture — all unchanged. `lib/test/build.ts`/`TestIsland.tsx`'s
+             # own site-coordinate gap is now CLOSED for `siteKey` — remove it
+             # from future sweeps; `visitOrdinal` was never added, deliberately,
+             # and should not be re-attempted without a genuinely new argument
+             # for why it would be safe. See DECISIONS.md v3-D249.
              # NOTE (v3-D248, 2026-09-24): fourth empty sweep for the zero-caller/
              # stale-docblock/wire-field-completeness bug class this file has
              # chased since v3-D82, run fresh rather than trusting v3-D246's own

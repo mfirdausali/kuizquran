@@ -87,7 +87,7 @@ import { append, currentTz } from "@/lib/idb/append";
 import { getEventsForSurah } from "@/lib/idb/read";
 import { writeLock } from "@/lib/idb/writeLock";
 import { displayOrder } from "@/lib/onboarding/pass";
-import { buildTestItems, itemAyah, ayahSnippet } from "@/lib/test/build";
+import { buildTestItems, itemAyah, itemSiteKey, ayahSnippet } from "@/lib/test/build";
 import { optionStateClass } from "@/components/quiz/reveal";
 
 export interface TestIslandProps {
@@ -307,6 +307,12 @@ export function TestIsland({ surah, glossLang }: TestIslandProps) {
         correct,
         structured: false,
         locale: glossLang,
+        // v3-D229's own deferred half, closed: this answer genuinely was
+        // about a served site (never a Math.random-shuffled variant of one —
+        // this file's own header says Test item selection never goes through
+        // selection.ts's rotation — so `visitOrdinal` stays deliberately
+        // absent; only the site coordinate itself is honest to record here).
+        siteKey: itemSiteKey(surah, item),
       };
       await append(event, { now: Date.now(), tz: currentTz() });
       return true;
