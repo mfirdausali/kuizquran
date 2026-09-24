@@ -23318,3 +23318,148 @@ zero fold-side consumer (v3-D206); `selection_determinism_check` still
 replaying a committed fixture; `lib/test/build.ts`/`TestIsland.tsx`'s
 `test_*` events still carrying no SITE coordinate (v3-D229) — all
 unchanged.
+
+### v3-D248 — fourth empty sweep for the zero-caller/stale-docblock/wire-field-completeness bug class (2026-09-24)
+
+**Sweep performed, no code change.** Following v3-D246's own "genuinely
+exhausted" verdict, this run's fresh sweep — deliberately run rather than
+trusted from that note — covered four veins not swept in this exact
+combination before, and all four came back clean.
+
+1. **Programmatic zero-caller sweep of `apps/web/lib/**`** (278 exported
+   `function`/`const`/`class` symbols, Python regex extraction cross-checked
+   with `grep -rl -w` against `app/`+`components/`+`lib/`+`test/`+`e2e/`,
+   excluding the defining file). 26 candidates surfaced; every one checked by
+   hand. Most were a false positive of the method itself — an export used
+   only within its own defining file (`STATUS_UNAVAILABLE`, `halfMonthLabel`,
+   `CONNECTION_WEIGHT`, `SESSION_HREF`, `clientCorpusUrl`, `LOCALES`,
+   `DEFAULT_LOCALE`, `isDischarged`, and others), which the script's
+   same-file exclusion wrongly flagged. The rest were already-named,
+   already-excluded deferrals (`lib/pricing.ts#regionFromCountry()`,
+   `lib/i18n/dictionaries.ts#isLocale()`).
+
+2. **Parallel sweep of `api/app/**` public methods** (90 methods, identical
+   technique). 5 candidates: `AccountDeletionRequest::isDue()` (v3-D146,
+   unchanged — the query-level check it duplicates is not misleading);
+   `User::routeNotificationForMail()` (a Laravel `Notifiable` trait hook the
+   framework's own mailer calls implicitly — a false positive of the grep
+   method, not application code with no caller);
+   `AtomCacheRebuilder::rebuildUsers()` (a same-file false positive —
+   `rebuild()` calls it directly, two lines past the script's own
+   defining-file exclusion boundary); `TrialAttribution::firstChosenSurahStart()`/
+   `::sourceOf()` (blocked on M7's still-unbuilt checkout flow, unchanged
+   since v3-D148).
+
+3. **A full line-by-line re-read of all five Playwright e2e specs**
+   (`first-session.test.ts`, `airplane-mode.test.ts`, `commit-before-
+   paint.test.ts`, `a11y-geometry.test.ts`, `idb-helpers.test.ts`) for the
+   "asserts a gap that has since closed" shape v3-D245/D246 each flagged as
+   only partially checked (two of five, at the time). All five read current
+   against the real shipped behavior — the service worker's precache/network
+   rules, the session loop's real event emission, the seven-screen onboarding
+   walk, and the a11y geometry measurements all match what the app actually
+   does today. No stale tripwire found.
+
+4. **Field-by-field wire-completeness re-audits of three admin panels** not
+   recently checked this way: `ContentFreezePanel.tsx` (re-confirmed
+   `FreezeReport.allMet` is v3-D194's own already-excluded case, verified
+   directly against `ContentFreezeController::index()`'s real source — it
+   literally sets `'bookable' => $allMet`, so the two fields are the same
+   value under two names and can never disagree); `FlagsPanel.tsx` (all ten
+   `FlagController::index()` fields — key, description, enabled, version,
+   killedAt, killedBy, bannerVisible, ackAt, ackBy, ackAutoWaived — render,
+   confirmed by grep against the component source); `AdminRolesPanel.tsx`
+   (all four `AdminRolesController::index()` entry fields plus `limit`
+   render).
+
+**One genuine asymmetry found, deliberately not fixed, reasoning recorded so
+a future sweep does not re-discover it as a live gap:**
+`EventWireCodec::toWire()`'s `$optional` array (the fold-runner-bound wire
+payload both `DeterminismCheckCommand::sampleFromDatabase()` and
+`AtomCacheRebuilder::rebuildUsers()` build) forwards `resume` (the
+interruption event's `resumePolicy` classification) but not its sibling
+`resumeMassed` (added three commits later at v3-D218, carrying the identical
+"for interruption events only, v0.6 metric, informational" docblock shape as
+`resume` itself). Checked directly rather than assumed to matter: both
+fields are dead weight to every real consumer of that payload.
+`packages/engine/src/rebuild.ts` has no `e.type === "interruption"` branch
+at all — every `type ===` check in the file was enumerated (tap/
+reconstruct_tap, rung_complete/ayah_produced, gate_result, gate_demote,
+connection_born, junction_result, chain_step) and `interruption` is not
+among them, confirming invariant #5's structural-absence discipline holds
+for this event type exactly as `session_start`/`test_*`/`day_marked_away`
+already do. Both of `EventWireCodec`'s two real callers pipe the payload
+straight into the Node fold-runner's `rebuild()` and nowhere else. So
+neither field's presence nor absence changes any observable output, and
+there is therefore no RED a fix could demonstrate — the bar every fix
+landed in this file since v3-D82 has held itself to. Recorded rather than
+fixed, and rather than left for a future run to re-find and mistake for a
+consequential gap.
+
+`v3/LAUNCH-CHECKLIST.md`'s "The critical path out of here" section re-read
+in full and re-verified line by line against the current repo state:
+unchanged since v3-D246 — one infrastructure gap (standing up staging,
+which cascades into the operational mailer, the live PDPA purge schedule,
+and the 7-night window), two human recruitments with multi-week lead times
+(Stripe MY verification, the qari and Malay reviewer), and the content
+freeze's own remaining human half (surah 67's scene beats). Every item on
+that list is human or infrastructure, none is a code change engineering can
+close.
+
+**Regression run** (fresh container: `make setup`'s two `composer install`
+calls, `v2/api` and `v3/api`, each hit the documented transient proxy/
+git-mirror-clone timeout on a single package and completed clean on retry
+with `COMPOSER_PROCESS_TIMEOUT=900`, no code or config change, after the
+five PHP-independent `npm install`s — `v2`, `corpus-compiler`, `engine`,
+`fold-runner`, `apps/web` — ran directly and successfully in parallel, the
+same recovery this file's history has recorded roughly a dozen times
+before). `HEAD`/local `main`/`origin/main` all already agreed at `559fc8e`
+(v3-D247) — no stale-local-`main` trap this run, confirmed via `git fetch
+origin main` before any exploration. `TZ=UTC make compile-corpus`: all four
+launch surahs PASS, no hard failures. `TZ=UTC make test`: **2863 passing**
+— 255 v2 vitest + 47 v2/api + 402 v3/api (2 incomplete/PAY-1 + 6 skipped,
+both environment-dependent, unrelated to this run's own diff since no file
+was changed: the 6 are the Postgres-only `PerUserFoldLockTest`/
+`PerUserFoldLockWiringTest` cases, v3-D116's own documented no-op-outside-
+Postgres design, in a sandbox with no live Postgres server this run;
+`DeterminismCheckCommandTest`/`DeterminismP1PagerTest`, which share a
+similar fold-runner-presence guard, were independently re-run with
+`--filter` and pass in full, 25/25, once their guard's install had settled)
++ 120 corpus-compiler + 439 engine + 63 fold-runner + 1537 apps/web, exit
+0. `check-test-floor.mjs`: OK, 2863 >= floor 1899 (+964 margin, unmoved,
+same discipline as every prior entry). `TZ=UTC make build`: exit 0, 30
+routes, unchanged. `npm run gates` (via `prebuild`): all green —
+locked-css OK, 1 documented hunk, 294 v1 lines byte-identical; boundaries
+OK, 321 files; fonts degraded-but-non-blocking, pre-existing, 2/6 UI fonts
+present; corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints
+across 4 artifacts — all unchanged from v3-D247's own recorded numbers. No
+file touched at any point (`git status --porcelain` empty throughout this
+run's entire investigation). No `v1/**`/`v2/**` edit. No Arabic codepoint
+(nothing written).
+
+**NOT addressed, unchanged:** every item on v3-D247's own "NOT addressed"
+list — "replan"/"makeup"; `DrillPicker.tsx`'s own unused `now` prop; the
+unused `atoms`/`corpus`/`sessions` IndexedDB object stores (v3-D232);
+`session_start`'s own "app-open → first drill" latency metric (v0.8); the
+streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151, v3-D219); `App\Flags\FlagService::enabled()`
+(v3-D197); multi-surah enrollment; the operational mailer/7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `corpusHash`'s zero fold-side consumer (v3-D206);
+`selection_determinism_check` still replaying a committed fixture;
+`lib/test/build.ts`/`TestIsland.tsx`'s `test_*` events still carrying no
+SITE coordinate (v3-D229) — all unchanged. NEWLY named and now CLOSED for
+future sweeps (recorded, not a live gap): the harmless
+`EventWireCodec::toWire()` `resume`/`resumeMassed` forwarding asymmetry
+described above.
+
+A fifth consecutive night of this exact generic sweep shape is unlikely to
+earn its keep without either a genuinely fresh corner this run did not
+think to check, or a willingness to take on one of the larger,
+already-named architectural items (`PaywallGate`, `EntitlementMachine::merge()`,
+multi-surah enrollment, `rhymeClassOf()`, FR5's own "replan"/"makeup"
+queue-level behavior).

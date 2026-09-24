@@ -53,9 +53,160 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2867 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 406 v3/api + 120 corpus-compiler
-             # + 439 engine + 63 fold-runner + 1537 apps/web. (v3-D247, 2026-09-24)
+make test    # 2863 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+             # environment-dependent], PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 402 v3/api + 120 corpus-compiler
+             # + 439 engine + 63 fold-runner + 1537 apps/web. (v3-D248, 2026-09-24)
+             # NOTE (v3-D248, 2026-09-24): fourth empty sweep for the zero-caller/
+             # stale-docblock/wire-field-completeness bug class this file has
+             # chased since v3-D82, run fresh rather than trusting v3-D246's own
+             # "genuinely exhausted" verdict. Four veins, all previously
+             # unswept in this exact combination, all came back clean:
+             #
+             # (1) A programmatic zero-caller sweep of every `export function`/
+             # `export const`/`export class` in `apps/web/lib/**` (278 exports,
+             # Python regex + `grep -rl` cross-check against `app/`+`components/`+
+             # `lib/`+`test/`+`e2e/`, excluding the defining file). 26 candidates
+             # surfaced; every one resolved to either an in-file-only helper (a
+             # false positive of the method, not a real gap — e.g.
+             # `STATUS_UNAVAILABLE`, `halfMonthLabel`, `CONNECTION_WEIGHT`,
+             # `SESSION_HREF`, `clientCorpusUrl`, `LOCALES`/`DEFAULT_LOCALE`, each
+             # verified by hand to have a real same-file caller) or an
+             # already-named, already-excluded deferral (`regionFromCountry`,
+             # `isLocale`).
+             #
+             # (2) A parallel sweep of every `public function` in `api/app/**`
+             # (90 methods, same technique). 5 candidates, all already-known:
+             # `AccountDeletionRequest::isDue()` (v3-D146, deliberately left —
+             # the query-level check it duplicates is not misleading);
+             # `User::routeNotificationForMail()` (a Laravel `Notifiable` trait
+             # hook, called by the framework's own mail pipeline, never by
+             # application code — a false positive of the grep method itself);
+             # `AtomCacheRebuilder::rebuildUsers()` (a same-file false
+             # positive — `rebuild()` calls it two lines below the excluded
+             # defining-file boundary); `TrialAttribution::firstChosenSurahStart()`/
+             # `::sourceOf()` (blocked on M7's still-unbuilt checkout flow,
+             # unchanged since v3-D148).
+             #
+             # (3) A full line-by-line re-read of all FIVE Playwright e2e specs
+             # (`first-session.test.ts`, `airplane-mode.test.ts`, `commit-
+             # before-paint.test.ts`, `a11y-geometry.test.ts`, `idb-
+             # helpers.test.ts`) for the "asserts a gap that has since closed"
+             # shape v3-D245/D246 each flagged as only partially checked. All
+             # five read current against the real shipped behavior (the
+             # service worker, the session loop, the seven-screen onboarding
+             # walk, the FR5 re-entry wiring) — no stale tripwire, no assertion
+             # describing a gap that has since closed.
+             #
+             # (4) Field-by-field wire-completeness re-audits of three admin
+             # panels not recently checked this way: `ContentFreezePanel.tsx`
+             # (re-confirmed `FreezeReport.allMet` is v3-D194's own already-
+             # excluded case — `ContentFreezeController::index()` literally
+             # sets `'bookable' => $allMet`, so the two fields can never
+             # disagree, verified by reading the controller source directly
+             # rather than trusting the old note); `FlagsPanel.tsx` (all ten
+             # `FlagController::index()` fields — key/description/enabled/
+             # version/killedAt/killedBy/bannerVisible/ackAt/ackBy/
+             # ackAutoWaived — render); `AdminRolesPanel.tsx` (all four
+             # `AdminRolesController::index()` entry fields plus `limit`
+             # render).
+             #
+             # ONE GENUINE ASYMMETRY FOUND, NOT FIXED, AND THE REASONING FOR
+             # NOT FIXING IT RECORDED SO A FUTURE RUN DOESN'T RE-DISCOVER IT AS
+             # A GAP: `EventWireCodec::toWire()`'s `$optional` array forwards
+             # `resume` (the interruption event's resumePolicy classification)
+             # to the fold-runner-bound wire payload but not its sibling
+             # `resumeMassed` (added three commits later, v3-D218, same "for
+             # interruption events only, v0.6 metric" docblock shape as
+             # `resume` itself). Checked directly rather than assumed: BOTH
+             # fields are dead weight to every consumer of that payload —
+             # `packages/engine/src/rebuild.ts` has no `e.type === "interruption"`
+             # branch at all (grepped every `type ===` check in the file: tap/
+             # reconstruct_tap, rung_complete/ayah_produced, gate_result,
+             # gate_demote, connection_born, junction_result, chain_step —
+             # interruption is not among them, confirming invariant #5's
+             # structural-absence discipline holds for this event type too),
+             # and the wire payload's only two callers
+             # (`DeterminismCheckCommand::sampleFromDatabase()`,
+             # `AtomCacheRebuilder::rebuildUsers()`) both pipe it straight into
+             # the Node fold-runner's `rebuild()` and nothing else. So there is
+             # no observable behavior either field's presence or absence could
+             # change, and therefore no RED any fix could demonstrate — the
+             # bar every fix in this file has held itself to since v3-D82.
+             # Recorded as a genuine, harmless inconsistency rather than
+             # silently left for a future sweep to re-find and mistake for a
+             # live gap.
+             #
+             # `v3/LAUNCH-CHECKLIST.md` re-read in full, "The critical path out
+             # of here" section re-verified line by line against the current
+             # repo state: unchanged since v3-D246 — one infrastructure gap
+             # (staging host, cascading into the mailer/purge-schedule/7-night
+             # window), two human recruitments (Stripe MY, the qari + Malay
+             # reviewer), and the content freeze's own human half (surah 67's
+             # scene beats). No item on that list is a code change.
+             #
+             # Session start: fresh container, no `node_modules`/`vendor`/
+             # compiled corpus anywhere. `make setup`'s two `composer install`
+             # calls (`v2/api`, `v3/api`) both hit the documented transient
+             # proxy/git-mirror-clone timeout on `laravel/pint` (`v2/api`) and
+             # completed clean on read-through with `COMPOSER_PROCESS_TIMEOUT=900`
+             # (both, no code change) after the five PHP-independent `npm
+             # install`s (v2, corpus-compiler, engine, fold-runner, apps/web)
+             # ran directly and successfully in parallel — the same recovery
+             # this file's history has recorded roughly a dozen times before.
+             # `HEAD`/local `main`/`origin/main` all already agreed at
+             # `559fc8e` (v3-D247) — no stale-local-`main` trap this run,
+             # confirmed via `git fetch origin main` before any exploration.
+             # `TZ=UTC make compile-corpus`: all four launch surahs PASS, no
+             # hard failures. `TZ=UTC make test`: 2863 passing (255 v2 vitest +
+             # 47 v2/api + 402 v3/api [2 incomplete/PAY-1 + 6
+             # Postgres/pcntl-gated skips, both environment-dependent and
+             # unrelated to this run — re-running `DeterminismCheckCommandTest`/
+             # `DeterminismP1PagerTest` individually with `--filter` shows both
+             # green in full, 25 tests, once the fold-runner install those
+             # particular two files check for had settled; the 6 skipped in
+             # the full-suite run are the Postgres-only `PerUserFoldLockTest`/
+             # `PerUserFoldLockWiringTest` cases, v3-D116's own documented
+             # no-op-outside-Postgres design] + 120 corpus-compiler + 439
+             # engine + 63 fold-runner + 1537 apps/web), exit 0.
+             # `check-test-floor.mjs`: OK, 2863 >= floor 1899 (+964 margin,
+             # unmoved, same discipline as every prior entry). `TZ=UTC make
+             # build`: exit 0, 30 routes, unchanged. `npm run gates` (via
+             # `prebuild`): all green — locked-css OK, 1 documented hunk, 294
+             # v1 lines byte-identical; boundaries OK, 321 files; fonts
+             # degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+             # corpus-morphology OK, 362 words; corpus-glyphs OK, 206
+             # codepoints across 4 artifacts — all unchanged from v3-D247's
+             # own recorded numbers. No file touched (`git status --porcelain`
+             # empty throughout this run's investigation). No `v1/**`/`v2/**`
+             # edit. No Arabic codepoint (nothing written).
+             #
+             # NOT addressed, unchanged: everything on v3-D247's own list —
+             # "replan"/"makeup"; `DrillPicker.tsx`'s unused `now` prop; the
+             # unused `atoms`/`corpus`/`sessions` IndexedDB object stores
+             # (v3-D232); `session_start`'s own latency metric (v0.8); the
+             # streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()`
+             # (v3-D136); `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution` (v3-D148);
+             # `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate`
+             # as a whole class (v3-D88, v3-D151, v3-D219);
+             # `App\Flags\FlagService::enabled()` (v3-D197); multi-surah
+             # enrollment; the operational mailer/7-night launch window;
+             # PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel` (v3-D188); `corpusHash`'s zero
+             # fold-side consumer (v3-D206); `selection_determinism_check`
+             # still replaying a committed fixture;
+             # `lib/test/build.ts`/`TestIsland.tsx`'s `test_*` events still
+             # carrying no SITE coordinate (v3-D229); the harmless
+             # `EventWireCodec::toWire()` `resume`/`resumeMassed` asymmetry
+             # named above (now closed for future sweeps — recorded, not a
+             # live gap) — all unchanged. A future run should not expect
+             # another same-shaped finding from a fifth generic sweep without
+             # either a genuinely fresh corner or a willingness to take on one
+             # of the larger, already-named architectural items. See
+             # DECISIONS.md v3-D248.
              # NOTE (v3-D247, 2026-09-24): FR5 "restart" — resume.ts's own
              # contract for a <1hr re-entry gap is literal: "restart the current
              # drill." `acknowledgeReentry` (wired v3-D217) only ever committed
