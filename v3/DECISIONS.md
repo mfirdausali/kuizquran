@@ -23023,3 +23023,140 @@ zero-caller/stale-docblock sweep across the usual set came back clean
 beyond this one instance; a future run should look for the next gap in the
 same "gate covers path A, a second path B silently exists" shape this
 entry closes, rather than re-walking the exhausted zero-caller list above.
+
+### v3-D246 — third empty sweep for the "computed/shipped, zero reader / stale docblock / drifted duplicate" bug class; LAUNCH-CHECKLIST re-confirmed fully closed on the engineering side (2026-09-24)
+
+**Sweep performed, no code change.** Following v3-D196/D197's own empty
+sweeps two weeks ago, and forty-eight further nights that each found one
+new real instance since (v3-D198…D245), this run's dedicated fresh sweep —
+independent of v3-D245's own "exhausted beyond this one instance" close —
+came back genuinely empty a third time. Checked directly, not assumed:
+
+- `worker/fold-runner/src/*` — every export cross-referenced against
+  `bin/*.ts`, `apps/web`, and PHP callers. The one zero-caller surface
+  (`severity.ts`'s `severityFromExitCode`/`resetsWindow`/`countsAsGreen`)
+  is PHP's own necessary re-implementation across the language boundary —
+  the already-named, already-excluded v3-D127 taxonomy drift, re-confirmed
+  unchanged.
+- `packages/corpus-compiler/src/*` — every export checked; the handful
+  that look zero-caller on a naive grep (`buildFoilPool`, `dominantRhyme`,
+  `compareCandidates`, `verbatimRefrain`, `evenSegments`, `derivedBeats`,
+  `displayKey`) are all called internally by their own file's exported
+  entry point (`buildFromInputs`/`classify`/`generateFoils`) — false
+  positives, not gaps.
+- `api/app/Console/Commands` — all 7 commands checked against
+  `routes/console.php` scheduling and test coverage; `NightlyWindowCommand`
+  is exercised via `$this->artisan('nightly:window', ...)` in
+  `WindowLedgerTest.php` (oddly named, but real); no orphaned command.
+- `packages/engine/src/types.ts` — every optional field on `Corpus`/
+  `CorpusWord`/`CorpusDistractor`/`CorpusVerse`/`LookAlike`/
+  `CorpusSceneBeat`/`DrillEvent` grep-verified against a real reader in
+  `apps/web` (`sentToReviews`, `deviceId`/`deviceSeq`, `corpusHash`,
+  `locale`, `gradeClass`, `awayDayIndex`/`away`, `receivedAt`,
+  `resumeMassed`, `siteKey`/`visitOrdinal`, `generatedFrom`,
+  `droppedCollisions`, `mentalModel`, `distractorOrigin`/`kernelYield` —
+  all wired). Nothing undeclared-and-shipped or declared-and-unread
+  remains on this type family, five sweeps running now.
+- Every `*Props` interface across `apps/web/components/**/*.tsx` scanned
+  for a field referenced ≤2 times in its own file (declared + never truly
+  read). Only hit: `DrillPicker.tsx`'s own unused `now` prop — already
+  known, already excluded.
+- Cross-file drift check: `capacity.ts` vs `scheduler.ts`'s independent
+  cost constants (`COST_PER_DUE_REVIEW` vs `COST_REVIEW`, both `0.4`) are
+  legitimately different granularities (daily-plan ETA vs per-session
+  queue estimate), not a drift bug. `EntitlementState::permitsReview()`
+  (PHP) vs `lib/entitlement/gate.ts#permitsReview()` (TS) both
+  unconditionally return `true` for every state — no divergence.
+- Every PHP public method in `app/Models`, `app/Billing`, `app/Flags`,
+  `app/Support` checked for callers. Zero-caller hits are all
+  already-known/excluded; `AccountDeletionRequest::isDue()` re-verified
+  its logic still exactly matches `PurgeDueAccountsCommand`'s own query,
+  non-divergent. `App\Flags\FlagService::enabled()` remains the same
+  already-excluded shape as `PaywallGate` (v3-D197): a real mechanism
+  gating features that don't exist yet, not a fixable wiring gap.
+- Stale-docblock grep (`"remain(s) unwired|never wired|zero.*caller|no
+  production caller"`) across every non-test source file: every hit is
+  historical narration inside the file that WAS the fix for that exact
+  gap (e.g. `lib/admin/reveal.ts`, `lib/progress/wordAccuracy.ts`) — none
+  are currently-false claims about the file's own present state.
+- Admin panel wire-field-to-render completeness checked exhaustively for
+  `AdminBillingController`↔`BillingAuditPanel` (8/8 rendered),
+  `FlagAuditController`↔`FlagAuditPanel` (8/8 rendered),
+  `EntitlementController`↔`PlanPanel` (all consumed — `trialSurah` feeds
+  `gate.ts#permitsIssuance`, not display, correctly, given single-surah
+  launch scope).
+- v3-D245's own fix (the SSR morphology strip) re-verified complete: all
+  8 real callers of `loadCorpus`/`loadEffectiveCorpus` route through the
+  fixed function; zero component/page anywhere reads `word.lemma`/`.root`/
+  `.class`.
+- The Playwright e2e specs (`e2e/first-session.test.ts`,
+  `e2e/a11y-geometry.test.ts`) were checked directly for the "asserts a
+  gap that has since closed" shape a prior HANDOVER.md note warned about
+  — both are current: `first-session.test.ts`'s own comment says outright
+  it "REPLACES the suite's old 'THE BREAK' tripwire," and
+  `a11y-geometry.test.ts`'s one near-hit ("the bank does not exist at
+  load") is describing an async fetch race, not an unbuilt feature.
+  Neither is stale.
+- `v3/LAUNCH-CHECKLIST.md` re-read in full against the current tree
+  rather than trusted from its own last-updated date: its own "critical
+  path out of here" section states plainly, and this run independently
+  confirms, that **every gate engineering can close is closed** — every
+  remaining item (gates 3/4/7/8/10/11/12/13/14/19/20/22, BUILD-PLAN Q9)
+  is BLOCKED-ON-HUMAN or BLOCKED-ON-INFRA by its own honest labelling,
+  not a wiring gap dressed up as one. Gate 16 (security review of admin
+  routes) is independently confirmed **GREEN**, all five findings fixed —
+  not an open item as an earlier stale HANDOVER.md table still implies.
+
+**Regression check, not just a sweep.** Fresh container: `make setup` ran
+clean from scratch, no retries needed. `HEAD` was found on a stale LOCAL
+`main` branch ref sixteen commits behind (`fcfe765`, v3-D229) — the
+recurring stale-local-`main` trap this file has recorded roughly fifty
+times since v3-D77 — caught before any exploration via `git fetch origin
+main` + `git checkout main && git merge --ff-only origin/main`, a clean
+fast-forward, no work lost or at risk. `TZ=UTC make test`: **2860
+passing**, matching CLAUDE.md's own recorded count exactly — 255 v2
+vitest + 47 v2/api + 402 v3/api + 120 corpus-compiler + 439 engine + 63
+fold-runner + 1534 apps/web, no drift in any suite. `check-test-floor.mjs`:
+OK, 2860 >= floor 1899 (+961 margin, unmoved, same discipline as every
+prior entry). `TZ=UTC make build`: exit 0, 30 routes, unchanged. No source
+or test file was touched (`git status --porcelain` empty throughout,
+before and after); no `v1/**`/`v2/**` file was touched; no Arabic
+codepoint was introduced, since nothing was written.
+
+**Assessment.** This is the THIRD time this exact bug class has come back
+empty (v3-D196, v3-D197, now this entry) — but unlike the first two, this
+time it followed FORTY-EIGHT consecutive nights (v3-D198 through v3-D245)
+that each found a genuine new instance, so the exhaustion is now measured
+against a codebase that has had roughly 250 independent passes made over
+it. The honest read is not "nothing is left," it is "the marginal yield of
+one more generic sweep is now near zero" — every remaining open item, this
+run confirmed again, is either architecturally large and already reasoned
+about (`PaywallGate`, `EntitlementMachine::merge()`, multi-surah
+enrollment, `rhymeClassOf()`, FR5's queue-level behavior), or genuinely
+outside engineering's reach (the qari, Stripe KYC, a staging host, seven
+elapsed calendar days). A future run should not spend a full night on
+another generic zero-caller/stale-docblock sweep without either a
+genuinely fresh corner of the codebase (this run did not, for instance, do
+a byte-for-byte migration-column-vs-model-cast audit, nor a full line-by-
+line pass over every Playwright/e2e spec beyond the two checked above) or
+a willingness to take on one of the larger, already-named architectural
+items above.
+
+**NOT addressed**, named so a future run doesn't re-discover it as new:
+every item on v3-D245's own "NOT addressed" list, unchanged —
+`DrillPicker.tsx`'s own unused `now` prop; the unused `atoms`/`corpus`/
+`sessions` IndexedDB object stores (v3-D232); `session_start`'s own
+"app-open → first drill" latency metric (v0.8); the streak/away-day
+day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151, v3-D219); `App\Flags\FlagService::enabled()`
+(v3-D197, re-confirmed); multi-surah enrollment; the operational
+mailer/7-night launch window; PAY-1's Stripe fixtures; surah 67's scene
+beats; `worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `corpusHash`'s zero fold-side consumer (v3-D206); FR5's
+queue-level restart/replan/makeup behavior (v3-D217);
+`selection_determinism_check` still replaying a committed fixture;
+`lib/test/build.ts`/`TestIsland.tsx`'s `test_*` events still carrying no
+SITE coordinate (v3-D229) — all unchanged.

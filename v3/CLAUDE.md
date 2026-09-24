@@ -56,6 +56,48 @@ make dev     # SPA :5273, API :8000
 make test    # 2860 passing (+2 incomplete, PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 402 v3/api + 120 corpus-compiler
              # + 439 engine + 63 fold-runner + 1534 apps/web. (v3-D245, 2026-09-23)
+             # NOTE (v3-D246, 2026-09-24): third empty sweep for the "computed/
+             # shipped, zero reader / stale docblock / drifted duplicate" bug
+             # class — after v3-D196/D197's own empty sweeps, then 48 further
+             # nights (v3-D198…D245) that each found a genuine new instance,
+             # this run's fresh, independent sweep across
+             # `worker/fold-runner/src`, `packages/corpus-compiler/src`,
+             # `api/app/Console/Commands`, every optional field on
+             # `packages/engine/src/types.ts`'s `Corpus`/`DrillEvent` family,
+             # every component `*Props` interface, a cross-file cost/logic
+             # drift check, every PHP public method in `app/Models`/
+             # `app/Billing`/`app/Flags`/`app/Support`, a stale-docblock grep,
+             # three admin panel wire-field-to-render completeness checks,
+             # v3-D245's own fix, and the Playwright e2e specs (checked
+             # directly for the "asserts a gap that has since closed" shape a
+             # prior HANDOVER.md note warned about — both current, neither
+             # stale) came back genuinely empty. `v3/LAUNCH-CHECKLIST.md`
+             # re-read in full: its own "critical path out of here" section
+             # states, and this run independently confirms, that every gate
+             # engineering can close is closed — every remaining item is
+             # BLOCKED-ON-HUMAN or BLOCKED-ON-INFRA by its own honest
+             # labelling. `TZ=UTC make test`: 2860 passing, matching this
+             # file's own recorded count exactly, no drift in any suite.
+             # `check-test-floor.mjs`: OK, 2860 >= floor 1899 (+961 margin,
+             # unmoved). `TZ=UTC make build`: exit 0, 30 routes, unchanged. No
+             # file touched (`git status --porcelain` empty throughout). No
+             # `v1/**`/`v2/**` edit. No Arabic codepoint (nothing written).
+             # Session start: fresh container, `make setup` ran clean from
+             # scratch; `HEAD` was found on a stale LOCAL `main` branch ref
+             # sixteen commits behind (`fcfe765`, v3-D229) — the recurring
+             # stale-local-`main` trap this file has recorded roughly fifty
+             # times since v3-D77 — caught before any exploration via `git
+             # fetch origin main` + `git checkout main && git merge --ff-only
+             # origin/main`, a clean fast-forward, no work lost or at risk.
+             # Documentation-only; test/build numbers unchanged. A future run
+             # should not spend a full night on another generic sweep without
+             # either a genuinely fresh corner (not yet done: a byte-for-byte
+             # migration-column-vs-model-cast audit, a full line-by-line pass
+             # over every e2e spec beyond the two checked here) or a
+             # willingness to take on one of the larger, already-named
+             # architectural items (`PaywallGate`, `EntitlementMachine::merge()`,
+             # multi-surah enrollment, `rhymeClassOf()`, FR5's queue-level
+             # behavior). See DECISIONS.md v3-D246.
              # NOTE (v3-D245, 2026-09-23): v3-D24 ("QAC `lemma`/`root`/`class` are
              # BUILD-TIME ONLY... stripped from the learner artifact") was only ever
              # implemented for the CLIENT-FETCH path
