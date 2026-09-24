@@ -516,6 +516,7 @@ function trivialOneItemRun(c: Corpus, now: number): SessionRun {
     structured: true,
     lastActivityAt: now,
     siteVisit: null,
+    freshMachine: { machine: initReconstruct(c, SURAH, 1, 0, { full: true }), rescaffolding: false },
   };
 }
 
@@ -584,6 +585,7 @@ describe("v3-D98 — Door 1 CTA on the real summary screen, actually wired", () 
       structured: true,
       lastActivityAt: now - 1000,
       siteVisit: null,
+      freshMachine: { machine: initReconstruct(corpus, SURAH, 2, 0, { full: true }), rescaffolding: false },
     };
     // Play this seeding run to completion OFF-SCREEN, via the real (unmocked)
     // functions — mirrors run.test.ts's own playThrough, driven by the
@@ -689,6 +691,7 @@ describe("v3-D106 — Door 2 CTA on the real summary screen, actually wired", ()
           structured: true,
           lastActivityAt: now,
           siteVisit: null,
+          freshMachine: { machine: initReconstruct(corpus, SURAH, 2, 0, { full: false }), rescaffolding: false },
         },
       });
 
@@ -821,6 +824,7 @@ function gateRunFor(c: Corpus, now: number): SessionRun {
     structured: true,
     lastActivityAt: now,
     siteVisit: null,
+    freshMachine: { machine: initReconstruct(c, SURAH, 1, 1, { full: true }), rescaffolding: false },
   };
 }
 
@@ -1215,6 +1219,7 @@ function twoItemRun(c: Corpus, now: number): SessionRun {
     structured: true,
     lastActivityAt: now,
     siteVisit: null,
+    freshMachine: { machine: initReconstruct(c, SURAH, 1, 0, { full: true }), rescaffolding: false },
   };
 }
 

@@ -23160,3 +23160,161 @@ queue-level restart/replan/makeup behavior (v3-D217);
 `selection_determinism_check` still replaying a committed fixture;
 `lib/test/build.ts`/`TestIsland.tsx`'s `test_*` events still carrying no
 SITE coordinate (v3-D229) — all unchanged.
+
+### v3-D247 — FR5 "restart": a re-entry within the hour now actually restarts the current drill, not just logs that it should (2026-09-24)
+
+**The gap.** v3-D246's own "NOT addressed" list (and v3-D217 before it)
+named this by name: `resume.ts#resumePolicy()`'s own header is a literal
+contract — "<1hr → restart the current drill" — but `acknowledgeReentry`
+(`lib/session/run.ts`, wired at v3-D217) only ever committed the audit
+`interruption` event and refreshed `lastActivityAt`; `run.machine` itself
+was never touched. A learner who stepped away mid-reconstruct for, say,
+twenty minutes and came back saw their half-finished blanks exactly as
+they left them — indistinguishable on screen from the ordinary <2min
+"resume" case, even though `resumeNotice("restart")`'s own text on the
+same screen says "that pause won't count toward your time on task,"
+actively implying something DID reset. Ran a fresh migration-column-vs-
+model-cast audit first (v3-D246's own named-but-undone fresh corner — see
+below), came back genuinely clean, then picked up this explicitly-named
+deferred item rather than a fourth generic sweep.
+
+**Migration-column-vs-model-cast audit, done first, genuinely empty.**
+Read all 21 `v3/api` migrations and all 20 Eloquent models (plus `User`)
+field by field: every `$fillable` list matches its migration's columns
+exactly (minus auto-managed `id`/timestamps); every boolean/JSON/enum
+column has the matching `Eloquent` cast (`Event`, `Flag`, `FlagRampAudit`,
+`Entitlement`'s `EntitlementState`/`EntitlementTier` enum casts, etc.).
+The one real hypothesis this audit raised — that `Event`'s many un-cast
+integer/bigint columns (`ts`, `surah`, `visitOrdinal`, …) would return as
+PHP strings under Postgres, breaking the wire contract's `number` fields
+in production while sqlite tests hid it — was checked EMPIRICALLY, not
+assumed from training-data-era PHP behavior: started the sandbox's real
+Postgres 16, ran a raw PDO query against `bigint`/`integer`/`smallint`/
+`boolean`/`float` columns, and confirmed PHP 8.4.19 (this project's actual
+pinned version, per `.github/workflows/ci.yml`'s own `php-version: "8.4"`,
+v3-D119) already returns all of them as native PHP types — the PDO_PGSQL
+native-type-coercion RFC that shipped in PHP 8.4, only `numeric`/`decimal`
+columns (none used anywhere in this schema) still come back as strings.
+The hypothesis was real for pre-8.4 PHP and false for this deployment;
+verifying against the real database rather than trusting the memory
+avoided "fixing" a bug this stack does not have. No code changed for this
+half of the run.
+
+**Fixed.** `SessionRun` gains `freshMachine: {machine, rescaffolding}` —
+the reconstruct machine exactly as it stood the moment the CURRENT queue
+item became current, before any tap. Refreshed at every site that already
+builds a fresh machine for a genuinely new item (`startFromQueue`,
+`settleAnswer`'s cursor-advance branch, `advancePastCurrent`,
+`settleRescaffoldWarmup`'s warm-up→cold transition, `startExtraLearn`,
+`startWeakSpotDrill` — six sites, enumerated directly by grepping every
+`machineForItem`/`machineFor`/`initReconstruct` call site in the file, not
+guessed) — never touched by a mid-item tap (`settleAnswer`'s two
+non-advancing branches), so a restart mid-pass reverts to the ORIGINAL
+blank layout, not to whatever the learner had tapped since. Nothing is
+re-derived from the corpus/atoms at restart time — re-deriving would risk
+sizing a fresh pass against events the very gap may have raced with;
+`freshMachine` is purely a stored snapshot. `acknowledgeReentry`'s
+"restart" branch now resets `machine`/`rescaffolding` to that snapshot and
+clears `gateSlipped`/`lastTap`, the same "fresh item, clean slate"
+discipline `settleAnswer`'s own cursor-advance branch already applies.
+Scoped to "restart" only, matching this file's own established "one door
+at a time" precedent (v3-D98/D106/D117): "replan" (re-derive the whole
+REMAINING queue with a warm-up) and "makeup" (a make-up merge) still
+resolve to nothing but the audit trail + notice, exactly as before —
+genuinely separate, larger scope, left named rather than rushed.
+
+Making `freshMachine` a REQUIRED field (not optional) surfaced ten
+pre-existing bare-literal `SessionRun` fixtures across `run.test.ts` and
+`test/session-island.test.tsx` that needed it added — a genuine TS
+compile-time catch, the same shape v3-D227's `siteVisit` produced, not a
+workaround.
+
+**RED confirmed directly**, mirroring this file's own established
+technique: `git stash` of `run.ts` alone (all three new
+`run.test.ts` cases and the test-fixture literal updates kept) and
+re-running — 2 of the 3 new cases failed exactly as predicted (the
+primary "resets a partially-answered gate item" case on `expected
+{blankIndex: 1, …} to deeply equal {blankIndex: 0, …}`; the "does not
+reset an EARLIER item's progress" case identically), the third — a
+negative case proving "replan" is untouched — passed vacuously and
+correctly, since the unfixed code already left "replan"'s machine alone.
+`git stash pop` restored the fix byte-identically, reran: 3/3 green (was
+0, +3; `run.test.ts` 101, was 98). The load-bearing first case seeds a
+real day-2 due cold gate (4-word ayah, so `full: true` blanks 4 positions
+— confirmed non-vacuously via `expect(pristine.blankPositions.length)
+.toBeGreaterThan(1)` before asserting anything else), taps ONE blank
+correctly (`blankIndex` 0→1, not done), classifies a 30-minute gap
+("restart"), and asserts the post-restart machine is `toEqual` the
+snapshot taken before any tap — word for word, position for position, not
+merely `blankIndex === 0` by coincidence. The second case proves the
+snapshot is re-captured PER ITEM, not frozen at session start: finishes
+one due gate completely (cursor advances 0→1), makes partial progress on
+the SECOND gate, restarts, and asserts the reset targets the second
+item's own pristine state, never the first's.
+
+`TZ=UTC npx vitest run` (apps/web, full suite): 1537 passing (was 1534,
++3 — exactly this run's new tests; `run.test.ts` 101/101, `session-
+island.test.tsx` 34/34, unchanged elsewhere). `TZ=UTC make test` (all
+seven suites, fresh `make setup` + `make compile-corpus` from a clean
+checkout): **2867 passing** — 255 v2 vitest + 47 v2/api + 406 v3/api +
+120 corpus-compiler + 439 engine + 63 fold-runner + 1537 apps/web. Every
+suite but apps/web is untouched by this diff (no PHP, engine, corpus-
+compiler or fold-runner file changed); v3/api's own count (406) reads
+four higher than the 402 v3-D246's comment last recorded, a pre-existing
+drift from the 17 commits (v3-D230…D246) fast-forwarded in at session
+start, not something this run introduced — confirmed by the identical
+gap existing before any file in this run was touched. `check-test-
+floor.mjs`: OK, 2867 >= floor 1899 (+968 margin, unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 30 routes
+(unchanged — no new route, no new component).
+`npm run gates` (via `prebuild`): all green (locked-css OK, 1 documented
+hunk, 294 v1 lines byte-identical; boundaries 321 files, unchanged count
+— two existing files edited plus one existing test file, no new
+production file; fonts degraded-but-non-blocking, pre-existing, 2/6 UI
+fonts present; corpus-morphology OK, 362 words; corpus-glyphs OK, 206
+codepoints across 4 artifacts, both unchanged — a session-loop-only fix
+touches no corpus data). `npx tsc --noEmit` (apps/web): clean. No
+`v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the suite was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2`
+empty immediately before committing). No Arabic codepoint (the full diff
+of all three changed files swept programmatically, in Python, over the
+Arabic, Arabic Supplement, Arabic Extended-A and both Presentation Forms
+Unicode blocks, plus a `fromCharCode`/`fromCodePoint` and
+`\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape sweep: CLEAN — every
+new string/identifier is a TypeScript field name, a millisecond
+arithmetic expression, or a fixed English docblock/comment sentence,
+never corpus text). No oracle/golden-log/fixture/snapshot regenerated —
+this diff touches one production file and two test files, none of them a
+committed oracle.
+
+Session start: fresh container (no `node_modules`/`vendor`/compiled
+corpus anywhere); `HEAD` and local `main` both already agreed with
+`origin/main` at `0c45b58` (v3-D246) via a clean `git fetch` + `git
+checkout main && git merge --ff-only origin/main` fast-forward before any
+exploration — the recurring stale-local-`main` trap this file has
+recorded roughly fifty times since v3-D77, caught immediately this run
+with zero work at risk (the prior night's 17 commits, v3-D230…D246, had
+already been pushed; only the local branch ref was stale). `make setup`
+ran clean from scratch, no retries needed; `make compile-corpus` compiled
+all four launch surahs clean.
+
+**NOT addressed**, named so a future run doesn't re-discover it as new:
+"replan" and "makeup" (this same entry's own paragraph above) remain
+genuinely separate, larger scope — a full re-derivation of the remaining
+queue and a make-up merge, respectively; `DrillPicker.tsx`'s own unused
+`now` prop; the unused `atoms`/`corpus`/`sessions` IndexedDB object
+stores (v3-D232); `session_start`'s own "app-open → first drill" latency
+metric (v0.8); the streak/away-day day-space mismatch (v3-D209);
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`;
+`App\Billing\TrialAttribution` (v3-D148); `lib/pricing.ts
+#regionFromCountry()` (v3-D163); `PaywallGate` as a whole class (v3-D88,
+v3-D151, v3-D219); `App\Flags\FlagService::enabled()` (v3-D197);
+multi-surah enrollment; the operational mailer/7-night launch window;
+PAY-1's Stripe fixtures; surah 67's scene beats; `worker/fold-runner/src
+/severity.ts`'s taxonomy drift (v3-D127); `packages/engine/src
+/placement.ts`; `MacroFacts.litany.rhymeLabel` (v3-D188); `corpusHash`'s
+zero fold-side consumer (v3-D206); `selection_determinism_check` still
+replaying a committed fixture; `lib/test/build.ts`/`TestIsland.tsx`'s
+`test_*` events still carrying no SITE coordinate (v3-D229) — all
+unchanged.

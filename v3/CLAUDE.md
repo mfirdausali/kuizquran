@@ -53,9 +53,111 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2860 passing (+2 incomplete, PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 402 v3/api + 120 corpus-compiler
-             # + 439 engine + 63 fold-runner + 1534 apps/web. (v3-D245, 2026-09-23)
+make test    # 2867 passing (+2 incomplete, PAY-1, by design), typechecks first.
+             # 255 v2 vitest + 47 v2/api + 406 v3/api + 120 corpus-compiler
+             # + 439 engine + 63 fold-runner + 1537 apps/web. (v3-D247, 2026-09-24)
+             # NOTE (v3-D247, 2026-09-24): FR5 "restart" — resume.ts's own
+             # contract for a <1hr re-entry gap is literal: "restart the current
+             # drill." `acknowledgeReentry` (wired v3-D217) only ever committed
+             # the audit `interruption` event and refreshed `lastActivityAt`;
+             # `run.machine` was never touched, so a learner who stepped away
+             # mid-reconstruct and came back within the hour still saw their
+             # half-finished blanks exactly as they left them — indistinguishable
+             # from the ordinary <2min "resume" case, even though the same
+             # screen's own notice ("that pause won't count toward your time on
+             # task") implies something DID reset. Named explicitly on every
+             # "NOT addressed" list since v3-D217.
+             #
+             # Ran a fresh migration-column-vs-model-cast audit FIRST (v3-D246's
+             # own named fresh corner): read all 21 `v3/api` migrations against
+             # all 20 Eloquent models field by field — every `$fillable` matches
+             # its migration exactly, every boolean/JSON/enum column has the
+             # matching cast. One real hypothesis surfaced (`Event`'s un-cast
+             # bigint/integer columns returning as PHP strings under Postgres,
+             # breaking the wire contract's `number` fields) and was checked
+             # EMPIRICALLY against a real Postgres 16 instance rather than
+             # assumed: PHP 8.4.19 (this project's own pinned CI version,
+             # v3-D119) already returns bigint/integer/smallint/boolean/float
+             # natively via the PDO_PGSQL native-type RFC — only `numeric`
+             # columns (none in this schema) still stringify. A real concern for
+             # pre-8.4 PHP, verified false for this stack; no code changed for
+             # this half. Came back genuinely clean otherwise.
+             #
+             # Fixed: `SessionRun` gains `freshMachine` — the reconstruct
+             # machine exactly as it stood the moment the CURRENT queue item
+             # became current, before any tap. Refreshed at the six sites that
+             # already build a fresh machine for a genuinely new item
+             # (`startFromQueue`, `settleAnswer`'s cursor-advance branch,
+             # `advancePastCurrent`, `settleRescaffoldWarmup`'s warm-up→cold
+             # transition, `startExtraLearn`, `startWeakSpotDrill`), never
+             # touched by a mid-item tap. `acknowledgeReentry`'s "restart"
+             # branch resets `machine`/`rescaffolding` to that snapshot and
+             # clears `gateSlipped`/`lastTap` — nothing re-derived from the
+             # corpus/atoms, which would risk racing the very gap being
+             # classified. Scoped to "restart" only (this file's own "one door
+             # at a time" precedent) — "replan"/"makeup" remain genuinely
+             # separate, larger scope, unchanged.
+             #
+             # RED confirmed directly: `git stash` of `run.ts` alone (all three
+             # new `run.test.ts` cases + ten pre-existing bare-literal
+             # `SessionRun` fixtures across `run.test.ts`/`session-
+             # island.test.tsx` that needed `freshMachine` added — a genuine
+             # TS compile-time catch, same shape as v3-D227's `siteVisit` —
+             # kept) failed 2 of 3 new cases exactly as predicted (a
+             # partially-tapped 4-word gate item's `machine` failed to reset;
+             # an out-of-order "earlier item" check failed identically); the
+             # third, a negative "replan is untouched" case, passed vacuously
+             # and correctly. Restored byte-identically, reran: 3/3 green (was
+             # 0, +3; `run.test.ts` 101/101, was 98).
+             #
+             # `TZ=UTC npx vitest run` (apps/web): 1537 passing (was 1534, +3).
+             # `TZ=UTC make test` (fresh container, `make setup` + `make
+             # compile-corpus` from scratch, no retries needed): 2867 passing —
+             # 255 v2 vitest + 47 v2/api + 406 v3/api + 120 corpus-compiler +
+             # 439 engine + 63 fold-runner + 1537 apps/web; every suite but
+             # apps/web untouched by this diff (no PHP/engine/corpus-compiler/
+             # fold-runner file changed) — v3/api's own 406 reads four higher
+             # than this file's own 402 last recorded (v3-D245), a pre-existing
+             # drift already present at session start from the 17 commits
+             # (v3-D230…D246) fast-forwarded in, not introduced by this run.
+             # `check-test-floor.mjs`: OK, 2867 >= floor 1899 (+968 margin,
+             # unmoved). `TZ=UTC make build`: exit 0, 30 routes, unchanged. `npx
+             # tsc --noEmit` (apps/web): clean. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted before
+             # committing). No Arabic codepoint (the full diff of all three
+             # changed files swept programmatically, in Python, over the
+             # Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms Unicode blocks, plus a `fromCharCode`/
+             # `fromCodePoint` and `\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx`
+             # escape sweep: CLEAN). No oracle/golden-log/fixture/snapshot
+             # regenerated.
+             #
+             # Session start: fresh container, `HEAD` and local `main` both
+             # already agreed with `origin/main` at `0c45b58` (v3-D246) via a
+             # clean `git fetch` + `git checkout main && git merge --ff-only
+             # origin/main` fast-forward — the recurring stale-local-`main`
+             # trap this file has recorded roughly fifty times since v3-D77,
+             # caught immediately with zero work at risk (the prior 17 commits
+             # had already been pushed; only the local branch ref was stale).
+             #
+             # NOT addressed: "replan"/"makeup" (this entry's own scope
+             # boundary); `DrillPicker.tsx`'s own unused `now` prop; the unused
+             # `atoms`/`corpus`/`sessions` IndexedDB object stores (v3-D232);
+             # `session_start`'s own latency metric (v0.8); the streak/away-day
+             # day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()`; `App\Billing\TrialAttribution`
+             # (v3-D148); `lib/pricing.ts#regionFromCountry()` (v3-D163);
+             # `PaywallGate` as a whole class (v3-D88/D151/D219);
+             # `App\Flags\FlagService::enabled()` (v3-D197); multi-surah
+             # enrollment; the operational mailer/7-night window; PAY-1's
+             # Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+             # `packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+             # (v3-D188); `corpusHash`'s zero fold-side consumer (v3-D206);
+             # `selection_determinism_check` still replaying a committed
+             # fixture; `lib/test/build.ts`/`TestIsland.tsx`'s `test_*` events
+             # still carrying no SITE coordinate (v3-D229) — all unchanged. See
+             # DECISIONS.md v3-D247.
              # NOTE (v3-D246, 2026-09-24): third empty sweep for the "computed/
              # shipped, zero reader / stale docblock / drifted duplicate" bug
              # class — after v3-D196/D197's own empty sweeps, then 48 further

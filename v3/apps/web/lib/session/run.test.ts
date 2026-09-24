@@ -732,7 +732,7 @@ describe("v3-D98 — Door 1, 'extra Learn' after the assembled queue is done", (
   it("offers nothing before the mastery gate window opens the FIRST candidate is un-encoded — a virgin log grants the first mushaf-order ayah", async () => {
     const c = corpus();
     const offer = await extraLearnOfferFor(
-      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true, gateSlipped: false, rescaffolding: false, structured: true, openPracticeDrill: null, lastActivityAt: T0, siteVisit: null },
+      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true, gateSlipped: false, rescaffolding: false, structured: true, openPracticeDrill: null, lastActivityAt: T0, siteVisit: null, freshMachine: { machine: {} as SessionRun["machine"], rescaffolding: false } },
       c,
       T0,
     );
@@ -813,6 +813,7 @@ describe("v3-D98 — Door 1, 'extra Learn' after the assembled queue is done", (
         openPracticeDrill: null,
         lastActivityAt: T0,
         siteVisit: null,
+        freshMachine: { machine: {} as SessionRun["machine"], rescaffolding: false },
       },
       c,
       T0 + 10_000,
@@ -866,7 +867,7 @@ describe("v3-D98 — Door 1, 'extra Learn' after the assembled queue is done", (
 describe("v3-D106 — Door 2, 'weak-spot gym' after the assembled queue is done", () => {
   it("offers nothing before any atom is encoded — a virgin log has no weak spot to rank", async () => {
     const offer = await weakSpotOfferFor(
-      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true, gateSlipped: false, rescaffolding: false, structured: true, openPracticeDrill: null, lastActivityAt: T0, siteVisit: null },
+      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true, gateSlipped: false, rescaffolding: false, structured: true, openPracticeDrill: null, lastActivityAt: T0, siteVisit: null, freshMachine: { machine: {} as SessionRun["machine"], rescaffolding: false } },
       T0,
     );
     expect(offer).toBeNull();
@@ -904,6 +905,7 @@ describe("v3-D106 — Door 2, 'weak-spot gym' after the assembled queue is done"
       structured: true,
       lastActivityAt: T0,
       siteVisit: null,
+      freshMachine: { machine: {} as SessionRun["machine"], rescaffolding: false },
     };
     const offer = await weakSpotOfferFor(doneRun, T0 + 10_000);
     expect(offer).not.toBeNull();
@@ -934,6 +936,7 @@ describe("v3-D106 — Door 2, 'weak-spot gym' after the assembled queue is done"
       structured: true,
       lastActivityAt: T0,
       siteVisit: null,
+      freshMachine: { machine: {} as SessionRun["machine"], rescaffolding: false },
     };
     const offer = await weakSpotOfferFor(doneRun, T0 + 10_000);
     expect(offer).not.toBeNull();
@@ -1057,6 +1060,7 @@ describe("v3-D111 — FR6 diminishing-returns nudge on the Door 2 weak-spot offe
     structured: true,
     lastActivityAt: T0,
     siteVisit: null,
+    freshMachine: { machine: {} as SessionRun["machine"], rescaffolding: false },
   };
 
   it("returns null below the threshold — three same-day reps is not yet 'a lot'", async () => {
@@ -1417,10 +1421,12 @@ describe("v3-D107 — gate forgiveness ladder: demoteOfferFor / acceptGateDemote
 // real re-entry gap an honest audit trail (a genuine `interruption` event,
 // evidence-only — `rebuild.ts` has no branch for it, invariant #5's
 // structural-absence discipline) and an honest one-line notice
-// (`resumeNotice`, engine-owned copy). Actually RESTRUCTURING the queue on
-// "restart"/"replan"/"makeup" is deliberately NOT built here — a genuinely
-// separate, larger scope, named so a future run doesn't have to re-derive
-// that boundary from scratch.
+// (`resumeNotice`, engine-owned copy). RESTRUCTURING the queue for "restart"
+// is now built (below, "FR5 restart") — the other two, "replan" (re-derive
+// the whole remaining queue with a warm-up) and "makeup" (a make-up merge),
+// stay deliberately NOT built here, a genuinely separate, larger scope,
+// named so a future run doesn't have to re-derive that boundary from
+// scratch.
 describe("FR5 — resumePolicy reaches the real session loop (classifyReentry / acknowledgeReentry)", () => {
   it("classifyReentry: null once the session is done — nothing left to attach an audit event to", async () => {
     const c = corpus();
@@ -1561,6 +1567,150 @@ describe("FR5 — resumePolicy reaches the real session loop (classifyReentry / 
 
     expect(after.length).toBe(before.length);
     expect(acked).toBe(run);
+  });
+});
+
+// FR5 restart — resume.ts's own contract for a <1hr gap is literal:
+// "restart the current drill", not merely log it and say so.
+// `acknowledgeReentry` committed the audit event and the honest notice
+// (above) but left `run.machine` untouched, so a learner who stepped away
+// mid-reconstruct and came back within the hour still saw their
+// half-finished blanks exactly as they left them — the ordinary "resume"
+// experience, indistinguishable from the <2min case `resumeNotice`'s own
+// text explicitly says did NOT happen ("that pause won't count toward your
+// time on task").
+//
+// Scoped to "restart" only, matching this file's own established "one door
+// at a time" precedent — "replan" and "makeup" still resolve to nothing but
+// the audit trail + notice, exactly as before.
+describe("FR5 restart — acknowledgeReentry discards the current item's partial progress", () => {
+  it("resets a partially-answered gate item back to its own pristine blank layout", async () => {
+    const c = corpus();
+    const gatedAyah = 1;
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah: gatedAyah, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+
+    const day2 = T0 + 86_400_000;
+    const started = await startSession({ surah: SURAH, now: day2, tz: TZ }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    expect(started.run.queue[0]?.kind).toBe("gate");
+
+    // The pristine state the moment this gate item became current — a full
+    // blank of ayah 1 (4 words in the real 112 corpus). Confirms the test's
+    // own precondition directly: more than one blank, so a single tap
+    // cannot complete the item and this test genuinely exercises PARTIAL
+    // progress, not a vacuous full pass.
+    const pristine = started.run.machine;
+    expect(pristine.blankPositions.length).toBeGreaterThan(1);
+    expect(pristine.blankIndex).toBe(0);
+
+    // One CORRECT tap — genuine progress, not a slip — advances the pass
+    // without completing it.
+    const afterOneTap = await answerCurrent(started.run, c, correctIndexFor(started.run, c), {
+      now: day2 + 100,
+      tz: TZ,
+    });
+    expect(afterOneTap.done).toBe(false);
+    expect(afterOneTap.machine.blankIndex).toBe(1);
+    expect(afterOneTap.machine).not.toEqual(pristine);
+
+    // A 30-minute gap — squarely inside resume.ts's "restart" window.
+    const gapNow = day2 + 100 + 30 * 60_000;
+    const decision = classifyReentry(afterOneTap, gapNow);
+    expect(decision?.action).toBe("restart");
+    if (!decision) return;
+
+    const acked = await acknowledgeReentry(afterOneTap, decision, { now: gapNow, tz: TZ });
+
+    // Back to the exact pristine state — not merely "blankIndex 0 again" by
+    // coincidence, but the SAME machine the item started with, word for
+    // word, position for position.
+    expect(acked.machine).toEqual(pristine);
+    expect(acked.rescaffolding).toBe(started.run.rescaffolding);
+    // A restart also clears whatever slip/tap memory belonged to the
+    // discarded pass — a fresh attempt earns a fresh slate, the same
+    // discipline a genuinely new queue item gets (`settleAnswer`'s own
+    // cursor-advance branch).
+    expect(acked.gateSlipped).toBe(false);
+    expect(acked.lastTap).toBeNull();
+
+    // Still a real audit trail, unchanged from the pre-existing coverage
+    // above — the fix adds a queue reset, it does not remove the evidence.
+    const events = await getAllEvents();
+    expect(events.some((e) => e.type === "interruption" && e.resume === "restart")).toBe(true);
+  });
+
+  it("does not reset an EARLIER item's progress after the queue has already advanced past it", async () => {
+    // Proves the pristine snapshot is re-captured per queue item, not frozen
+    // at session start: complete ayah 1's gate fully (advancing the cursor),
+    // make partial progress on the NEXT item, then restart — the reset must
+    // target the CURRENT item's own fresh state, never ayah 1's.
+    const c = corpus();
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah: 1, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah: 3, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+
+    const day2 = T0 + 86_400_000;
+    const started = await startSession({ surah: SURAH, now: day2, tz: TZ }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    // Two due gates, both full-blanked (4 words each in the real corpus).
+    expect(started.run.queue.filter((q) => q.kind === "gate").length).toBe(2);
+
+    // Finish the FIRST gate completely.
+    let run = started.run;
+    const firstAyah = run.queue[0]!.ayah;
+    let cur = currentItem(run, c);
+    while (cur && run.queue[run.cursor]?.ayah === firstAyah) {
+      run = await answerCurrent(run, c, correctIndexFor(run, c), {
+        now: day2 + 100 * (run.cursor + 1),
+        tz: TZ,
+      });
+      cur = currentItem(run, c);
+    }
+    expect(run.cursor).toBe(1);
+    expect(run.done).toBe(false);
+
+    const secondPristine = run.machine;
+    const afterOneTap = await answerCurrent(run, c, correctIndexFor(run, c), {
+      now: day2 + 5000,
+      tz: TZ,
+    });
+    expect(afterOneTap.machine).not.toEqual(secondPristine);
+
+    const gapNow = day2 + 5000 + 30 * 60_000;
+    const decision = classifyReentry(afterOneTap, gapNow);
+    expect(decision?.action).toBe("restart");
+    if (!decision) return;
+
+    const acked = await acknowledgeReentry(afterOneTap, decision, { now: gapNow, tz: TZ });
+    expect(acked.machine).toEqual(secondPristine);
+    expect(acked.cursor).toBe(1);
+  });
+
+  it("'replan'/'makeup' are unaffected — only 'restart' resets the machine", async () => {
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+
+    const gapNow = T0 + ONE_HOUR + 60_000;
+    const decision = classifyReentry(started.run, gapNow);
+    expect(decision?.action).toBe("replan");
+    if (!decision) return;
+
+    const acked = await acknowledgeReentry(started.run, decision, { now: gapNow, tz: TZ });
+    // No queue restructuring for "replan" — machine/cursor/queue untouched.
+    expect(acked.machine).toEqual(started.run.machine);
+    expect(acked.cursor).toBe(started.run.cursor);
+    expect(acked.queue).toBe(started.run.queue);
   });
 });
 

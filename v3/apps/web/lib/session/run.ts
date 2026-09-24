@@ -307,6 +307,22 @@ export interface SessionRun {
    * `ensureSiteVisit` re-resolves rather than reuses.
    */
   readonly siteVisit: SiteVisit | null;
+  /**
+   * FR5 restart (resume.ts's own contract: "<1hr → restart the current
+   * drill") — the reconstruct machine exactly as it stood the moment the
+   * CURRENT queue item became current, before any tap. `acknowledgeReentry`'s
+   * "restart" branch resets `machine`/`rescaffolding` back to this snapshot,
+   * discarding whatever partial progress the interrupted pass had made.
+   *
+   * Refreshed at every site that builds a FRESH machine for a genuinely new
+   * item (`startFromQueue`, `settleAnswer`'s cursor-advance branch,
+   * `advancePastCurrent`, `settleRescaffoldWarmup`'s warm-up→cold
+   * transition, `startExtraLearn`, `startWeakSpotDrill`) — never touched by
+   * a mid-item tap (`settleAnswer`'s non-advancing branches), so a restart
+   * mid-pass reverts to the ORIGINAL blank layout, not to whatever the
+   * learner had tapped since.
+   */
+  readonly freshMachine: { readonly machine: ReconstructState; readonly rescaffolding: boolean };
 }
 
 /**
@@ -853,6 +869,7 @@ async function startFromQueue(
       // here: a session that is started and abandoned must not pay for an
       // IndexedDB read it never used.
       siteVisit: null,
+      freshMachine: { machine, rescaffolding },
     },
   };
 }
@@ -1236,12 +1253,16 @@ async function settleRescaffoldWarmup(
   const events = await getEventsForSurah(run.surah);
   const atomsMap = rebuild(events);
   const strength = strengthOf(atomsMap, run.surah, cur.ayah);
+  const machine = initReconstruct(c, run.surah, cur.ayah, strength, { full: true });
   return {
     ...run,
-    machine: initReconstruct(c, run.surah, cur.ayah, strength, { full: true }),
+    machine,
     rescaffolding: false,
     gateSlipped: false,
     lastTap: { index: optionIndex, correct: true },
+    // The rescaffold warm-up just ended — a restart from here must return to
+    // the fresh COLD check, never back to the (now-resolved) warm-up.
+    freshMachine: { machine, rescaffolding: false },
   };
 }
 
@@ -1299,6 +1320,7 @@ async function settleAnswer(
       // A fresh queue item starts with a clean slate, regardless of what the
       // PREVIOUS item's gate slip state was.
       gateSlipped: false,
+      freshMachine: { machine, rescaffolding },
     };
   }
 
@@ -1327,16 +1349,17 @@ export function clearReveal(run: SessionRun): SessionRun {
  * attach an audit event to, and a learner looking at their own completed
  * summary has nothing left to be "interrupted" out of.
  *
- * Deliberately just the CLASSIFICATION. Restructuring the queue for
- * "restart"/"replan"/"makeup" (discarding the current item's partial state,
- * re-deriving the whole remaining queue, or running a make-up merge) is a
- * genuinely separate, larger scope — this file's own established "one door
- * at a time" precedent (v3-D98's Door 1, v3-D106's Door 2, v3-D117's Door
- * 3), named here so a future run does not have to re-derive that boundary.
- * What a caller MAY honestly say today, regardless of whether it ever
- * builds that larger scope: `timeOnTaskMs` already excludes this gap's
- * latency from "time on task" for any classification other than "resume",
- * independently of anything here ever running — see `resumeNotice`.
+ * Just the CLASSIFICATION — `acknowledgeReentry`, below, is what acts on it.
+ * "restart" (this file's own established "one door at a time" precedent —
+ * v3-D98's Door 1, v3-D106's Door 2, v3-D117's Door 3) discards the current
+ * item's partial state via `run.freshMachine`. "replan" (re-deriving the
+ * whole REMAINING queue with a warm-up) and "makeup" (a make-up merge) stay
+ * genuinely separate, larger scope — named here so a future run does not
+ * have to re-derive that boundary. What a caller MAY honestly say today for
+ * either of those two, regardless of whether it ever builds that larger
+ * scope: `timeOnTaskMs` already excludes this gap's latency from "time on
+ * task" for any classification other than "resume", independently of
+ * anything here ever running — see `resumeNotice`.
  */
 export function classifyReentry(run: SessionRun, now: number): ResumeDecision | null {
   if (run.done) return null;
@@ -1357,6 +1380,18 @@ export function classifyReentry(run: SessionRun, now: number): ResumeDecision | 
  *
  * `ayah` is the CURRENT queue item's — the one thing an interruption can be
  * said to be "about" — never a fabricated coordinate.
+ *
+ * "restart" (<1hr gap) additionally resets `machine`/`rescaffolding` to
+ * `run.freshMachine` — the pristine state the CURRENT item began in — and
+ * clears `gateSlipped`/`lastTap`, discarding whatever partial progress the
+ * interrupted pass had made. This is resume.ts's own literal contract
+ * ("restart the current drill"), not merely logging that a gap happened:
+ * a learner who stepped away mid-reconstruct and comes back within the hour
+ * gets the item's blanks back the way it started, never half-finished as
+ * they left them. Never re-derived from the corpus/atoms here — that would
+ * risk sizing a fresh pass against events this very gap may have raced
+ * with; `freshMachine` is exactly the snapshot taken when the item became
+ * current, nothing recomputed.
  */
 export async function acknowledgeReentry(
   run: SessionRun,
@@ -1383,6 +1418,18 @@ export async function acknowledgeReentry(
   } as DrillEvent;
 
   await append(event, ctx);
+
+  if (decision.action === "restart") {
+    return {
+      ...run,
+      machine: run.freshMachine.machine,
+      rescaffolding: run.freshMachine.rescaffolding,
+      gateSlipped: false,
+      lastTap: null,
+      lastActivityAt: ctx.now,
+    };
+  }
+
   return { ...run, lastActivityAt: ctx.now };
 }
 
@@ -1454,11 +1501,12 @@ export function startExtraLearn(run: SessionRun, c: Corpus, ayah: number): Sessi
   // ever offers `!encoded.has(ayah)`), so its strength is definitionally 0 —
   // the same starting point a first-ever "learn" item gets inside the normal
   // assembled queue.
+  const machine = machineFor(c, run.surah, item, 0);
   return {
     ...run,
     queue,
     cursor,
-    machine: machineFor(c, run.surah, item, 0),
+    machine,
     lastTap: null,
     done: false,
     gateSlipped: false,
@@ -1468,6 +1516,7 @@ export function startExtraLearn(run: SessionRun, c: Corpus, ayah: number): Sessi
     // victory-lap drill (`structured:false`), that mode must not leak into a
     // fresh Learn the engine granted — a newly learned ayah has to encode.
     structured: true,
+    freshMachine: { machine, rescaffolding: false },
   };
 }
 
@@ -1539,11 +1588,12 @@ export async function startWeakSpotDrill(run: SessionRun, c: Corpus, ayah: numbe
   };
   const queue = [...run.queue, item];
   const cursor = queue.length - 1;
+  const machine = machineFor(c, run.surah, item, strengthOf(atomsMap, run.surah, ayah));
   return {
     ...run,
     queue,
     cursor,
-    machine: machineFor(c, run.surah, item, strengthOf(atomsMap, run.surah, ayah)),
+    machine,
     lastTap: null,
     done: false,
     gateSlipped: false,
@@ -1553,6 +1603,7 @@ export async function startWeakSpotDrill(run: SessionRun, c: Corpus, ayah: numbe
     // inherited from a victory-lap drill's `structured:false`, which would
     // silently make the weakest-atom rehearsal count for nothing.
     structured: true,
+    freshMachine: { machine, rescaffolding: false },
   };
 }
 
@@ -1697,6 +1748,7 @@ async function advancePastCurrent(run: SessionRun, c: Corpus): Promise<SessionRu
     rescaffolding,
     lastTap: null,
     gateSlipped: false,
+    freshMachine: { machine, rescaffolding },
   };
 }
 
