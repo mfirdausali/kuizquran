@@ -23976,3 +23976,115 @@ moves, a human approves it). Also unchanged: FR5 "replan"/"makeup" (now
 unblocked — `assembleFor` returns partially-learned ayat, so a re-plan
 would no longer drop the in-progress Learn); every other item on v3-D251's
 own "NOT addressed" list.
+
+## v3-D253 (2026-09-25) — DEFECTS.md#B15: a Carry-band review re-armed an already-passed cold gate
+
+v3-D252's own "NEXT RUN" note named this exactly, having observed it on the
+same 14-day harness that closed B14: "a Carry-band REVIEW (full blank → S3
+`ayah_produced`) re-arming an already-passed cold gate via `rebuild.ts`'s S3
+branch (`scheduleGate` sets `gatePassed:false`), blocking Steady's next-day
+Learn every time." Confirmed and closed this run.
+
+`packages/engine/src/rebuild.ts#applyEvent`'s `rung_complete`/`ayah_produced`
+branch scheduled the day-1 cold gate for **any** structured `S3`-rung
+completion, unconditionally — not only the one that first encodes the ayah.
+Once an atom is encoded and has passed its cold gate, an ordinary later
+spaced REVIEW can also grade `S3` (a Carry-band atom's full-blank
+reconstruction — `run.ts`'s own difficulty choice for a strong atom), through
+the exact same `ayah_produced` event shape the original encoding used.
+`gate.ts#scheduleGate()` unconditionally sets `gatePassed: false` and re-arms
+`gateDueAt` for the next learning-day, so every such review silently
+re-opened an already-closed gate — and with Steady's `gateTolerance` of 0
+(`unlockPermitted`), that pending gate blocked new-ayah Learn from the
+review's next day onward, forever. Same "a completion routed to the wrong
+fold semantics" shape as B11 (v3-D101), one layer over.
+
+**Fixed:** the schedule-gate branch now also requires `!atom.encoded` — read
+off the atom's state as it stood **before** this event, not the freshly
+`update()`-d copy. This is true exactly when the S3 completion is a genuine
+transition into `encoded` (first-time encoding, or a re-encoding after
+`gate_demote`); it is false for any later review that happens to grade S3 on
+an atom that was already encoded, so `gatePassed`/`gateDueAt` are left
+untouched by those.
+
+RED confirmed directly: 3 new cases added to `test/rebuild.test.ts` (a
+dedicated "v3-D253/B15" describe block), run against the unmodified
+`rebuild.ts` — the load-bearing case failed exactly `expected false to be
+true` on `atom.gatePassed` after a post-gate-pass S3 review, reproducing the
+harness's own observation; the other two (fold == replay holds for the same
+event shape; a genuinely fresh re-encoding after `gate_demote` still
+schedules the gate) passed vacuously, correctly, since neither depends on
+the fix — the second is the explicit no-regression guard for the one case
+that legitimately must still schedule a gate. Reran: engine suite 446/446
+(was 443, +3 — exactly this run's new tests).
+
+`golden-log-parity.test.ts` — the gate this fix's own risk note said to
+check — was re-run directly before and after: green both times, unmodified.
+Confirmed why, not merely observed: the committed oracle's `events.json` has
+exactly two ayat with any `S3`-rung/`gate_result` activity (ayah 4, ayah 11),
+and each carries exactly ONE `S3` completion event, always the first one for
+that atom (`atom.encoded` is `false` going in) — the fixture never exercises
+a second S3 completion on an already-encoded atom, so the fix is a pure
+no-op against it. No oracle/golden-log/fixture/snapshot was regenerated; per
+NIGHTLY.md's rule, this was verified rather than assumed before touching
+anything.
+
+`TZ=UTC make test`: **2884 passing** (was 2881, +3 — exactly this run's
+three new tests; only `engine` moved: 255 v2 vitest, 47 v2/api, 402 v3/api
+[2 incomplete/PAY-1 + 6 Postgres-gated skips, unchanged], 120
+corpus-compiler, **446 engine** [was 443], 63 fold-runner, 1551 apps/web),
+exit 0. `check-test-floor.mjs`: OK, 2884 >= floor 1899 (+985 margin, floor
+left unmoved, same discipline as every prior entry). `TZ=UTC make build`:
+exit 0, 30 routes, unchanged (an engine-only fix, no apps/web production
+file touched — the identical route/file counts as v3-D252: boundaries OK,
+322 files; locked-css OK, 1 documented hunk, 294 v1 lines byte-identical;
+fonts degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints across 4
+artifacts — no corpus data in this diff). `npx tsc --noEmit`, run separately
+across all four v3 node packages (`engine`, `corpus-compiler`, `fold-runner`,
+`apps/web` — each of the latter three imports `rebuild()`/the engine
+package directly, so a change to its exported behavior could in principle
+break a sibling package's own typecheck without touching its source): clean
+in all four. No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff produced by `make setup`/running the suite was reverted
+before committing, same discipline as every prior entry — `git status
+--porcelain -- v1 v2` empty immediately before committing). No Arabic
+codepoint (the diff of both changed files swept programmatically, in
+Python, over the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks, plus a `\u06xx`/`\u07xx`/`\u08xx`/
+`\uFBxx`/`\uFExx` escape and `fromCharCode`/`fromCodePoint` sweep: CLEAN —
+every new string is a TypeScript identifier, a docblock/comment sentence, or
+a millisecond arithmetic constant (`DAY`), never corpus text).
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled corpus
+anywhere except `packages/engine` (pre-installed). `HEAD` was found detached
+exactly at `origin/main`'s own real tip (`2c91bc9`, v3-D252), on a stale
+LOCAL `main` branch ref one commit behind (`f1c92ce`, v3-D251) — the
+recurring stale-local-`main` trap this file has recorded roughly fifty times
+since v3-D77 — caught before any implementation work via `git fetch origin
+main` + `git checkout main && git merge --ff-only origin/main`, a clean
+fast-forward, no work lost or at risk. `make setup` ran clean from scratch
+for every package except `packages/engine`, no retries needed.
+
+NOT addressed: every item on v3-D251's/v3-D252's own "NOT addressed" lists,
+unchanged — `DrillPicker.tsx`'s own unused `now` prop; the unused
+`atoms`/`corpus`/`sessions` IndexedDB object stores (v3-D232);
+`session_start`'s own latency metric (v0.8); the streak/away-day day-space
+mismatch (v3-D209); `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`;
+`App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151, v3-D219); `App\Flags\FlagService::enabled()`
+(v3-D197); multi-surah enrollment; the operational mailer/7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `corpusHash`'s zero fold-side consumer (v3-D206);
+`selection_determinism_check` still replaying a committed fixture — all
+unchanged. FR5's own "replan"/"makeup" queue-level behavior remains
+unbuilt, though now genuinely unblocked on the data side by both B14 and
+B15: a re-plan or make-up merge can now trust that `assembleFor`'s
+partially-learned Learn candidates and a Carry-band ayah's own gate state
+are both honestly represented in the fold, where before either bug could
+silently corrupt what a replan would see. This B14/B15 pair (both found via
+the same real-corpus, real-session-loop 14-day harness) is now CLOSED —
+remove it from future sweeps.

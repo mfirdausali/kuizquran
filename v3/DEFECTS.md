@@ -8,10 +8,45 @@ by executing the v2 harness. **B10, B11, B12** were found in v3's own session
 loop (build-plan step 18), independent of the v2 port. **B13** is a port
 omission in the Test route (build-plan step 15's override layer, consumed at
 step 18+). **B14** is another v3 session-loop defect (step 18/19), a
-regression against v2's own Learn-window behavior. **E-01…E-08** are
-multi-surah defects that only manifest once a second surah exists.
+regression against v2's own Learn-window behavior. **B15** is an engine-fold
+defect (`rebuild.ts`), found immediately downstream of B14's own fix.
+**E-01…E-08** are multi-surah defects that only manifest once a second surah
+exists.
 
 ---
+
+## B15 — a Carry-band review re-armed an already-passed cold gate ✅ CLOSED (build-plan step 18, v3-D253)
+
+`packages/engine/src/rebuild.ts#applyEvent`'s `rung_complete`/`ayah_produced`
+branch called `scheduleGate()` for **any** structured `S3`-rung completion —
+not only the FIRST one. Once an ayah is encoded and its cold gate passed, an
+ordinary later spaced REVIEW can also grade `S3` (a Carry-band full-blank
+reconstruction is `run.ts`'s own difficulty choice for a strong atom), and
+arrives through the exact same `ayah_produced` event shape the original
+encoding used. `scheduleGate()` unconditionally sets `gatePassed: false` and
+re-arms `gateDueAt` for the next learning-day — so every such review
+silently re-opened an already-closed cold gate, and with Steady's
+`gateTolerance` of 0 (`unlockPermitted`), that pending gate blocked new-ayah
+Learn from the review's next day onward, indefinitely, the same "a completion
+routed to the wrong fold semantics" shape as B11.
+
+Observed on the real surah-112 corpus via a 14-day harness (v3-D251's own
+"NEXT RUN" note): day 12 served a Carry-band review of ayah 1, day 13 served
+`gate1` again for an atom that had already passed its cold gate on day 9.
+
+**Fixed:** the schedule-gate branch is now gated on `!atom.encoded` — the
+atom's own state **before** this event — so only a genuine transition into
+`encoded` (the first S3 completion, or a re-encoding after `gate_demote`)
+schedules the gate. A later review that happens to grade S3 on an
+already-encoded atom now leaves `gatePassed`/`gateDueAt` untouched.
+
+**Regression tests:** `test/rebuild.test.ts` "v3-D253/B15" describe block (3
+cases: a post-gate-pass S3 review leaves `gatePassed` true and the gate never
+reads due again; fold == replay holds for the same event shape; a genuinely
+fresh re-encoding after `gate_demote` still schedules the gate — no
+regression). `golden-log-parity.test.ts` re-confirmed green unmodified — the
+committed oracle's event log never exercises a second S3 completion on an
+already-encoded atom, so the fix is a pure no-op against it.
 
 ## B14 — a partially-learned ayah was never offered again, so the daily loop could never encode a multi-word ayah ✅ CLOSED (build-plan step 18, v3-D252)
 

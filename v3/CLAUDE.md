@@ -53,11 +53,45 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2881 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 2884 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 402 v3/api + 120 corpus-compiler
-             # + 443 engine + 63 fold-runner + 1551 apps/web. (v3-D252, 2026-09-25)
-             # NOTE (v3-D252, 2026-09-25): DEFECTS.md#B14 CLOSED.
+             # + 446 engine + 63 fold-runner + 1551 apps/web. (v3-D253, 2026-09-25)
+             # NOTE (v3-D253, 2026-09-25): DEFECTS.md#B15 CLOSED —
+             # `rebuild.ts`'s S3-completion branch unconditionally
+             # `scheduleGate()`d, re-arming an already-passed cold gate on
+             # any LATER ordinary review that happened to grade S3 (a
+             # Carry-band full-blank reconstruction), blocking new-ayah
+             # Learn forever after the first such review. Named by v3-D252's
+             # own "NEXT RUN" note (observed on the same 14-day real-corpus
+             # harness that closed B14, one day later: day 12 a Carry-band
+             # review, day 13 the gate re-served). Fixed: the schedule-gate
+             # branch now also requires the atom was NOT already `encoded`
+             # before this event — true only for a genuine first encoding or
+             # a re-encoding after `gate_demote`. RED confirmed directly: 3
+             # new `test/rebuild.test.ts` cases, the load-bearing one failed
+             # `expected false to be true` on `gatePassed` against the
+             # unmodified fold; engine 446 (was 443, +3).
+             # `golden-log-parity.test.ts` re-run green, unmodified, and
+             # confirmed WHY: the committed oracle's log has exactly one S3
+             # completion per ayah, always the first (never-encoded-before)
+             # one, so the fix is a pure no-op against it — no oracle
+             # regenerated. `TZ=UTC make test`: 2884 (was 2881, +3, engine
+             # only). `make build`: exit 0, 30 routes, unchanged (engine-only
+             # fix, no apps/web file touched); boundaries 322 files,
+             # locked-css/fonts/corpus-morphology/corpus-glyphs all
+             # unchanged. `npx tsc --noEmit` clean across all four v3 node
+             # packages. No v1/v2 edit (stray `v2/tsconfig.tsbuildinfo`
+             # reverted). No Arabic codepoint (both changed files swept
+             # over every Arabic/Presentation-Forms block plus an escape/
+             # fromCharCode sweep: clean). Session start: `HEAD` detached
+             # exactly at `origin/main`'s tip (`2c91bc9`), local `main` one
+             # commit stale (`f1c92ce`) — the usual trap, fast-forwarded
+             # before any work. See DEFECTS.md#B15 and DECISIONS.md v3-D253
+             # for the full write-up. NOT addressed: every item on v3-D251's/
+             # v3-D252's own "NOT addressed" lists, unchanged — see
+             # DECISIONS.md v3-D253's own closing note for the full
+             # enumeration.
              # `lib/session/run.ts#learnCandidatesFor` excluded every ayah
              # with ANY atom row, but a strength-0 Learn pass blanks one word,
              # grades S2 and never encodes — while `getAtom` still creates the

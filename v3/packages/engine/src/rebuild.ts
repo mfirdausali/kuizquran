@@ -93,7 +93,14 @@ export function applyEvent(atoms: AtomsMap, e: DrillEvent, cfg?: DayConfig): voi
     };
     let updated = update(atom, outcome, { cfg });
     // Completing S3 = the ayah was produced whole → schedule the day-1 cold gate.
-    if (e.rung === "S3" && isStructured(e)) {
+    // Gated on `!atom.encoded` (the atom's state BEFORE this event): a later,
+    // ordinary spaced REVIEW can also grade S3 (a Carry-band full-blank
+    // reconstruction, `run.ts`'s own difficulty choice) via this exact same
+    // event shape, on an atom that is already encoded and may have already
+    // passed its gate. Without this guard every such review re-armed the gate
+    // (`scheduleGate` unconditionally sets `gatePassed: false`), permanently
+    // blocking new-ayah unlock the day after — v3-D253/B15.
+    if (e.rung === "S3" && isStructured(e) && !atom.encoded) {
       updated = scheduleGate(updated, effectiveTs(e), cfg);
     }
     atoms.set(key, updated);

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { rebuild, applyEvent, type AtomsMap } from "../src/rebuild.ts";
+import { gateDue } from "../src/gate.ts";
 import type { DrillEvent } from "../src/types.ts";
 
 const DAY = 86_400_000;
@@ -147,6 +148,56 @@ describe("rebuild — v2 Phase 1 tap-to-reconstruct events (reconstruct_tap/ayah
     // Net of one slip (-15, Learn band) then a graded S2 completion (+12): still positive.
     expect(atom.strength).toBeGreaterThan(0);
     expect(atom.reps).toBe(2); // the slip + the completion; the bare correct tap carries no signal
+  });
+});
+
+describe("rebuild — v3-D253/B15: a Carry-band full-blank REVIEW must not re-arm an already-passed gate", () => {
+  it("an ordinary S3-rung review after a passed gate leaves gatePassed true and does not re-arm gateDueAt", () => {
+    const t = 5 * DAY;
+    const events: DrillEvent[] = [
+      // day 5: encode via a whole-ayah reconstruct pass — schedules the gate.
+      { type: "ayah_produced", ts: t, surah: 12, ayah: 4, rung: "S3" },
+      // day 6: the cold gate is attempted and passed.
+      { type: "gate_result", ts: t + DAY + 3600_000, surah: 12, ayah: 4, rung: "S3", correct: true },
+      // day 20: an ordinary spaced REVIEW happens to be a full-blank
+      // reconstruction (Carry band) and grades S3 — the same rung the
+      // original encoding used, but via `ayah_produced`, never `gate_result`.
+      { type: "ayah_produced", ts: t + 15 * DAY, surah: 12, ayah: 4, rung: "S3" },
+    ];
+    const atoms = rebuild(events);
+    const atom = atoms.get("12:ayah:4")!;
+    expect(atom.gatePassed).toBe(true);
+    // The gate must not read as due again on any later day.
+    expect(gateDue(atom, t + 30 * DAY)).toBe(false);
+  });
+
+  it("fold == replay still holds for this exact event shape", () => {
+    const t = 5 * DAY;
+    const events: DrillEvent[] = [
+      { type: "ayah_produced", ts: t, surah: 12, ayah: 4, rung: "S3" },
+      { type: "gate_result", ts: t + DAY, surah: 12, ayah: 4, rung: "S3", correct: true },
+      { type: "ayah_produced", ts: t + 15 * DAY, surah: 12, ayah: 4, rung: "S3" },
+    ];
+    const full = rebuild(events);
+    const incremental: AtomsMap = new Map();
+    for (const e of events) applyEvent(incremental, e);
+    expect(incremental).toEqual(full);
+  });
+
+  it("a genuinely FRESH encoding after a demote still schedules the gate (no regression)", () => {
+    const t = 5 * DAY;
+    const events: DrillEvent[] = [
+      { type: "ayah_produced", ts: t, surah: 12, ayah: 4, rung: "S3" }, // encode + schedule
+      { type: "gate_result", ts: t + DAY, surah: 12, ayah: 4, rung: "S3", correct: false }, // fail, re-arm
+      { type: "gate_demote", ts: t + DAY + 1000, surah: 12, ayah: 4, rung: "S3" }, // clears encoding/gate
+      { type: "ayah_produced", ts: t + 2 * DAY, surah: 12, ayah: 4, rung: "S3" }, // re-encode
+    ];
+    const atoms = rebuild(events);
+    const atom = atoms.get("12:ayah:4")!;
+    expect(atom.encoded).toBe(true);
+    expect(atom.gatePassed).toBe(false);
+    expect(atom.gateDueAt).not.toBeNull();
+    expect(gateDue(atom, t + 3 * DAY)).toBe(true); // the gate genuinely is due again
   });
 });
 
