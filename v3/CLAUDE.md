@@ -53,10 +53,131 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2875 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 2876 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 402 v3/api + 120 corpus-compiler
-             # + 443 engine + 63 fold-runner + 1545 apps/web. (v3-D250, 2026-09-25)
+             # + 443 engine + 63 fold-runner + 1546 apps/web. (v3-D251, 2026-09-25)
+             # NOTE (v3-D251, 2026-09-25): `lib/session/run.test.ts`'s own
+             # "UNTAUGHT ayah" test comment (Door 3 / FR6, added at v3-D117)
+             # repeated the EXACT staleness v3-D244 closed nine nights
+             # earlier, one file over: it said `coldSuccessAdoption` was
+             # "still unwired, out of this run's scope" — false since
+             # v3-D118, the very next night, wired it as
+             # `adoptionOfferFor`/`acceptAdoption`, real, exported from
+             # `run.ts` and called from `SessionIsland.tsx`. v3-D244's own
+             # regression test (the `describe("this file's own docblocks do
+             # not claim a wired door is unwired")` block, `run.test.ts:999`)
+             # scans `run.ts`'s own docblock for exactly this phrasing but
+             # never scanned THIS test file's own prose, so the sibling
+             # instance sitting 1400 lines further down the very file that
+             # guard lives in went unnoticed for nine more nights
+             # (v3-D245..D250), each correctly closing "Door 3/adoption" on
+             # the strength of the `run.ts` fix alone. Found by a fresh
+             # sweep this run for the "test asserts a gap that has since
+             # closed" shape (v3-D246/D248 checked the five Playwright e2e
+             # specs for this; this run grepped every `.ts`/`.tsx` for
+             # stale-staleness phrasing instead) after the usual zero-caller
+             # scans (`apps/web/lib/**`, `packages/engine/src`, Laravel
+             # model relations/migrations, the Console schedule, the flag
+             # registry, and a field-by-field re-audit of
+             # `AdminRolesController`, `NightlyWindowController`
+             # +`NightlyWindowPanel.tsx`, `EntitlementController`,
+             # `EventWireCodec`'s field symmetry, and `Event`'s own
+             # `$fillable`/casts against its two newest migrations) all came
+             # back genuinely complete or already-known/deferred — grep-
+             # confirmed this was the ONE hit anywhere in the tree
+             # (`grep -rn "still unwired\|out of this run"` returned exactly
+             # this line) before writing any test.
+             #
+             # Fixed, one file, two hunks, no behavior change — `run.ts`,
+             # `SessionIsland.tsx` and every real Door-3/adoption caller
+             # were already correct and are byte-identical after this run:
+             # the comment is corrected to state the real wiring while
+             # keeping its true substantive point (this ONE test proves only
+             # the passive half — practicing with no adoption tap teaches
+             # nothing); a new permanent regression test is added to
+             # v3-D244's own describe block so a recurrence in either file
+             # is now caught automatically. The new test reads
+             # `run.test.ts`'s own real source text and asserts the stale
+             # phrase is absent, then — the biconditional half, mirroring
+             # the sibling test exactly — asserts `SessionIsland.tsx` still
+             # calls `acceptAdoption`. Its search phrase is built from an
+             # array of separate words joined at runtime specifically so the
+             # assertion's OWN declaration (which this same test reads,
+             # since it scans the file it lives in) can never accidentally
+             # satisfy the very pattern it forbids.
+             #
+             # RED confirmed directly: the new test was added FIRST, with
+             # the stale comment left untouched, and run in isolation —
+             # failed exactly on `expect(testSrc).not.toContain(staleClaim)`,
+             # the real stale text still present. Comment fixed, rerun:
+             # 2/2 green in that describe block (was 1, +1); full file
+             # 102/102 (was 101, +1). `TZ=UTC make test`: 2876 passing (was
+             # 2875, +1 — exactly this run's one new test; apps/web 1546,
+             # was 1545; no other suite moved: 255 v2 vitest, 47 v2/api, 402
+             # v3/api [2 incomplete/PAY-1 + 6 skipped, both environment-
+             # dependent — the 6 skips are all `PerUserFoldLockTest`/
+             # `PerUserFoldLockWiringTest` cases gated on an unreachable
+             # Postgres connection in this sandbox, v3-D116's own documented
+             # no-op-outside-Postgres design; `DeterminismCheckCommandTest`/
+             # `DeterminismP1PagerTest` did NOT skip, since `worker/fold-
+             # runner` was genuinely installed by this run's own `make
+             # setup`], 120 corpus-compiler, 443 engine, 63 fold-runner),
+             # exit 0. `check-test-floor.mjs`: OK, 2876 >= floor 1899 (+977
+             # margin, unmoved). `TZ=UTC make build`: exit 0, 30 routes,
+             # unchanged (a test-file-only change). `npm run gates`: all
+             # green — locked-css OK, 1 documented hunk, 294 v1 lines byte-
+             # identical; boundaries OK, 323 files, up from 322 in this
+             # run's own baseline — confirmed the same pre-existing
+             # gitignored `next-env.d.ts` bootstrap-artifact fluctuation
+             # v3-D206/D227/D231/D236/D239 each already recorded via `git
+             # status --porcelain --ignored`, not a new production file;
+             # fonts degraded-but-non-blocking, pre-existing, 2/6 UI fonts
+             # present; corpus-morphology OK, 362 words; corpus-glyphs OK,
+             # 206 codepoints across 4 artifacts — all unchanged, no corpus
+             # data in this diff. `npx tsc --noEmit`: clean. No
+             # `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff reverted before committing). No Arabic
+             # codepoint (the one changed file swept programmatically, in
+             # Python, over the Arabic, Arabic Supplement, Arabic
+             # Extended-A and both Presentation Forms Unicode blocks, plus a
+             # `\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape and
+             # `fromCharCode`/`fromCodePoint` sweep: CLEAN — every new
+             # string is a TypeScript identifier, a comment sentence, or the
+             # closed-set array-of-words the assertion builds its search
+             # phrase from, never corpus text). No oracle/golden-log/
+             # fixture/snapshot regenerated.
+             #
+             # Session start: fresh container, `make setup` ran clean from
+             # scratch. `HEAD`/local `main` were stale (`fcfe765`, 21
+             # commits behind) versus `origin/main`'s real tip (`db2b03c`,
+             # v3-D250) — caught before any exploration via `git fetch
+             # origin main` + `git ls-remote origin main`, then `git
+             # checkout main && git merge --ff-only origin/main`, a clean
+             # fast-forward, no work lost or at risk — the same recurring
+             # stale-local-`main` trap this file has recorded roughly fifty
+             # times since v3-D77.
+             #
+             # NOT addressed: every item on v3-D250's own "NOT addressed"
+             # list, unchanged — "replan"/"makeup"; `DrillPicker.tsx`'s own
+             # unused `now` prop; the unused `atoms`/`corpus`/`sessions`
+             # IndexedDB object stores (v3-D232); `session_start`'s own
+             # latency metric (v0.8); the streak/away-day day-space mismatch
+             # (v3-D209); `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()`; `App\Billing\TrialAttribution`
+             # (v3-D148); `lib/pricing.ts#regionFromCountry()` (v3-D163);
+             # `PaywallGate` as a whole class (v3-D88, v3-D151, v3-D219);
+             # `App\Flags\FlagService::enabled()` (v3-D197); multi-surah
+             # enrollment; the operational mailer/7-night launch window;
+             # PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel` (v3-D188); `corpusHash`'s zero
+             # fold-side consumer (v3-D206); `selection_determinism_check`
+             # still replaying a committed fixture — all unchanged.
+             # `run.test.ts`'s own stale adoption comment is now CLOSED and
+             # permanently guarded — remove it from future "docblock says X,
+             # reality is Y" sweeps. See DECISIONS.md v3-D251.
              # NOTE (v3-D250, 2026-09-25): `packages/engine/src/capacity.ts
              # #planFor()`'s own `habitProtocol` field (FR10's first-week
              # ramp: "underloaded: true, secondThreadFromDay: 3") had zero

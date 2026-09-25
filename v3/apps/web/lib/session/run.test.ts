@@ -1018,6 +1018,28 @@ describe("this file's own docblocks do not claim a wired door is unwired", () =>
     expect(islandSrc).toMatch(/\badoptionOfferFor\b/);
     expect(islandSrc).toMatch(/\bacceptAdoption\b/);
   });
+
+  // v3-D251: the SAME staleness the test above guards against in `run.ts`'s
+  // own docblock recurred one file over, in THIS test file's own prose —
+  // the "UNTAUGHT ayah" test below (added at v3-D117, before v3-D118 wired
+  // cold-success adoption) said `coldSuccessAdoption` was "still unwired,
+  // out of this run's scope." False since v3-D118: `adoptionOfferFor`/
+  // `acceptAdoption` are real, exported below and called from
+  // `SessionIsland.tsx`. The sibling check above only scans `run.ts`'s own
+  // source — this file's own comment was never covered by it.
+  it("this file's own UNTAUGHT-ayah test comment never claims cold-success adoption is unwired", () => {
+    const testSrc = readFileSync(resolve(HERE, "run.test.ts"), "utf8");
+    // Built from parts so this assertion's own source text can never
+    // accidentally satisfy the very pattern it forbids.
+    const staleClaim = ["still", "unwired,", "out", "of", "this", "run's", "scope"].join(" ");
+    expect(testSrc).not.toContain(staleClaim);
+
+    // The biconditional half, same discipline as the sibling check above:
+    // the claim would only be honest if `acceptAdoption` genuinely had no
+    // caller.
+    const islandSrc = readFileSync(SESSION_ISLAND_SRC, "utf8");
+    expect(islandSrc).toMatch(/\bacceptAdoption\b/);
+  });
 });
 
 // FR6's diminishing-returns nudge (`packages/engine/src/freeplay.ts#diminishingReturns`)
@@ -2413,9 +2435,11 @@ describe("v3-D117 — FR6 Door 3, 'open practice' (any ayah × chosen difficulty
     // The fold's structured guard (`update.ts:71`) drops every free-play
     // outcome, so an ayah practiced but never actually taught stays
     // un-encoded — a Door 3 pass, however "hard" and however cleanly
-    // completed, cannot silently teach it. (That is exactly what
-    // `coldSuccessAdoption` exists to offer as a deliberate, separate,
-    // tap-gated step — still unwired, out of this run's scope.)
+    // completed, cannot silently teach it. (`coldSuccessAdoption` is the
+    // deliberate, separate, tap-gated step that CAN teach it — wired since
+    // v3-D118 as `adoptionOfferFor`/`acceptAdoption` below. This test's own
+    // scope is only the passive half proven above: practicing alone, with
+    // no adoption tap, teaches nothing.)
     const atom = rebuild(after).get(atomKey(SURAH, "ayah", ayah));
     expect(atom?.encoded ?? false).toBe(false);
   });
