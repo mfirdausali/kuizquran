@@ -212,16 +212,22 @@ export function dueToday(
 
   for (let ayah = 1; ayah <= corpus.meta.ayahCount; ayah++) {
     const atom = atoms.get(atomKey(surah, "ayah", ayah));
-    if (!atom) {
+    // `gateDue` is asked FIRST, for any atom that exists, so the delegation
+    // `plan-due-today.test.ts` pins stays discriminating: an inline copy
+    // lacking `gateDue`'s own `encoded` term would still be caught listing a
+    // stray `gateDueAt` on an un-encoded atom.
+    if (atom && gateDue(atom, now)) {
+      gates.push({ surah, ayah });
+    } else if (!atom || !atom.encoded) {
       // Every unencoded ayah is a real candidate — mirroring `run.ts
       // #learnCandidatesFor`'s own shape — capped below to the mode's actual
-      // ceiling, never to a hardcoded 1.
+      // ceiling, never to a hardcoded 1. v3-D252: "unencoded" includes an
+      // atom row that EXISTS with `encoded: false` (a demoted ayah, or an
+      // abandoned Learn pass) — such an atom is never a gate (`gateDue`
+      // requires `encoded`) nor a review (below), so the old `!atom`-only
+      // test listed it nowhere at all.
       learnCandidates.push(ayah);
-      continue;
-    }
-    if (gateDue(atom, now)) {
-      gates.push({ surah, ayah });
-    } else if (atom.encoded && currentBand(atom, now) !== "carry") {
+    } else if (currentBand(atom, now) !== "carry") {
       reviews += 1;
     }
   }

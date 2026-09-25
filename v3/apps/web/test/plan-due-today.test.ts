@@ -125,3 +125,38 @@ describe("PlanIsland#dueToday's learn list respects the learner's real pace ceil
     expect(result.learn).toEqual([{ surah: SURAH, ayah: 1 }]);
   });
 });
+
+// v3-D252 — `dueToday` mirrors `run.ts#learnCandidatesFor`, and both read
+// "an atom row exists" as "already learned". An atom can exist UN-ENCODED:
+// `gate.ts#demoteToLearn` (the forgiveness ladder's "send back to Learn")
+// leaves one behind with `encoded: false`, and `rebuild.ts#getAtom`
+// materializes one on the first wrong tap of a Learn pass. Such an ayah is
+// neither a gate nor a review, so `/plan` listed it nowhere at all.
+describe("PlanIsland#dueToday lists an un-encoded ayah with an existing atom as a Learn candidate", () => {
+  it("a demoted ayah (atom present, encoded:false, no gate) is the next Learn, in mushaf order", () => {
+    const demoted: AtomState = {
+      ...initAtom(SURAH, "ayah", 1),
+      encoded: false,
+      gatePassed: false,
+      gateDueAt: null,
+      strength: 30,
+    };
+    const atoms = new Map<string, AtomState>([[`${SURAH}:ayah:1`, demoted]]);
+    const result = dueToday(stubCorpus(3), atoms, NOW);
+    expect(result.learn).toEqual([{ surah: SURAH, ayah: 1 }]);
+    expect(result.gates).toEqual([]);
+    expect(result.reviews).toBe(0);
+  });
+
+  it("an ENCODED ayah is still never listed as a Learn candidate", () => {
+    const encoded: AtomState = {
+      ...initAtom(SURAH, "ayah", 1),
+      encoded: true,
+      gatePassed: true,
+      gateDueAt: null,
+    };
+    const atoms = new Map<string, AtomState>([[`${SURAH}:ayah:1`, encoded]]);
+    const result = dueToday(stubCorpus(3), atoms, NOW);
+    expect(result.learn).toEqual([{ surah: SURAH, ayah: 2 }]);
+  });
+});

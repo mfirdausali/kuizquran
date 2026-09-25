@@ -1498,9 +1498,11 @@ export function startExtraLearn(run: SessionRun, c: Corpus, ayah: number): Sessi
   const queue = [...run.queue, item];
   const cursor = queue.length - 1;
   // The candidate is un-encoded by extraLearnGrant's own contract (it only
-  // ever offers `!encoded.has(ayah)`), so its strength is definitionally 0 —
-  // the same starting point a first-ever "learn" item gets inside the normal
-  // assembled queue.
+  // ever offers `!encoded.has(ayah)`), so it is sized as a first-ever Learn
+  // at strength 0 — even when an un-encoded atom row already exists for it
+  // (a demoted ayah, or an abandoned Learn pass, v3-D252): an ayah that was
+  // never produced whole, or was sent back to Learn, gets the full Learn
+  // scaffold again, never a review-sized one.
   const machine = machineFor(c, run.surah, item, 0);
   return {
     ...run,
@@ -1873,16 +1875,25 @@ function strengthOf(atoms: ReturnType<typeof rebuild>, surah: number, ayah: numb
   return 0;
 }
 
-/** Ayat eligible to be newly Learned, in mushaf order: those with no atom yet.
+/** Ayat eligible to be newly Learned, in mushaf order: those not yet ENCODED.
  *  Which of them is actually served — and whether any is — remains the
- *  engine's call inside `assembleQueue`. */
+ *  engine's call inside `assembleQueue`.
+ *
+ *  v3-D252 — "not encoded", never "no atom yet". An atom row can exist
+ *  un-encoded: `rebuild.ts#getAtom` materializes one on the first wrong tap
+ *  of a Learn pass, and `gate.ts#demoteToLearn` (the forgiveness ladder's
+ *  "send this verse back to Learn") deliberately keeps the atom with
+ *  `encoded: false`. The old existence filter dropped every such ayah from
+ *  Learn forever — and, un-encoded, it was never a review or a gate either,
+ *  so it was silently orphaned. `encoded` is the same predicate the engine's
+ *  own consumers apply (`assembleQueue` step 5, `extraLearnGrant`). */
 function learnCandidatesFor(c: Corpus, atoms: ReturnType<typeof rebuild>): number[] {
-  const seen = new Set<number>();
-  for (const a of atoms.values()) if (a.kind === "ayah") seen.add(a.ref);
+  const encoded = new Set<number>();
+  for (const a of atoms.values()) if (a.kind === "ayah" && a.encoded) encoded.add(a.ref);
   const all = [...new Set(c.words.map((w: { ayah: number }) => w.ayah))].sort(
     (x: number, y: number) => x - y,
   );
-  return all.filter((n) => !seen.has(n));
+  return all.filter((n) => !encoded.has(n));
 }
 
 /** Same LOCAL day, used only to decide resume-vs-new. Day boundaries for

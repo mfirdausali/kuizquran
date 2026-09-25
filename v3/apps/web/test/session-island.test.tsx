@@ -601,6 +601,22 @@ describe("v3-D98 — Door 1 CTA on the real summary screen, actually wired", () 
     }
     expect(seedRun.done).toBe(true);
 
+    // v3-D252 — the seeding run above genuinely ENCODES only ayah 2 (its
+    // first machine is `full: true`, graded S3). Ayat 3 and 4 get
+    // `machineForItem`'s ordinary strength-0 Learn machine — one blank,
+    // graded S2 — which leaves them un-encoded. This test's own stated
+    // precondition ("ONLY ayah 1 remains un-encoded") only ever held under
+    // `learnCandidatesFor`'s old "has any atom = learned" misreading, the
+    // very defect v3-D252 fixes. Encode 3 and 4 for real, through the same
+    // public `append()` an S3 completion uses, so the precondition is TRUE
+    // rather than an artifact of that bug.
+    for (const ayah of [3, 4]) {
+      await append(
+        { type: "ayah_produced", ts: now - 500 + ayah, tz: "UTC", surah: SURAH, ayah, rung: "S3", structured: true } as DrillEvent,
+        { now: now - 500 + ayah, tz: "UTC" },
+      );
+    }
+
     startSessionOverride = () => Promise.resolve({ ok: true, run: trivialOneItemRun(corpus, now) });
     render(<SessionIsland surah={SURAH} />);
     await waitFor(() => expect(screen.getByTestId("session-drill")).toBeTruthy());

@@ -23880,3 +23880,99 @@ either a genuinely fresh corner or a willingness to take on one of the
 larger, already-named architectural items (`PaywallGate`,
 `EntitlementMachine::merge()`, multi-surah enrollment, `rhymeClassOf()`,
 FR5's own "replan"/"makeup" queue-level behavior).
+
+## v3-D252 (2026-09-25) — DEFECTS.md#B14: a partially-learned ayah was never offered again — the real daily loop could never encode a multi-word ayah
+
+**Found** while scoping FR5's "replan" (the long-standing "NOT addressed"
+item): re-deriving the queue mid-session means calling `assembleFor` again,
+so its Learn-candidate input was read closely first.
+`apps/web/lib/session/run.ts#learnCandidatesFor` returned "ayat with no atom
+yet". An ordinary Learn item is a strength-0 reconstruct pass that blanks
+ONE word (`reconstruct.ts#blankCountFor`, Learn band) and is graded S2; S2
+never sets `AtomState.encoded` (`update.ts:118` — only S3/gate), but
+`rebuild.ts#getAtom` creates the atom on that first pass. From then on the
+ayah was no Learn candidate (atom exists), no review (`assembleQueue` step 3
+requires `encoded`), no gate (`gateDueAt` null) — orphaned. Same for an
+ayah the forgiveness ladder "sent back to Learn" (`demoteToLearn` keeps the
+atom with `encoded:false`) and for a Learn abandoned after one wrong tap.
+
+**Measured, not argued.** A throwaway harness (deleted, never committed)
+drove the real `startSession` → `answerCurrent` loop on the real compiled
+112 corpus, one session per learning-day, 14 days. Unfixed: days 0–3 serve
+`learn1`..`learn4` once each, days 4–13 all return `nothing-due`, and zero
+ayat ever encode. Fixed: `learn1` returns every day with strength
+11→21→…→100, encodes on day 8, `gate1` on day 9, `learn2` from day 10.
+
+**Decision (no new policy invented).** "Learn candidate" means NOT ENCODED
+— the predicate the engine's own consumers already apply (`assembleQueue`
+step 5's `encodedOrQueued`, `freeplay.ts#extraLearnGrant`'s "first
+not-encoded candidate") and what v2's `useSession.ts` window effectively
+did. Candidates stay in mushaf order, so an un-encoded lower ayah is the
+next Learn — which is exactly the "back to Learn" the forgiveness ladder
+promises. Door 1 ("extra Learn") therefore may now offer another pass at the
+ayah the session just partially learned: that is `extraLearnGrant`'s own
+documented contract, not a new choice.
+
+**Fixed:** `learnCandidatesFor` excludes only `encoded` ayah atoms.
+`PlanIsland.tsx#dueToday` (which mirrors it) lists an existing un-encoded
+atom as a Learn candidate; it now asks `gateDue` FIRST for any existing atom
+so v3-D227's delegation test still discriminates (an inline gate copy
+missing `encoded` would still be caught). `startExtraLearn`'s comment
+("strength is definitionally 0") corrected: an un-encoded candidate is sized
+as a first Learn at strength 0 even when an atom row exists.
+
+**Three pre-existing tests encoded the bug's own misreading, corrected (not
+weakened):** (1) `run.test.ts` Door 1 "leaves candidates behind" used "has
+an `ayah_produced` event" as its encoded proxy — now uses the fold's
+`encoded`, the original produced-count preconditions kept verbatim;
+(2) `run.test.ts` `startExtraLearn` asserted exactly one `ayah_produced` for
+the offered ayah in the whole log — now asserts exactly one ADDED by the
+extension (a before/after delta), since the offered ayah can legitimately
+carry an earlier S2 pass; (3) `session-island.test.tsx` "never renders the
+CTA once every candidate ayah is genuinely exhausted" — its off-screen seed
+run only ever encoded ayah 2 (ayat 3/4 got S2 passes), so its stated
+precondition "ONLY ayah 1 remains un-encoded" was never true; ayat 3/4 are
+now genuinely encoded via S3 `append()`s before the assertion, which still
+checks the CTA never renders. No assertion deleted, no `.skip`.
+
+**RED confirmed** with the 5 new tests added first against unmodified
+source: 3 failed exactly as predicted (`expected [ 2 ] to include 1` twice
+in `run.test.ts`; `expected [{surah:112,ayah:2}] to deeply equal
+[{surah:112,ayah:1}]` in `plan-due-today.test.ts`); the 2 "encoded is still
+excluded" guards passed, as they should. After the fix: those files 114/114;
+full apps/web 1551/1551 (was 1546, +5). `TZ=UTC make test`: **2881 passing**
+(was 2876, +5 — only apps/web moved: 255 v2 vitest, 47 v2/api, 402 v3/api
+[2 incomplete/PAY-1 + 6 Postgres-gated skips, unchanged], 120
+corpus-compiler, 443 engine, 63 fold-runner, 1551 apps/web), exit 0.
+`check-test-floor.mjs`: OK, 2881 >= 1899 (+982). `TZ=UTC make build`: exit
+0, 30 routes; locked-css OK (1 hunk, 294 lines byte-identical); boundaries
+OK, 322 files; fonts degraded-but-non-blocking (pre-existing);
+corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints / 4
+artifacts. `npx tsc --noEmit`: clean. No `v1/**`/`v2/**` edit (stray
+`v2/tsconfig.tsbuildinfo` reverted). No Arabic: every changed file swept in
+Python over U+0600–06FF, U+0750–077F, U+08A0–08FF, U+FB50–FDFF,
+U+FE70–FEFF plus `\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`–`\uFExx` escapes and
+`fromCharCode`/`fromCodePoint`: CLEAN — tests use coordinates only. No
+oracle/golden-log/fixture/snapshot regenerated. Playwright e2e was not run
+(not part of `make test`).
+
+Session start: `HEAD`, local `main` and `origin/main` already agreed at
+`f1c92ce` (v3-D251) after `git fetch origin main` — no stale-local-`main`
+trap this run. `make setup` completed (composer's documented proxy
+timeouts recovered by falling back to source downloads).
+
+**Observed, NOT addressed — the next run should start here.** The same
+14-day harness showed a carried ayah's REVIEW re-arming its cold gate: day
+12 served `review1`, day 13 served `gate1` again. A Carry-band review blanks
+the whole ayah (`blankCountFor` → full), grades S3, and `rebuild.ts`'s
+`ayah_produced` branch calls `scheduleGate()` for ANY structured S3 —
+which sets `gatePassed:false` on an already-passed atom. With Steady's
+`gateTolerance` 0 that blocks new Learn on the review's next day, every
+time. The same shape as B11 (a completion routed to the wrong fold
+semantics), on the review path. Not investigated past that observation; it
+needs its own RED and very likely touches the engine fold, so the
+golden-log parity gate must be checked (and, if the oracle legitimately
+moves, a human approves it). Also unchanged: FR5 "replan"/"makeup" (now
+unblocked — `assembleFor` returns partially-learned ayat, so a re-plan
+would no longer drop the in-progress Learn); every other item on v3-D251's
+own "NOT addressed" list.

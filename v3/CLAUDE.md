@@ -53,10 +53,34 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2876 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 2881 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 402 v3/api + 120 corpus-compiler
-             # + 443 engine + 63 fold-runner + 1546 apps/web. (v3-D251, 2026-09-25)
+             # + 443 engine + 63 fold-runner + 1551 apps/web. (v3-D252, 2026-09-25)
+             # NOTE (v3-D252, 2026-09-25): DEFECTS.md#B14 CLOSED.
+             # `lib/session/run.ts#learnCandidatesFor` excluded every ayah
+             # with ANY atom row, but a strength-0 Learn pass blanks one word,
+             # grades S2 and never encodes — while `getAtom` still creates the
+             # atom. So every multi-word ayah was orphaned after its FIRST
+             # Learn pass (no Learn: atom exists; no review/gate: not
+             # encoded), and so was every forgiveness-ladder demote. Measured
+             # with a throwaway harness on the real 112 corpus, one real
+             # session per day for 14 days: unfixed, `learn1..learn4` once
+             # each, then `nothing-due` forever, ZERO ayat ever encoded;
+             # fixed, ayah 1 climbs daily, encodes day 8, gate day 9, ayah 2
+             # from day 10. Fix: candidates = not ENCODED (the engine's own
+             # consumers' predicate; v2 parity). `PlanIsland#dueToday`
+             # mirrors it. RED first: 3 of 5 new tests failed as predicted.
+             # Three older tests carried the bug's own "has evidence =
+             # learned" misreading and were corrected, not weakened — see
+             # DECISIONS.md v3-D252. `TZ=UTC make test` 2881 (was 2876, +5,
+             # apps/web only); `make build` exit 0, 30 routes; no v1/v2 edit;
+             # no Arabic. NEXT RUN: the same harness showed a Carry-band
+             # REVIEW (full blank → S3 `ayah_produced`) re-arming an
+             # already-passed cold gate via `rebuild.ts`'s S3 branch
+             # (`scheduleGate` sets `gatePassed:false`), blocking Steady's
+             # next-day Learn every time — a B11-shaped engine-fold defect,
+             # observed but not investigated; mind the golden-log parity gate.
              # NOTE (v3-D251, 2026-09-25): `lib/session/run.test.ts`'s own
              # "UNTAUGHT ayah" test comment (Door 3 / FR6, added at v3-D117)
              # repeated the EXACT staleness v3-D244 closed nine nights

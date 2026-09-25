@@ -7,10 +7,51 @@ the regression test that closes it.
 by executing the v2 harness. **B10, B11, B12** were found in v3's own session
 loop (build-plan step 18), independent of the v2 port. **B13** is a port
 omission in the Test route (build-plan step 15's override layer, consumed at
-step 18+). **E-01…E-08** are multi-surah defects that only manifest once a
-second surah exists.
+step 18+). **B14** is another v3 session-loop defect (step 18/19), a
+regression against v2's own Learn-window behavior. **E-01…E-08** are
+multi-surah defects that only manifest once a second surah exists.
 
 ---
+
+## B14 — a partially-learned ayah was never offered again, so the daily loop could never encode a multi-word ayah ✅ CLOSED (build-plan step 18, v3-D252)
+
+`apps/web/lib/session/run.ts#learnCandidatesFor` — the Learn-candidate list
+feeding `assembleFor` (so `/session` AND `/home`'s due count) and
+`extraLearnOfferFor` (FR6 Door 1) — excluded every ayah with ANY atom row,
+reading "an atom exists" as "already learned". But an ordinary Learn item is
+a strength-0 reconstruct pass that blanks ONE word (`reconstruct.ts
+#blankCountFor`, Learn band) and is graded S2, which never sets
+`AtomState.encoded` (only S3/gate does, `update.ts:118`) — yet
+`rebuild.ts#getAtom` materializes the atom on that very first pass. So after
+its first Learn pass every multi-word ayah was: not a Learn candidate (atom
+exists), not a review (`assembleQueue` step 3 needs `encoded`), not a gate
+(`gateDueAt` null). Orphaned. The same held for an ayah sent back by the
+forgiveness ladder (`gate.ts#demoteToLearn` keeps the atom, `encoded:
+false`) — "send this verse back to Learn" sent it nowhere.
+
+Measured on the real surah-112 corpus by driving the real session loop one
+session per learning-day for 14 days: unfixed, days 0–3 each serve one
+first Learn pass on ayat 1, 2, 3, 4, then every later day is `nothing-due`
+and **zero** ayat are ever encoded. Fixed, ayah 1 is re-served daily with a
+growing blank count, encodes on day 8, passes its cold gate on day 9, and
+ayah 2 begins on day 10 — the progressive scaffold `reconstruct.ts`'s own
+header describes ("the hidden tail grows toward the front as strength
+climbs").
+
+v2 parity: v2's `useSession.ts` fed `assembleQueue` a window of ayah numbers
+anchored on the highest ENCODED ayah, never an atom-existence filter, and the
+engine's own consumers (`assembleQueue` step 5, `freeplay.ts
+#extraLearnGrant`) filter by `encoded`.
+
+**Fixed:** `learnCandidatesFor` excludes only ENCODED ayat.
+`components/plan/PlanIsland.tsx#dueToday`, which mirrors it for `/plan`,
+now lists an un-encoded atom as a Learn candidate (it was listed nowhere).
+
+**Regression tests:** `lib/session/run.test.ts` "v3-D252 — an un-encoded
+ayah with an existing atom is still offered for Learn" (3 cases: demoted
+ayah returns as Learn; abandoned-after-a-slip Learn returns first in mushaf
+order; an encoded ayah is still never a Learn) and
+`test/plan-due-today.test.ts` (2 cases).
 
 ## B13 — the `disable` override reached no learner ✅ CLOSED (build-plan step 15, v3-D110)
 

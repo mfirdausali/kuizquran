@@ -749,18 +749,29 @@ describe("v3-D98 — Door 1, 'extra Learn' after the assembled queue is done", (
     expect(taps).toBeGreaterThan(0);
     expect(run.done).toBe(true);
 
-    // What the FIRST session actually encoded, derived from the real log —
+    // What the FIRST session actually worked on, derived from the real log —
     // never a hardcoded ayah number, which would freeze a corpus-cost detail
     // this test has no business asserting.
     const events = await getAllEvents();
-    const encoded = new Set(
+    const produced = new Set(
       events.filter((e) => e.type === "ayah_produced").map((e) => e.ayah),
     );
     // The 8-minute default budget must not have swallowed the whole surah, or
     // this test is not exercising the scenario it claims to (see the corpus12
     // comment above for why 12, not 112, is used here).
-    expect(encoded.size).toBeGreaterThan(0);
-    expect(encoded.size).toBeLessThan(111);
+    expect(produced.size).toBeGreaterThan(0);
+    expect(produced.size).toBeLessThan(111);
+
+    // v3-D252 — "encoded" is the FOLD's own `AtomState.encoded` (an S3/gate
+    // success, `update.ts`), never "has an `ayah_produced` event": a Learn
+    // pass at strength 0 blanks one word (`blankCountFor`'s Learn band) and
+    // is graded S2, which leaves the ayah un-encoded. This test's previous
+    // proxy read every `ayah_produced` as encoding — the same "has any
+    // evidence = learned" misreading v3-D252 fixed in `learnCandidatesFor`,
+    // where it silently orphaned every partially-learned ayah.
+    const encoded = new Set(
+      [...rebuild(events).values()].filter((a) => a.kind === "ayah" && a.encoded).map((a) => a.ref),
+    );
 
     const offer = await extraLearnOfferFor(run, c, T0 + taps * 1000);
     expect(offer.granted).toBe(true);
@@ -835,6 +846,13 @@ describe("v3-D98 — Door 1, 'extra Learn' after the assembled queue is done", (
     expect(offer.granted).toBe(true);
     const offeredAyah = offer.ayah!;
 
+    // v3-D252 — the offered ayah may be one the first session already
+    // PARTIALLY learned (an S2 `ayah_produced`, still un-encoded), so count
+    // this extension's own completion as a delta, never an absolute total.
+    const producedBefore = (await getAllEvents()).filter(
+      (e) => e.type === "ayah_produced" && e.ayah === offeredAyah,
+    ).length;
+
     const extended = startExtraLearn(first.run, c, offeredAyah);
     expect(extended.done).toBe(false);
     expect(extended.queue.length).toBe(first.run.queue.length + 1);
@@ -852,7 +870,7 @@ describe("v3-D98 — Door 1, 'extra Learn' after the assembled queue is done", (
     const producedForOffered = events.filter(
       (e) => e.type === "ayah_produced" && e.ayah === offeredAyah,
     );
-    expect(producedForOffered.length).toBe(1);
+    expect(producedForOffered.length - producedBefore).toBe(1);
   });
 });
 
@@ -1426,6 +1444,108 @@ describe("v3-D107 — gate forgiveness ladder: demoteOfferFor / acceptGateDemote
     expect(events.length).toBe(before.length);
     expect(events.some((e) => e.type === "gate_demote")).toBe(false);
     expect(after).toBe(started.run);
+  });
+});
+
+// v3-D252 — an UN-ENCODED ayah whose atom already exists must still be
+// offered for Learn.
+//
+// `learnCandidatesFor` (this module's own helper, feeding `assembleFor` —
+// and through it `/home`'s due count — and `extraLearnOfferFor`) excluded
+// every ayah that had ANY atom row, reading "has an atom" as "has been
+// learned". The two are not the same: `rebuild.ts#getAtom` materializes an
+// un-encoded atom on the very first wrong tap of a Learn pass, and
+// `gate.ts#demoteToLearn` (v2-D08's forgiveness ladder, "send this verse
+// back to Learn") deliberately leaves the atom in place with `encoded:
+// false`. Either way the ayah then fell out of the candidate list forever —
+// never a Learn (atom exists), never a review (not encoded, `assembleQueue`
+// step 3), never a gate (`gateDueAt` null) — silently orphaned. The engine's
+// own consumers (`assembleQueue` step 5, `freeplay.ts#extraLearnGrant`)
+// already filter candidates by `encoded`, never by existence; v2's
+// `useSession.ts` fed them a window over ayah numbers, never an
+// atom-existence filter. Coordinates only — no Arabic anywhere here.
+describe("v3-D252 — an un-encoded ayah with an existing atom is still offered for Learn", () => {
+  it("an ayah sent back to Learn by acceptGateDemote reappears as a Learn item the next learning-day", async () => {
+    const c = corpus();
+    const gatedAyah = 1;
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah: gatedAyah, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+    for (let day = 1; day <= DEMOTE_OFFER_AFTER_FAILS; day++) {
+      await append(
+        {
+          type: "gate_result",
+          ts: T0 + day * 86_400_000,
+          tz: TZ,
+          surah: SURAH,
+          ayah: gatedAyah,
+          rung: "S3",
+          correct: false,
+          structured: true,
+        } as DrillEvent,
+        { now: T0 + day * 86_400_000, tz: TZ },
+      );
+    }
+
+    const dueDay = T0 + (DEMOTE_OFFER_AFTER_FAILS + 1) * 86_400_000;
+    const started = await startSession({ surah: SURAH, now: dueDay, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+    expect(await demoteOfferFor(started.run)).toEqual({ ayah: gatedAyah });
+    await acceptGateDemote(started.run, c, { now: dueDay + 500, tz: TZ });
+
+    // Precondition, proven rather than assumed: the atom still EXISTS, and is
+    // un-encoded — the exact shape the old existence filter mis-read.
+    const atom = rebuild(await getAllEvents()).get(atomKey(SURAH, "ayah", gatedAyah));
+    expect(atom).toBeDefined();
+    expect(atom?.encoded).toBe(false);
+
+    const nextDay = dueDay + 86_400_000;
+    const next = await startSession({ surah: SURAH, now: nextDay, tz: TZ }, c);
+    if (!next.ok) throw new Error("session must start");
+    const learnAyat = next.run.queue.filter((q) => q.kind === "learn").map((q) => q.ayah);
+    expect(learnAyat).toContain(gatedAyah);
+  });
+
+  it("a Learn item abandoned after one wrong tap is offered again the next learning-day, not skipped forever", async () => {
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+    const first = started.run.queue[0];
+    expect(first?.kind).toBe("learn");
+    const learnAyah = first!.ayah;
+
+    // One WRONG tap commits a real `reconstruct_tap` (correct:false) without
+    // completing the item — the learner then walks away.
+    const correct = correctIndexFor(started.run, c);
+    const wrong = correct === 0 ? 1 : 0;
+    const afterSlip = await answerCurrent(started.run, c, wrong, { now: T0 + 1000, tz: TZ });
+    expect(afterSlip.done).toBe(false);
+
+    const atom = rebuild(await getAllEvents()).get(atomKey(SURAH, "ayah", learnAyah));
+    expect(atom).toBeDefined();
+    expect(atom?.encoded).toBe(false);
+
+    const nextDay = T0 + 86_400_000;
+    const next = await startSession({ surah: SURAH, now: nextDay, tz: TZ }, c);
+    if (!next.ok) throw new Error("session must start");
+    const learnAyat = next.run.queue.filter((q) => q.kind === "learn").map((q) => q.ayah);
+    expect(learnAyat).toContain(learnAyah);
+    // Mushaf order is preserved: the orphan-candidate is not merely appended
+    // at the end — it is still the FIRST Learn, exactly where it was.
+    expect(learnAyat[0]).toBe(learnAyah);
+  });
+
+  it("an ENCODED ayah is still never offered for Learn — the fix narrows the exclusion, it does not drop it", async () => {
+    const c = corpus();
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah: 1, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+    const nextDay = T0 + 86_400_000;
+    const next = await startSession({ surah: SURAH, now: nextDay, tz: TZ }, c);
+    if (!next.ok) throw new Error("session must start");
+    expect(next.run.queue.some((q) => q.kind === "learn" && q.ayah === 1)).toBe(false);
   });
 });
 
