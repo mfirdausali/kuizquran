@@ -23596,3 +23596,129 @@ it from future sweeps; `visitOrdinal` was never added, deliberately, and should
 not be re-attempted without a genuinely new argument for why it would be safe,
 since the one made here (Test never calls `selectFor`) is a structural fact,
 not a scoping choice that a future night could simply widen.
+
+### v3-D250 — `/plan`'s forecast never honored FR10's own first-week habit-protocol ramp — `planFor()`'s `habitProtocol` had zero readers anywhere (2026-09-25)
+
+**The gap, found by a fresh cross-boundary sweep (`packages/engine` -> `apps/web`).**
+`packages/engine/src/capacity.ts#planFor()` has returned a `habitProtocol: {
+underloaded: true, secondThreadFromDay: 3 }` field on every `DailyPlan` since
+FR10 shipped, with its own docblock stating in as many words: "First week is
+deliberately underloaded (FR10 habit protocol) — the scheduler reads
+`habitProtocol` to soften early days." `WIREFRAME.md` §14 ("The first-week
+ramp") repeats the same instruction as a requirement, not a suggestion: "The
+forecast must reflect that deliberate ramp, or week 1 will always look
+'behind.'" `apps/web/lib/plan/forecast.ts#buildForecast()` is the ONE real,
+already-shipped caller of `planFor()` on the `/plan` route — and it read only
+`plan.etaDays`, never `plan.habitProtocol`. `grep -rn "habitProtocol"
+packages/engine apps/web` returned exactly two hits outside the field's own
+declaration, both pure unit-test assertions (`capacity.test.ts`,
+`placement.test.ts`) — zero production readers. `forecast.ts` itself had NO
+test file at all before this run (`find apps/web -iname "*forecast*"` found
+only the source), so nothing could have caught the drop.
+
+**Why it matters, concretely.** A brand-new learner whose steady-state
+capacity would support more than one new ayah per day (a Sprint-pace learner,
+or one on a short surah) sees `/plan`'s trajectory zone (`etaDays`,
+`finishLabel`) computed as if that full capacity applied from day 1 — silently
+violating the exact honesty rule E-06 was built to enforce one line up in the
+same file ("every ETA lies... shipping a date you know is wrong is the precise
+failure §14 exists to prevent"). Week 1 then looks slower than the shown
+projection purely because the projection never accounted for the deliberate
+ramp, the precise "always looks behind" failure mode WIREFRAME names by name.
+Distinct from the excluded `packages/engine/src/placement.ts` (FR10's
+onboarding placement quiz, a different, deliberately-unwired consumer of the
+same `planFor()`) and from "multi-surah enrollment" (a different, excluded
+product decision) — this gap sits entirely inside the single-surah `/plan`
+forecast that already ships today, gated on neither exclusion.
+
+**Fixed, two files, no behavior change for the common case.** `planFor()`'s
+own `DailyPlan.etaDays` is left untouched — the plain steady-state figure
+every existing reader/test already expects. `capacity.ts` gains a new,
+separately-tested `etaDaysWithRamp(plan)`: days are 1-indexed (day 1 = the
+first active day); before `habitProtocol.secondThreadFromDay`, capacity is
+capped at `min(ayahPerDay, 1)` (a single new-ayah "thread"), and the full rate
+applies from that day on. For the common Steady-pace case (`ayahPerDay` is
+already 1) this is a no-op, byte-identical to the old, unramped figure —
+verified directly by a dedicated test. `forecast.ts#buildForecast()` now
+folds `etaDaysWithRamp(plan)` into its per-surah max instead of `plan.etaDays`.
+
+**RED confirmed directly, at both layers.** Engine level: `etaDaysWithRamp`
+did not exist; the 4 new `capacity.test.ts` cases (in a dedicated
+`etaDaysWithRamp` describe block, the 4 pre-existing `planFor` cases
+untouched) failed on `etaDaysWithRamp is not a function` — confirmed by
+running the suite against the tree before `capacity.ts` was touched. The
+load-bearing case picks a genuinely-reachable `ayahPerDay > 1` fixture
+(`avgWordsPerAyah: 5, minutesPerDay: 20` → `ayahPerDay: 7`) and proves the
+un-ramped answer (`ceil(20/7) = 3`, the exact "week 1 looks ahead of itself"
+lie) differs from the ramped one (`5`, hand-traced: day1=1, day2=1, day3=7,
+day4=7, day5=7 → done at day 5). Wiring level: a new
+`apps/web/lib/plan/forecast.test.ts` (this file did not exist before this run)
+proves `buildForecast`'s own `etaDays` is unaffected in the common
+single-thread case, and is genuinely later (never `3`, always `5`) for the
+higher-capacity fixture — this assertion is only satisfiable once
+`buildForecast` actually calls `etaDaysWithRamp`, not `plan.etaDays`; a third
+case confirms `finishLabel` still reads as a half-month, never a day-precise
+date, regardless of which ETA fed it.
+
+**Verified against the full monorepo, not just the two touched packages.**
+Session start: fresh container, no `node_modules`/`vendor`/compiled corpus
+anywhere; `make setup` ran clean from scratch (`v2/api`'s own `composer
+install` needed the documented git-mirror-clone fallback for `laravel/pint`,
+`v3/api`'s own for `laravel/framework`, both recovering on the same
+invocation with no retry flag needed — the same recovery this file's history
+has recorded roughly a dozen times before). `HEAD` was detached exactly at
+`origin/main`'s own tip (`0b6deb7`, v3-D249) — no stale-local-`main` trap this
+run. `TZ=UTC make compile-corpus`: all four launch surahs PASS. `TZ=UTC make
+test`: **2875 passing** (was 2868, +7 — exactly this run's new tests: 4 in
+`capacity.test.ts`, 3 in the new `forecast.test.ts`; engine 443, was 439;
+apps/web 1545, was 1542; no other suite moved: 255 v2 vitest, 47 v2/api, 402
+v3/api [2 incomplete/PAY-1 + 6 skipped, both environment-dependent], 120
+corpus-compiler, 63 fold-runner), exit 0. `check-test-floor.mjs`: OK, 2875 >=
+floor 1899 (+976 margin, unmoved, same discipline as every prior entry).
+`TZ=UTC make build`: exit 0, 30 routes, unchanged (no route added — a
+`packages/engine`+`lib/plan`-only change). `npm run gates` (via `prebuild`):
+all green — locked-css OK, 1 documented hunk, 294 v1 lines byte-identical;
+boundaries OK, 322 files, unchanged count (no new production file, two
+existing files edited plus two test files); fonts degraded-but-non-blocking,
+pre-existing, 2/6 UI fonts present; corpus-morphology OK, 362 words;
+corpus-glyphs OK, 206 codepoints across 4 artifacts — all unchanged, this
+diff carries no new corpus data. `npx tsc --noEmit`: clean. No
+`v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running `make build` was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2` empty
+immediately before committing). No Arabic codepoint (all four changed/new
+files swept programmatically, in Python, over the Arabic, Arabic Supplement,
+Arabic Extended-A and both Presentation Forms Unicode blocks, plus a
+`\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape and
+`fromCharCode`/`fromCodePoint` sweep: CLEAN — every new string is a
+TypeScript identifier, a fixture numeric literal, or a fixed English docblock
+sentence, never corpus text). No oracle/golden-log/fixture/snapshot
+regenerated.
+
+**Found by** a dedicated fresh-sweep agent (Explore) handed the full
+exclusion list carried through v3-D249 and directed specifically at
+cross-package callers (a function in `packages/engine` consumed only from
+`apps/web` or vice versa) rather than the by-now-heavily-mined
+`apps/web/lib/**`-only territory — independently re-verified by this run
+directly against `capacity.ts`, `forecast.ts`, `WIREFRAME.md` §14 and the
+underlying `v3-wireframe.excalidraw`/`gen-wireframe.mjs` source (which
+states the identical requirement in its own generated sticky-note text)
+before writing any test.
+
+**NOT addressed, unchanged:** every item on v3-D249's own "NOT addressed"
+list — "replan"/"makeup"; `DrillPicker.tsx`'s own unused `now` prop; the
+unused `atoms`/`corpus`/`sessions` IndexedDB object stores (v3-D232);
+`session_start`'s own "app-open → first drill" latency metric (v0.8); the
+streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151, v3-D219); `App\Flags\FlagService::enabled()`
+(v3-D197); multi-surah enrollment; the operational mailer/7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `corpusHash`'s zero fold-side consumer (v3-D206);
+`selection_determinism_check` still replaying a committed fixture —
+all unchanged. `packages/engine/src/capacity.ts#planFor()`'s own
+`habitProtocol` field is now CLOSED for `/plan`'s forecast — remove it from
+future "no reader" sweeps.

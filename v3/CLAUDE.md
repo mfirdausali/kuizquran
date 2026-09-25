@@ -53,10 +53,83 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2868 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 2875 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 402 v3/api + 120 corpus-compiler
-             # + 439 engine + 63 fold-runner + 1542 apps/web. (v3-D249, 2026-09-24)
+             # + 443 engine + 63 fold-runner + 1545 apps/web. (v3-D250, 2026-09-25)
+             # NOTE (v3-D250, 2026-09-25): `packages/engine/src/capacity.ts
+             # #planFor()`'s own `habitProtocol` field (FR10's first-week
+             # ramp: "underloaded: true, secondThreadFromDay: 3") had zero
+             # production readers anywhere — `apps/web/lib/plan/forecast.ts
+             # #buildForecast()`, the ONE real caller of `planFor()` on the
+             # already-shipped `/plan` route, read only `plan.etaDays`, never
+             # `plan.habitProtocol`, despite WIREFRAME.md §14's own explicit
+             # instruction: "The forecast must reflect that deliberate ramp,
+             # or week 1 will always look 'behind.'" `forecast.ts` had no test
+             # file at all before this run. Fixed: `capacity.ts` gains
+             # `etaDaysWithRamp(plan)` — days 1-indexed, capacity capped at
+             # `min(ayahPerDay, 1)` before `secondThreadFromDay`, full rate
+             # after — a no-op for the common `ayahPerDay===1` case, verified
+             # directly; `planFor()`'s own `etaDays` is untouched.
+             # `buildForecast()` now folds `etaDaysWithRamp(plan)` into its
+             # per-surah max instead of `plan.etaDays`. RED confirmed at both
+             # layers before implementing: `capacity.test.ts`'s 4 new cases
+             # failed on `etaDaysWithRamp is not a function`; the new
+             # `forecast.test.ts` (3 cases) proves the ramp genuinely
+             # delays the ETA for a higher-capacity fixture (`ceil(20/7)=3`
+             # un-ramped vs `5` ramped) and leaves the common single-thread
+             # case untouched. `TZ=UTC make test`: 2875 passing (was 2868,
+             # +7 — exactly this run's new tests: 4 engine + 3 apps/web; no
+             # other suite moved). `check-test-floor.mjs`: OK, 2875 >= floor
+             # 1899 (+976 margin, unmoved). `TZ=UTC make build`: exit 0, 30
+             # routes, unchanged. `npm run gates`: all green — locked-css OK,
+             # 1 documented hunk, 294 v1 lines byte-identical; boundaries OK,
+             # 322 files, unchanged count; fonts degraded-but-non-blocking,
+             # pre-existing, 2/6 UI fonts present; corpus-morphology OK, 362
+             # words; corpus-glyphs OK, 206 codepoints across 4 artifacts —
+             # all unchanged. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted before
+             # committing). No Arabic codepoint (all four changed/new files
+             # swept programmatically, in Python, over the Arabic, Arabic
+             # Supplement, Arabic Extended-A and both Presentation Forms
+             # Unicode blocks, plus a `\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/
+             # `\uFExx` escape and `fromCharCode`/`fromCodePoint` sweep:
+             # CLEAN). No oracle/golden-log/fixture/snapshot regenerated.
+             # Session start: fresh container, `make setup` ran clean from
+             # scratch (both `v2/api`'s and `v3/api`'s `composer install`
+             # hit the documented transient git-mirror-clone timeout and
+             # recovered on the same invocation, no retry flag needed).
+             # `HEAD` was detached exactly at `origin/main`'s own tip
+             # (`0b6deb7`, v3-D249) — no stale-local-`main` trap this run.
+             # Found by a dedicated fresh-sweep agent (Explore) directed at
+             # CROSS-PACKAGE callers (a `packages/engine` export consumed
+             # only from `apps/web`, or vice versa) rather than the
+             # by-now-heavily-mined `apps/web/lib/**`-only territory —
+             # independently re-verified directly against `capacity.ts`,
+             # `forecast.ts` and WIREFRAME.md §14 (plus the underlying
+             # `v3-wireframe.excalidraw`/`gen-wireframe.mjs` source, which
+             # states the identical requirement in its own generated
+             # sticky-note text) before writing any test. NOT addressed:
+             # every item on v3-D249's own "NOT addressed" list, unchanged —
+             # "replan"/"makeup"; `DrillPicker.tsx`'s own unused `now` prop;
+             # the unused `atoms`/`corpus`/`sessions` IndexedDB object
+             # stores (v3-D232); `session_start`'s own "app-open → first
+             # drill" latency metric (v0.8); the streak/away-day day-space
+             # mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()`; `App\Billing\TrialAttribution`
+             # (v3-D148); `lib/pricing.ts#regionFromCountry()` (v3-D163);
+             # `PaywallGate` as a whole class (v3-D88, v3-D151, v3-D219);
+             # `App\Flags\FlagService::enabled()` (v3-D197); multi-surah
+             # enrollment; the operational mailer/7-night launch window;
+             # PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel` (v3-D188); `corpusHash`'s zero
+             # fold-side consumer (v3-D206); `selection_determinism_check`
+             # still replaying a committed fixture — all unchanged.
+             # `planFor()`'s own `habitProtocol` is now CLOSED for `/plan`'s
+             # forecast — remove it from future "no reader" sweeps. See
+             # DECISIONS.md v3-D250.
              # NOTE (v3-D249, 2026-09-24): `lib/test/build.ts`/`TestIsland.tsx`'s
              # `test_*` events carried no site coordinate at all — v3-D229's own
              # deferred gap, left open through nineteen consecutive nights'

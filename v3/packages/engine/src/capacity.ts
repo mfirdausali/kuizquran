@@ -65,3 +65,29 @@ export function planFor(inp: PlanInputs): DailyPlan {
     habitProtocol: { underloaded: true, secondThreadFromDay: 3 },
   };
 }
+
+/**
+ * ETA in active days, honoring the first-week habit-protocol ramp (WIREFRAME
+ * §14: "planFor() returns habitProtocol... The forecast must reflect that
+ * deliberate ramp, or week 1 will always look 'behind.'"). Days are 1-indexed
+ * (day 1 = the first active day). Before `habitProtocol.secondThreadFromDay`,
+ * only a single new-ayah thread runs, so capacity is capped at 1 ayah/day
+ * regardless of the steady-state `ayahPerDay` figure; from that day on the
+ * full rate applies.
+ *
+ * `DailyPlan.etaDays` itself is left as the plain steady-state figure — every
+ * existing reader of it keeps its current meaning; this is a separate,
+ * ramp-aware projection for a caller that needs the first-week-honest
+ * horizon (currently: the `/plan` forecast).
+ */
+export function etaDaysWithRamp(plan: DailyPlan): number {
+  if (plan.remaining <= 0) return 0;
+  let left = plan.remaining;
+  let day = 0;
+  while (left > 0) {
+    day += 1;
+    const ramped = day < plan.habitProtocol.secondThreadFromDay;
+    left -= ramped ? Math.min(plan.ayahPerDay, 1) : plan.ayahPerDay;
+  }
+  return day;
+}

@@ -48,7 +48,7 @@
 //
 // Pure. `now` and `tz` are passed in; no clock is read here.
 
-import { planFor } from "@engine/capacity.ts";
+import { etaDaysWithRamp, planFor } from "@engine/capacity.ts";
 import { splitBudget } from "@engine/multiSurah.ts";
 
 /** The last day offset that gets exact, named items. */
@@ -191,7 +191,12 @@ export function buildForecast(input: BuildForecastInput): Forecast {
       // The SPLIT share. Passing `minutesPerDay` here is the E-06 lie.
       minutesPerDay: shares.get(e.surah) ?? 0,
     });
-    etaDays = Math.max(etaDays, plan.etaDays);
+    // WIREFRAME §14's own instruction: "The forecast must reflect that
+    // deliberate ramp, or week 1 will always look 'behind.'" `plan.etaDays`
+    // is the steady-state figure; `etaDaysWithRamp` accounts for the
+    // first-week habit protocol (FR10) instead of assuming full pace from
+    // day 1.
+    etaDays = Math.max(etaDays, etaDaysWithRamp(plan));
   }
 
   const days: DayForecast[] = [];
