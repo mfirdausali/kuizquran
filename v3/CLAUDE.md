@@ -57,6 +57,102 @@ make test    # 2884 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 402 v3/api + 120 corpus-compiler
              # + 446 engine + 63 fold-runner + 1551 apps/web. (v3-D253, 2026-09-25)
+             # NOTE (v3-D254, 2026-09-26): fifth empty sweep for the "computed/
+             # shipped, zero reader / stale docblock / drifted duplicate /
+             # zero-caller mechanism" bug class this file has chased since
+             # v3-D82 — after the four prior empty sweeps (v3-D196, v3-D197,
+             # v3-D246, v3-D248) and 40+ intervening nights that each found a
+             # genuine new instance anyway, this run's own fresh, independent
+             # sweep came back genuinely clean too. Checked directly, not
+             # assumed: every `api/app/Http/Controllers/**` class (27 files)
+             # against its own route table and the real `apps/web/lib`
+             # callers — all wired, matching prior sweeps' own conclusion;
+             # every Eloquent `BelongsTo`/`HasMany`/`HasOne` relation across
+             # `api/app/Models` (nine relations total) — all either wired or
+             # the already-excluded "raw FK pseudonymized instead" pattern
+             # (`AdminAudit::actor()`); every `worker/fold-runner/src` export
+             # — all real, all consumed by the two determinism-check runners;
+             # `routes/console.php`'s full nightly schedule (three commands,
+             # all real) and `api/app/Http/Middleware` (one file,
+             # `EnsureIsAdmin`, already the sole gate); all five Playwright
+             # e2e specs (unchanged since v3-D248's own line-by-line read, no
+             # new stale-tripwire shape); `App\Flags\FlagRegistry`'s eleven
+             # registered flags against `FlagService::enabled()`'s own zero
+             # production callers (re-confirmed: every flag gates a feature —
+             # social M11, notifications, two experiments, two billing rails —
+             # that genuinely does not exist in code yet, the same non-gap
+             # v3-D197 already named); `DrillPicker.tsx`'s own unused `now`
+             # prop (re-confirmed: the picker's readiness decision is still
+             # purely `atom.encoded`-based, no time-sensitive branch exists
+             # to wire it into); and the `atoms`/`corpus`/`sessions`
+             # IndexedDB object stores (re-confirmed: `SessionRow`'s own
+             # docblock still names a `/quiz/[sessionId]` route that does not
+             # exist in the real route table — `next build`'s own printed
+             # route list has no such route — so there is still no existing
+             # mechanism to wire a reader/writer to).
+             #
+             # `LAUNCH-CHECKLIST.md` re-read in full: its own "critical path
+             # out of here" section is itself stale in one place — it still
+             # says "one endpoint with no frontend yet wired to it," which
+             # described gate 19 before v3-D80 built that frontend; every
+             # other line matches the current repo state (one infrastructure
+             # gap — staging/Postgres/live schedule/SMTP — cascading into
+             # gates 3/4/10/13/19; two human recruitments — Stripe MY, the
+             # qari + Malay reviewer; two human content/audit passes — surah
+             # 67's scene beats, a11y-on-real-AT/Arabic visual QA). Not fixed
+             # this run: correcting that one stale sentence in a document
+             # that is not part of any test gate is lower value than the
+             # sweep itself, and is named here instead so a future run does
+             # not need to re-read the whole document to find it.
+             #
+             # FR5's own "replan"/"makeup" queue-level behavior (unblocked on
+             # the data side since B14/B15, per v3-D253's own closing note)
+             # was read in full (`resume.ts`, `run.ts#classifyReentry`/
+             # `acknowledgeReentry`) and deliberately NOT attempted this run:
+             # both remain, by this file's own explicit "one door at a time"
+             # precedent (v3-D98/D106/D117/D247), genuinely separate, larger
+             # scope — "replan" needs a real design for re-deriving the WHOLE
+             # remaining queue with a warm-up, "makeup" needs a real
+             # make-up-merge design, and neither has the kind of single,
+             # already-tested-and-idle function the last four such doors
+             # each had waiting to be wired.
+             #
+             # `TZ=UTC make test`: 2884 passing, matching this file's own
+             # recorded count exactly — no drift in any of the seven suites.
+             # `check-test-floor.mjs`: OK, 2884 >= floor 1899 (+985 margin,
+             # unmoved). `TZ=UTC make build`: exit 0, 30 routes, unchanged.
+             # No file touched (`git status --porcelain` empty throughout
+             # this run's own investigation, apart from this documentation
+             # commit). No `v1/**`/`v2/**` edit. No Arabic codepoint (nothing
+             # written). Session start: fresh container, `make setup` ran
+             # clean from scratch, no retries needed. `HEAD`, local `main`
+             # and `origin/main` all already agreed at `cbaed04` (v3-D253) —
+             # no stale-local-`main` trap this run, confirmed via `git fetch
+             # origin main` before any exploration.
+             #
+             # NOT addressed: every item on v3-D253's own "NOT addressed"
+             # list, unchanged and now re-confirmed as genuinely exhausted a
+             # fifth time — `DrillPicker.tsx`'s own unused `now` prop; the
+             # unused `atoms`/`corpus`/`sessions` IndexedDB object stores
+             # (v3-D232); `session_start`'s own latency metric (v0.8); the
+             # streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()`
+             # (v3-D136); `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution` (v3-D148);
+             # `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate`
+             # as a whole class (v3-D88, v3-D151, v3-D219);
+             # `App\Flags\FlagService::enabled()` (v3-D197); multi-surah
+             # enrollment; the operational mailer/7-night launch window;
+             # PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel` (v3-D188); `corpusHash`'s zero
+             # fold-side consumer (v3-D206); `selection_determinism_check`
+             # still replaying a committed fixture; FR5's own
+             # "replan"/"makeup" queue-level behavior (above) — all
+             # unchanged. A future run should not spend a full night on
+             # another generic sweep of this exact shape without either a
+             # genuinely fresh corner or a willingness to take on one of the
+             # larger, already-named items above. See DECISIONS.md v3-D254.
              # NOTE (v3-D253, 2026-09-25): DEFECTS.md#B15 CLOSED —
              # `rebuild.ts`'s S3-completion branch unconditionally
              # `scheduleGate()`d, re-arming an already-passed cold gate on

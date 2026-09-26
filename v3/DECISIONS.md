@@ -24088,3 +24088,132 @@ are both honestly represented in the fold, where before either bug could
 silently corrupt what a replan would see. This B14/B15 pair (both found via
 the same real-corpus, real-session-loop 14-day harness) is now CLOSED —
 remove it from future sweeps.
+
+## v3-D254 (2026-09-26) — fifth empty sweep for the zero-caller/stale-docblock/
+drifted-duplicate bug class
+
+Session start: fresh container, `make setup` ran clean from scratch (no
+retries needed). `HEAD`, local `main` and `origin/main` all already agreed
+at `cbaed04` (v3-D253) — no stale-local-`main` trap this run, confirmed via
+`git fetch origin main` before any exploration. Baseline `TZ=UTC make test`:
+2884 passing (matching CLAUDE.md's own recorded count exactly — 255 v2
+vitest, 47 v2/api, 402 v3/api [2 incomplete/PAY-1 + 6 Postgres-gated skips],
+120 corpus-compiler, 446 engine, 63 fold-runner, 1551 apps/web),
+`check-test-floor.mjs` OK (2884 >= 1899, +985 margin). Baseline `TZ=UTC make
+build`: exit 0, 30 routes, matching v3-D253's own printed route list
+exactly.
+
+With DEFECTS.md's B1–B15/E-01..E-08 all CLOSED and only PAY-1 open (needs a
+live Stripe account, out of scope by NIGHTLY.md's own rule), this run's job
+was the fresh sweep NIGHTLY.md itself anticipates once the defect ledger is
+this exhausted. Directed at corners this file's own history had not
+explicitly re-checked in a while, or had flagged as worth re-confirming
+rather than assuming still true:
+
+1. Every `api/app/Http/Controllers/**` class (27 files, `find` confirmed)
+   against its own route in `routes/api.php` and a real caller under
+   `apps/web/lib/**` — all 27 wired. No orphaned controller found.
+2. Every Eloquent relation (`BelongsTo`/`HasMany`/`HasOne`) declared across
+   all 19 `api/app/Models/*.php` files (nine relations total, `grep`
+   confirmed) — all either genuinely wired (`GlossDraft::reviews()`,
+   `Override::editor()`, `User::events()`, `BillingEvent::user()`, …) or the
+   one already-excluded non-gap this file has recorded since v3-D129:
+   `AdminAudit::actor()` is deliberately read as a raw FK and pseudonymized
+   directly, never through the Eloquent relation, by design.
+3. Every export in `worker/fold-runner/src/*.ts` (7 files) — all real, all
+   consumed by `DeterminismCheckCommand`'s two runners
+   (`foldDeterminismCheckRun`/`selectionDeterminismCheckRun`) or by each
+   other. No zero-caller export found — this vein has now been checked
+   independently at v3-D127, v3-D178, v3-D248 and again here, always clean.
+4. `routes/console.php`'s full nightly schedule (the determinism check, the
+   PDPA purge, the flag auto-waive — three `Schedule::command()` entries,
+   all three real commands with real, tested bodies) and the entirety of
+   `api/app/Http/Middleware` (one file, `EnsureIsAdmin.php`, already the
+   sole gate on every admin route) — both re-confirmed complete.
+5. All five Playwright specs under `apps/web/e2e/` (`first-session`,
+   `airplane-mode`, `commit-before-paint`, `a11y-geometry`, `idb-helpers`) —
+   re-read directly against the current shipped behavior. Unchanged since
+   v3-D248's own line-by-line pass; no new "asserts a gap that has since
+   closed" instance.
+6. `App\Flags\FlagRegistry::FLAGS` (eleven registered flags) against
+   `App\Flags\FlagService::enabled()`'s own callers — `grep -rn` outside
+   `FlagPlaneTest.php` returns nothing. Re-confirmed, not merely repeated:
+   every one of the eleven flags gates a feature with no code path in this
+   repo yet (five `social.*` flags are M11/post-launch scope by BUILD-PLAN's
+   own order; the two `notifications.*` flags have no push/email-digest
+   sender anywhere; `experiments.scheduler_v2`/`experiments.new_onboarding`
+   have no alternate code branch to select between; `billing.checkout_live`/
+   `billing.lifetime_fpx` are blocked on the still-nonexistent M7 checkout
+   flow) — the same non-gap v3-D197 already named, confirmed still true.
+7. `components/drill/DrillPicker.tsx`'s own unused `now` prop — `grep -n
+   "now"` inside the component shows it declared on `DrillPickerProps` and
+   never read in the function body. Re-confirmed the same reasoning
+   v3-D234/238 already gave: the picker's readiness decision
+   (`buildDrillPreview`) is purely `atom.encoded`-based, not time-based, so
+   there is no existing time-sensitive branch to wire `now` into without
+   inventing one — real, separate, larger-scoped product work, not a
+   wiring gap.
+8. The unused `atoms`/`corpus`/`sessions` IndexedDB object stores
+   (`lib/idb/db.ts`/`lib/idb/schema.ts`) — `SessionRow`'s own docblock still
+   reads "what `/quiz/[sessionId]` reads on mount." `make build`'s own
+   printed route list (checked directly this run, reproduced above) has no
+   `/quiz/[sessionId]` route and never has — the real session route is
+   `/session`, which resumes by folding the `events` store, not by reading
+   a stored assembled queue. Re-confirmed genuinely dead schema with no
+   existing mechanism to attach a reader/writer to (v3-D232/D234's own
+   conclusion, unchanged).
+
+Also re-read in full: `LAUNCH-CHECKLIST.md`'s own "critical path out of
+here" section. It is itself one sentence stale — "one endpoint with no
+frontend yet wired to it" describes gate 19 (PDPA export/delete/purge)
+*before* v3-D80 built its frontend; every other line (the staging/Postgres/
+SMTP infrastructure gap cascading into gates 3/4/10/13/19, the two human
+recruitments, the two human content/audit passes) matches the current
+state. Not corrected this run: it is a stale sentence in a document with no
+test gate behind it, lower-value than the code sweep above, and is named
+here rather than fixed so a future run does not have to re-read the whole
+document to rediscover it.
+
+Also read in full and deliberately NOT attempted: FR5's "replan"/"makeup"
+queue-level behavior (`packages/engine/src/resume.ts`,
+`lib/session/run.ts#classifyReentry`/`acknowledgeReentry`). v3-D253's own
+closing note observed both are now unblocked on the *data* side by B14/B15
+— a replan can trust `assembleFor`'s partially-learned candidates and a
+Carry-band ayah's gate state are both honestly folded. But per this
+codebase's own explicit "one door at a time" precedent (v3-D98 Door 1,
+v3-D106 Door 2, v3-D117 Door 3, v3-D247's "restart") each of those four
+still needed a real design decision plus its own night of mutation-tested
+wiring, and "restart" alone (the smallest of the four, reusing an existing
+snapshot the run already carried) took a full night. "Replan" needs a real
+design for re-deriving the WHOLE remaining queue with a warm-up; "makeup"
+needs a real make-up-merge design. Neither has, unlike every prior Door, a
+single already-built-and-idle function sitting there waiting to be called
+— attempting either in the remainder of one night risks exactly the
+"larger scope forced into one night" mistake NIGHTLY.md's working method
+warns against. Left named, not built.
+
+No file was touched by the investigation itself; this entry and the
+matching `CLAUDE.md` note are the only diff. `git status --porcelain -- v1
+v2` empty. No Arabic codepoint (nothing written carries any). Test and
+build numbers are unchanged from v3-D253's own baseline, reconfirmed
+directly rather than assumed.
+
+NOT addressed, unchanged from v3-D253's own list, now re-confirmed a fifth
+time as genuinely exhausted rather than merely repeated: `DrillPicker.tsx`'s
+own unused `now` prop; the unused `atoms`/`corpus`/`sessions` IndexedDB
+object stores (v3-D232); `session_start`'s own latency metric (v0.8); the
+streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151, v3-D219); `App\Flags\FlagService::enabled()`
+(v3-D197); multi-surah enrollment; the operational mailer/7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `corpusHash`'s zero fold-side consumer (v3-D206);
+`selection_determinism_check` still replaying a committed fixture; FR5's
+"replan"/"makeup" (above); `LAUNCH-CHECKLIST.md`'s one stale sentence
+(above) — all unchanged. A future run should not spend a full night on
+another generic sweep of this exact shape without either a genuinely fresh
+corner or a willingness to take on one of the larger, already-named items
+above.
