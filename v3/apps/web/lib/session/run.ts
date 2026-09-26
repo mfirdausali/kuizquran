@@ -46,7 +46,7 @@ import {
   type ReconstructState,
 } from "@engine/reconstruct.ts";
 import { rebuild } from "@engine/rebuild.ts";
-import { assembleQueue, type QueueItem } from "@engine/scheduler.ts";
+import { assembleQueue, makeupDeferredCount, type QueueItem } from "@engine/scheduler.ts";
 import { summarizeSession, type SessionSummary } from "@engine/sessionSummary.ts";
 import { atomKey } from "@engine/atom.ts";
 // v3-D227 — build-plan step 10 froze `DrillEvent.siteKey`/`.visitOrdinal`
@@ -275,6 +275,25 @@ export interface SessionRun {
    */
   readonly pace?: PaceMode;
   /**
+   * FR5 "makeup" (`resume.ts`'s own literal contract for a gap that crosses
+   * the day boundary, and `docs/WIREFRAME.md`'s own "Returning after weeks"
+   * row: "Cap the queue, say what was deferred, keep the session
+   * finishable.") — how many make-up items THIS run's own queue assembly
+   * deferred past `scheduler.ts#MAKEUP_CAP`, resolved ONCE at
+   * `startFromQueue` from `AssembledQueue.makeupDeferred` (the same "resolve
+   * a provenance fact once, stamp it once" shape `pace`/`corpusHash` already
+   * establish) — never re-derived later, so a mid-session sync pull cannot
+   * retroactively change what this session already told the learner it was
+   * deferring.
+   *
+   * Always `0` — never `undefined` — for `startFloorSession`/
+   * `startDrillSession`/`startOpenPractice`: none of those assembles via
+   * `assembleQueue`'s make-up step (see `pace`'s own header for why), so
+   * none of them has a make-up merge to defer anything from. `startSession`
+   * is the only caller that ever passes a nonzero value.
+   */
+  readonly makeupDeferred: number;
+  /**
    * `c.meta.corpusHash` (`@engine/types.ts`), captured ONCE at
    * `startFromQueue` and carried on every event this session commits — the
    * same "resolve a provenance fact once, stamp it on every emit" shape
@@ -442,6 +461,15 @@ export interface AssembledQueue {
   readonly atoms: ReturnType<typeof rebuild>;
   /** The log this queue was assembled from, canonically ordered. */
   readonly prior: Awaited<ReturnType<typeof getEventsForSurah>>;
+  /**
+   * FR5 "makeup" (v3-D256) — how many make-up items `scheduler.ts`'s own
+   * `MAKEUP_CAP` left out of `queue`, computed by `makeupDeferredCount` off
+   * the IDENTICAL candidate list `assembleQueue`'s own make-up step read (so
+   * this can never disagree with what `queue` itself actually carries). `0`
+   * for an ordinary next-day return — not a skipped-day gap at all — or when
+   * nothing exceeded the cap.
+   */
+  readonly makeupDeferred: number;
 }
 
 /**
@@ -513,8 +541,11 @@ export async function assembleFor(
       learnCandidates: candidatesForPace(learnCandidatesFor(c, atomsMap), pace),
     },
   });
+  // v3-D256 — off the SAME atoms/lastActiveDay `assembleQueue` itself just
+  // read, so this can never disagree with what `queue` actually carries.
+  const makeupDeferred = makeupDeferredCount(atoms, surah, now, lastActiveDay);
 
-  return { queue, atoms: atomsMap, prior };
+  return { queue, atoms: atomsMap, prior, makeupDeferred };
 }
 
 /**
@@ -555,6 +586,7 @@ export async function startSession(input: StartInput, c: Corpus): Promise<StartR
     null,
     glossLang,
     pace,
+    assembled.makeupDeferred,
   );
 }
 
@@ -853,6 +885,10 @@ async function startFromQueue(
   // when the caller has none (every entry point but `startSession` — see
   // `SessionRun.pace`'s own header for why the distinction matters).
   pace?: PaceMode,
+  // FR5 "makeup" (v3-D256) — `AssembledQueue.makeupDeferred`, or `0` for
+  // every entry point but `startSession` (see `SessionRun.makeupDeferred`'s
+  // own header for why).
+  makeupDeferred = 0,
 ): Promise<StartResult> {
   if (queue.length === 0) {
     return { ok: false, unavailable: "nothing-due" };
@@ -902,6 +938,7 @@ async function startFromQueue(
       structured,
       openPracticeDrill,
       pace,
+      makeupDeferred,
       corpusHash: c.meta.corpusHash,
       glossLang,
       lastActivityAt: now,

@@ -777,6 +777,22 @@ export function SessionIsland({
 
   return (
     <div className="stack" data-testid="session-drill">
+      {/* v3-D256 — FR5 "makeup" (`resume.ts`'s own literal contract for a
+          gap that crosses the day boundary; `docs/WIREFRAME.md`'s "Returning
+          after weeks" row: "Cap the queue, say what was deferred, keep the
+          session finishable."). `run.makeupDeferred` is read-only
+          presentation of a fact `lib/session/run.ts#assembleFor` already
+          decided (via `scheduler.ts#MAKEUP_CAP`/`makeupDeferredCount`) —
+          never a cap or a count computed here, the same discipline the
+          rescaffold hint below already follows. `0` (the ordinary case,
+          every session that isn't a churned return) renders nothing. */}
+      {run && run.makeupDeferred > 0 ? (
+        <p className="caption" role="status" data-testid="makeup-deferred-notice">
+          This session covers what fits today. {run.makeupDeferred} more overdue
+          check-in{run.makeupDeferred === 1 ? "" : "s"} will come up over your
+          next few sessions — nothing was skipped for good.
+        </p>
+      ) : null}
       {/* v3-D109 — v2-D08's rescaffold rung: `run.rescaffolding` is read-only
           presentation of state `lib/session/run.ts` already decided (never a
           strength/schedule DECISION made here — clause 5 still holds), the

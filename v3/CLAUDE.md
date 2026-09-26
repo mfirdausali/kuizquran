@@ -53,10 +53,162 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2888 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 2902 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 402 v3/api + 120 corpus-compiler
-             # + 446 engine + 63 fold-runner + 1555 apps/web. (v3-D255, 2026-09-26)
+             # + 453 engine + 63 fold-runner + 1562 apps/web. (v3-D256, 2026-09-26)
+             # NOTE (v3-D256, 2026-09-26): FR5 "makeup" — the engine's own
+             # make-up merge (`assembleQueue`'s step 1, `packages/engine/src
+             # /scheduler.ts`) folded EVERY gate due on a skipped learning-day
+             # into `mandatory` queue items the time-budget fit may never
+             # drop — the literal "queue explosion" BUILD-PLAN edge case #70
+             # names ("Churned learner returns after months... makeup caps
+             # queue + says what deferred"), and the exact gap
+             # `apps/web/components/home/MySurahs.tsx`'s own edge-case-#98
+             # copy already promised against ("Your next sessions will work
+             # through the backlog a piece at a time instead of handing you
+             # all of it at once... nothing was deleted for being late")
+             # without the engine ever having built the cap that sentence
+             # describes — v3-D255's own closing note named this exactly as
+             # "makeup" (`resume.ts`'s literal contract for a gap that
+             # crosses the day boundary; `docs/WIREFRAME.md`'s own "Returning
+             # after weeks" row: "Cap the queue, say what was deferred, keep
+             # the session finishable"), genuinely unbuilt and needing its
+             # own make-up-merge design, distinct from "replan"'s re-assembly.
+             #
+             # Built: `scheduler.ts` gains `MAKEUP_CAP` (3) and
+             # `makeupDeferredCount()` — both read ONE shared, newly-extracted
+             # `missedDayGates()` candidate list (oldest-missed-first), so the
+             # capped queue and the honest "N deferred" count can never
+             # disagree about which atoms qualify, the same "one decision,
+             # one function" discipline `gateStateOf` (v3-D211/D212) already
+             # established. `assembleQueue`'s own make-up step now takes only
+             # the first `MAKEUP_CAP` (or `cfg.makeupCap`) of that list; the
+             # rest are DEFERRED to a later session, never dropped from the
+             # schedule — their own `gateDueAt` is untouched, so they simply
+             # reappear once today's cap is spent. `lib/session/run.ts`
+             # threads the honest count through: `AssembledQueue` gains
+             # `makeupDeferred` (computed in `assembleFor` off the identical
+             # atoms/lastActiveDay `assembleQueue` itself just read) and
+             # `SessionRun` gains a same-named, always-resolved field (`0` for
+             # `startFloorSession`/`startDrillSession`/`startOpenPractice`,
+             # none of which assembles via `assembleQueue` — the same scope
+             # boundary `pace` already draws — a nonzero value passed only by
+             # `startSession`). `SessionIsland.tsx` renders it as a one-line,
+             # `role="status"` notice ("This session covers what fits today.
+             # N more overdue check-ins will come up over your next few
+             # sessions — nothing was skipped for good.") whenever
+             # `run.makeupDeferred > 0` — read-only presentation of a fact
+             # `run.ts` already decided, the same discipline the adjacent
+             # rescaffold hint already follows; `0`, the ordinary case for
+             # every session that isn't a churned return, renders nothing.
+             # `acknowledgeReentry`'s own "makeup" branch (a mid-session
+             # interruption reclassified across the day boundary) is
+             # untouched — it already sends the learner to `/home` for "a
+             # fresh queue," and that fresh queue is now honestly capped by
+             # construction the moment it is assembled, with no second
+             # queue-level behavior needed at the interruption site itself.
+             #
+             # RED confirmed directly, mutation-verified via `git stash` of
+             # the three production files alone (all thirteen new test cases
+             # kept — 7 in `scheduler.test.ts`, 4 in `run.test.ts`, 2
+             # positive + 1 vacuous-negative in `session-island.test.tsx`):
+             # failed exactly as predicted against the unmodified source —
+             # `makeupDeferredCount`/`MAKEUP_CAP` undefined; a churned-return
+             # queue carried all 4 of surah 112's own make-up items instead of
+             # 3; `started.run.makeupDeferred` read `undefined` throughout;
+             # the DOM notice never rendered (`findByTestId` timeout) for
+             # either positive case, while the "says nothing" negative case
+             # passed vacuously and correctly (the unmodified component
+             # already rendered no such notice for anyone). Five pre-existing
+             # `scheduler.test.ts` cases, 109 pre-existing `run.test.ts`
+             # cases and 35 pre-existing `session-island.test.tsx` cases were
+             # all unaffected. Restored byte-identically (`git stash pop`,
+             # `git diff` empty across all three production files before
+             # reimplementing was already known — this run wrote the fix
+             # once and verified RED/GREEN by stash-and-restore rather than
+             # write-revert-rewrite), reran green: `scheduler.test.ts` 12/12
+             # (was 5, +7); `run.test.ts` 113/113 (was 109, +4);
+             # `session-island.test.tsx` 37/37 (was 34, +3).
+             #
+             # `TZ=UTC make test`: 2902 passing (was 2888, +14 — exactly this
+             # run's new tests: 7 engine + 7 apps/web; engine 453, was 446;
+             # apps/web 1562, was 1555; no other suite moved: 255 v2 vitest,
+             # 47 v2/api, 402 v3/api, 120 corpus-compiler, 63 fold-runner),
+             # exit 0. `check-test-floor.mjs`: OK, 2902 >= floor 1899 (+1003
+             # margin, unmoved, same discipline as every prior entry). `TZ=UTC
+             # make build`: exit 0, 30 routes, unchanged (a `lib/`+two
+             # existing component/engine-module changes, no new route or
+             # production file). `npm run gates` (via `prebuild`): all green —
+             # locked-css OK, 1 documented hunk, 294 v1 lines byte-identical;
+             # boundaries OK, 322 files, unchanged count — no new production
+             # file; fonts degraded-but-non-blocking, pre-existing, 2/6 UI
+             # fonts present; corpus-morphology OK, 362 words; corpus-glyphs
+             # OK, 206 codepoints across 4 artifacts — all unchanged, this
+             # diff carries no corpus data. `TZ=UTC npx tsc --noEmit`, run
+             # separately across all four v3 node packages: clean in all
+             # four. No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff produced by running the suite was reverted
+             # twice before committing, same discipline as every prior entry
+             # — `git status --porcelain -- v1 v2` empty immediately before
+             # committing). No Arabic codepoint (the full diff of all six
+             # changed files swept programmatically, in Python, over the
+             # Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms Unicode blocks, plus a `\u06xx`/`\u07xx`/
+             # `\u08xx`/`\uFBxx`/`\uFExx` escape and `fromCharCode`/
+             # `fromCodePoint` sweep: CLEAN — every new string is a
+             # TypeScript identifier, a docblock sentence, or a fixed English
+             # caption built from an integer, never corpus text). No
+             # oracle/golden-log/fixture/snapshot regenerated.
+             #
+             # Session start: fresh container, `make setup` ran clean end to
+             # end (`v3/api`'s own `composer install` hit the documented
+             # transient proxy timeout on GitHub API metadata for most of the
+             # phpunit/sebastian dependency tree and recovered via the
+             # git-mirror fallback, no retry flag needed). `HEAD`,
+             # `origin/main` and (once fast-forwarded from a `git fetch`-
+             # confirmed four-commits-behind local ref) local `main` all
+             # agreed at `b08a4ba` (v3-D255) — the recurring stale-local-
+             # `main` trap this file has recorded roughly fifty times since
+             # v3-D77, caught before any commit via `git fetch origin main`,
+             # a `git stash` of the in-progress fix, `git checkout main &&
+             # git merge --ff-only origin/main`, and a `git stash pop` — no
+             # work lost or at risk.
+             #
+             # NOT addressed: `acknowledgeReentry`'s own "makeup" branch
+             # still only logs the audit trail and points the learner at
+             # `/home` — it does not itself replan or cap anything at the
+             # interruption site, relying entirely on the fresh assembly the
+             # NEXT `startSession` call performs; this was a deliberate scope
+             # choice (see above), not an oversight, but a future run could
+             # still choose to surface the deferred count on that mid-session
+             # notice too, once a fresh queue's own count is known before the
+             # learner navigates away. `MySurahs.tsx`'s own #98 copy is
+             # unchanged and still deliberately reports only the elapsed-time
+             # fact, never the engine's own cap or count, per its own header;
+             # a future run could extend it to name the real number now that
+             # one exists, but was not required to make its existing promise
+             # true. Every other item on v3-D255's own "NOT addressed" list
+             # is unchanged: `DrillPicker.tsx`'s own unused `now` prop; the
+             # unused `atoms`/`corpus`/`sessions` IndexedDB object stores
+             # (v3-D232); `session_start`'s own latency metric (v0.8); the
+             # streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()`
+             # (v3-D136); `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution` (v3-D148);
+             # `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate`
+             # as a whole class (v3-D88, v3-D151, v3-D219);
+             # `App\Flags\FlagService::enabled()` (v3-D197); multi-surah
+             # enrollment; the operational mailer/7-night launch window;
+             # PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel` (v3-D188); `corpusHash`'s zero
+             # fold-side consumer (v3-D206); `selection_determinism_check`
+             # still replaying a committed fixture — all unchanged. FR5's
+             # "makeup" is now CLOSED (its queue-level half — see above) —
+             # remove it from future sweeps except for the narrower
+             # mid-session-notice refinement named just above. See
+             # DECISIONS.md v3-D256.
              # NOTE (v3-D255, 2026-09-26): FR5 "replan" (resume.ts's own contract
              # for a >1hr, same-day re-entry gap: "re-plan the queue with a
              # warm-up") is now built — the one door among "restart"/"replan"/

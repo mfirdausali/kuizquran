@@ -37,6 +37,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Corpus, DrillEvent } from "@engine/types.ts";
 import { rebuild } from "@engine/rebuild.ts";
+import { MAKEUP_CAP } from "@engine/scheduler.ts";
 import { atomKey } from "@engine/atom.ts";
 // v3-D227 — the fold `selection_determinism_check` is built on. Imported here
 // to prove a REAL session log is replayable at all, not merely that two
@@ -91,6 +92,7 @@ vi.mock("@engine/gradeClass.ts", async (importOriginal) => {
 import {
   startSession,
   startFloorSession,
+  assembleFor,
   currentItem,
   answerCurrent,
   sessionSummaryOf,
@@ -732,7 +734,7 @@ describe("v3-D98 — Door 1, 'extra Learn' after the assembled queue is done", (
   it("offers nothing before the mastery gate window opens the FIRST candidate is un-encoded — a virgin log grants the first mushaf-order ayah", async () => {
     const c = corpus();
     const offer = await extraLearnOfferFor(
-      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true, gateSlipped: false, rescaffolding: false, structured: true, openPracticeDrill: null, lastActivityAt: T0, siteVisit: null, freshMachine: { machine: {} as SessionRun["machine"], rescaffolding: false } },
+      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true, gateSlipped: false, rescaffolding: false, structured: true, openPracticeDrill: null, makeupDeferred: 0, lastActivityAt: T0, siteVisit: null, freshMachine: { machine: {} as SessionRun["machine"], rescaffolding: false } },
       c,
       T0,
     );
@@ -821,6 +823,7 @@ describe("v3-D98 — Door 1, 'extra Learn' after the assembled queue is done", (
         gateSlipped: false,
         rescaffolding: false,
         structured: true,
+        makeupDeferred: 0,
         openPracticeDrill: null,
         lastActivityAt: T0,
         siteVisit: null,
@@ -885,7 +888,7 @@ describe("v3-D98 — Door 1, 'extra Learn' after the assembled queue is done", (
 describe("v3-D106 — Door 2, 'weak-spot gym' after the assembled queue is done", () => {
   it("offers nothing before any atom is encoded — a virgin log has no weak spot to rank", async () => {
     const offer = await weakSpotOfferFor(
-      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true, gateSlipped: false, rescaffolding: false, structured: true, openPracticeDrill: null, lastActivityAt: T0, siteVisit: null, freshMachine: { machine: {} as SessionRun["machine"], rescaffolding: false } },
+      { surah: SURAH, queue: [], cursor: 0, machine: {} as SessionRun["machine"], startedAt: T0, slips: 0, lastTap: null, done: true, gateSlipped: false, rescaffolding: false, structured: true, openPracticeDrill: null, makeupDeferred: 0, lastActivityAt: T0, siteVisit: null, freshMachine: { machine: {} as SessionRun["machine"], rescaffolding: false } },
       T0,
     );
     expect(offer).toBeNull();
@@ -921,6 +924,7 @@ describe("v3-D106 — Door 2, 'weak-spot gym' after the assembled queue is done"
       rescaffolding: false,
       openPracticeDrill: null,
       structured: true,
+      makeupDeferred: 0,
       lastActivityAt: T0,
       siteVisit: null,
       freshMachine: { machine: {} as SessionRun["machine"], rescaffolding: false },
@@ -952,6 +956,7 @@ describe("v3-D106 — Door 2, 'weak-spot gym' after the assembled queue is done"
       rescaffolding: false,
       openPracticeDrill: null,
       structured: true,
+      makeupDeferred: 0,
       lastActivityAt: T0,
       siteVisit: null,
       freshMachine: { machine: {} as SessionRun["machine"], rescaffolding: false },
@@ -1098,6 +1103,7 @@ describe("v3-D111 — FR6 diminishing-returns nudge on the Door 2 weak-spot offe
     rescaffolding: false,
     openPracticeDrill: null,
     structured: true,
+    makeupDeferred: 0,
     lastActivityAt: T0,
     siteVisit: null,
     freshMachine: { machine: {} as SessionRun["machine"], rescaffolding: false },
@@ -2057,6 +2063,89 @@ describe("FR5 replan — acknowledgeReentry re-derives the whole remaining queue
 
     const events = await getAllEvents();
     expect(events.some((e) => e.type === "interruption" && e.resume === "replan")).toBe(true);
+  });
+});
+
+// v3-D256 — FR5 "makeup" (`packages/engine/src/resume.ts`'s own literal
+// contract for a gap that crosses the day boundary) and
+// `docs/WIREFRAME.md`'s "Returning after weeks" row: `resumePolicy()` →
+// `makeup`. "Cap the queue, say what was deferred, keep the session
+// finishable." Unlike "restart"/"replan" (both act on a mid-session
+// INTERRUPTION), the real make-up merge lives one layer down, in
+// `assembleQueue`'s own step 1 (`packages/engine/src/scheduler.ts`) — it
+// fires for ANY session assembled after a skipped-day gap, whether reached
+// via a live re-entry or an ordinary fresh `/home` → `/session` visit days
+// later. Before v3-D256, that step folded EVERY gate due on a skipped day
+// into `mandatory` queue items the budget fit may never drop — the literal
+// "queue explosion" BUILD-PLAN edge case #70 names, and the exact gap
+// `apps/web/components/home/MySurahs.tsx`'s own #98 copy already promised
+// against ("Your next sessions will work through the backlog a piece at a
+// time... and nothing was deleted for being late") without the engine ever
+// having built the cap that promise describes. This block proves the WIRING
+// from `assembleFor`/`startSession` down to the engine's own cap and count —
+// `MAKEUP_CAP`/`makeupDeferredCount` themselves are proven at the engine
+// level (`packages/engine/test/scheduler.test.ts`).
+describe("v3-D256 — FR5 makeup: the real session loop caps a churned return and reports what was deferred", () => {
+  // All four ayat of 112 encoded in one sitting — each schedules its OWN cold
+  // gate for the next learning-day (B15's `!atom.encoded` gate, real fold
+  // behavior) — then the learner is gone for three weeks. Four due-but-
+  // unpassed gates, all missed the same way, is exactly the "queue explosion"
+  // shape #70 names, and 112 has no fifth ayah to pad the count with.
+  async function encodeAllFourAyat(): Promise<void> {
+    for (let i = 0; i < 4; i++) {
+      await append(
+        {
+          type: "ayah_produced",
+          ts: T0 + i * 1000,
+          tz: TZ,
+          surah: SURAH,
+          ayah: i + 1,
+          rung: "S3",
+          structured: true,
+        } as DrillEvent,
+        { now: T0 + i * 1000, tz: TZ },
+      );
+    }
+  }
+  const churnedReturn = T0 + 21 * 86_400_000; // three weeks later
+
+  it("assembleFor caps the make-up items at MAKEUP_CAP and reports the exact overflow", async () => {
+    const c = corpus();
+    await encodeAllFourAyat();
+    const assembled = await assembleFor({ surah: SURAH, now: churnedReturn }, c);
+    expect(assembled).not.toBeNull();
+    if (!assembled) return;
+    const makeups = assembled.queue.filter((q) => q.kind === "makeup");
+    // Never all four in one sitting — the whole point of the cap.
+    expect(makeups.length).toBe(MAKEUP_CAP);
+    expect(assembled.makeupDeferred).toBe(4 - MAKEUP_CAP);
+  });
+
+  it("startSession's own run carries the honest deferred count, for the UI to name it", async () => {
+    const c = corpus();
+    await encodeAllFourAyat();
+    const started = await startSession({ surah: SURAH, now: churnedReturn, tz: TZ }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    expect(started.run.queue.filter((q) => q.kind === "makeup").length).toBe(MAKEUP_CAP);
+    expect(started.run.makeupDeferred).toBe(4 - MAKEUP_CAP);
+  });
+
+  it("an ordinary, un-churned session reports zero deferred — this is not permanent chrome", async () => {
+    const c = corpus();
+    const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    expect(started.run.makeupDeferred).toBe(0);
+  });
+
+  it("a floor/drill/open-practice run — no larger daily assembly — reports zero deferred too", async () => {
+    const c = corpus();
+    await encodeAllFourAyat();
+    const started = await startFloorSession({ surah: SURAH, now: churnedReturn, tz: TZ }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    expect(started.run.makeupDeferred).toBe(0);
   });
 });
 

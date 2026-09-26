@@ -285,6 +285,77 @@ describe("v3-D217 — FR5's resumePolicy reaches the real session loop via a win
   });
 });
 
+// v3-D256 — FR5 "makeup" (`packages/engine/src/resume.ts`'s own literal
+// contract for a gap that crosses the day boundary; `docs/WIREFRAME.md`'s own
+// "Returning after weeks" row: "Cap the queue, say what was deferred, keep
+// the session finishable."). `scheduler.ts#MAKEUP_CAP`/`makeupDeferredCount`
+// and their wiring into `assembleFor`/`startSession` are proven at
+// `lib/session/run.test.ts`'s level, against a real churned-return session on
+// the real 112 corpus. This proves the one thing only a mounted component
+// can: that a run whose OWN `makeupDeferred` is nonzero actually SAYS so —
+// never a decision made here (this component decides nothing, per its own
+// file header), only a printed fact `run.ts` already decided.
+describe("v3-D256 — the make-up-deferred notice names what a churned return left out", () => {
+  function runWithMakeupDeferred(c: Corpus, now: number, deferred: number): SessionRun {
+    return {
+      surah: SURAH,
+      queue: [{ kind: "makeup", atomKey: "112:ayah:1", ayah: 1, estMin: 1 }],
+      cursor: 0,
+      machine: initReconstruct(c, SURAH, 1, 60, { full: true }),
+      startedAt: now,
+      slips: 0,
+      lastTap: null,
+      done: false,
+      gateSlipped: false,
+      rescaffolding: false,
+      openPracticeDrill: null,
+      structured: true,
+      makeupDeferred: deferred,
+      lastActivityAt: now,
+      siteVisit: null,
+      freshMachine: { machine: initReconstruct(c, SURAH, 1, 60, { full: true }), rescaffolding: false },
+    };
+  }
+
+  it("names the exact deferred count on a real churned-return run", async () => {
+    installFetch();
+    const now = Date.now();
+    startSessionOverride = () =>
+      Promise.resolve({ ok: true, run: runWithMakeupDeferred(corpus, now, 2) });
+
+    render(<SessionIsland surah={SURAH} />);
+    await screen.findByTestId("session-drill");
+
+    const notice = await screen.findByTestId("makeup-deferred-notice");
+    expect(notice.textContent).toMatch(/2 more overdue check-ins/);
+  });
+
+  it("uses the singular for exactly one deferred item", async () => {
+    installFetch();
+    const now = Date.now();
+    startSessionOverride = () =>
+      Promise.resolve({ ok: true, run: runWithMakeupDeferred(corpus, now, 1) });
+
+    render(<SessionIsland surah={SURAH} />);
+    await screen.findByTestId("session-drill");
+
+    const notice = await screen.findByTestId("makeup-deferred-notice");
+    expect(notice.textContent).toMatch(/1 more overdue check-in\b/);
+    expect(notice.textContent).not.toMatch(/check-ins/);
+  });
+
+  it("says nothing at all when nothing was deferred — not permanent chrome", async () => {
+    installFetch();
+    const now = Date.now();
+    startSessionOverride = () =>
+      Promise.resolve({ ok: true, run: runWithMakeupDeferred(corpus, now, 0) });
+
+    render(<SessionIsland surah={SURAH} />);
+    await screen.findByTestId("session-drill");
+    expect(screen.queryByTestId("makeup-deferred-notice")).toBeNull();
+  });
+});
+
 // v3-D93 — `writeLock.subscribe()` / `useWriterStatus()` (lib/idb/useLogState.ts)
 // were built and unit-tested (writeLock.test.ts's "subscribers observe status
 // transitions") but had ZERO production callers: SessionIsland took one
@@ -514,6 +585,7 @@ function trivialOneItemRun(c: Corpus, now: number): SessionRun {
     rescaffolding: false,
     openPracticeDrill: null,
     structured: true,
+    makeupDeferred: 0,
     lastActivityAt: now,
     siteVisit: null,
     freshMachine: { machine: initReconstruct(c, SURAH, 1, 0, { full: true }), rescaffolding: false },
@@ -583,6 +655,7 @@ describe("v3-D98 — Door 1 CTA on the real summary screen, actually wired", () 
       rescaffolding: false,
       openPracticeDrill: null,
       structured: true,
+      makeupDeferred: 0,
       lastActivityAt: now - 1000,
       siteVisit: null,
       freshMachine: { machine: initReconstruct(corpus, SURAH, 2, 0, { full: true }), rescaffolding: false },
@@ -705,6 +778,7 @@ describe("v3-D106 — Door 2 CTA on the real summary screen, actually wired", ()
           rescaffolding: false,
           openPracticeDrill: null,
           structured: true,
+          makeupDeferred: 0,
           lastActivityAt: now,
           siteVisit: null,
           freshMachine: { machine: initReconstruct(corpus, SURAH, 2, 0, { full: false }), rescaffolding: false },
@@ -838,6 +912,7 @@ function gateRunFor(c: Corpus, now: number): SessionRun {
     rescaffolding: false,
     openPracticeDrill: null,
     structured: true,
+    makeupDeferred: 0,
     lastActivityAt: now,
     siteVisit: null,
     freshMachine: { machine: initReconstruct(c, SURAH, 1, 1, { full: true }), rescaffolding: false },
@@ -1233,6 +1308,7 @@ function twoItemRun(c: Corpus, now: number): SessionRun {
     rescaffolding: false,
     openPracticeDrill: null,
     structured: true,
+    makeupDeferred: 0,
     lastActivityAt: now,
     siteVisit: null,
     freshMachine: { machine: initReconstruct(c, SURAH, 1, 0, { full: true }), rescaffolding: false },
