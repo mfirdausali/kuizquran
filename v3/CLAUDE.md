@@ -53,10 +53,123 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2884 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 2888 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 402 v3/api + 120 corpus-compiler
-             # + 446 engine + 63 fold-runner + 1551 apps/web. (v3-D253, 2026-09-25)
+             # + 446 engine + 63 fold-runner + 1555 apps/web. (v3-D255, 2026-09-26)
+             # NOTE (v3-D255, 2026-09-26): FR5 "replan" (resume.ts's own contract
+             # for a >1hr, same-day re-entry gap: "re-plan the queue with a
+             # warm-up") is now built — the one door among "restart"/"replan"/
+             # "makeup" that four prior nights (v3-D247, v3-D253, v3-D254 and
+             # the one before it) had each read in full and deliberately left,
+             # per this file's own "needs a real design, not just a wiring gap"
+             # verdict. `lib/session/run.ts` gains `SessionRun.pace` (the
+             # config a `startSession` queue was assembled under, resolved once
+             # and carried — the same "resolve once, stamp once" shape
+             # `corpusHash`/`structured` already use) and `replanQueue()`: on a
+             # >1hr gap it re-runs `assembleFor` at the CURRENT moment rather
+             # than merely resuming the stale in-memory queue, so an item
+             # another device already resolved during the gap correctly drops
+             # out, and a review's `forgettingRisk`-based ranking reflects real
+             # elapsed time rather than the moment the session first opened. If
+             # the replanned queue's own leading item is a cold gate, it opens
+             # at the SAME lighter warm-up rung the gate-forgiveness ladder's
+             # own "rescaffold" case already uses (`machineForItem`'s new
+             # `forceWarmup` option) — reusing `settleRescaffoldWarmup()`'s
+             # already-tested transition rather than inventing a second one. A
+             # replanned queue that comes up EMPTY ends the session honestly
+             # (`done: true`) rather than serving a stale item. Scoped
+             # explicitly to a run whose queue came from the ordinary daily
+             # assembly (`run.pace !== undefined`) — a floor/drill/open-
+             # practice/FR6-offer run falls back to the identical treatment
+             # "restart" already gives, since none of those has a pace-shaped
+             # remaining queue for "replan" to mean anything beyond its own
+             # single/fixed item. `acknowledgeReentry` now takes the corpus as
+             # a required parameter (only the "replan" branch reads it);
+             # `SessionIsland.tsx` passes its own `corpus` state, and its own
+             # adjacent comment — itself stale since v3-D247 shipped "restart"
+             # and never updated, still claiming this effect "does NOT
+             # restart, re-plan or make-up merge the queue" — is corrected in
+             # the same edit.
+             #
+             # RED confirmed directly: `git stash` of the two production files
+             # alone (all four new `run.test.ts` "FR5 replan" cases kept, the
+             # renamed `"'makeup' is unaffected"` case — which needed its own
+             # gap changed from >1hr same-day to a genuine day-boundary
+             # crossing, since the old shared test asserted the now-wrong
+             # "replan changes nothing" behavior — also kept) failed exactly
+             # the 4 new cases against the unmodified source: `acked.queue`
+             # was `toBe`-identical to the stale queue where a fresh assembly
+             # was expected; a replanned gate read `rescaffolding: false`
+             # instead of `true`; an empty replan still reported the stale
+             # 1-item queue instead of `done: true`; and the floor-session
+             # fallback case's machine reset carried a stray extra tap's
+             # `blankIndex` instead of the pristine snapshot — 105 other cases
+             # in the file unaffected. Restored byte-identically, reran:
+             # `run.test.ts` 109/109 (was 105, net +4 — one renamed/corrected
+             # case, four new). `test/session-island.test.tsx` 34/34,
+             # unaffected (this fix does not touch the "restart" path that
+             # file's own re-entry tests exercise). `TZ=UTC npx tsc --noEmit`
+             # (apps/web): clean.
+             #
+             # `TZ=UTC make test`: 2888 passing (was 2884, +4 — exactly this
+             # run's net new tests; apps/web 1555, was 1551; no other suite
+             # moved: 255 v2 vitest, 47 v2/api, 402 v3/api, 120 corpus-
+             # compiler, 446 engine, 63 fold-runner), exit 0.
+             # `check-test-floor.mjs`: OK, 2888 >= floor 1899 (+989 margin,
+             # unmoved). `TZ=UTC make build`: exit 0, 30 routes, unchanged (a
+             # `lib/`+one existing component change, no new route). `npm run
+             # gates` (via `prebuild`): all green — locked-css OK, 1
+             # documented hunk, 294 v1 lines byte-identical; boundaries OK,
+             # 322 files, unchanged count — no new production file; fonts
+             # degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+             # corpus-morphology OK, 362 words; corpus-glyphs OK, 206
+             # codepoints across 4 artifacts — all unchanged, this diff
+             # carries no corpus data. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff produced by running
+             # the suite was reverted before committing, same discipline as
+             # every prior entry). No Arabic codepoint (the full diff of all
+             # three changed files swept programmatically, in Python, over
+             # the Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms Unicode blocks, plus a `\u06xx`/`\u07xx`/
+             # `\u08xx`/`\uFBxx`/`\uFExx` escape and `fromCharCode`/
+             # `fromCodePoint` sweep: CLEAN — every new string is a
+             # TypeScript identifier, a docblock sentence, or a closed-set
+             # test fixture value, never corpus text). No oracle/golden-log/
+             # fixture/snapshot regenerated.
+             #
+             # Session start: fresh container, `make setup` ran clean end to
+             # end (both `v2/api`'s and `v3/api`'s `composer install` hit the
+             # documented transient proxy timeout on GitHub API metadata and
+             # recovered via the git-mirror fallback, no retry flag needed).
+             # `HEAD`, local `main` and `origin/main` all already agreed at
+             # `d7140f5` (v3-D254) — no stale-local-`main` trap this run,
+             # confirmed via `git fetch origin main` before any exploration.
+             #
+             # NOT addressed: "makeup" (a gap that crosses the day boundary)
+             # remains genuinely unbuilt — it needs its own make-up-merge
+             # design (capping the queue, naming what was deferred, per
+             # WIREFRAME.md's own "Returning after weeks" row), a separate,
+             # larger scope from "replan," left for a future run. Every other
+             # item on v3-D254's own "NOT addressed" list is unchanged:
+             # `DrillPicker.tsx`'s own unused `now` prop; the unused
+             # `atoms`/`corpus`/`sessions` IndexedDB object stores (v3-D232);
+             # `session_start`'s own latency metric (v0.8); the streak/
+             # away-day day-space mismatch (v3-D209); `rhymeClassOf()`
+             # (v3-D136); `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution` (v3-D148);
+             # `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate`
+             # as a whole class (v3-D88, v3-D151, v3-D219);
+             # `App\Flags\FlagService::enabled()` (v3-D197); multi-surah
+             # enrollment; the operational mailer/7-night launch window;
+             # PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel` (v3-D188); `corpusHash`'s zero
+             # fold-side consumer (v3-D206); `selection_determinism_check`
+             # still replaying a committed fixture — all unchanged. FR5's
+             # "replan" is now CLOSED — remove it from future sweeps. See
+             # DECISIONS.md v3-D255.
              # NOTE (v3-D254, 2026-09-26): fifth empty sweep for the "computed/
              # shipped, zero reader / stale docblock / drifted duplicate /
              # zero-caller mechanism" bug class this file has chased since

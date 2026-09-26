@@ -346,29 +346,34 @@ export function SessionIsland({
   // interruption event to (`classifyReentry` itself already returns `null`
   // there), and a gap before a session has even started has no run yet.
   //
-  // Deliberately does NOT restart, re-plan or make-up merge the queue —
-  // `classifyReentry`'s own header names that as separate, larger scope.
-  // What this DOES do, honestly: log the gap (an evidence-only audit event,
-  // invariant #5) and say the one thing that is already true regardless —
-  // the gap's latency will not count toward "time on task"
-  // (`timeOnTaskMs` already excludes it, independently of this effect).
+  // `acknowledgeReentry` now RESTRUCTURES the run for "restart" (v3-D247)
+  // and "replan" (this run) — reads `corpus`, which is guaranteed non-null
+  // here since it is set in the SAME effect that produces `run`
+  // (`beginAsWriter`, above) — never merely logs the gap for either. "makeup"
+  // (a gap that crossed the day boundary) stays the one classification this
+  // effect only logs, per `classifyReentry`'s own header: `timeOnTaskMs`
+  // already excludes its latency from "time on task", independently of
+  // anything here.
   useEffect(() => {
-    if (phase.kind !== "drilling" || !run) return;
+    if (phase.kind !== "drilling" || !run || !corpus) return;
     function onFocus() {
-      if (!run) return;
+      if (!run || !corpus) return;
       const decision = classifyReentry(run, Date.now());
       if (!decision || decision.action === "resume") return;
       const notice = resumeNotice(decision.action);
-      void acknowledgeReentry(run, decision, { now: Date.now(), tz: currentTz() }).then(
-        (next) => {
-          setRun(next);
-          setReentryNotice(notice);
-        },
-      );
+      void acknowledgeReentry(
+        run,
+        decision,
+        { now: Date.now(), tz: currentTz() },
+        corpus,
+      ).then((next) => {
+        setRun(next);
+        setReentryNotice(notice);
+      });
     }
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, [phase, run]);
+  }, [phase, run, corpus]);
 
   const cur = useMemo(() => {
     if (!run || !corpus) return null;

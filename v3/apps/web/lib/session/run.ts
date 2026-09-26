@@ -260,6 +260,21 @@ export interface SessionRun {
    */
   readonly openPracticeDrill: OpenPracticeDrill | null;
   /**
+   * FR5 "replan" — the pace this run's queue was assembled under
+   * (`startSession`'s own resolved value, `pace ?? DEFAULT_PACE_MODE`),
+   * captured ONCE at `startFromQueue` — the same "resolve a provenance fact
+   * once, stamp it once" shape `corpusHash`/`structured`/`openPracticeDrill`
+   * already establish. `undefined` for every OTHER entry point
+   * (`startFloorSession`/`startDrillSession`/`startOpenPractice`, and every
+   * FR6 offer built on top of them): none of those assembles via
+   * `assembleQueue`, so none of them has a pace-shaped remaining queue for
+   * "replan" to legitimately re-derive. `replanQueue`/`acknowledgeReentry`
+   * (below) read this field's presence as "this run's queue can be
+   * re-planned" and its absence as "fall back to the same treatment as
+   * restart" — see their own headers.
+   */
+  readonly pace?: PaceMode;
+  /**
    * `c.meta.corpusHash` (`@engine/types.ts`), captured ONCE at
    * `startFromQueue` and carried on every event this session commits — the
    * same "resolve a provenance fact once, stamp it on every emit" shape
@@ -382,16 +397,30 @@ function machineFor(c: Corpus, surah: number, q: QueueItem, strength: number): R
  * first, mirroring v2's `pages/Gate.tsx` (`stage === "rescaffold"`); every
  * other gate, and every non-gate item, is unaffected — `machineFor`'s own
  * `full = kind === "gate"` rule still decides those.
+ *
+ * `opts.forceWarmup` — FR5 "replan" (`replanQueue`, below) reuses this SAME
+ * warm-up rung for a different trigger: a gate item that leads a freshly
+ * re-planned queue after a real >1hr interruption, regardless of what the
+ * forgiveness ladder's own fail count says. A one-shot, no-partial-credit
+ * cold check (`machineFor`'s ordinary `full: true`) is a harsh thing for a
+ * learner to meet the moment they return from a real gap; every OTHER item
+ * kind is already sized off the atom's real strength, never a full
+ * reconstruction, so only a leading GATE needs this second trigger. Once the
+ * warm-up completes, `settleRescaffoldWarmup()` transitions to the real cold
+ * check exactly as it already does for the forgiveness-ladder case — one
+ * mechanism, two reasons to enter it.
  */
 function machineForItem(
   c: Corpus,
   surah: number,
   q: QueueItem,
   atomsMap: ReturnType<typeof rebuild>,
+  opts?: { forceWarmup?: boolean },
 ): { machine: ReconstructState; rescaffolding: boolean } {
   if (q.kind === "gate") {
     const atom = atomsMap.get(atomKey(surah, "ayah", q.ayah));
-    if (atom && gateForgiveness(atom) === "rescaffold") {
+    const ladderWarmup = atom !== undefined && gateForgiveness(atom) === "rescaffold";
+    if (ladderWarmup || opts?.forceWarmup) {
       const strength = strengthOf(atomsMap, surah, q.ayah);
       return {
         machine: initReconstruct(c, surah, q.ayah, strength, { full: false }),
@@ -502,7 +531,12 @@ export async function assembleFor(
  * reload look like a fresh sitting.
  */
 export async function startSession(input: StartInput, c: Corpus): Promise<StartResult> {
-  const { surah, now, tz, pace, glossLang } = input;
+  const { surah, now, tz, glossLang } = input;
+  // Resolved ONCE, here, and carried on `SessionRun.pace` (see its own
+  // header) — never re-derived, so a later "replan" re-assembles under the
+  // IDENTICAL config this session actually started under, never a silently
+  // different default.
+  const pace = input.pace ?? DEFAULT_PACE_MODE;
 
   const assembled = await assembleFor({ surah, now, pace }, c);
   if (!assembled) {
@@ -520,6 +554,7 @@ export async function startSession(input: StartInput, c: Corpus): Promise<StartR
     undefined,
     null,
     glossLang,
+    pace,
   );
 }
 
@@ -814,6 +849,10 @@ async function startFromQueue(
   // carried onto the run and every event it commits (see `SessionRun
   // .glossLang`'s own header). Passed by every caller alike.
   glossLang?: GlossLang,
+  // FR5 "replan" — the pace this queue was assembled under, or `undefined`
+  // when the caller has none (every entry point but `startSession` — see
+  // `SessionRun.pace`'s own header for why the distinction matters).
+  pace?: PaceMode,
 ): Promise<StartResult> {
   if (queue.length === 0) {
     return { ok: false, unavailable: "nothing-due" };
@@ -862,6 +901,7 @@ async function startFromQueue(
       rescaffolding,
       structured,
       openPracticeDrill,
+      pace,
       corpusHash: c.meta.corpusHash,
       glossLang,
       lastActivityAt: now,
@@ -1353,17 +1393,106 @@ export function clearReveal(run: SessionRun): SessionRun {
  * "restart" (this file's own established "one door at a time" precedent —
  * v3-D98's Door 1, v3-D106's Door 2, v3-D117's Door 3) discards the current
  * item's partial state via `run.freshMachine`. "replan" (re-deriving the
- * whole REMAINING queue with a warm-up) and "makeup" (a make-up merge) stay
- * genuinely separate, larger scope — named here so a future run does not
- * have to re-derive that boundary. What a caller MAY honestly say today for
- * either of those two, regardless of whether it ever builds that larger
- * scope: `timeOnTaskMs` already excludes this gap's latency from "time on
- * task" for any classification other than "resume", independently of
- * anything here ever running — see `resumeNotice`.
+ * whole REMAINING queue with a warm-up, `replanQueue` below) is now built
+ * too. "makeup" (a make-up merge for a gap that crossed the day boundary)
+ * stays genuinely separate, larger scope — named here so a future run does
+ * not have to re-derive that boundary. What a caller MAY honestly say today
+ * for "makeup", regardless of whether it ever builds that larger scope:
+ * `timeOnTaskMs` already excludes this gap's latency from "time on task" for
+ * any classification other than "resume", independently of anything here
+ * ever running — see `resumeNotice`.
  */
 export function classifyReentry(run: SessionRun, now: number): ResumeDecision | null {
   if (run.done) return null;
   return resumePolicy(run.lastActivityAt, now);
+}
+
+/**
+ * FR5 "replan" (`resume.ts`'s own literal contract for a >1hr, same-day gap:
+ * "re-plan the queue with a warm-up") — re-derive the WHOLE remaining queue
+ * from a FRESH fold at `now`, rather than merely resetting the current item
+ * the way "restart" does.
+ *
+ * WHY THIS IS MORE THAN "restart" ONE LEVEL UP: `run.queue` was assembled
+ * against a `now` that, after an hour or more, is genuinely stale —
+ * `assembleQueue`'s review ordering is `forgettingRisk × weight`, a
+ * continuous function of elapsed time, so the RIGHT next review to serve can
+ * differ from the one the original assembly picked. Worse, the underlying
+ * fold itself can have moved: `lib/sync` may have pulled in events another
+ * device committed while this one was away, and a queue held only in memory
+ * has no way to notice. Re-running `assembleFor` (the SAME function
+ * `startSession` itself calls — no second assembly to drift from the real
+ * one) picks up both changes honestly.
+ *
+ * WARM-UP: if the replanned queue's own leading item is a cold GATE, it
+ * opens at the same lighter, non-full rung `machineForItem`'s forgiveness-
+ * ladder "rescaffold" case already uses (`opts.forceWarmup` — see that
+ * function's own header) rather than the ordinary one-shot, no-partial-
+ * credit full check. A learner meeting a hard gate the INSTANT they return
+ * from a real interruption is exactly the harsh first impression the ladder's
+ * own rescaffold rung exists to soften elsewhere; reusing the identical
+ * mechanism means `settleRescaffoldWarmup()` — already tested, already
+ * wired — is what carries the warm-up into the real cold check on
+ * completion, with no second transition to build or verify. No other queue-
+ * item kind needs an equivalent: a review/learn item is already sized off
+ * the atom's REAL strength (`machineFor`), never a full reconstruction, so
+ * "re-derived at a fresh `now`" is already the whole of its own warm-up.
+ *
+ * A replanned queue that comes up EMPTY — everything due was independently
+ * completed elsewhere during the gap — ends the session honestly
+ * (`done: true`), the same "no fifth tile bank under a finished session"
+ * discipline `currentItem`'s own header already states, rather than serving
+ * a stale item or crashing on an empty `queue[0]`.
+ *
+ * Scoped to a run whose queue came from the ordinary daily assembly
+ * (`run.pace !== undefined`, set only by `startSession` — see
+ * `SessionRun.pace`'s own header): a floor/drill/open-practice/offer-
+ * extended run has no larger remaining queue for "re-derive the WHOLE
+ * remaining queue" to mean anything beyond its own single or fixed item, so
+ * `acknowledgeReentry`'s own "replan" branch falls back to exactly the
+ * "restart" treatment for those instead of calling this function at all.
+ */
+async function replanQueue(run: SessionRun, c: Corpus, now: number): Promise<SessionRun> {
+  const assembled = await assembleFor({ surah: run.surah, now, pace: run.pace }, c);
+  const queue = assembled?.queue ?? [];
+
+  if (queue.length === 0 || !assembled) {
+    return {
+      ...run,
+      queue: [],
+      cursor: 0,
+      done: true,
+      rescaffolding: false,
+      gateSlipped: false,
+      lastTap: null,
+      lastActivityAt: now,
+      // Nothing left to be "at", so no stale visit can mean anything either.
+      siteVisit: null,
+    };
+  }
+
+  const first = queue[0]!;
+  const { machine, rescaffolding } = machineForItem(c, run.surah, first, assembled.atoms, {
+    forceWarmup: first.kind === "gate",
+  });
+
+  return {
+    ...run,
+    queue,
+    cursor: 0,
+    machine,
+    rescaffolding,
+    gateSlipped: false,
+    lastTap: null,
+    lastActivityAt: now,
+    freshMachine: { machine, rescaffolding },
+    // The item now leading the queue may not be the one `run.siteVisit`
+    // (if any) was resolved for, even when the cursor coordinate itself
+    // (0) coincides — a stale visit at the SAME cursor is not a valid one
+    // just because the number matches. `ensureSiteVisit` re-resolves a
+    // fresh ordinal for whatever leads the replanned queue.
+    siteVisit: null,
+  };
 }
 
 /**
@@ -1392,11 +1521,23 @@ export function classifyReentry(run: SessionRun, now: number): ResumeDecision | 
  * risk sizing a fresh pass against events this very gap may have raced
  * with; `freshMachine` is exactly the snapshot taken when the item became
  * current, nothing recomputed.
+ *
+ * "replan" (>1hr, same day) calls `replanQueue` (above) for a run whose
+ * queue can honestly be re-derived (`run.pace !== undefined`); for every
+ * other run kind (floor/drill/open-practice/an FR6 offer's single item) it
+ * falls back to the identical treatment "restart" gives, since there is no
+ * larger remaining queue for "re-plan the WHOLE remaining queue" to mean
+ * anything beyond that one item's own fresh start.
+ *
+ * `c` is read only by the "replan" branch — every other classification
+ * ("restart", "makeup", the no-op paths) needs no corpus at all, since
+ * `run.freshMachine` already carries everything a restart needs.
  */
 export async function acknowledgeReentry(
   run: SessionRun,
   decision: ResumeDecision,
   ctx: AppendContext,
+  c: Corpus,
 ): Promise<SessionRun> {
   if (decision.action === "resume" || run.done) return run;
   const q = run.queue[run.cursor];
@@ -1430,6 +1571,24 @@ export async function acknowledgeReentry(
     };
   }
 
+  if (decision.action === "replan") {
+    if (run.pace === undefined) {
+      // No larger assembled queue exists for this run kind — the same
+      // treatment "restart" gives, per this function's own header.
+      return {
+        ...run,
+        machine: run.freshMachine.machine,
+        rescaffolding: run.freshMachine.rescaffolding,
+        gateSlipped: false,
+        lastTap: null,
+        lastActivityAt: ctx.now,
+      };
+    }
+    return replanQueue(run, c, ctx.now);
+  }
+
+  // "makeup" — still just the audit trail + notice, deliberately out of
+  // scope (see this function's own header).
   return { ...run, lastActivityAt: ctx.now };
 }
 

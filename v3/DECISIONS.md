@@ -24217,3 +24217,162 @@ window; PAY-1's Stripe fixtures; surah 67's scene beats;
 another generic sweep of this exact shape without either a genuinely fresh
 corner or a willingness to take on one of the larger, already-named items
 above.
+
+## v3-D255 (2026-09-26) — FR5 "replan": re-derive the whole remaining queue on a >1hr same-day re-entry gap
+
+Session start: fresh container, `make setup` ran clean end to end (both
+`v2/api`'s and `v3/api`'s `composer install` hit the documented transient
+proxy timeout on GitHub API metadata and recovered via the git-mirror
+fallback, no retry flag needed — the `sebastianbergmann/*`/`phpunit`
+packages each took a slow individual mirror clone before the checkout phase
+sped up). `HEAD`, local `main` and `origin/main` all already agreed at
+`d7140f5` (v3-D254) — no stale-local-`main` trap this run, confirmed via
+`git fetch origin main` before any exploration.
+
+A ~20-minute fresh sweep for the zero-caller/stale-docblock bug class this
+file has chased since v3-D82 (a targeted look at `v3/apps/web/e2e`,
+`scripts/`, and a scan for any newly-orphaned export in `packages/engine/src`
+not already covered by the five prior empty sweeps) came back clean, matching
+v3-D254's own closing note that this exact shape is genuinely exhausted for
+now. Per NIGHTLY.md's own instruction for exactly this situation, committed
+to the most concretely-scoped larger item both v3-D247's and v3-D253's/
+v3-D254's own "NOT addressed" lists have named for nine consecutive nights:
+FR5's "replan" (`packages/engine/src/resume.ts`'s own literal contract for a
+>1hr, same-day re-entry gap — "re-plan the queue with a warm-up" — distinct
+from "restart," closed at v3-D247, and "makeup," left out of this run's own
+scope below).
+
+**The design, since none of the four prior nights that read `resume.ts` in
+full ever committed to one:** "restart" (v3-D247) resets the CURRENT item to
+its own pristine snapshot (`run.freshMachine`) — correct for a short gap, but
+`run.queue` itself was assembled against a `now` that, after an hour or more,
+is genuinely stale in two ways. First, `assembleQueue`'s review ordering is
+`forgettingRisk × weight`, a continuous function of elapsed time — the RIGHT
+next review to serve after a real gap can differ from the one the original
+assembly picked. Second, and more concretely reachable: the fold itself can
+have moved — `lib/sync` may have pulled in an event another device committed
+while this one was away — and a queue held only in React state has no way to
+notice. "Replan" therefore re-runs `assembleFor` (the SAME function
+`startSession` itself calls, never a second implementation) at the gap's own
+end, so both changes are picked up honestly rather than silently ignored.
+
+If the replanned queue's own leading item is a cold GATE, it opens at the
+SAME lighter, non-full warm-up rung `machineForItem`'s gate-forgiveness-
+ladder "rescaffold" case already uses, via a new `opts.forceWarmup` — a
+one-shot, no-partial-credit cold check is a harsh thing for a learner to meet
+the instant they return from a real interruption, and reusing the identical
+mechanism means `settleRescaffoldWarmup()` (already tested, already wired for
+the ladder's own trigger) is what carries the warm-up into the real cold
+check on completion, with no second transition to build or verify. No other
+queue-item kind needs an equivalent warm-up: a review/learn item is already
+sized off the atom's REAL strength (`machineFor`), never a full
+reconstruction, so "re-derived at the gap's own fresh moment" is already the
+whole of its own warm-up. A replanned queue that comes up EMPTY — everything
+due was independently completed elsewhere during the gap — ends the session
+honestly (`done: true`, matching `currentItem`'s own "no fifth tile bank
+under a finished session" rule) rather than serving a stale item or crashing
+on an empty `queue[0]`.
+
+**Scope boundary, deliberate:** replanning is only meaningful for a run whose
+queue came from the ordinary daily assembly. `SessionRun` gains an optional
+`pace?: PaceMode` — the pace `startSession` actually resolved
+(`input.pace ?? DEFAULT_PACE_MODE`), captured once and carried, the same
+"resolve once, stamp once" shape `corpusHash`/`structured`/`openPracticeDrill`
+already establish — set ONLY by `startSession`, left `undefined` by
+`startFloorSession`/`startDrillSession`/`startOpenPractice` and every FR6
+offer built on top of them, none of which assembles via `assembleQueue` and
+so none of which has a pace-shaped remaining queue for "re-derive the WHOLE
+remaining queue" to mean anything beyond its own single or fixed item.
+`acknowledgeReentry`'s "replan" branch reads `run.pace`'s presence as
+eligibility and its absence as "fall back to the identical treatment
+'restart' already gives" — a floor session mid-gate-item interrupted for
+over an hour still gets its own pristine reset, just never a re-derived
+queue it was never eligible for.
+
+**Wiring, one required parameter, one stale comment fixed alongside it:**
+`acknowledgeReentry` now takes `c: Corpus` (only the "replan" branch reads
+it — every other classification needs no corpus at all, since
+`run.freshMachine` already carries everything "restart" needs).
+`SessionIsland.tsx` passes its own `corpus` state, guarded the same way
+`run` already is. That effect's own adjacent comment had gone stale the
+moment v3-D247 shipped "restart" three months earlier — it still read
+"Deliberately does NOT restart, re-plan or make-up merge the queue," the
+exact "docblock says X, reality is Y" shape v3-D90/D110/D123/D236/D244 have
+each closed elsewhere in this tree, caught here only because this run was
+already editing the same eight lines. Corrected in the same edit, no
+separate finding.
+
+**RED confirmed directly**, mirroring the technique this file's own
+precedents use: `git stash` of the two production files alone (every new
+`run.test.ts` "FR5 replan" case kept, plus the renamed
+`"'makeup' is unaffected"` case — which needed its own gap changed from the
+old shared test's >1hr-same-day scenario to a genuine day-boundary crossing,
+since the shared test's own assertion, "no queue restructuring for replan,"
+was about to become false) — reran against the unmodified source and failed
+exactly the 4 new cases: a freshly-resolved-elsewhere gate item still
+appeared in `acked.queue` (a `toBe`-identity check on the stale array
+object); a replanned leading gate read `rescaffolding: false` where `true`
+was expected; an empty replan still reported the stale single-item queue
+instead of `done: true`; and the floor-session fallback's reset machine
+carried a stray extra tap's `blankIndex: 1` where the pristine snapshot's
+`blankIndex: 0` was expected. The other 105 cases in the file were
+unaffected. Restored byte-identically (`git diff` empty before
+reimplementing), reran green: `lib/session/run.test.ts` 109/109 (was 105,
+net +4 — one case corrected in place, four new); `test/session-island
+.test.tsx` 34/34, unchanged (this fix does not touch the "restart" path
+that suite's own re-entry tests exercise).
+
+Each new test uses a REAL out-of-band event (`append()`'d directly, at the
+same public entry point every real tap or sync pull commits through) to
+stand in for "another device resolved this while we were away," never a
+fabricated internal atom shape — the load-bearing case seeds two due gates,
+passes one via such an event, and asserts the replanned queue names only the
+other, by ayah number, with the queue array itself no longer `toBe`-identical
+to the stale one. The empty-queue case deliberately uses `pace: "maintain"`
+(zero new-ayah ceiling) so the scenario is genuinely about an empty replan,
+not about a Learn candidate opening up once the one gate passes.
+
+`TZ=UTC npx tsc --noEmit` (apps/web): clean. `TZ=UTC make test`: 2888 passing
+(was 2884, +4 — exactly this run's net new tests; apps/web 1555, was 1551;
+no other suite moved: 255 v2 vitest, 47 v2/api, 402 v3/api, 120 corpus-
+compiler, 446 engine, 63 fold-runner), exit 0. `check-test-floor.mjs`: OK,
+2888 >= floor 1899 (+989 margin, unmoved, same discipline as every prior
+entry). `TZ=UTC make build`: exit 0, 30 routes, unchanged (a `lib/`+one
+existing component change, no new route or production file). `npm run
+gates` (via `prebuild`): all green — locked-css OK, 1 documented hunk, 294
+v1 lines byte-identical; boundaries OK, 322 files, unchanged count — no new
+production file; fonts degraded-but-non-blocking, pre-existing, 2/6 UI
+fonts present; corpus-morphology OK, 362 words; corpus-glyphs OK, 206
+codepoints across 4 artifacts — all unchanged, this diff carries no corpus
+data. No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache
+diff produced by running the suite was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2` empty
+immediately before committing). No Arabic codepoint (the full diff of all
+three changed files swept programmatically, in Python, over the Arabic,
+Arabic Supplement, Arabic Extended-A and both Presentation Forms Unicode
+blocks, plus a `\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape and
+`fromCharCode`/`fromCodePoint` sweep: CLEAN — every new string is a
+TypeScript identifier, a docblock sentence, or a closed-set test fixture
+value, never corpus text). No oracle/golden-log/fixture/snapshot
+regenerated.
+
+NOT addressed: "makeup" (a gap that crosses the day boundary) remains
+genuinely unbuilt — WIREFRAME.md's own "Returning after weeks" row names
+what it needs ("cap the queue, say what was deferred, keep the session
+finishable"), a real make-up-merge design distinct from "replan"'s own
+re-assembly, left for a future run per this file's own "one door at a time"
+precedent. Every other item on v3-D254's own "NOT addressed" list is
+unchanged: `DrillPicker.tsx`'s own unused `now` prop; the unused
+`atoms`/`corpus`/`sessions` IndexedDB object stores (v3-D232);
+`session_start`'s own latency metric (v0.8); the streak/away-day day-space
+mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151, v3-D219); `App\Flags\FlagService::enabled()`
+(v3-D197); multi-surah enrollment; the operational mailer/7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `corpusHash`'s zero fold-side consumer (v3-D206);
+`selection_determinism_check` still replaying a committed fixture — all
+unchanged. FR5's "replan" is now CLOSED — remove it from future sweeps.

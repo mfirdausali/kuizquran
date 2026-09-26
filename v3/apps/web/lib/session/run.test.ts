@@ -1564,11 +1564,11 @@ describe("v3-D252 — an un-encoded ayah with an existing atom is still offered 
 // evidence-only — `rebuild.ts` has no branch for it, invariant #5's
 // structural-absence discipline) and an honest one-line notice
 // (`resumeNotice`, engine-owned copy). RESTRUCTURING the queue for "restart"
-// is now built (below, "FR5 restart") — the other two, "replan" (re-derive
-// the whole remaining queue with a warm-up) and "makeup" (a make-up merge),
-// stay deliberately NOT built here, a genuinely separate, larger scope,
-// named so a future run doesn't have to re-derive that boundary from
-// scratch.
+// is built (below, "FR5 restart"); "replan" (re-derive the whole remaining
+// queue with a warm-up) is built too (below, "FR5 replan"). "makeup" (a
+// make-up merge for a gap that crosses the day boundary) stays deliberately
+// NOT built here, a genuinely separate, larger scope, named so a future run
+// doesn't have to re-derive that boundary from scratch.
 describe("FR5 — resumePolicy reaches the real session loop (classifyReentry / acknowledgeReentry)", () => {
   it("classifyReentry: null once the session is done — nothing left to attach an audit event to", async () => {
     const c = corpus();
@@ -1635,7 +1635,7 @@ describe("FR5 — resumePolicy reaches the real session loop (classifyReentry / 
     const before = await getAllEvents();
     const atomsBefore = rebuild(before);
 
-    const acked = await acknowledgeReentry(started.run, decision, { now: gapNow, tz: TZ });
+    const acked = await acknowledgeReentry(started.run, decision, { now: gapNow, tz: TZ }, c);
     expect(acked.lastActivityAt).toBe(gapNow);
 
     const after = await getAllEvents();
@@ -1666,7 +1666,7 @@ describe("FR5 — resumePolicy reaches the real session loop (classifyReentry / 
     expect(decision?.massed).toBe(false);
     if (!decision) return;
 
-    await acknowledgeReentry(started.run, decision, { now: gapNow, tz: TZ });
+    await acknowledgeReentry(started.run, decision, { now: gapNow, tz: TZ }, c);
 
     const after = await getAllEvents();
     const interruption = after.find((e) => e.type === "interruption");
@@ -1684,7 +1684,7 @@ describe("FR5 — resumePolicy reaches the real session loop (classifyReentry / 
     expect(decision?.action).toBe("resume");
     if (!decision) return;
 
-    const acked = await acknowledgeReentry(started.run, decision, { now: T0 + 1000, tz: TZ });
+    const acked = await acknowledgeReentry(started.run, decision, { now: T0 + 1000, tz: TZ }, c);
     const after = await getAllEvents();
 
     expect(after.length).toBe(before.length);
@@ -1704,6 +1704,7 @@ describe("FR5 — resumePolicy reaches the real session loop (classifyReentry / 
       run,
       { action: "restart", discardLatency: true, massed: true },
       { now: run.startedAt + 30 * 60_000, tz: TZ },
+      c,
     );
     const after = await getAllEvents();
 
@@ -1765,7 +1766,7 @@ describe("FR5 restart — acknowledgeReentry discards the current item's partial
     expect(decision?.action).toBe("restart");
     if (!decision) return;
 
-    const acked = await acknowledgeReentry(afterOneTap, decision, { now: gapNow, tz: TZ });
+    const acked = await acknowledgeReentry(afterOneTap, decision, { now: gapNow, tz: TZ }, c);
 
     // Back to the exact pristine state — not merely "blankIndex 0 again" by
     // coincidence, but the SAME machine the item started with, word for
@@ -1833,26 +1834,229 @@ describe("FR5 restart — acknowledgeReentry discards the current item's partial
     expect(decision?.action).toBe("restart");
     if (!decision) return;
 
-    const acked = await acknowledgeReentry(afterOneTap, decision, { now: gapNow, tz: TZ });
+    const acked = await acknowledgeReentry(afterOneTap, decision, { now: gapNow, tz: TZ }, c);
     expect(acked.machine).toEqual(secondPristine);
     expect(acked.cursor).toBe(1);
   });
 
-  it("'replan'/'makeup' are unaffected — only 'restart' resets the machine", async () => {
+  it("'makeup' is unaffected — restructuring is scoped to 'restart'/'replan' only", async () => {
     const c = corpus();
     const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);
     if (!started.ok) throw new Error("session must start");
 
-    const gapNow = T0 + ONE_HOUR + 60_000;
+    // A day-boundary-crossing gap (T0 09:00 UTC -> +24h, past the 04:30 UTC
+    // default rollover in between) is "makeup", never "replan" — the one
+    // classification this file's own header still names as deliberately
+    // out of scope.
+    const gapNow = T0 + 86_400_000 + 30 * 60_000;
+    const decision = classifyReentry(started.run, gapNow);
+    expect(decision?.action).toBe("makeup");
+    if (!decision) return;
+
+    const acked = await acknowledgeReentry(started.run, decision, { now: gapNow, tz: TZ }, c);
+    // No queue restructuring for "makeup" — machine/cursor/queue untouched.
+    expect(acked.machine).toEqual(started.run.machine);
+    expect(acked.cursor).toBe(started.run.cursor);
+    expect(acked.queue).toBe(started.run.queue);
+  });
+});
+
+// FR5 "replan" — resume.ts's own literal contract for a >1hr, same-day gap:
+// "re-plan the queue with a warm-up", not merely reset the current item the
+// way "restart" does. `replanQueue` (`lib/session/run.ts`) re-derives the
+// WHOLE remaining queue from a fresh fold at the CURRENT moment, so a queue
+// assembled over an hour ago — whose review ranking is a continuous function
+// of elapsed time, and which may be missing progress this device only just
+// pulled in from elsewhere during the gap — is replaced by one derived
+// fresh, rather than merely resuming the stale one.
+describe("FR5 replan — acknowledgeReentry re-derives the whole remaining queue", () => {
+  it("re-derives the queue at the gap's own moment — an item resolved elsewhere during the gap no longer appears", async () => {
+    const c = corpus();
+    // Two ayat encoded on day 1, so day 2 opens with TWO due gates —
+    // mirrors the "restart" block's own precedent above.
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah: 1, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah: 3, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+
+    const day2 = T0 + 86_400_000;
+    const started = await startSession({ surah: SURAH, now: day2, tz: TZ }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    expect(started.run.queue.map((q) => q.ayah)).toEqual([1, 3]);
+
+    // While this device was away, ANOTHER device (or tab) genuinely passed
+    // ayah 1's gate — a real event landing in the log, exactly what a real
+    // sync pull would leave behind, never a fabricated internal atom shape.
+    const passedElsewhereAt = day2 + 10 * 60_000;
+    await append(
+      {
+        type: "gate_result",
+        ts: passedElsewhereAt,
+        tz: TZ,
+        surah: SURAH,
+        ayah: 1,
+        rung: "S3",
+        correct: true,
+        structured: true,
+      } as DrillEvent,
+      { now: passedElsewhereAt, tz: TZ },
+    );
+
+    const gapNow = day2 + ONE_HOUR + 60_000;
     const decision = classifyReentry(started.run, gapNow);
     expect(decision?.action).toBe("replan");
     if (!decision) return;
 
-    const acked = await acknowledgeReentry(started.run, decision, { now: gapNow, tz: TZ });
-    // No queue restructuring for "replan" — machine/cursor/queue untouched.
-    expect(acked.machine).toEqual(started.run.machine);
-    expect(acked.cursor).toBe(started.run.cursor);
-    expect(acked.queue).toBe(started.run.queue);
+    const acked = await acknowledgeReentry(started.run, decision, { now: gapNow, tz: TZ }, c);
+
+    // The stale queue this session started with still names both ayat; the
+    // REPLANNED queue must not — it is a genuinely fresh assembly, not the
+    // original one merely resumed.
+    expect(acked.queue).not.toBe(started.run.queue);
+    expect(acked.queue.some((q) => q.ayah === 1)).toBe(false);
+    expect(acked.queue.map((q) => q.ayah)).toEqual([3]);
+    expect(acked.cursor).toBe(0);
+    expect(acked.machine.ayah).toBe(3);
+    expect(acked.gateSlipped).toBe(false);
+    expect(acked.lastTap).toBeNull();
+
+    // Still a real audit trail — the fix restructures the queue, it does not
+    // remove the evidence "restart" already established.
+    const events = await getAllEvents();
+    expect(events.some((e) => e.type === "interruption" && e.resume === "replan")).toBe(true);
+  });
+
+  it("opens a replanned GATE item at the lighter warm-up rung, never the full one-shot cold check", async () => {
+    const c = corpus();
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah: 1, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+
+    const day2 = T0 + 86_400_000;
+    const started = await startSession({ surah: SURAH, now: day2, tz: TZ }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    expect(started.run.queue[0]?.kind).toBe("gate");
+    // The UNFORCED gate opens full (every word blanked) — confirms the
+    // test's own precondition: this atom's own forgiveness ladder has zero
+    // fails, so absent the replan trigger it would never rescaffold on its
+    // own (`gateForgiveness()` reads "cold" here, not "rescaffold").
+    const totalWords = c.words.filter((w) => w.ayah === 1).length;
+    expect(totalWords).toBeGreaterThan(1);
+    expect(started.run.machine.blankPositions.length).toBe(totalWords);
+    expect(started.run.rescaffolding).toBe(false);
+
+    const gapNow = day2 + ONE_HOUR + 60_000;
+    const decision = classifyReentry(started.run, gapNow);
+    expect(decision?.action).toBe("replan");
+    if (!decision) return;
+
+    const acked = await acknowledgeReentry(started.run, decision, { now: gapNow, tz: TZ }, c);
+
+    expect(acked.queue[0]?.kind).toBe("gate");
+    expect(acked.rescaffolding).toBe(true);
+    expect(acked.machine.blankPositions.length).toBeLessThan(totalWords);
+    // The warm-up IS the fresh state a later "restart" would revert to.
+    expect(acked.freshMachine.machine).toEqual(acked.machine);
+    expect(acked.freshMachine.rescaffolding).toBe(true);
+  });
+
+  it("ends the session honestly when the replanned queue comes up empty, rather than serving a stale item", async () => {
+    const c = corpus();
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah: 1, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+
+    const day2 = T0 + 86_400_000;
+    // "maintain" — reviews/gates only, never a new Learn candidate — so
+    // passing the one due gate elsewhere during the gap leaves NOTHING for
+    // a fresh assembly to serve; a Learn candidate opening up instead would
+    // make this scenario about pace, not about an empty replan.
+    const started = await startSession({ surah: SURAH, now: day2, tz: TZ, pace: "maintain" }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    expect(started.run.queue.length).toBe(1);
+
+    const passedElsewhereAt = day2 + 10 * 60_000;
+    await append(
+      {
+        type: "gate_result",
+        ts: passedElsewhereAt,
+        tz: TZ,
+        surah: SURAH,
+        ayah: 1,
+        rung: "S3",
+        correct: true,
+        structured: true,
+      } as DrillEvent,
+      { now: passedElsewhereAt, tz: TZ },
+    );
+
+    const gapNow = day2 + ONE_HOUR + 60_000;
+    const decision = classifyReentry(started.run, gapNow);
+    expect(decision?.action).toBe("replan");
+    if (!decision) return;
+
+    const acked = await acknowledgeReentry(started.run, decision, { now: gapNow, tz: TZ }, c);
+
+    expect(acked.queue.length).toBe(0);
+    expect(acked.cursor).toBe(0);
+    expect(acked.done).toBe(true);
+    expect(currentItem(acked, c)).toBeNull();
+
+    const events = await getAllEvents();
+    expect(events.some((e) => e.type === "interruption" && e.resume === "replan")).toBe(true);
+  });
+
+  it("a run with no larger assembled queue (the floor session) falls back to the same treatment as 'restart'", async () => {
+    const c = corpus();
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah: 1, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+
+    const day2 = T0 + 86_400_000;
+    const started = await startFloorSession({ surah: SURAH, now: day2, tz: TZ }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    // `startFloorSession` never sets `pace` — this is the eligibility check
+    // `acknowledgeReentry`'s "replan" branch reads (see `SessionRun.pace`'s
+    // own header).
+    expect(started.run.pace).toBeUndefined();
+
+    const pristine = started.run.machine;
+    const afterOneTap = await answerCurrent(started.run, c, correctIndexFor(started.run, c), {
+      now: day2 + 100,
+      tz: TZ,
+    });
+    expect(afterOneTap.machine).not.toEqual(pristine);
+
+    // >1hr — a real "replan" classification, not "restart".
+    const gapNow = day2 + 100 + ONE_HOUR + 60_000;
+    const decision = classifyReentry(afterOneTap, gapNow);
+    expect(decision?.action).toBe("replan");
+    if (!decision) return;
+
+    const acked = await acknowledgeReentry(afterOneTap, decision, { now: gapNow, tz: TZ }, c);
+
+    // The SAME treatment "restart" gives — reset to the item's own pristine
+    // start, the fixed floor queue itself untouched (there is no larger
+    // remaining queue here for "replan" to re-derive).
+    expect(acked.machine).toEqual(pristine);
+    expect(acked.queue).toBe(afterOneTap.queue);
+    expect(acked.cursor).toBe(afterOneTap.cursor);
+    expect(acked.gateSlipped).toBe(false);
+    expect(acked.lastTap).toBeNull();
+
+    const events = await getAllEvents();
+    expect(events.some((e) => e.type === "interruption" && e.resume === "replan")).toBe(true);
   });
 });
 
