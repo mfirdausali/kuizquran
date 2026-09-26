@@ -24565,3 +24565,109 @@ window; PAY-1's Stripe fixtures; surah 67's scene beats;
 unchanged. FR5's "makeup" is now CLOSED for its queue-level half — remove
 it from future sweeps, except for the narrower mid-session-notice
 refinement named above.
+
+## v3-D257 (2026-09-26) — FR5 "makeup"'s own sibling gap on `/home`: `AssembledQueue.makeupDeferred` reaches `SessionIsland.tsx` but not `TodaySession.tsx`
+
+**Finding.** `AssembledQueue` (`apps/web/lib/session/run.ts`) has four
+fields: `queue`, `atoms`, `prior`, `makeupDeferred` (the last built at
+v3-D256, the immediately preceding decision). `lib/home/queue.ts
+#buildHomeSurah` already calls `assembleFor` — the same shared assembly
+`startSession` uses — specifically so `/home`'s due count can never drift
+from what the session will actually serve (the module's own header: "two
+assemblies... is exactly the shape in which they drift"). It already reads
+three of the four fields off that same `AssembledQueue` object
+(`assembled.queue.length` → `dueCount`, `assembled.prior` → `streakLabel`,
+`assembled.atoms` → `floorOffer`), but never `assembled.makeupDeferred`.
+`SessionIsland.tsx` names this fact once a learner has already opened
+`/session` (v3-D256's own notice). WIREFRAME's "Returning after weeks" row
+(#98) — "cap the queue, say what was deferred, keep the session
+finishable" — is describing the DASHBOARD, the screen a churned-return
+learner sees BEFORE tapping in, where `dueLabel`'s own honestly-capped
+count ("3 items due today") went unexplained.
+
+**Why this is not the already-excluded `MySurahs.tsx` #98 gap.** That
+component's own header explains it deliberately never calls `assembleFor`
+at all — doing so would be a genuine `check-boundaries.mjs` clause-5 risk,
+since `MySurahs.tsx` today only reads the raw log. `buildHomeSurah` is a
+different function, already in `lib/`, already holding the exact
+`AssembledQueue` object with `makeupDeferred` sitting in hand. Zero new
+call site, zero boundary risk — the textbook "three siblings wired, the
+fourth forgotten" shape.
+
+**Fixed.** `HomeSurahRow` gains `makeupDeferred: number`, set verbatim from
+`assembled.makeupDeferred` — no new fold, no new query.
+`components/home/TodaySession.tsx` renders it as a `role="status"`
+caption, present only when `row.makeupDeferred > 0`, wording aligned with
+`SessionIsland.tsx`'s own v3-D256 notice.
+
+**RED confirmed directly**: reverting the two production files alone (both
+new `test/home-today.test.tsx` cases kept, 20 pre-existing cases in the
+file untouched) failed both new cases — the positive case's
+`findByTestId("makeup-deferred-notice")` timed out against the unmodified
+component; the negative "says nothing when nothing was deferred" case
+passed vacuously and correctly, since the unmodified component already
+showed no such notice for anyone. Restored, reran green:
+`test/home-today.test.tsx` 16/16 (was 14, +2). The positive case's own
+fixture is guarded by an oracle assertion (`engineMakeupDeferred(...)
+toBeGreaterThan(0)`) so it cannot pass on a churn that never actually
+overflowed `MAKEUP_CAP`.
+
+**Verified:** `TZ=UTC make build`: exit 0, unchanged (no new route or
+production file). `TZ=UTC make test`: 2904 passing (was 2902, +2 — exactly
+this run's two new tests; apps/web 1564, was 1562; no other suite moved:
+255 v2 vitest, 47 v2/api, 402 v3/api, 120 corpus-compiler, 453 engine, 63
+fold-runner). `check-test-floor.mjs`: OK, 2904 >= floor 1899 (+1005
+margin, unmoved). `npm run gates`: all green — locked-css OK, 1 documented
+hunk, 294 v1 lines byte-identical; boundaries OK, 322 files, unchanged
+count; fonts degraded-but-non-blocking, pre-existing, 2/6 UI fonts
+present; corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints
+across 4 artifacts — all unchanged, this diff carries no corpus data. No
+`v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+reverted before committing). No Arabic codepoint (all three changed files
+swept programmatically, in Python, over the Arabic, Arabic Supplement,
+Arabic Extended-A and both Presentation Forms Unicode blocks, plus a
+`\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape and `fromCharCode`/
+`fromCodePoint` sweep: CLEAN — every new string is a TypeScript identifier,
+a docblock sentence, or a fixed English caption built from an integer,
+never corpus text). No oracle/golden-log/fixture/snapshot regenerated.
+
+Found by a dedicated fresh-sweep agent (Explore) handed the full exclusion
+list carried through v3-D256 and directed at structs with several sibling
+fields already wired against the one forgotten field, after re-reading
+v3-D256's own closing note directly rather than a generic zero-caller grep
+— independently re-verified against `run.ts`'s `AssembledQueue` interface
+and `lib/home/queue.ts`'s real source before writing any test.
+
+Session start: fresh container, `make setup` ran clean end to end
+(`v3/api`'s own `composer install` hit the documented transient proxy
+timeout on GitHub API metadata for most of the phpunit/sebastian
+dependency tree and recovered via the git-mirror fallback, no retry flag
+needed). `HEAD` was found detached exactly at `origin/main`'s own tip
+(`b34cf28`, v3-D256), on a stale LOCAL `main` branch ref five commits
+behind (`f1c92ce`) — the recurring stale-local-`main` trap this file has
+recorded roughly fifty times since v3-D77 — caught before any commit via
+`git fetch origin main`, then `git checkout main && git merge --ff-only
+origin/main`, a clean fast-forward, no work lost or at risk.
+
+NOT addressed: `acknowledgeReentry`'s own "makeup" branch still only logs
+the audit trail and points the learner at `/home` for a fresh, now-
+honestly-capped queue — unchanged, v3-D256's own "no second queue-level
+behavior needed" verdict still holds, since the dashboard itself now
+names the deferred count before the learner ever navigates there. Every
+other item on v3-D256's own "NOT addressed" list is unchanged:
+`DrillPicker.tsx`'s own unused `now` prop; the unused `atoms`/`corpus`/
+`sessions` IndexedDB object stores (v3-D232); `session_start`'s own
+latency metric (v0.8); the streak/away-day day-space mismatch (v3-D209);
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`;
+`App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151, v3-D219); `App\Flags\FlagService::enabled()`
+(v3-D197); multi-surah enrollment; the operational mailer/7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `corpusHash`'s zero fold-side consumer (v3-D206);
+`selection_determinism_check` still replaying a committed fixture — all
+unchanged. FR5's "makeup" is now CLOSED end to end, both `/session` and
+`/home` — remove it from future sweeps except for the narrower
+`acknowledgeReentry` mid-session-notice refinement named above.

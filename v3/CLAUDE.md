@@ -53,10 +53,117 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2902 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 2904 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 402 v3/api + 120 corpus-compiler
-             # + 453 engine + 63 fold-runner + 1562 apps/web. (v3-D256, 2026-09-26)
+             # + 453 engine + 63 fold-runner + 1564 apps/web. (v3-D257, 2026-09-26)
+             # NOTE (v3-D257, 2026-09-26): FR5 "makeup"'s own sibling gap on
+             # `/home` — `AssembledQueue.makeupDeferred` (v3-D256) is
+             # `lib/home/queue.ts#buildHomeSurah`'s to read: that function
+             # already calls the SAME `assembleFor` that produces
+             # `dueCount`/`dueLabel`/`streakLabel`/`floorOffer` (three of
+             # `AssembledQueue`'s four fields — `queue`, `prior`, `atoms` —
+             # already had a reader there), but never read the fourth. So a
+             # churned-return learner who has NOT YET tapped "Start" saw only
+             # an honestly-capped `dueLabel` ("3 items due today") on `/home`
+             # itself, with no hint that count was capped — WIREFRAME's own
+             # "Returning after weeks" row (#98) is describing this exact
+             # screen, not only `SessionIsland.tsx`'s mid-session notice
+             # v3-D256 already built one screen later. Found by a dedicated
+             # fresh-sweep agent (Explore) directed at cross-checking every
+             # struct with several siblings already wired against the one
+             # forgotten field, after re-reading v3-D256's own closing note
+             # directly; independently re-verified against `run.ts`'s
+             # `AssembledQueue` interface and `lib/home/queue.ts`'s real
+             # source before writing any test — zero new call site, zero
+             # boundary-clause-5 risk, since `buildHomeSurah` already lives in
+             # `lib/` and already holds the value in hand.
+             #
+             # Fixed: `HomeSurahRow` gains `makeupDeferred: number`, set
+             # verbatim from `assembled.makeupDeferred` in `buildHomeSurah`
+             # (one line, no new fold, no new query). `TodaySession.tsx`
+             # renders it as a `role="status"` caption, present only when
+             # `row.makeupDeferred > 0`, wording aligned with
+             # `SessionIsland.tsx`'s own v3-D256 notice — read-only
+             # presentation of a fact the view already holds, never a cap or
+             # count computed here.
+             #
+             # RED confirmed directly, mutation-verified via `git diff` of
+             # the two production files alone (both new
+             # `test/home-today.test.tsx` cases kept, 20 pre-existing cases
+             # in the file untouched): reverting the two source files failed
+             # both new cases exactly as predicted — `HomeSurahRow` carried
+             # no `makeupDeferred` field to read (a TypeScript compile-time
+             # catch on the test's own literal-shaped assertions, plus a
+             # runtime `findByTestId("makeup-deferred-notice")` timeout on
+             # the positive case, since the unmodified component rendered no
+             # such node); the negative "says nothing when nothing was
+             # deferred" case passed vacuously and correctly, since the
+             # unmodified component already showed no such notice for
+             # anyone. Restored, reran green: `test/home-today.test.tsx`
+             # 16/16 (was 14, +2).
+             #
+             # `TZ=UTC make build`: exit 0, unchanged (a `lib/`+one existing
+             # component change, no new route or production file); locked-css
+             # OK, 1 documented hunk, 294 v1 lines byte-identical; boundaries
+             # OK, 322 files, unchanged count; fonts degraded-but-non-
+             # blocking, pre-existing, 2/6 UI fonts present; corpus-morphology
+             # OK, 362 words; corpus-glyphs OK, 206 codepoints across 4
+             # artifacts — all unchanged, this diff carries no corpus data.
+             # `TZ=UTC make test`: 2904 passing (was 2902, +2 — exactly this
+             # run's two new tests; apps/web 1564, was 1562; no other suite
+             # moved). `check-test-floor.mjs`: OK, 2904 >= floor 1899 (+1005
+             # margin, unmoved). No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff produced by running
+             # the suite was reverted before committing, same discipline as
+             # every prior entry — `git status --porcelain -- v1 v2` empty
+             # immediately before committing). No Arabic codepoint (all three
+             # changed files swept programmatically, in Python, over the
+             # Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms Unicode blocks, plus a `\u06xx`/`\u07xx`/
+             # `\u08xx`/`\uFBxx`/`\uFExx` escape and `fromCharCode`/
+             # `fromCodePoint` sweep: CLEAN — every new string is a
+             # TypeScript identifier, a docblock sentence, or a fixed English
+             # caption built from an integer, never corpus text). No oracle/
+             # golden-log/fixture/snapshot regenerated.
+             #
+             # Session start: fresh container, `make setup` ran clean end to
+             # end (`v3/api`'s own `composer install` hit the documented
+             # transient proxy timeout on GitHub API metadata and recovered
+             # via the git-mirror fallback, no retry flag needed). `HEAD` was
+             # found detached exactly at `origin/main`'s own tip (`b34cf28`,
+             # v3-D256), on a stale LOCAL `main` branch ref five commits
+             # behind (`f1c92ce`) — the recurring stale-local-`main` trap
+             # this file has recorded roughly fifty times since v3-D77 —
+             # caught before any commit via `git fetch origin main`, then
+             # `git checkout main && git merge --ff-only origin/main`, a
+             # clean fast-forward, no work lost or at risk.
+             #
+             # NOT addressed: `acknowledgeReentry`'s own "makeup" branch
+             # still only logs the audit trail and points the learner at
+             # `/home` for a fresh, now-honestly-capped queue — unchanged,
+             # v3-D256's own "no second queue-level behavior needed" verdict
+             # still holds. Every other item on v3-D256's own "NOT addressed"
+             # list is unchanged: `DrillPicker.tsx`'s own unused `now` prop;
+             # the unused `atoms`/`corpus`/`sessions` IndexedDB object
+             # stores (v3-D232); `session_start`'s own latency metric
+             # (v0.8); the streak/away-day day-space mismatch (v3-D209);
+             # `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution` (v3-D148);
+             # `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate`
+             # as a whole class (v3-D88, v3-D151, v3-D219);
+             # `App\Flags\FlagService::enabled()` (v3-D197); multi-surah
+             # enrollment; the operational mailer/7-night launch window;
+             # PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel` (v3-D188); `corpusHash`'s zero
+             # fold-side consumer (v3-D206); `selection_determinism_check`
+             # still replaying a committed fixture — all unchanged. FR5's
+             # "makeup" is now CLOSED end to end, both `/session` and
+             # `/home` — remove it from future sweeps except for the
+             # narrower `acknowledgeReentry` mid-session-notice refinement
+             # named above.
              # NOTE (v3-D256, 2026-09-26): FR5 "makeup" — the engine's own
              # make-up merge (`assembleQueue`'s step 1, `packages/engine/src
              # /scheduler.ts`) folded EVERY gate due on a skipped learning-day

@@ -41,7 +41,7 @@ import { fileURLToPath } from "node:url";
 
 import type { Corpus, DrillEvent } from "@engine/types.ts";
 import { rebuild } from "@engine/rebuild.ts";
-import { assembleQueue } from "@engine/scheduler.ts";
+import { assembleQueue, makeupDeferredCount } from "@engine/scheduler.ts";
 import { completedDayIndices, computeStreak } from "@engine/streak.ts";
 import { DEFAULT_DAY_CONFIG } from "@engine/daybound.ts";
 import { floorQueue, floorMinutes } from "@engine/floor.ts";
@@ -564,5 +564,78 @@ describe("an unavailable corpus gets its own words", () => {
     expect(screen.queryByText(/nothing due today/i)).toBeNull();
     expect(screen.queryByText(/up to date/i)).toBeNull();
     expect(screen.queryByRole("link", { name: /start today's session/i })).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v3-D256's own dashboard sibling — FR5 "makeup" reaches /home, not only
+// /session
+// ---------------------------------------------------------------------------
+// `AssembledQueue.makeupDeferred` (v3-D256) was computed inside the SAME
+// `assembleFor` call `buildHomeSurah` already makes for `dueCount`/
+// `dueLabel` above, and sat unread — three of `AssembledQueue`'s four fields
+// (`queue`, `prior`, `atoms`) already had a reader here; `makeupDeferred` did
+// not. `SessionIsland.tsx` names this same fact once a learner has actually
+// opened `/session` (v3-D256); WIREFRAME's own "Returning after weeks" edge
+// case (#98) is describing THIS screen — the dashboard a churned-return
+// learner sees BEFORE they tap in, where an honestly-capped `dueLabel` count
+// ("3 items due today") would otherwise go unexplained.
+//
+// As with every other field above, the expectation is DERIVED from the
+// engine's own `makeupDeferredCount`, run over the same event log the
+// component reads — never a hand-picked number this test chose itself.
+async function engineMakeupDeferred(surah: number, now: number): Promise<number> {
+  const prior = await getEventsForSurah(surah);
+  const atomsMap = rebuild(prior);
+  const lastActiveDay =
+    prior.length > 0 ? prior.reduce((max, e) => (e.ts > max ? e.ts : max), 0) : null;
+  return makeupDeferredCount([...atomsMap.values()], surah, now, lastActiveDay);
+}
+
+describe("v3-D256's dashboard sibling — the makeup cap's own overflow reaches /home, not only /session", () => {
+  // All four ayat of 112 encoded in one sitting — each schedules its own cold
+  // gate for the next learning-day (real fold behaviour, B15's `!atom.encoded`
+  // gate) — then a three-week gap. Mirrors `lib/session/run.test.ts`'s own
+  // v3-D256 fixture, at a real (not fixed) `now` so it exercises the exact
+  // `Date.now()` this component actually calls.
+  async function encodeAllFourAyat(t: number): Promise<void> {
+    for (let i = 0; i < 4; i++) {
+      await addEvent({ type: "ayah_produced", ts: t + i * 1000, surah: SURAH, ayah: i + 1, rung: "S3" });
+    }
+  }
+
+  it("names the exact overflow the engine's own makeupDeferredCount reports, once a session has churned", async () => {
+    await enroll(SURAH);
+    serveCorpus();
+
+    const now = Date.now();
+    await encodeAllFourAyat(now - 21 * 24 * 60 * 60 * 1000);
+
+    const expected = await engineMakeupDeferred(SURAH, now);
+    // A guard on the oracle: this fixture must genuinely overflow the cap, or
+    // the assertion below would pass on a component that never renders the
+    // notice at all.
+    expect(expected).toBeGreaterThan(0);
+
+    render(<TodaySession />);
+    await waitFor(() => expect(screen.getByTestId("today-session")).toBeTruthy());
+    const notice = await screen.findByTestId("makeup-deferred-notice");
+    expect(notice.textContent).toMatch(
+      new RegExp(`\\b${expected} more overdue check-in${expected === 1 ? "" : "s"}\\b`, "i"),
+    );
+  });
+
+  it("says nothing when nothing has been deferred — this is not permanent chrome", async () => {
+    await enroll(SURAH);
+    serveCorpus();
+
+    // A freshly enrolled learner: no prior activity at all, so there is no
+    // gap to churn over and nothing for the engine's own oracle to defer.
+    const expected = await engineMakeupDeferred(SURAH, Date.now());
+    expect(expected).toBe(0);
+
+    render(<TodaySession />);
+    await waitFor(() => expect(screen.getByTestId("today-session")).toBeTruthy());
+    expect(screen.queryByTestId("makeup-deferred-notice")).toBeNull();
   });
 });

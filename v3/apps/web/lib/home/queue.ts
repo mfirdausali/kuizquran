@@ -117,6 +117,19 @@ export interface HomeSurahRow {
    * number a learner can read at a glance.
    */
   readonly floorOffer: { readonly count: number; readonly minutes: number } | null;
+  /**
+   * FR5 "makeup" (v3-D256) — `AssembledQueue.makeupDeferred`, read-only
+   * presentation of a fact `assembleFor` already decided (via
+   * `scheduler.ts#MAKEUP_CAP`/`makeupDeferredCount`), never a cap or a count
+   * computed here. `SessionIsland.tsx` already names this same fact once a
+   * learner has opened `/session`; this is the same fact one screen earlier,
+   * so a churned-return learner reading `dueLabel`'s honestly-capped count on
+   * `/home` is not left to wonder whether that count IS capped. `0` for the
+   * ordinary case (every session that isn't a churned return) — WIREFRAME's
+   * own "Returning after weeks" row (#98) is what this field exists to
+   * honour on the dashboard itself, not only mid-session.
+   */
+  readonly makeupDeferred: number;
 }
 
 export interface BuildHomeSurahInput {
@@ -165,6 +178,7 @@ export async function buildHomeSurah(
     ctaLabel: "Start today's session",
     streakLabel: streakLabelFor(assembled.prior, now),
     floorOffer: floorOfferFor(assembled.atoms, now),
+    makeupDeferred: assembled.makeupDeferred,
   };
 }
 

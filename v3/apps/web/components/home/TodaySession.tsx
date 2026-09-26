@@ -179,6 +179,24 @@ export function TodaySession() {
           </p>
           {/* Already a sentence when it arrived. Nothing is counted here. */}
           <p className="caption">{row.dueLabel}</p>
+          {/* FR5 "makeup" (v3-D256) — `row.makeupDeferred` is read-only
+              presentation of a fact `lib/home/queue.ts#buildHomeSurah`
+              already decided from the SAME `assembleFor` that produced
+              `dueLabel`/`dueCount` above, never a cap or a count computed
+              here (clause 5 still holds). `SessionIsland.tsx` names this
+              same fact once a learner has opened `/session`; this is the
+              identical wording one screen earlier, so `dueLabel`'s own
+              honestly-capped count is never left unexplained on the
+              dashboard itself — WIREFRAME's "Returning after weeks" row
+              (#98) describes this screen, not only the one after it. `0`
+              (every session that isn't a churned return) renders nothing. */}
+          {row.makeupDeferred > 0 ? (
+            <p className="caption" role="status" data-testid="makeup-deferred-notice">
+              Today&apos;s count covers what fits. {row.makeupDeferred} more overdue
+              check-in{row.makeupDeferred === 1 ? "" : "s"} will come up over your
+              next few sessions — nothing was skipped for good.
+            </p>
+          ) : null}
           {row.ctaEnabled ? (
             <Link href={row.ctaHref} className="btn hit">
               {row.ctaLabel}
