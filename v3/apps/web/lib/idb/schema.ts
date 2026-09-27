@@ -194,31 +194,23 @@ export interface Iq3Schema extends DBSchema {
  * The canonical sort key for an event row, v3-D09: `(ts, deviceId, deviceSeq, id)`.
  *
  * Missing deviceId/deviceSeq/id sort as ""/0/"" — still a TOTAL, deterministic
- * order, never a crash. This mirrors `v3/worker/fold-runner/src/canonicalOrder.ts`
- * exactly; the client and the server MUST agree on order or the two-device
- * determinism check is meaningless.
+ * order, never a crash.
+ *
+ * v3-D261: `canonicalKey`/`compareCanonical` themselves now live in the ONE
+ * shared place both this client and `worker/fold-runner/src/canonicalOrder.ts`
+ * import from, `@engine/canonicalOrder.ts` — re-exported here, never
+ * re-declared, so this file cannot drift from the server's own fold order the
+ * way a comment alone never actually prevented (see that module's own
+ * header). `canonicalKey`/`compareCanonical` are still exported FROM THIS
+ * FILE unchanged, so every existing caller (`lib/idb/index.ts`, `read.ts`,
+ * `append.test.ts`) needed no edit.
  *
  * An index key cannot contain `undefined` in IndexedDB — a record with an
  * undefined member of a compound keyPath is simply NOT INDEXED and would
  * silently vanish from a by_ts cursor. That is why `append()` always writes
  * concrete values for all four members.
  */
-export function canonicalKey(e: LocalEventRow): [number, string, number, string] {
-  return [e.ts, e.deviceId ?? "", e.deviceSeq ?? 0, e.id ?? ""];
-}
-
-/** Compare two rows in v3-D09 canonical order. */
-export function compareCanonical(a: LocalEventRow, b: LocalEventRow): number {
-  const ka = canonicalKey(a);
-  const kb = canonicalKey(b);
-  for (let i = 0; i < ka.length; i++) {
-    const x = ka[i]!;
-    const y = kb[i]!;
-    if (x < y) return -1;
-    if (x > y) return 1;
-  }
-  return 0;
-}
+export { canonicalKey, compareCanonical } from "@engine/canonicalOrder.ts";
 
 /** Strip every local-only field, yielding the frozen wire shape. Use this on
  *  ANY path that pushes to the server (M6). */

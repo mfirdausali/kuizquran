@@ -13,6 +13,7 @@ export * from "./update.ts";
 export * from "./gate.ts";
 export * from "./resume.ts";
 export * from "./rebuild.ts";
+export * from "./canonicalOrder.ts";
 export * from "./scheduler.ts";
 export * from "./multiSurah.ts";
 export * from "./site.ts";

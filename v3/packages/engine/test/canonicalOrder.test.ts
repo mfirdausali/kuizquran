@@ -1,16 +1,19 @@
 // v3-D09: the canonical event order is (ts, deviceId, deviceSeq, uuid),
-// NEVER `ts` alone — clocks skew and milliseconds tie. This is the fold-
-// runner's own half of the fix for `v2/src/db/eventLog.ts:113`'s bug
-// (DEFECTS.md#B5 in spirit — arrival order becomes fold order): the
-// SERVER receives events in whatever order they arrive over the network,
-// from however many devices, and must fold them in one canonical order
-// regardless — proving arrival-order-INVARIANCE is the actual guarantee
-// that matters, not just that sorting exists.
+// NEVER `ts` alone — clocks skew and milliseconds tie.
+//
+// v3-D261: this is now the ONE place this rule is implemented. Before this
+// file existed, the identical comparator was hand-declared TWICE —
+// `apps/web/lib/idb/schema.ts` (the client's IndexedDB cursor order) and
+// `worker/fold-runner/src/canonicalOrder.ts` (the server fold and the
+// nightly `fold_determinism_check`) — with nothing but a comment on each
+// side asserting the other agreed. This suite proves the ONE real
+// implementation's own properties directly; `apps/web`'s and
+// `worker/fold-runner`'s own test files each carry a companion assertion
+// that their own import is this exact function, not a re-derived copy.
 
 import { describe, expect, it } from "vitest";
-import { canonicalOrder } from "../src/canonicalOrder.ts";
-import { canonicalOrder as engineCanonicalOrder } from "../../../packages/engine/src/canonicalOrder.ts";
-import type { DrillEvent } from "../../../packages/engine/src/types.ts";
+import { canonicalKey, compareCanonical, canonicalOrder } from "../src/canonicalOrder.ts";
+import type { DrillEvent } from "../src/types.ts";
 
 function ev(partial: Partial<DrillEvent> & { ts: number }): DrillEvent {
   return { type: "session_start", surah: 12, ayah: 1, rung: "S1", ...partial };
@@ -31,11 +34,34 @@ function seededShuffle<T>(arr: T[], seed: number): T[] {
   return out;
 }
 
-describe("canonicalOrder — v3-D09's (ts, deviceId, deviceSeq, uuid)", () => {
-  it("(v3-D261) is the engine's own canonicalOrder, not a second, re-declared copy", () => {
-    expect(canonicalOrder).toBe(engineCanonicalOrder);
+describe("canonicalKey — the (ts, deviceId, deviceSeq, id) tuple", () => {
+  it("falls back to ''/0/'' for a pre-selection-era event missing deviceId/deviceSeq/id", () => {
+    expect(canonicalKey(ev({ ts: 100 }))).toEqual([100, "", 0, ""]);
   });
 
+  it("carries every real field through untouched", () => {
+    expect(canonicalKey(ev({ ts: 100, deviceId: "d1", deviceSeq: 5, id: "e1" }))).toEqual([
+      100,
+      "d1",
+      5,
+      "e1",
+    ]);
+  });
+});
+
+describe("compareCanonical", () => {
+  it("orders primarily by ts", () => {
+    expect(compareCanonical(ev({ ts: 100 }), ev({ ts: 200 }))).toBeLessThan(0);
+    expect(compareCanonical(ev({ ts: 200 }), ev({ ts: 100 }))).toBeGreaterThan(0);
+    expect(compareCanonical(ev({ ts: 100 }), ev({ ts: 100 }))).toBe(0);
+  });
+
+  it("breaks a ts tie by deviceId", () => {
+    expect(compareCanonical(ev({ ts: 100, deviceId: "aaa" }), ev({ ts: 100, deviceId: "zzz" }))).toBeLessThan(0);
+  });
+});
+
+describe("canonicalOrder — v3-D09's (ts, deviceId, deviceSeq, uuid)", () => {
   it("orders primarily by ts", () => {
     const a = ev({ id: "a", ts: 300 });
     const b = ev({ id: "b", ts: 100 });
@@ -92,5 +118,14 @@ describe("canonicalOrder — v3-D09's (ts, deviceId, deviceSeq, uuid)", () => {
       const reordered = canonicalOrder(shuffled).map((e) => e.id);
       expect(reordered, `arrival-order divergence at shuffle seed ${seed}`).toEqual(canonical);
     }
+  });
+
+  it("agrees with sorting by compareCanonical directly — canonicalOrder is not a second, divergent rule", () => {
+    const events: DrillEvent[] = Array.from({ length: 12 }, (_, i) =>
+      ev({ id: `e${i}`, ts: 1000 + ((i * 53) % 400), deviceId: i % 2 === 0 ? "a" : "b", deviceSeq: i }),
+    );
+    const viaCanonicalOrder = canonicalOrder(events).map((e) => e.id);
+    const viaSort = [...events].sort(compareCanonical).map((e) => e.id);
+    expect(viaCanonicalOrder).toEqual(viaSort);
   });
 });

@@ -25013,3 +25013,168 @@ window; PAY-1's Stripe fixtures; surah 67's scene beats;
 `selection_determinism_check` still replaying a committed fixture — all
 unchanged. FR5's "makeup" is now CLOSED across as many consecutive sessions
 as a real backlog needs — remove DEFECTS.md#B16 from future sweeps.
+
+## v3-D261, 2026-09-27: the canonical event-order comparator was hand-declared TWICE — client and fold-runner, no shared source, nothing but a comment enforcing agreement
+
+Picked up from a fresh, dedicated sweep dispatched for this build's own
+established "computed/tested mechanism, zero-caller / two independent
+implementations of one decision" bug class (`gradeClassToWire` v3-D83,
+`lastActiveDayMs` v3-D113, `digestsMatch` v3-D159, `gateStateOf`
+v3-D211/D212) — every prior open item on v3-D260's own "NOT addressed" list
+is either human/infra/calendar-blocked or a genuine open product-design
+question (re-confirmed directly against LAUNCH-CHECKLIST.md and DEFECTS.md,
+which has no open code-level entry except PAY-1 and E-05/E-07's
+multi-surah-enrollment block), so tonight's work was another sweep of this
+exact shape rather than a BUILD-PLAN step.
+
+**The gap.** v3-D09's own canonical event-order rule — `(ts, deviceId,
+deviceSeq, id)` ascending, with `""`/`0`/`""` fallbacks for pre-selection-era
+rows — was implemented independently, twice, with no shared source and no
+agreement test anywhere:
+
+- `apps/web/lib/idb/schema.ts#canonicalKey`/`compareCanonical` — the
+  client's own IndexedDB cursor order, what `lib/idb/read.ts#getEventsForSurah`/
+  `getAllEvents` hands to `lib/session/run.ts#assembleFor`, i.e. every real
+  learner's own session-assembly fold.
+- `worker/fold-runner/src/canonicalOrder.ts#canonicalOrder` — the server's
+  own fold order, consumed by `fold.ts#foldEvents`, which feeds the nightly
+  `fold_determinism_check` (a confirmed P1 there resets the
+  7-consecutive-green-nights launch gate) and `AtomCacheRebuilder`.
+
+Both copies agreed byte-for-byte (verified directly by reading both before
+touching anything) but `packages/engine/src` — the one place both `apps/web`
+(via the `@engine/` alias) and `worker/fold-runner` (via the relative import
+it already uses for `DrillEvent`/`rebuild`) can both reach — had no
+canonical-order function at all. `schema.ts`'s own docblock even named the
+exact discipline this violated one paragraph above the duplicate: `DrillEvent`
+itself "is never redeclared here — a second declaration is how a wire
+silently forks... a STOP-and-report, not an edit" — yet the ORDERING rule
+for that same wire type sat redeclared eleven lines below, with the
+docstring merely ASSERTING "this mirrors
+`v3/worker/fold-runner/src/canonicalOrder.ts` exactly... the client and the
+server MUST agree on order" — nothing mechanical ever checked that. A future
+edit to either file's tie-break rule landing on one side and not the other
+would silently diverge the client's own fold from the server's fold of the
+identical log — corrupting the one property `fold_determinism_check` exists
+to verify, from an ordering disagreement alone, not a real data problem.
+
+**Fixed**, five files, no wire/schema change, no behavior change (the rule
+itself is byte-identical): new `packages/engine/src/canonicalOrder.ts`
+exports `canonicalKey`/`compareCanonical`/`canonicalOrder` — the ONE real
+implementation, over a `Pick<DrillEvent, "ts" | "deviceId" | "deviceSeq" |
+"id">` so it accepts both `DrillEvent` and the client's own
+`LocalEventRow` structurally. `packages/engine/src/index.ts` re-exports it.
+`worker/fold-runner/src/canonicalOrder.ts` is now a one-line re-export of the
+engine's `canonicalOrder` — every existing caller
+(`test/canonicalOrder.test.ts`, `apps/web/lib/sync/merge.test.ts`, `fold.ts`)
+needed no edit. `apps/web/lib/idb/schema.ts`'s own `canonicalKey`/
+`compareCanonical` are now a re-export from `@engine/canonicalOrder.ts`
+instead of a re-declaration — every existing caller
+(`lib/idb/index.ts`, `read.ts`, `append.test.ts`) needed no edit either,
+since both names are still exported FROM `schema.ts` under the same names.
+
+**RED confirmed at both layers, each via `git stash` of the one production
+file alone (every new/updated test kept), restored byte-identically after**:
+fold-runner level, a new reference-equality case
+(`expect(canonicalOrder).toBe(engineCanonicalOrder)`) added to the existing
+`test/canonicalOrder.test.ts` failed exactly `expected [Function
+canonicalOrder] to be [Function canonicalOrder]` against the unmodified,
+independently-declared `src/canonicalOrder.ts` — 7 other pre-existing cases
+in that file (including its own arrival-order-invariance property test)
+unaffected; reran 8/8 green (was 7, +1). Client level, a new
+`lib/idb/canonicalOrder-agreement.test.ts` (3 cases — reference identity for
+both `canonicalKey`/`compareCanonical`, a cross-package behavioral agreement
+check against the fold-runner's own real `canonicalOrder` importing it
+directly, the same `lib/sync/merge.test.ts`-established precedent for
+treating `worker/fold-runner/src` as a real test oracle) failed exactly the
+reference-identity case against the unmodified, independently-declared
+`schema.ts` — the two behavioral cases passed vacuously, correctly, since
+both copies already agreed on output; restored, reran 3/3 green. A new,
+dedicated `packages/engine/test/canonicalOrder.test.ts` (12 cases, porting
+the fold-runner's own property-test suite onto the engine's real exports
+directly, plus one new case proving `canonicalOrder` and sorting by
+`compareCanonical` directly agree) failed on the module not existing before
+`src/canonicalOrder.ts` was written; 12/12 green after.
+
+**Verified:** `TZ=UTC make test` (same fresh container `make setup` this
+session already completed clean, no retries needed): **2922 passing** (was
+2906, +16 — exactly this run's new tests: 12 engine + 1 fold-runner + 3
+apps/web; engine 464, was 452; fold-runner 64, was 63; apps/web 1570, was
+1567; no other suite moved: 255 v2 vitest, 47 v2/api, 402 v3/api [2
+incomplete + 6 skipped, both environment-dependent, unrelated], 120
+corpus-compiler), exit 0. `check-test-floor.mjs`: OK, 2922 >= floor 1899
+(+1023 margin, unmoved, same discipline as every prior entry). `TZ=UTC make
+build`: exit 0, 30 routes, unchanged (an engine-plus-two-existing-file
+change, no route or component touched; all three launch surahs' own corpus
+recompile inside `prebuild` reproduced byte-identical `corpusHash`es —
+908ca9edbd2ab2e4/123c6212cc1d074d/77722a2b8b1b6aae, matching this session's
+own pre-fix baseline exactly — this diff carries no corpus data). `npm run
+gates` (via `prebuild`): all green — locked-css OK, 1 documented hunk, 294
+v1 lines byte-identical; boundaries OK, 323 files, up from 321 — one new
+apps/web file (`canonicalOrder-agreement.test.ts`) plus the same
+pre-existing gitignored `next-env.d.ts` Next.js bootstrap-artifact
+fluctuation this file has recorded roughly a dozen times before, confirmed
+directly via `git status --porcelain --ignored` showing that path as `!!`
+and by this session's own earlier `make build` (before this fix) already
+having created it; fonts degraded-but-non-blocking, pre-existing, 2/6 UI
+fonts present; corpus-morphology OK, 362 words; corpus-glyphs OK, 206
+codepoints across 4 artifacts — all unchanged, this diff carries no corpus
+data. `TZ=UTC npx tsc --noEmit`, run separately across all four v3 node
+packages: clean in all four. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite was
+reverted twice before committing, same discipline as every prior entry —
+`git status --porcelain -- v1 v2` empty immediately before committing). No
+Arabic codepoint (every changed/new file swept programmatically, in Python,
+over the Arabic, Arabic Supplement, Arabic Extended-A and both Presentation
+Forms Unicode blocks, plus a `\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx`
+escape and `fromCharCode`/`fromCodePoint` sweep: CLEAN — every new/changed
+line is a TypeScript identifier, a wire field name, a fixed English
+docblock sentence, or a synthetic multi-device test fixture value, never
+corpus text). No oracle/golden-log/fixture/snapshot regenerated —
+`golden-log-parity.test.ts` (3 cases, unchanged) still passes unmodified,
+since it never depended on which of the two (already byte-identical)
+comparators folded it.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled corpus
+anywhere. `make setup` ran clean end to end from scratch, no retries needed.
+`HEAD`, local `main` and `origin/main` did NOT already agree: `origin/main`
+was already at `0cc44e5` (v3-D260, the true tip — confirmed via `git fetch
+origin main`), but `HEAD` was found DETACHED 11 commits ahead of a stale
+LOCAL `main` branch ref (`f1c92ce`) — the mirror image of the recurring
+"stale local main" trap this file has recorded roughly fifty times since
+v3-D77 (there, detached `HEAD` sits behind a stale ref; here it sat exactly
+at the real tip, `origin/main` already carrying all 11 commits). No work was
+at risk and nothing was unpushed — `git fetch` + `git checkout main && git
+merge --ff-only origin/main` fast-forwarded the local ref, a no-op push
+confirmed `origin/main` needed nothing. Found by a dedicated fresh-sweep
+agent (Explore) handed the full exclusion list carried through v3-D260 and
+directed at the least-recently-swept corners (PlanPanel/planSummary.ts,
+PracticePicker/VerifyEmailScreen/ResetPasswordForm/AdminGate, Admin/*
+controllers re-verified field-by-field rather than trusting old "fully
+wired" claims, `resume.ts`/`scheduler.ts`'s newest exports, `SessionRun`'s
+full field list, a corpus-compiler/fold-runner zero-external-caller
+re-sweep, every Eloquent relation) — all of those came back genuinely wired
+or already-excluded; this was the one genuine, previously-unreported
+instance, independently re-verified this run directly against
+`schema.ts`'s and `canonicalOrder.ts`'s real source, and against
+`merge.test.ts`'s own established cross-package-import precedent, before
+writing any test.
+
+**NOT addressed:** every item on v3-D260's own "NOT addressed" list,
+unchanged — `acknowledgeReentry`'s own "makeup" branch still only logs the
+audit trail and points the learner at `/home` for a fresh, honestly-capped
+queue (v3-D256's own "no second queue-level behavior needed" verdict still
+holds); `DrillPicker.tsx`'s own unused `now` prop; the unused
+`atoms`/`corpus`/`sessions` IndexedDB object stores (v3-D232);
+`session_start`'s own latency metric (v0.8); the streak/away-day day-space
+mismatch (v3-D209); `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`;
+`App\Billing\TrialAttribution` (v3-D148); `lib/pricing.ts#regionFromCountry()`
+(v3-D163); `PaywallGate` as a whole class (v3-D88, v3-D151, v3-D219);
+`App\Flags\FlagService::enabled()` (v3-D197); multi-surah enrollment; the
+operational mailer/7-night launch window; PAY-1's Stripe fixtures; surah
+67's scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy drift
+(v3-D127); `packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `corpusHash`'s zero fold-side consumer (v3-D206);
+`selection_determinism_check` still replaying a committed fixture — all
+unchanged. The canonical-order duplication is now CLOSED — remove it from
+future sweeps.
