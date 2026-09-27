@@ -141,6 +141,43 @@ describe("FR5 makeup cap (v3-D256, edge case #70/#98)", () => {
     expect(makeups.map((i) => i.ayah)).toEqual([1, 2, 3]);
   });
 
+  // v3-D259 — v3-D256's cap counted only `kind === "makeup"`, and every test
+  // above did too, so nobody noticed that step 2 (GATES) re-admitted the
+  // DEFERRED missed gates as ordinary mandatory "gate" items (they are all
+  // `gateDue`): the queue still carried the whole backlog, just relabelled.
+  // A deferred gate must be genuinely absent from this session's queue.
+  it("a deferred missed gate is NOT re-admitted as an ordinary gate — the cap bounds the whole queue", () => {
+    const atoms = sixMissedGates();
+    const q = assembleQueue({
+      surah: 12,
+      atoms,
+      now,
+      lastActiveDay,
+      wordCounts,
+      cfg: { day: DEFAULT_DAY_CONFIG, budgetMin: 8 },
+    });
+    expect(q.filter((i) => i.kind === "gate")).toEqual([]);
+    const mandatory = q.filter((i) => i.kind === "gate" || i.kind === "makeup");
+    expect(mandatory.map((i) => i.ayah)).toEqual([1, 2, 3]);
+    // The deferred ones (4, 5, 6) appear nowhere in this session.
+    expect(q.some((i) => i.ayah >= 4)).toBe(false);
+  });
+
+  it("the deferred count equals exactly the missed gates absent from the queue", () => {
+    const atoms = sixMissedGates();
+    const q = assembleQueue({
+      surah: 12,
+      atoms,
+      now,
+      lastActiveDay,
+      wordCounts,
+      cfg: { day: DEFAULT_DAY_CONFIG, budgetMin: 8 },
+    });
+    const queuedAyat = new Set(q.map((i) => i.ayah));
+    const absent = atoms.filter((a) => !queuedAyat.has(a.ref)).length;
+    expect(makeupDeferredCount(atoms, 12, now, lastActiveDay)).toBe(absent);
+  });
+
   it("makeupDeferredCount reports exactly the overflow the queue itself deferred", () => {
     const atoms = sixMissedGates();
     expect(makeupDeferredCount(atoms, 12, now, lastActiveDay)).toBe(6 - MAKEUP_CAP);

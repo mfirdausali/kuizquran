@@ -2149,6 +2149,101 @@ describe("v3-D256 — FR5 makeup: the real session loop caps a churned return an
   });
 });
 
+// v3-D259 — two defects that together left v3-D256's cap doing nothing for a
+// real churned learner. (1) The engine's step 2 re-admitted every DEFERRED
+// missed gate as an ordinary mandatory "gate", so the queue still carried the
+// whole backlog (v3-D256's tests counted only `kind === "makeup"`). (2)
+// `lastActiveDayMs` took the newest `ts` of ANY event, so an audit-only event
+// stamped "now" — the `interruption` `acknowledgeReentry` itself writes on a
+// churned re-entry (whose notice then sends the learner to /home for "a fresh
+// queue"), a `session_start` from a session opened and abandoned, a read-only
+// Test — made the gap read as zero days and switched the make-up merge off.
+describe("v3-D259 — the make-up cap bounds the WHOLE queue, and audit events cannot switch it off", () => {
+  async function encodeAllFourAyat(): Promise<void> {
+    for (let i = 0; i < 4; i++) {
+      await append(
+        {
+          type: "ayah_produced",
+          ts: T0 + i * 1000,
+          tz: TZ,
+          surah: SURAH,
+          ayah: i + 1,
+          rung: "S3",
+          structured: true,
+        } as DrillEvent,
+        { now: T0 + i * 1000, tz: TZ },
+      );
+    }
+  }
+  const DAY = 86_400_000;
+  const churnedReturn = T0 + 21 * DAY;
+
+  function mandatory(queue: readonly { kind: string }[]): number {
+    return queue.filter((q) => q.kind === "gate" || q.kind === "makeup").length;
+  }
+
+  it("a churned return's queue carries only MAKEUP_CAP of the four missed gates — never all four relabelled", async () => {
+    const c = corpus();
+    await encodeAllFourAyat();
+    const assembled = await assembleFor({ surah: SURAH, now: churnedReturn }, c);
+    expect(assembled).not.toBeNull();
+    if (!assembled) return;
+    expect(mandatory(assembled.queue)).toBe(MAKEUP_CAP);
+    expect(assembled.queue.length).toBe(MAKEUP_CAP);
+    expect(assembled.makeupDeferred).toBe(4 - MAKEUP_CAP);
+  });
+
+  it("acknowledgeReentry's own 'makeup' interruption event does not uncap the /home queue it points the learner at", async () => {
+    const c = corpus();
+    await encodeAllFourAyat();
+    // An ordinary next-day session is opened (four due gates) and the tab is
+    // left open for three weeks.
+    const started = await startSession({ surah: SURAH, now: T0 + DAY, tz: TZ }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    const decision = classifyReentry(started.run, churnedReturn);
+    expect(decision?.action).toBe("makeup");
+    if (!decision) return;
+    await acknowledgeReentry(started.run, decision, { now: churnedReturn, tz: TZ }, c);
+
+    const fresh = await assembleFor({ surah: SURAH, now: churnedReturn + 1000 }, c);
+    expect(fresh).not.toBeNull();
+    if (!fresh) return;
+    expect(fresh.queue.filter((q) => q.kind === "makeup").length).toBe(MAKEUP_CAP);
+    expect(mandatory(fresh.queue)).toBe(MAKEUP_CAP);
+    expect(fresh.makeupDeferred).toBe(4 - MAKEUP_CAP);
+  });
+
+  it("a session opened and abandoned on return does not uncap the next assembly the same day", async () => {
+    const c = corpus();
+    await encodeAllFourAyat();
+    const first = await startSession({ surah: SURAH, now: churnedReturn, tz: TZ }, c);
+    expect(first.ok).toBe(true);
+    // ...abandoned with no tap; the learner looks at /home an hour later.
+    const later = await assembleFor({ surah: SURAH, now: churnedReturn + 3_600_000 }, c);
+    expect(later).not.toBeNull();
+    if (!later) return;
+    expect(mandatory(later.queue)).toBe(MAKEUP_CAP);
+    expect(later.makeupDeferred).toBe(4 - MAKEUP_CAP);
+  });
+
+  it("a read-only Test taken first on return does not uncap the session that follows (invariant #5)", async () => {
+    const c = corpus();
+    await encodeAllFourAyat();
+    for (const type of ["test_start", "test_answer", "test_result"] as const) {
+      await append(
+        { type, ts: churnedReturn, tz: TZ, surah: SURAH, ayah: 1, rung: "S1", structured: false } as DrillEvent,
+        { now: churnedReturn, tz: TZ },
+      );
+    }
+    const started = await startSession({ surah: SURAH, now: churnedReturn + 1000, tz: TZ }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    expect(mandatory(started.run.queue)).toBe(MAKEUP_CAP);
+    expect(started.run.makeupDeferred).toBe(4 - MAKEUP_CAP);
+  });
+});
+
 // v3-D108 — FR9, the 2-minute floor session
 // (`packages/engine/src/floor.ts#floorQueue`/`floorMinutes`).
 //
