@@ -175,18 +175,26 @@ export function assembleQueue(input: AssembleInput): QueueItem[] {
   //    is spent.
   const missedDays =
     input.lastActiveDay !== null && daysBetween(input.lastActiveDay, now, dayCfg) >= 2;
+  // v3-D259: the missed gates the cap DEFERS. Every one of them is also
+  // `gateDue`, so step 2 below would otherwise re-admit it as an ordinary
+  // mandatory "gate" — the whole backlog back in one sitting, merely
+  // relabelled, while `makeupDeferredCount` reported it as deferred.
+  const deferred = new Set<string>();
   if (missedDays) {
     const cap = cfg.makeupCap ?? MAKEUP_CAP;
-    for (const a of missedDayGates(atoms, now, input.lastActiveDay).slice(0, cap)) {
+    const missed = missedDayGates(atoms, now, input.lastActiveDay);
+    for (const a of missed.slice(0, cap)) {
       queue.push({ kind: "makeup", atomKey: atomKey(a.surah, a.kind, a.ref), ayah: a.ref, estMin: COST_MAKEUP });
     }
+    for (const a of missed.slice(cap)) deferred.add(atomKey(a.surah, a.kind, a.ref));
   }
 
-  // 2. GATES — day-1 cold gates due now (that weren't already pulled as make-ups).
+  // 2. GATES — day-1 cold gates due now (that weren't already pulled as
+  //    make-ups, and weren't deferred past the make-up cap).
   const alreadyQueued = new Set(queue.map((q) => q.atomKey));
   for (const a of dueGates(atoms, now)) {
     const key = atomKey(a.surah, a.kind, a.ref);
-    if (!alreadyQueued.has(key)) {
+    if (!alreadyQueued.has(key) && !deferred.has(key)) {
       queue.push({ kind: "gate", atomKey: key, ayah: a.ref, estMin: COST_GATE });
       alreadyQueued.add(key);
     }

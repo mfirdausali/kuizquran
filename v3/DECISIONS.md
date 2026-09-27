@@ -24792,3 +24792,75 @@ consumer (v3-D206); `selection_determinism_check` still replaying a
 committed fixture — all unchanged. `DeviceReset.tsx`'s own stale
 account-adoption claim is now CLOSED and permanently guarded — remove it
 from future sweeps.
+
+## v3-D259 (2026-09-27) — the FR5 make-up cap never bounded a churned learner's queue (DEFECTS.md#B16)
+
+Picked up from v3-D256/D257's own named refinement, the `acknowledgeReentry`
+"makeup" branch. Reading what that branch's `/home` pointer actually leads to
+turned up two engine defects, and together they meant v3-D256's `MAKEUP_CAP`
+never removed anything from a real churned learner's queue.
+
+1. **`scheduler.ts` step 2 re-admitted every deferred gate.** Step 1 queued
+   the first `MAKEUP_CAP` missed-day gates as `makeup` items. Every deferred
+   one is also `gateDue`, so step 2 pushed it as an ordinary mandatory `gate`,
+   which step 4 never drops. For surah 112's four missed gates the queue held
+   3 `makeup` + 1 `gate`; for six missed gates, 3 + 3. Meanwhile
+   `makeupDeferredCount` said 1 (or 3) were deferred, and `SessionIsland`/
+   `TodaySession` told the learner those check-ins "will come up over your
+   next few sessions" while they sat in the current queue. v3-D256's own
+   tests counted only `kind === "makeup"`, so they passed.
+2. **`activity.ts#lastActiveDayMs` counted audit-only events.** It returned
+   the newest `ts` of any event. The make-up merge needs a gap of at least
+   2 learning-days, so any event stamped "now" disabled it. That includes the
+   `interruption` that `acknowledgeReentry`'s own "makeup" branch writes just
+   before its notice sends the learner to `/home` for "a fresh queue", a
+   `session_start` from an abandoned session, a read-only Test (`test_*`), a
+   `day_marked_away` toggle, and an `adoption` row. Every one of those
+   uncapped the next assembly completely.
+
+**Fixed:**
+- Step 2 now skips the gates step 1 deferred. `makeupDeferredCount` is
+  unchanged; it is now simply true.
+- `lastActiveDayMs` counts only structured retrieval evidence, via a new
+  exported `isRetrievalActivity`. That means the seven event types
+  `rebuild.ts#applyEvent` folds as a retrieval outcome, and only with
+  `structured !== false`, the same default as `rebuild.ts#isStructured`.
+  Free-play is evidence only (invariant #5), so it does not count either.
+  A log with no retrieval returns `null`, as an empty log already did.
+
+**RED confirmed first, and committed separately** (`423d296`), against the
+unmodified source:
+- engine: 6 of 22 in `activity.test.ts` + `scheduler.test.ts` failed. The
+  deferred ayat 4/5/6 were re-queued as `gate` items, and `lastActiveDayMs`
+  returned the `session_start`/free-play/audit `ts`.
+- apps/web: 4 of 4 new `run.test.ts` "v3-D259" cases failed (a queue of 4
+  where `MAKEUP_CAP` is 3; 0 make-ups after a real `acknowledgeReentry`).
+
+One pre-existing test was corrected, not weakened.
+`lib/session/assemble-lastactive.test.ts` (v3-D113) used a lone
+`session_start` as its fixture and asserted it counted as the last active
+day, which is exactly this defect. The fixture now has a structured
+`reconstruct_tap` at T0 plus a later `session_start`, and the assertion
+still expects T0. The same "an older test encoded the bug" correction was
+made at v3-D252.
+
+**Verified:** engine 460/460 (was 453, +7). apps/web 1569/1569 (was 1565,
++4). `npx tsc --noEmit` clean in both packages. Full-gate numbers are in the
+commit message. The golden-log parity test was not touched: the scheduler is
+not part of the fold, and `rebuild.ts` did not change. No oracle, fixture file
+or snapshot was regenerated. No `v1/**`/`v2/**` edit. No Arabic codepoint.
+
+**NOT addressed (next run):**
+- **The backlog still arrives in two sessions, not "a piece at a time".**
+  After a capped session's make-ups are graded, `lastActiveDay` is today, so
+  the next session's gap is under 2 days, `missedDays` is false, and every
+  still-deferred gate comes back through step 2 uncapped. Established by
+  reading the code, not by a harness run. Fixing it means redefining a
+  make-up as "a gate overdue from before today's learning-day" rather than
+  "since last active", which needs a scheduler design decision. v3-D256's own
+  wording ("they simply reappear here once today's cap is spent") is the
+  ratified intent to build towards.
+- The "makeup" re-entry notice still names no count. `resumeNotice` is
+  generic, and the fresh `/home` queue now carries the honest count
+  (v3-D257).
+- Every other item on v3-D258's list is unchanged.

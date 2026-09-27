@@ -53,10 +53,24 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2904 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 2916 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 402 v3/api + 120 corpus-compiler
-             # + 453 engine + 63 fold-runner + 1564 apps/web. (v3-D257, 2026-09-26)
+             # + 460 engine + 63 fold-runner + 1569 apps/web. (v3-D259, 2026-09-27)
+             # NOTE (v3-D259, 2026-09-27): DEFECTS.md#B16. v3-D256's
+             # MAKEUP_CAP never bounded a churned learner's queue:
+             # `scheduler.ts` step 2 re-queued every DEFERRED missed gate as
+             # an ordinary mandatory "gate", and `lastActiveDayMs` counted
+             # audit-only events (`interruption`, `session_start`, `test_*`,
+             # `day_marked_away`, `adoption`), so any of them stamped "now"
+             # switched the make-up merge off. Fixed both: step 2 skips
+             # deferred gates, and `lastActiveDayMs` counts only structured
+             # retrieval events (`activity.ts#isRetrievalActivity`). RED
+             # committed first (423d296): engine 6/22, apps/web 4/4 failing.
+             # NEXT: after a capped session, the next day's gap is under 2
+             # days, so every remaining deferred gate returns uncapped
+             # through step 2. Needs a "make-up = overdue from before today"
+             # scheduler redesign. See DECISIONS.md v3-D259.
              # NOTE (v3-D257, 2026-09-26): FR5 "makeup"'s own sibling gap on
              # `/home` — `AssembledQueue.makeupDeferred` (v3-D256) is
              # `lib/home/queue.ts#buildHomeSurah`'s to read: that function

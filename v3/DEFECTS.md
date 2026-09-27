@@ -10,8 +10,49 @@ omission in the Test route (build-plan step 15's override layer, consumed at
 step 18+). **B14** is another v3 session-loop defect (step 18/19), a
 regression against v2's own Learn-window behavior. **B15** is an engine-fold
 defect (`rebuild.ts`), found immediately downstream of B14's own fix.
+**B16** is an engine-scheduler defect (`scheduler.ts`/`activity.ts`): v3-D256's
+make-up cap never actually bounded a churned learner's queue.
 **E-01…E-08** are multi-surah defects that only manifest once a second surah
 exists.
+
+---
+
+## B16 — the FR5 make-up cap never bounded the queue ✅ CLOSED (FR5 makeup, v3-D259)
+
+Two defects, each enough on its own to defeat v3-D256's `MAKEUP_CAP` for a
+real churned learner (edge case #70, "queue explosion").
+
+1. **Deferred gates were re-admitted.** `assembleQueue`'s step 1 took the
+   first `MAKEUP_CAP` missed-day gates as `makeup` items, but every deferred
+   one is also `gateDue`, so step 2 (GATES) re-queued it as an ordinary
+   mandatory `gate` that step 4 never drops. The queue still carried the
+   whole backlog, relabelled, while `makeupDeferredCount` reported those
+   items as deferred and `SessionIsland`/`TodaySession` told the learner so.
+   v3-D256's tests counted only `kind === "makeup"`, so they passed.
+2. **Audit events reset "last active".** `activity.ts#lastActiveDayMs`
+   returned the newest `ts` of any event. The make-up merge fires only on a
+   gap of at least 2 learning-days, so any audit-only event stamped "now"
+   switched it off: the `interruption` that `acknowledgeReentry` writes on a
+   churned re-entry (whose own notice then sends the learner to `/home`), a
+   `session_start` from an abandoned session, a read-only Test (`test_*`), a
+   `day_marked_away` toggle, or an `adoption` row.
+
+**Fixed:** step 2 skips the gates step 1 deferred. `lastActiveDayMs` counts
+only structured retrieval evidence: the seven event types `rebuild.ts` folds
+as a retrieval (`tap`, `reconstruct_tap`, `rung_complete`, `ayah_produced`,
+`gate_result`, `junction_result`, `chain_step`), with `structured !== false`
+(invariant #5).
+
+**Regression tests:** `packages/engine/test/scheduler.test.ts` (2 new cases
+in the v3-D256 block), `packages/engine/test/activity.test.ts` (v3-D259
+block, 5 cases), `apps/web/lib/session/run.test.ts` (v3-D259 block, 4 cases
+through the real IndexedDB log, `acknowledgeReentry`, `startSession` and
+`assembleFor`).
+
+**Still open:** once a capped session's make-ups are done, `lastActiveDay`
+becomes today, so the NEXT session's gap is under 2 days and every
+still-deferred gate returns through step 2 uncapped. The backlog is spread
+across two sessions, not "a piece at a time". See DECISIONS.md v3-D259.
 
 ---
 

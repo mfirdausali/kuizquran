@@ -52,18 +52,39 @@ const T0 = Date.UTC(2026, 7, 11, 9, 0, 0);
 
 // A fixed, NON-empty prior, so the inline `reduce(..., 0)` returns a concrete
 // max ts (T0) that is DISTINCT from the spy's sentinel — making the two
-// derivations observably different. A single `session_start` folds to no atom,
-// so `assembleQueue` still runs against the real 112 corpus.
+// derivations observably different. A CORRECT `reconstruct_tap` folds to no
+// atom (rebuild.ts folds only a slip), so `assembleQueue` still runs against
+// the real 112 corpus.
+//
+// v3-D259: this fixture used to be a lone `session_start`, and the second
+// case below asserted it counted as the last active day — the exact defect
+// v3-D259 closes (an audit-only event stamped "now" switched the make-up cap
+// off). It now carries a structured retrieval at T0 AND a later
+// `session_start` at T0 + 1000, and still expects T0: the real derivation
+// must skip the audit event, which this case now proves end to end.
 const PRIOR = [
   {
-    type: "session_start",
+    type: "reconstruct_tap",
     ts: T0,
     surah: 112,
     ayah: 1,
-    rung: "RC",
+    rung: "S2",
+    correct: true,
+    structured: true,
     id: "seed-1",
     deviceId: "dev-1",
     deviceSeq: 1,
+    tz: "UTC",
+  } as unknown as DrillEvent,
+  {
+    type: "session_start",
+    ts: T0 + 1000,
+    surah: 112,
+    ayah: 1,
+    rung: "RC",
+    id: "seed-2",
+    deviceId: "dev-1",
+    deviceSeq: 2,
     tz: "UTC",
   } as unknown as DrillEvent,
 ];
@@ -109,7 +130,8 @@ describe("assembleFor derives lastActiveDay via engine activity.ts#lastActiveDay
 
     await assembleFor({ surah: 112, now: T0 + 86_400_000 }, CORPUS);
 
-    // max ts of PRIOR — the value the engine's own lastActiveDayMs returns.
+    // The last structured RETRIEVAL in PRIOR (T0) — never the later
+    // `session_start` audit event (v3-D259).
     expect(capturedLastActiveDay).toBe(T0);
   });
 });
