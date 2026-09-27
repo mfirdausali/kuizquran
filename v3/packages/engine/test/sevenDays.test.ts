@@ -51,7 +51,6 @@ describe("7-day interruption simulation (v0.3 exit criterion)", () => {
     const daySchedule = [4, 5, 6, 7, 8, 9, 10]; // one new ayah per day
     const finishedSameDay: boolean[] = [];
     const gateFiredOn: number[] = [];
-    let lastActiveDay: number | null = null;
 
     for (let d = 0; d < 7; d++) {
       // Day 4 (index 3) is a MISSED day: skip it entirely.
@@ -69,7 +68,6 @@ describe("7-day interruption simulation (v0.3 exit criterion)", () => {
       surah: 12,
         atoms,
         now: morning,
-        lastActiveDay,
         wordCounts,
         cfg: { day: cfg, learnCandidates: daySchedule, budgetMin: 8 },
       });
@@ -111,8 +109,6 @@ describe("7-day interruption simulation (v0.3 exit criterion)", () => {
       // The encode's rung_complete/ayah_complete all fall on the same learning-day.
       const sameDay = dayStart(finishTs, cfg) === dayStart(morning, cfg);
       finishedSameDay.push(sameDay);
-
-      lastActiveDay = morning;
     }
 
     // --- Assertions on the whole run ---
@@ -155,7 +151,6 @@ describe("7-day interruption simulation (v0.3 exit criterion)", () => {
       surah: 12,
       atoms,
       now: morningOf(returnDay),
-      lastActiveDay: morningOf(base), // last active day 0; day 1 skipped
       wordCounts,
       cfg: { day: cfg, budgetMin: 8 },
     });

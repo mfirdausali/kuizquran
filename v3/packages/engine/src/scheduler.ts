@@ -6,7 +6,7 @@
 import { atomKey, type AtomState } from "./atom.ts";
 import { forgettingRisk } from "./strength.ts";
 import { dueGates, unlockPermitted } from "./gate.ts";
-import { daysBetween, type DayConfig } from "./daybound.ts";
+import { dayStart, type DayConfig } from "./daybound.ts";
 
 export type QueueItemKind = "makeup" | "gate" | "review" | "learn";
 
@@ -73,37 +73,43 @@ const DEFAULT_CONN_WEIGHT = 1.5;
 export const MAKEUP_CAP = 3;
 
 /**
- * The gates due on a SKIPPED learning-day (the same predicate step 1 below
- * uses), oldest-missed-first. Both `assembleQueue`'s own make-up step and
- * `makeupDeferredCount` read this ONE list — the same "one decision, one
- * function" discipline `gateStateOf` (v3-D211/D212) already established for
- * this codebase — so the queue and the honest "N deferred" count can never
- * disagree about which atoms qualify.
+ * v3-D260 (DEFECTS.md#B16's own "Still open" note) — a make-up candidate is a
+ * gate overdue from a PREVIOUS learning-day, never "since the learner was
+ * last active". v3-D256/D259's own gap-since-last-active gate
+ * (`daysBetween(lastActiveDay, now) >= 2`) reset itself the instant ANY
+ * session ran a single graded event: the very next session's gap read under
+ * 2 learning-days, so the make-up merge (this function) never ran at all,
+ * and every atom still overdue from before the cap was spent came back
+ * through step 2 as an ordinary mandatory "gate" — uncapped, the whole
+ * remaining backlog in one further sitting rather than "a piece at a time".
+ *
+ * This reads only each atom's OWN `gateDueAt` against the START of TODAY's
+ * learning-day (`dayStart`), which needs no second timestamp at all:
+ * `scheduleGate()`/`applyGateResult()` always arm `gateDueAt` at a day
+ * boundary (`dayStart(x) + 86_400_000`), so a gate due exactly today (the
+ * ordinary, ever-present next-day case) is never counted here — only one
+ * whose own due-day has already passed is backlog. Because this reads the
+ * atom, not the log, it stays correct across as many sessions as the
+ * backlog needs to drain, with no "last active" bookkeeping to go stale.
+ *
+ * Both `assembleQueue`'s own make-up step and `makeupDeferredCount` read
+ * this ONE list — the same "one decision, one function" discipline
+ * `gateStateOf` (v3-D211/D212) already established for this codebase — so
+ * the queue and the honest "N deferred" count can never disagree about
+ * which atoms qualify.
  */
-function missedDayGates(
-  atoms: AtomState[],
-  now: number,
-  lastActiveDay: number | null,
-): AtomState[] {
-  if (lastActiveDay === null) return [];
+function overdueGates(atoms: AtomState[], now: number, cfg?: DayConfig): AtomState[] {
+  const cutoff = dayStart(now, cfg);
   return atoms
-    .filter(
-      (a) =>
-        a.gateDueAt !== null &&
-        !a.gatePassed &&
-        a.gateDueAt <= now &&
-        // came due strictly after the last active day (i.e. on a skipped day)
-        a.gateDueAt > lastActiveDay,
-    )
+    .filter((a) => a.gateDueAt !== null && !a.gatePassed && a.gateDueAt < cutoff)
     .sort((a, b) => a.gateDueAt! - b.gateDueAt!);
 }
 
 /**
  * How many make-up items a real assembly for this surah would defer past the
- * cap — `0` for an ordinary next-day return (not a skipped-day gap) or when
- * nothing exceeds it. Computed off the identical candidate list
- * `assembleQueue`'s own make-up step reads (`missedDayGates`, above), so this
- * can never disagree with what a session's own queue actually carries.
+ * cap — `0` when nothing exceeds it. Computed off the identical candidate
+ * list `assembleQueue`'s own make-up step reads (`overdueGates`, above), so
+ * this can never disagree with what a session's own queue actually carries.
  *
  * Defensively scoped to `surah` (DEFECTS.md#E-02's own discipline): a caller
  * that hands atoms from more than one surah can never have another surah's
@@ -113,13 +119,10 @@ export function makeupDeferredCount(
   atoms: AtomState[],
   surah: number,
   now: number,
-  lastActiveDay: number | null,
   cfg?: { day?: DayConfig; cap?: number },
 ): number {
-  if (lastActiveDay === null) return 0;
-  if (daysBetween(lastActiveDay, now, cfg?.day) < 2) return 0;
   const scoped = atoms.filter((a) => a.surah === surah);
-  const candidates = missedDayGates(scoped, now, lastActiveDay);
+  const candidates = overdueGates(scoped, now, cfg?.day);
   const cap = cfg?.cap ?? MAKEUP_CAP;
   return Math.max(0, candidates.length - cap);
 }
@@ -137,8 +140,6 @@ export interface AssembleInput {
   surah: number;
   atoms: AtomState[];
   now: number;
-  /** ms of the last learning-day the user had a session, or null if none. */
-  lastActiveDay: number | null;
   /** word count per ayah, for Learn-cost estimation. */
   wordCounts: Map<number, number>;
   cfg?: ScheduleConfig;
@@ -163,30 +164,33 @@ export function assembleQueue(input: AssembleInput): QueueItem[] {
 
   const queue: QueueItem[] = [];
 
-  // 1. MAKE-UP MERGE — only if the user SKIPPED one or more learning-days (a gap
-  //    of ≥2 learning-days since last active). A normal next-day return is NOT a
-  //    make-up; those gates flow through step 2 as ordinary cold gates. A make-up
-  //    item is one that came due on a day that was skipped entirely.
+  // 1. MAKE-UP MERGE — v3-D260: a gate overdue from a PREVIOUS learning-day
+  //    (never one due today, the ordinary case). A normal next-day return is
+  //    NOT a make-up; those gates flow through step 2 as ordinary cold gates.
+  //    This runs on EVERY assembly, not only after a detected gap — the
+  //    atoms' own `gateDueAt` already says whether there is backlog, so
+  //    there is no separate "did the learner skip a day" signal to go stale.
   //
   //    v3-D256: capped at `MAKEUP_CAP` (or `cfg.makeupCap`), oldest-missed-first
-  //    — see `missedDayGates`/`makeupDeferredCount`, above, for why. The rest
+  //    — see `overdueGates`/`makeupDeferredCount`, above, for why. The rest
   //    are deferred to a later session, not dropped from the schedule: their
   //    own `gateDueAt` is untouched, so they simply reappear here once the cap
-  //    is spent.
-  const missedDays =
-    input.lastActiveDay !== null && daysBetween(input.lastActiveDay, now, dayCfg) >= 2;
+  //    is spent — and keep reappearing, session after session, for as long
+  //    as they stay overdue, since that fact never depends on how recently a
+  //    session ran (v3-D260, DEFECTS.md#B16's own "Still open" note).
+  //
   // v3-D259: the missed gates the cap DEFERS. Every one of them is also
   // `gateDue`, so step 2 below would otherwise re-admit it as an ordinary
   // mandatory "gate" — the whole backlog back in one sitting, merely
   // relabelled, while `makeupDeferredCount` reported it as deferred.
   const deferred = new Set<string>();
-  if (missedDays) {
+  {
     const cap = cfg.makeupCap ?? MAKEUP_CAP;
-    const missed = missedDayGates(atoms, now, input.lastActiveDay);
-    for (const a of missed.slice(0, cap)) {
+    const overdue = overdueGates(atoms, now, dayCfg);
+    for (const a of overdue.slice(0, cap)) {
       queue.push({ kind: "makeup", atomKey: atomKey(a.surah, a.kind, a.ref), ayah: a.ref, estMin: COST_MAKEUP });
     }
-    for (const a of missed.slice(cap)) deferred.add(atomKey(a.surah, a.kind, a.ref));
+    for (const a of overdue.slice(cap)) deferred.add(atomKey(a.surah, a.kind, a.ref));
   }
 
   // 2. GATES — day-1 cold gates due now (that weren't already pulled as

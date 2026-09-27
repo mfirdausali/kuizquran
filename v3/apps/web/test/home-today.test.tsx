@@ -167,8 +167,6 @@ async function engineDueCount(
   for (const w of corpus.words) {
     wordCounts.set(w.ayah, (wordCounts.get(w.ayah) ?? 0) + 1);
   }
-  const lastActiveDay =
-    prior.length > 0 ? prior.reduce((max, e) => (e.ts > max ? e.ts : max), 0) : null;
   const seen = new Set<number>();
   for (const a of atomsMap.values()) if (a.kind === "ayah") seen.add(a.ref);
   const learnCandidates = [...new Set(corpus.words.map((w) => w.ayah))]
@@ -180,7 +178,6 @@ async function engineDueCount(
     surah,
     atoms: [...atomsMap.values()],
     now,
-    lastActiveDay,
     wordCounts,
     cfg: {
       budgetMin: paceCfg.budgetMin,
@@ -587,9 +584,7 @@ describe("an unavailable corpus gets its own words", () => {
 async function engineMakeupDeferred(surah: number, now: number): Promise<number> {
   const prior = await getEventsForSurah(surah);
   const atomsMap = rebuild(prior);
-  const lastActiveDay =
-    prior.length > 0 ? prior.reduce((max, e) => (e.ts > max ? e.ts : max), 0) : null;
-  return makeupDeferredCount([...atomsMap.values()], surah, now, lastActiveDay);
+  return makeupDeferredCount([...atomsMap.values()], surah, now);
 }
 
 describe("v3-D256's dashboard sibling — the makeup cap's own overflow reaches /home, not only /session", () => {

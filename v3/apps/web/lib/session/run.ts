@@ -105,14 +105,6 @@ import { paceConfig, candidatesForPace, DEFAULT_PACE_MODE, type PaceMode } from 
 // unasserted by any test until v3-D83 added both. Every rung below is a call,
 // never a literal.
 import { gradeClassToWire, type GradeClass } from "@engine/gradeClass.ts";
-// v2-BUG-2 / v3-D113 — the ms of the learner's last active day, derived from the
-// append-only log (invariant #2). `activity.ts`'s own header states the intent:
-// deriving it there is so "the session caller has no excuse to hardcode it
-// again." `assembleFor` hardcoded it anyway (an inline `reduce(..., 0)`), so
-// this had ZERO production callers — the "re-derive instead of import" shape
-// v3-D107/D108 named. The one derivation now lives in one place; the inline
-// copy's `0` floor (vs the engine's `-Infinity`) is gone with it.
-import { lastActiveDayMs } from "@engine/activity.ts";
 // FR5 — resume policy (`packages/engine/src/resume.ts#resumePolicy`). See
 // `classifyReentry`/`acknowledgeReentry` near the bottom of this file for why
 // this had ZERO production callers until now, despite
@@ -527,13 +519,10 @@ export async function assembleFor(
     wordCounts.set(w.ayah, (wordCounts.get(w.ayah) ?? 0) + 1);
   }
 
-  const lastActiveDay = lastActiveDayMs(prior);
-
   const queue = assembleQueue({
     surah,
     atoms,
     now,
-    lastActiveDay,
     wordCounts,
     cfg: {
       budgetMin: paceCfg.budgetMin,
@@ -541,9 +530,9 @@ export async function assembleFor(
       learnCandidates: candidatesForPace(learnCandidatesFor(c, atomsMap), pace),
     },
   });
-  // v3-D256 — off the SAME atoms/lastActiveDay `assembleQueue` itself just
-  // read, so this can never disagree with what `queue` actually carries.
-  const makeupDeferred = makeupDeferredCount(atoms, surah, now, lastActiveDay);
+  // v3-D260 — off the SAME atoms `assembleQueue` itself just read, so this
+  // can never disagree with what `queue` actually carries.
+  const makeupDeferred = makeupDeferredCount(atoms, surah, now);
 
   return { queue, atoms: atomsMap, prior, makeupDeferred };
 }

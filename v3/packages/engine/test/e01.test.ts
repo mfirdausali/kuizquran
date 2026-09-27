@@ -121,7 +121,7 @@ describe("scheduler.ts and floor.ts never build atom keys by raw interpolation",
     const atoms: AtomState[] = [
       { ...initAtom(12, "ayah", 4), encoded: true, gatePassed: true, strength: 60, stability: 4, lastRetrieval: 0 },
     ];
-    const q = assembleQueue({ surah: 12, atoms, now: 30 * 86_400_000, lastActiveDay: null, wordCounts: new Map() });
+    const q = assembleQueue({ surah: 12, atoms, now: 30 * 86_400_000, wordCounts: new Map() });
     for (const item of q) {
       expect(item.atomKey.startsWith("12:")).toBe(true);
     }

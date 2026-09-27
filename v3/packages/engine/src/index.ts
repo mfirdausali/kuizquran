@@ -27,7 +27,6 @@ export * from "./floor.ts";
 export * from "./heatmap.ts";
 export * from "./sessionSummary.ts";
 export * from "./pace.ts";
-export * from "./activity.ts";
 export * from "./test.ts";
 export * from "./overrides.ts";
 export * from "./rotation.ts";

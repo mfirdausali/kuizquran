@@ -10,14 +10,16 @@ omission in the Test route (build-plan step 15's override layer, consumed at
 step 18+). **B14** is another v3 session-loop defect (step 18/19), a
 regression against v2's own Learn-window behavior. **B15** is an engine-fold
 defect (`rebuild.ts`), found immediately downstream of B14's own fix.
-**B16** is an engine-scheduler defect (`scheduler.ts`/`activity.ts`): v3-D256's
-make-up cap never actually bounded a churned learner's queue.
+**B16** is an engine-scheduler defect (`scheduler.ts`, formerly also
+`activity.ts`, retired at v3-D260): v3-D256's make-up cap never actually
+bounded a churned learner's queue across as many sessions as its backlog
+needed to drain.
 **E-01…E-08** are multi-surah defects that only manifest once a second surah
 exists.
 
 ---
 
-## B16 — the FR5 make-up cap never bounded the queue ✅ CLOSED (FR5 makeup, v3-D259)
+## B16 — the FR5 make-up cap never bounded the queue across sessions ✅ CLOSED (FR5 makeup, v3-D260)
 
 Two defects, each enough on its own to defeat v3-D256's `MAKEUP_CAP` for a
 real churned learner (edge case #70, "queue explosion").
@@ -43,16 +45,38 @@ as a retrieval (`tap`, `reconstruct_tap`, `rung_complete`, `ayah_produced`,
 `gate_result`, `junction_result`, `chain_step`), with `structured !== false`
 (invariant #5).
 
-**Regression tests:** `packages/engine/test/scheduler.test.ts` (2 new cases
-in the v3-D256 block), `packages/engine/test/activity.test.ts` (v3-D259
-block, 5 cases), `apps/web/lib/session/run.test.ts` (v3-D259 block, 4 cases
-through the real IndexedDB log, `acknowledgeReentry`, `startSession` and
-`assembleFor`).
+**Regression tests (as of v3-D259):** `packages/engine/test/scheduler.test.ts`
+(2 new cases in the v3-D256 block), `packages/engine/test/activity.test.ts`
+(v3-D259 block, 5 cases), `apps/web/lib/session/run.test.ts` (v3-D259 block,
+4 cases through the real IndexedDB log, `acknowledgeReentry`, `startSession`
+and `assembleFor`).
 
-**Still open:** once a capped session's make-ups are done, `lastActiveDay`
-becomes today, so the NEXT session's gap is under 2 days and every
-still-deferred gate returns through step 2 uncapped. The backlog is spread
-across two sessions, not "a piece at a time". See DECISIONS.md v3-D259.
+**v3-D259's own "Still open" note:** once a capped session's make-ups were
+done, `lastActiveDay` became today, so the NEXT session's gap read under 2
+days and every still-deferred gate returned through step 2 uncapped. The
+backlog spread across two sessions, not "a piece at a time".
+
+**v3-D260 closed this fully** by retiring the `lastActiveDay`-based
+classification entirely: a make-up candidate is now any gate whose own
+`gateDueAt` is before the START of TODAY's learning-day
+(`scheduler.ts#overdueGates`, using `daybound.ts#dayStart`) — no second
+timestamp, no "since when was the learner last active" bookkeeping to go
+stale. This runs on EVERY assembly, not only a detected gap, so the cap
+keeps biting for as many consecutive sessions as the backlog needs to
+drain. `activity.ts`/`lastActiveDayMs`/`isRetrievalActivity` — v3-D259's own
+fix, whose only production caller was this classification — were retired
+with it (deleted, not left as a zero-caller mechanism for a future sweep to
+rediscover).
+
+**Regression tests (v3-D260):** `packages/engine/test/scheduler.test.ts`'s
+"v3-D260" describe block (a 9-missed-gate fixture proves a THIRD session
+still caps at `MAKEUP_CAP`, not merely a second) plus the updated "FR5
+makeup cap" block; `packages/engine/test/phase2-session.test.ts`'s "v2-BUG-2
+regression" (updated — make-up still fires live from a real skipped-day
+log, on the new argument-free mechanism); `apps/web/lib/session/run.test.ts`'s
+existing v3-D256/D259 blocks (unchanged in substance — every one of those
+scenarios already holds under the new classification, since none of them
+depend on how many sessions ran before).
 
 ---
 

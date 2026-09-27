@@ -52,7 +52,7 @@ describe("E-02: assembleQueue never mixes another surah's atoms into one queue",
       { ...initAtom(12, "ayah", 4), encoded: true, gatePassed: true, strength: 60, stability: 4, lastRetrieval: 0 },
       { ...initAtom(67, "ayah", 4), encoded: true, gatePassed: true, strength: 60, stability: 4, lastRetrieval: 0 },
     ];
-    const q = assembleQueue({ surah: 12, atoms, now: 30 * DAY, lastActiveDay: null, wordCounts: new Map() });
+    const q = assembleQueue({ surah: 12, atoms, now: 30 * DAY, wordCounts: new Map() });
     // Every item in a surah-12 queue must belong to surah 12 (checked via
     // the atomKey format, which is surah-prefixed since E-01).
     for (const item of q) expect(item.atomKey.startsWith("12:")).toBe(true);

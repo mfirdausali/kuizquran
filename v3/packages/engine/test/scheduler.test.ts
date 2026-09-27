@@ -26,7 +26,6 @@ describe("assembleQueue (FR3 order)", () => {
       surah: 12,
       atoms: [gated],
       now,
-      lastActiveDay: atUtc(2026, 7, 13, 8),
       wordCounts,
       cfg: { day: DEFAULT_DAY_CONFIG, learnCandidates: [5], budgetMin: 8 },
     });
@@ -42,7 +41,6 @@ describe("assembleQueue (FR3 order)", () => {
       surah: 12,
       atoms: [encoded(4)],
       now,
-      lastActiveDay: atUtc(2026, 7, 13, 8),
       wordCounts,
       cfg: { day: DEFAULT_DAY_CONFIG, learnCandidates: [5, 6], budgetMin: 8 },
     });
@@ -60,7 +58,6 @@ describe("assembleQueue (FR3 order)", () => {
       surah: 12,
       atoms: [ayah, conn],
       now,
-      lastActiveDay: atUtc(2026, 7, 13, 8),
       wordCounts,
       cfg: { day: DEFAULT_DAY_CONFIG, budgetMin: 8, connectionWeight: 1.5 },
     });
@@ -75,7 +72,6 @@ describe("assembleQueue (FR3 order)", () => {
       surah: 12,
       atoms: [gated],
       now: atUtc(2026, 7, 15, 8), // returned after missing the 14th
-      lastActiveDay: atUtc(2026, 7, 13, 8),
       wordCounts,
       cfg: { day: DEFAULT_DAY_CONFIG, budgetMin: 0.1 }, // absurdly tight
     });
@@ -89,7 +85,6 @@ describe("assembleQueue (FR3 order)", () => {
       surah: 12,
       atoms: [gated],
       now,
-      lastActiveDay: atUtc(2026, 7, 13, 8),
       wordCounts,
       cfg: { day: DEFAULT_DAY_CONFIG, budgetMin: 0 },
     });
@@ -107,13 +102,16 @@ describe("assembleQueue (FR3 order)", () => {
 // sitting, the exact "queue explosion" #70 names. `MAKEUP_CAP` bounds it;
 // `makeupDeferredCount` reports the honest overflow off the SAME candidate
 // list, so the two can never disagree about which atoms qualify.
-describe("FR5 makeup cap (v3-D256, edge case #70/#98)", () => {
-  const lastActiveDay = atUtc(2026, 7, 1, 8);
+//
+// v3-D260 (DEFECTS.md#B16's own "Still open" note) retired the
+// `lastActiveDay`-based classification these tests originally exercised: a
+// gate qualifies purely by its own `gateDueAt` against the START of TODAY's
+// learning-day, with no second timestamp to hardcode wrong or let go stale.
+describe("FR5 makeup cap (v3-D256/D260, edge case #70/#98)", () => {
   const now = atUtc(2026, 7, 20, 8);
 
   // Six ayat, each encoded (and its gate scheduled) on its own, distinct day
-  // strictly after `lastActiveDay` — six genuinely separate skipped-day
-  // debts, oldest (ayah 1) first.
+  // — six genuinely separate skipped-day debts, oldest (ayah 1) first.
   function sixMissedGates(): AtomState[] {
     return [1, 2, 3, 4, 5, 6].map((ayah) =>
       scheduleGate(
@@ -130,7 +128,6 @@ describe("FR5 makeup cap (v3-D256, edge case #70/#98)", () => {
       surah: 12,
       atoms,
       now,
-      lastActiveDay,
       wordCounts,
       cfg: { day: DEFAULT_DAY_CONFIG, budgetMin: 8 },
     });
@@ -152,7 +149,6 @@ describe("FR5 makeup cap (v3-D256, edge case #70/#98)", () => {
       surah: 12,
       atoms,
       now,
-      lastActiveDay,
       wordCounts,
       cfg: { day: DEFAULT_DAY_CONFIG, budgetMin: 8 },
     });
@@ -169,18 +165,17 @@ describe("FR5 makeup cap (v3-D256, edge case #70/#98)", () => {
       surah: 12,
       atoms,
       now,
-      lastActiveDay,
       wordCounts,
       cfg: { day: DEFAULT_DAY_CONFIG, budgetMin: 8 },
     });
     const queuedAyat = new Set(q.map((i) => i.ayah));
     const absent = atoms.filter((a) => !queuedAyat.has(a.ref)).length;
-    expect(makeupDeferredCount(atoms, 12, now, lastActiveDay)).toBe(absent);
+    expect(makeupDeferredCount(atoms, 12, now)).toBe(absent);
   });
 
   it("makeupDeferredCount reports exactly the overflow the queue itself deferred", () => {
     const atoms = sixMissedGates();
-    expect(makeupDeferredCount(atoms, 12, now, lastActiveDay)).toBe(6 - MAKEUP_CAP);
+    expect(makeupDeferredCount(atoms, 12, now)).toBe(6 - MAKEUP_CAP);
   });
 
   it("the cap is overridable via cfg.makeupCap, and both readers agree", () => {
@@ -189,12 +184,11 @@ describe("FR5 makeup cap (v3-D256, edge case #70/#98)", () => {
       surah: 12,
       atoms,
       now,
-      lastActiveDay,
       wordCounts,
       cfg: { day: DEFAULT_DAY_CONFIG, budgetMin: 8, makeupCap: 5 },
     });
     expect(q.filter((i) => i.kind === "makeup").length).toBe(5);
-    expect(makeupDeferredCount(atoms, 12, now, lastActiveDay, { cap: 5 })).toBe(1);
+    expect(makeupDeferredCount(atoms, 12, now, { cap: 5 })).toBe(1);
   });
 
   it("reports zero deferred when nothing exceeds the cap", () => {
@@ -203,27 +197,118 @@ describe("FR5 makeup cap (v3-D256, edge case #70/#98)", () => {
       surah: 12,
       atoms,
       now,
-      lastActiveDay,
       wordCounts,
       cfg: { day: DEFAULT_DAY_CONFIG, budgetMin: 8 },
     });
     expect(q.filter((i) => i.kind === "makeup").length).toBe(2);
-    expect(makeupDeferredCount(atoms, 12, now, lastActiveDay)).toBe(0);
+    expect(makeupDeferredCount(atoms, 12, now)).toBe(0);
   });
 
-  it("reports zero for an ordinary next-day return — not a skipped-day gap at all", () => {
-    const atoms = sixMissedGates();
-    const yesterday = atUtc(2026, 7, 19, 8); // < 2 learning-days before `now`
-    expect(makeupDeferredCount(atoms, 12, now, yesterday)).toBe(0);
-  });
-
-  it("reports zero when there is no prior activity to compare against", () => {
-    const atoms = sixMissedGates();
-    expect(makeupDeferredCount(atoms, 12, now, null)).toBe(0);
+  // v3-D260 — a gate due EXACTLY today (the ordinary, ever-present next-day
+  // case) is never backlog, regardless of whether the learner has ANY prior
+  // activity on record at all — there is no longer a `lastActiveDay` input
+  // this could even be gated on.
+  it("reports zero for a gate due exactly today — not overdue from a prior day at all", () => {
+    const dueToday = scheduleGate(
+      { ...initAtom(12, "ayah", 1), encoded: true },
+      atUtc(2026, 7, 19, 20), // encoded yesterday evening
+      DEFAULT_DAY_CONFIG,
+    );
+    const q = assembleQueue({
+      surah: 12,
+      atoms: [dueToday],
+      now: atUtc(2026, 7, 20, 8), // today — the gate's own due day
+      wordCounts,
+      cfg: { day: DEFAULT_DAY_CONFIG, budgetMin: 8 },
+    });
+    expect(q.filter((i) => i.kind === "makeup")).toEqual([]);
+    expect(q.some((i) => i.kind === "gate")).toBe(true);
+    expect(makeupDeferredCount([dueToday], 12, atUtc(2026, 7, 20, 8))).toBe(0);
   });
 
   it("never counts a different surah's atoms (E-01/E-02 scoping)", () => {
     const otherSurah = sixMissedGates().map((a) => ({ ...a, surah: 67 }));
-    expect(makeupDeferredCount(otherSurah, 12, now, lastActiveDay)).toBe(0);
+    expect(makeupDeferredCount(otherSurah, 12, now)).toBe(0);
+  });
+});
+
+// v3-D260 (DEFECTS.md#B16's own "Still open" note) — before this fix, the
+// cap only ever bit on the FIRST post-gap assembly: `assembleQueue`'s make-up
+// step was gated on `daysBetween(lastActiveDay, now) >= 2`, and completing
+// even a capped session wrote fresh graded events "now", so the VERY NEXT
+// assembly's gap read under 2 learning-days and skipped step 1 entirely —
+// every atom still overdue from before the cap was spent flowed through
+// step 2 as an ordinary mandatory "gate", uncapped, the rest of the whole
+// backlog in one further sitting rather than "a piece at a time"
+// (v3-D256's own wording). The fix reads only each atom's own `gateDueAt`
+// against today's `dayStart`, which stays true no matter how many sessions
+// in a row have already run today or yesterday.
+describe("v3-D260 — the make-up cap keeps biting across consecutive sessions, not only the first", () => {
+  // Nine ayat, each with its own distinct skipped-day debt — three full
+  // cap-widths of backlog, so a SECOND capped session is still observably
+  // capped rather than merely "empty because everything already fit".
+  function nineMissedGates(): AtomState[] {
+    return Array.from({ length: 9 }, (_, i) => i + 1).map((ayah) =>
+      scheduleGate(
+        { ...initAtom(12, "ayah", ayah), encoded: true },
+        atUtc(2026, 7, 1 + ayah, 20),
+        DEFAULT_DAY_CONFIG,
+      ),
+    );
+  }
+
+  it("a session immediately following a capped one still defers past MAKEUP_CAP, not the whole remaining backlog", () => {
+    const now = atUtc(2026, 7, 20, 8);
+    const atoms = nineMissedGates();
+
+    // Session 1: caps at 3 (ayat 1-3), defers 6 (ayat 4-9).
+    const first = assembleQueue({
+      surah: 12,
+      atoms,
+      now,
+      wordCounts,
+      cfg: { day: DEFAULT_DAY_CONFIG, budgetMin: 8 },
+    });
+    expect(first.filter((i) => i.kind === "makeup").map((i) => i.ayah)).toEqual([1, 2, 3]);
+    expect(makeupDeferredCount(atoms, 12, now)).toBe(6);
+
+    // The learner passes all 3 of today's make-up gates — the ONLY state
+    // change a completed session produces on these atoms.
+    const afterFirst = atoms.map((a) =>
+      first.some((i) => i.kind === "makeup" && i.ayah === a.ref) ? { ...a, gatePassed: true } : a,
+    );
+
+    // Session 2, the VERY NEXT learning-day — under the old `lastActiveDay`
+    // gap gate this reads as an ordinary (non-churned) return, since a
+    // graded event was just committed "now"; the old code would have let
+    // all 6 remaining atoms (4-9) through step 2 as ordinary mandatory
+    // gates. The fix caps this session identically to the first.
+    const secondNow = atUtc(2026, 7, 21, 8);
+    const second = assembleQueue({
+      surah: 12,
+      atoms: afterFirst,
+      now: secondNow,
+      wordCounts,
+      cfg: { day: DEFAULT_DAY_CONFIG, budgetMin: 8 },
+    });
+    expect(second.filter((i) => i.kind === "gate")).toEqual([]);
+    expect(second.filter((i) => i.kind === "makeup").map((i) => i.ayah)).toEqual([4, 5, 6]);
+    expect(second.some((i) => i.ayah >= 7)).toBe(false);
+    expect(makeupDeferredCount(afterFirst, 12, secondNow)).toBe(3);
+
+    // Session 3 clears the last of the backlog.
+    const afterSecond = afterFirst.map((a) =>
+      second.some((i) => i.kind === "makeup" && i.ayah === a.ref) ? { ...a, gatePassed: true } : a,
+    );
+    const thirdNow = atUtc(2026, 7, 22, 8);
+    const third = assembleQueue({
+      surah: 12,
+      atoms: afterSecond,
+      now: thirdNow,
+      wordCounts,
+      cfg: { day: DEFAULT_DAY_CONFIG, budgetMin: 8 },
+    });
+    expect(third.filter((i) => i.kind === "makeup").map((i) => i.ayah)).toEqual([7, 8, 9]);
+    expect(makeupDeferredCount(afterSecond, 12, thirdNow)).toBe(0);
   });
 });

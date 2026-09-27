@@ -53,10 +53,144 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2916 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 2906 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 402 v3/api + 120 corpus-compiler
-             # + 460 engine + 63 fold-runner + 1569 apps/web. (v3-D259, 2026-09-27)
+             # + 452 engine + 63 fold-runner + 1567 apps/web. (v3-D260, 2026-09-27)
+             # NOTE (v3-D260, 2026-09-27): DEFECTS.md#B16 fully CLOSED,
+             # closing v3-D259's own "Still open" note. That note: after a
+             # capped session, the next assembly's gap since `lastActiveDay`
+             # reads under 2 learning-days, so `scheduler.ts`'s make-up step
+             # never runs at all and every atom still overdue from before
+             # the cap was spent flows through step 2 as an ordinary
+             # mandatory "gate" — the rest of the whole backlog in one
+             # further sitting, not "a piece at a time" (v3-D256's own
+             # wording, the ratified intent). Redesigned per v3-D259's own
+             # suggestion: a make-up candidate is no longer "due since the
+             # learner was last active" but simply a gate whose own
+             # `gateDueAt` is before the START of TODAY's learning-day
+             # (`scheduler.ts#overdueGates`, `daybound.ts#dayStart`) — a
+             # gate due exactly today is never counted, only one whose own
+             # due-day has already passed. This needs no second timestamp,
+             # so `assembleQueue`'s step 1 now runs on EVERY assembly (no
+             # `missedDays` precondition), and the cap keeps biting for as
+             # many consecutive sessions as real backlog remains.
+             # `AssembleInput.lastActiveDay`/`makeupDeferredCount`'s
+             # matching parameter are REMOVED, not left unused — and since
+             # `activity.ts` (`lastActiveDayMs`/`isRetrievalActivity`,
+             # v3-D113/D259) had exactly one real caller anywhere (feeding
+             # this one classification), the whole module is DELETED rather
+             # than left a freshly-created zero-caller mechanism for a
+             # future sweep to rediscover — the same "delete when genuinely
+             # superseded" call this build made once before for
+             # `LogSummary.tsx` (v3-D146), here on an engine module.
+             #
+             # RED confirmed directly: `scheduler.ts` alone reverted to its
+             # pre-fix HEAD version against every rewritten/new test kept
+             # (`scheduler.test.ts`'s updated "FR5 makeup cap" block + new
+             # "v3-D260" block; `phase2-session.test.ts`'s rewritten
+             # "v2-BUG-2 regression"; `e01.test.ts`/`multi-surah.test.ts`/
+             # `sevenDays.test.ts`'s updated call sites) — 23 of 39 failed,
+             # every one a genuine `RangeError: Invalid time value` inside
+             # `daybound.ts#partsInTz` (the old code's `daysBetween(undefined,
+             # now, ...)`, since the new tests no longer pass a
+             # `lastActiveDay` the old `AssembleInput` still required).
+             # Restored byte-identically (`diff` confirmed empty), reran:
+             # `packages/engine` 452/452 (was 460 — exactly
+             # `activity.test.ts`'s own 8 cases, gone with the module;
+             # `scheduler.test.ts`/`phase2-session.test.ts` net +0/+0 each,
+             # one test replaced for another in both). The load-bearing new
+             # case (`scheduler.test.ts`'s "v3-D260" block) drives THREE
+             # consecutive `assembleQueue` calls over nine separate
+             # skipped-day debts (three cap-widths), applying only the
+             # state change a completed session actually produces between
+             # each: session 1 caps ayat 1-3 (6 deferred); session 2 — on
+             # the VERY NEXT learning-day, exactly the case that read as an
+             # ordinary non-churned return under the old gap gate — still
+             # caps ayat 4-6 (3 deferred), never all six; session 3 clears
+             # the last three. A second new case proves the complementary
+             # boundary: a gate due EXACTLY today is never make-up, with no
+             # `lastActiveDay` argument left to even gate that on.
+             # `apps/web/test/home-today.test.tsx`'s own independent oracle
+             # helpers (kept deliberately un-imported from `lib/home/
+             # queue.ts`, so the test proves agreement with the engine, not
+             # a tautology) dropped their own inline `lastActiveDay`
+             # re-derivation to match.
+             #
+             # `TZ=UTC make test`: 2906 passing (was 2916; engine 452, was
+             # 460, -8, exactly `activity.test.ts`'s own case count;
+             # apps/web 1567, was 1569, -2, exactly
+             # `assemble-lastactive.test.ts`'s own two cases, deleted with
+             # the wiring proof it existed to guard; every other suite
+             # unmoved: 255 v2 vitest, 47 v2/api, 402 v3/api, 120
+             # corpus-compiler, 63 fold-runner), exit 0.
+             # `check-test-floor.mjs`: OK, 2906 >= floor 1899 (+1007 margin,
+             # unmoved, same discipline as every prior entry). `TZ=UTC make
+             # build`: exit 0, 30 routes, unchanged (an engine-plus-one-
+             # lib-file fix, no route or component touched; the four launch
+             # surahs' own corpus recompile inside `prebuild` reproduced
+             # byte-identical corpusHashes — this diff carries no corpus
+             # data). `npm run gates`: all green — locked-css OK, 1
+             # documented hunk, 294 v1 lines byte-identical; boundaries OK,
+             # 321 files, unchanged count (one file deleted from
+             # `packages/engine/src`, which the gate does not count at all,
+             # plus test-only changes elsewhere); fonts degraded-but-non-
+             # blocking, pre-existing, 2/6 UI fonts present; corpus-
+             # morphology OK, 362 words; corpus-glyphs OK, 206 codepoints
+             # across 4 artifacts — all unchanged, this diff carries no
+             # corpus data. `TZ=UTC npx tsc --noEmit`, run separately across
+             # all four v3 node packages: clean in all four — deleting
+             # `activity.ts` and its `index.ts` re-export surfaced no other
+             # importer anywhere, confirmed by this clean typecheck, not
+             # merely a text grep. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff produced by
+             # running the suite was reverted before committing, same
+             # discipline as every prior entry — `git status --porcelain --
+             # v1 v2` empty immediately before committing). No Arabic
+             # codepoint (the full diff swept programmatically, in Python,
+             # over the Arabic, Arabic Supplement, Arabic Extended-A and
+             # both Presentation Forms Unicode blocks, plus a
+             # `\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape and
+             # `fromCharCode`/`fromCodePoint` sweep: CLEAN — every changed
+             # line addresses an ayah number, a millisecond arithmetic
+             # result, a wire/field identifier, or a fixed English docblock
+             # sentence, never corpus text). No oracle/golden-log/fixture/
+             # snapshot regenerated — `golden-log-parity.test.ts` (3 cases,
+             # unchanged) still passes unmodified, since the frozen fixture
+             # log carries no `scheduler.ts` state at all (the fold, not
+             # the scheduler, is what that oracle guards).
+             #
+             # Session start: fresh container, `make setup` ran clean end
+             # to end from scratch, no retries needed. `HEAD`, local `main`
+             # and `origin/main` all already agreed at `0e10f24` (v3-D259)
+             # — no stale-local-`main` trap this run, confirmed directly
+             # via `git fetch origin main` before any exploration.
+             #
+             # NOT addressed: every item on v3-D259's own "NOT addressed"
+             # list, minus the backlog-spread item this run closes —
+             # `acknowledgeReentry`'s own "makeup" branch still only logs
+             # the audit trail and points the learner at `/home` for a
+             # fresh, now-honestly-capped queue (v3-D256's own "no second
+             # queue-level behavior needed" verdict still holds);
+             # `DrillPicker.tsx`'s own unused `now` prop; the unused
+             # `atoms`/`corpus`/`sessions` IndexedDB object stores
+             # (v3-D232); `session_start`'s own latency metric (v0.8); the
+             # streak/away-day day-space mismatch (v3-D209);
+             # `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution` (v3-D148);
+             # `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate`
+             # as a whole class (v3-D88, v3-D151, v3-D219);
+             # `App\Flags\FlagService::enabled()` (v3-D197); multi-surah
+             # enrollment; the operational mailer/7-night launch window;
+             # PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel` (v3-D188); `corpusHash`'s zero
+             # fold-side consumer (v3-D206); `selection_determinism_check`
+             # still replaying a committed fixture — all unchanged. FR5's
+             # "makeup" is now CLOSED across as many consecutive sessions
+             # as a real backlog needs — remove DEFECTS.md#B16 from future
+             # sweeps. See DECISIONS.md v3-D260.
              # NOTE (v3-D259, 2026-09-27): DEFECTS.md#B16. v3-D256's
              # MAKEUP_CAP never bounded a churned learner's queue:
              # `scheduler.ts` step 2 re-queued every DEFERRED missed gate as

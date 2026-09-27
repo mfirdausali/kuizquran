@@ -4,9 +4,19 @@
 // v2-BUG-1 was: v1's useSession.ts hardcoded `budgetMin:8` into assembleQueue, so
 // Steady and Sprint collapsed to the identical drip. v2-BUG-2 was: the same
 // caller hardcoded `lastActiveDay:null`, so the make-up merge (FR3 step 1) never
-// fired live. Both callers are fixed in v2 by wiring pace.ts's PaceConfig and
-// activity.ts's lastActiveDayMs into assembleQueue — this file proves it at the
-// engine level (the real caller, src/session/useSession.ts, does the same thing).
+// fired live. BUG-1 is fixed by wiring pace.ts's PaceConfig into assembleQueue —
+// this file proves it at the engine level (the real caller,
+// src/session/useSession.ts, does the same thing).
+//
+// v3-D260 retired the `lastActiveDay`-based fix for BUG-2 (DEFECTS.md#B16's own
+// "Still open" note): the gap-since-last-active gate reset itself the instant
+// any session ran, so a capped session's own completion let the whole
+// remaining backlog back in, uncapped, on the very next assembly. The make-up
+// merge now reads only each atom's own `gateDueAt` against the START of
+// TODAY's learning-day (`scheduler.ts#overdueGates`) — it needs no second
+// timestamp at all, so there is no `lastActiveDay` argument left to hardcode
+// wrong. The BUG-2 regression below is updated to prove make-up still fires
+// live from a real skipped-day log, on the new, argument-free mechanism.
 
 import { describe, expect, it } from "vitest";
 import type { DrillEvent } from "../src/types.ts";
@@ -15,7 +25,6 @@ import { rebuild } from "../src/rebuild.ts";
 import { assembleQueue } from "../src/scheduler.ts";
 import { gateDue } from "../src/gate.ts";
 import { paceConfig, candidatesForPace, type PaceMode } from "../src/pace.ts";
-import { lastActiveDayMs } from "../src/activity.ts";
 import { DEFAULT_DAY_CONFIG, dayStart } from "../src/daybound.ts";
 
 const DAY = 86_400_000;
@@ -61,7 +70,6 @@ function runUnderPace(mode: PaceMode, days: number): number {
   for (let d = 0; d < days; d++) {
     const morning = morningOf(base + d * DAY);
     const atomsBeforeGates = [...rebuild(log, cfg).values()];
-    const lastActiveDay = lastActiveDayMs(log); // BUG-2 fix: real log, never null-by-default
 
     // Pass every due gate first (FR3 step 2, ahead of Learn).
     for (const a of atomsBeforeGates) {
@@ -75,7 +83,6 @@ function runUnderPace(mode: PaceMode, days: number): number {
       surah: 12,
       atoms: atomsAfterGates,
       now: morning,
-      lastActiveDay,
       wordCounts,
       cfg: {
         day: cfg,
@@ -128,7 +135,6 @@ describe("v2-BUG-1 regression: budgetMin is genuinely wired (Steady ≠ Sprint o
       surah: 12,
       atoms: [],
       now,
-      lastActiveDay: null,
       wordCounts,
       cfg: {
         day: cfg,
@@ -140,7 +146,6 @@ describe("v2-BUG-1 regression: budgetMin is genuinely wired (Steady ≠ Sprint o
       surah: 12,
       atoms: [],
       now,
-      lastActiveDay: null,
       wordCounts,
       cfg: {
         day: cfg,
@@ -159,36 +164,25 @@ describe("v2-BUG-1 regression: budgetMin is genuinely wired (Steady ≠ Sprint o
   });
 });
 
-describe("v2-BUG-2 regression: lastActiveDay is wired from the real event log, not hardcoded null", () => {
-  it("a real log's lastActiveDayMs makes a skipped-day make-up fire live", () => {
+describe("v2-BUG-2 regression: make-up merge fires from the real atom state, with no hardcodable gap left (v3-D260)", () => {
+  it("a real log's overdue gate makes a skipped-day make-up fire live", () => {
     const base = new Date(2026, 6, 14, 12, 0, 0, 0).getTime();
     const log: DrillEvent[] = encodeEvents(100, morningOf(base));
     const returnDay = base + 2 * DAY; // day 1 (the gate day) was skipped
     const atoms = [...rebuild(log, cfg).values()];
 
-    const realLastActive = lastActiveDayMs(log); // the fix: derived from the log
-    expect(realLastActive).not.toBeNull();
-
-    const queueWithFix = assembleQueue({
+    const queue = assembleQueue({
       surah: 12,
       atoms,
       now: morningOf(returnDay),
-      lastActiveDay: realLastActive,
       wordCounts,
       cfg: { day: cfg, budgetMin: 8 },
     });
-    expect(queueWithFix.some((q) => q.kind === "makeup")).toBe(true);
+    expect(queue.some((q) => q.kind === "makeup")).toBe(true);
 
-    // The OLD bug: hardcoding null suppresses the make-up merge entirely (step 1
-    // of FR3 never fires) — demonstrate the concrete behavioral gap being closed.
-    const queueWithOldBug = assembleQueue({
-      surah: 12,
-      atoms,
-      now: morningOf(returnDay),
-      lastActiveDay: null,
-      wordCounts,
-      cfg: { day: cfg, budgetMin: 8 },
-    });
-    expect(queueWithOldBug.some((q) => q.kind === "makeup")).toBe(false);
+    // The gate came due YESTERDAY (day 1, skipped) — genuinely overdue as of
+    // TODAY's (day 2's) learning-day start. A gate due exactly today is never
+    // make-up (the ordinary next-day case): confirmed by the Phase-2 exit
+    // criterion tests above, which never see a "makeup" item.
   });
 });
