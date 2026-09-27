@@ -12,11 +12,16 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { DB_NAME, append, currentTz, openDb, resetDbForTests, writeLock } from "@/lib/idb";
 import type { DrillEvent } from "@engine/types.ts";
 import { MySurahs } from "@/components/home/MySurahs";
 import { DeviceReset } from "@/components/home/DeviceReset";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 afterEach(cleanup);
 
@@ -150,6 +155,45 @@ describe("#104 — device reset enumerates what would be lost", () => {
     // A destructive control that works before its recovery path exists is worse
     // than one that waits, and the screen says why rather than hiding it.
     expect((button as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText(/no account to restore from yet/i)).toBeTruthy();
+    expect(screen.getByText(/clearing isn't offered yet/i)).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v3-D258 — `DeviceReset.tsx`'s own docblock/copy went stale (nightly sweep)
+// ---------------------------------------------------------------------------
+// The component's disabled-button reason and its own docblock both claimed
+// "this build has no account adoption and no server-side identity to
+// restore from" / "there is no account to restore from yet... it unlocks
+// together with sign-in" — true the day #104 shipped (before v3-D153), false
+// since `AuthController::register()`/`login()` landed: `register()`'s own
+// docblock is explicit that it "claims the SAME user row" so a registered,
+// fully-synced learner genuinely COULD sign back in on a fresh device and
+// pull their whole history back. Same "docblock says X, reality is Y" shape
+// v3-D90/D110/D123/D236/v3-D244 each already closed elsewhere in this tree —
+// guarded here the same way: pin the AGREEMENT, not a wording, so the check
+// cannot pass by deleting the sentence while account adoption is genuinely
+// unbuilt again.
+describe("DeviceReset's own copy does not claim account adoption is unbuilt, now that it is", () => {
+  it("the component's real source never claims 'no account adoption' while register()/login() genuinely exist", () => {
+    const componentSrc = readFileSync(
+      resolve(HERE, "../components/home/DeviceReset.tsx"),
+      "utf8",
+    );
+    expect(componentSrc).not.toMatch(/no account adoption/i);
+    expect(componentSrc).not.toMatch(/no account to restore from/i);
+
+    // The biconditional half: the corrected claim is honest only because
+    // account adoption (claim the SAME user row via email+password) is a
+    // real, exported mechanism — assert it directly rather than trusting
+    // the old sentence's replacement.
+    const authSrc = readFileSync(resolve(HERE, "../lib/account/auth.ts"), "utf8");
+    expect(authSrc).toMatch(/export async function registerAccount/);
+    expect(authSrc).toMatch(/export async function loginAccount/);
+    const controllerSrc = readFileSync(
+      resolve(HERE, "../../../api/app/Http/Controllers/AuthController.php"),
+      "utf8",
+    );
+    expect(controllerSrc).toMatch(/claim the SAME user row/i);
   });
 });

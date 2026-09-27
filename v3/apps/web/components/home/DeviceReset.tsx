@@ -32,12 +32,27 @@
 // not. Saying "you can sign in again later" without that distinction would be
 // the most damaging kind of half-truth this surface could tell.
 //
-// NOTHING IS DELETED HERE YET. This build has no account adoption and no
-// server-side identity to restore from, so a working reset button would be an
-// irreversible action with no recovery path behind it. What ships is the
-// enumeration — the part #104 is actually about — with the action disabled and
-// the reason stated. A destructive control that works before its recovery path
-// exists is worse than one that waits.
+// NOTHING IS DELETED HERE YET.
+//
+// CORRECTED (nightly sweep, v3-D258): this paragraph used to assert, in as
+// many words, that the whole product had nothing an identity could be
+// re-claimed from at all — true the day #104 shipped, false since
+// `AuthController::register()`/`login()` landed (v3-D153): `register()`
+// "claim[s] the SAME user row via email+password", so a registered,
+// fully-synced learner genuinely COULD sign back in — here or on a fresh
+// device — and pull their whole history back. That is a real, possible
+// recovery path, not a fabricated one.
+//
+// What is still missing is narrower and unrelated to accounts: no code
+// anywhere actually PERFORMS a device clear — there is no "delete this
+// IndexedDB" primitive, no re-pull-after-clear flow, and this component does
+// not read account/sync state to decide when clearing would be safe. So a
+// working reset button would still be an irreversible action with no BUILT
+// AND TESTED recovery path behind it — only a theoretically possible one.
+// What ships is the enumeration — the part #104 is actually about — with the
+// action disabled and the REAL reason stated. A destructive control that
+// works before its recovery path is built and proven is worse than one that
+// waits.
 
 import { useCallback } from "react";
 import { getAllEvents, useLogState } from "@/lib/idb";
@@ -124,9 +139,10 @@ export function DeviceReset() {
             Clear this device
           </button>
           <p className="caption">
-            Disabled in this build: there is no account to restore from yet, so
-            clearing would be permanent with no way back. It unlocks together
-            with sign-in.
+            Disabled in this build: clearing isn't offered yet. Signing in to
+            a real account exists now, but nothing here yet actually clears
+            and restores a device safely — until that is built and tested,
+            this stays a description, not a working button.
           </p>
         </div>
       );
