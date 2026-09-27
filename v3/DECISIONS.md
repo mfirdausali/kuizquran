@@ -24671,3 +24671,124 @@ window; PAY-1's Stripe fixtures; surah 67's scene beats;
 unchanged. FR5's "makeup" is now CLOSED end to end, both `/session` and
 `/home` — remove it from future sweeps except for the narrower
 `acknowledgeReentry` mid-session-notice refinement named above.
+
+## v3-D258 (2026-09-27) — `DeviceReset.tsx`'s own docblock/copy claimed account adoption is unbuilt — it isn't
+
+Nightly sweep. `components/home/DeviceReset.tsx` (edge case #104) has, since
+it shipped (v3-D96 era), told a learner its "Clear this device" button stays
+permanently disabled because "this build has no account adoption and no
+server-side identity to restore from... it unlocks together with sign-in."
+True the day it was written; false since `AuthController::register()`/
+`login()` landed (v3-D153): `register()`'s own docblock states it "claim[s]
+the SAME user row via email+password", so a registered, fully-synced learner
+genuinely could sign back in — here or on a fresh device — and pull their
+whole history back via the existing sync-pull cursor mechanism
+(`lib/sync/cursor.ts`'s `pullCursor`, stored locally, so a cleared
+IndexedDB re-pulls from scratch). The component never re-derived this from
+account/sync state at all — the button is unconditionally `disabled` with no
+`onClick`, so "it unlocks together with sign-in" was never even wired to
+mean anything. Same "docblock says X, reality is Y" bug class this codebase
+has repeatedly found and fixed (v3-D90/D110/D123/D236/D244).
+
+Found by direct field-by-field investigation after an extensive fresh sweep
+of the usual veins came back exhausted: a zero-external-caller export scan
+across `apps/web/lib/**` (10 candidates, all already-known in-file-only
+false positives per v3-D248's own technique); a PHP Eloquent
+relation-vs-caller scan across every `api/app/Models/*.php` `BelongsTo`/
+`HasMany` (all either wired, per prior sweeps, or the already-excluded
+"raw FK pseudonymized instead" pattern); `App\Flags\FlagRegistry`'s eleven
+registered flags re-confirmed against `FlagService::enabled()`'s real
+callers — still zero, still gating features that genuinely don't exist yet;
+a repo-wide TODO/FIXME/XXX grep (all hits are deliberate content-freeze gate
+placeholders, not stale markers); a direct read of `scheduler.ts`'s FR5
+"makeup" merge (`missedDayGates`/`makeupDeferredCount`/`MAKEUP_CAP`) and
+`resume.ts`'s `resumePolicy` for a subtle boundary bug — both correct, day-
+boundary precedence and surah-scoping verified by hand; and the streak/
+away-day day-space mismatch (v3-D209), re-confirmed to still need a genuine
+design decision this run did not fabricate one for. `DeviceReset.tsx` was
+the one genuine, previously-undiscovered instance — its docblock predates
+account adoption by roughly three weeks and nothing had re-checked it since.
+
+**Deliberately did NOT wire up the actual destructive clear action.** That
+needs a real "delete this IndexedDB" primitive (none exists anywhere in this
+tree), a re-pull-after-clear flow, and this component reading account/sync
+state to decide when clearing is genuinely safe — none of which exist. Per
+this component's own stated principle ("a destructive control that works
+before its recovery path exists is worse than one that waits"), building
+that is real, separate, larger and materially riskier scope for actual user
+data — not a one-night documentation fix, and not something to fabricate
+under this run's own "never do anything reckless" discipline. Instead
+corrected the docblock and the on-screen disabled-reason copy to state the
+real, current gap (no clear-and-restore mechanism has been built at all,
+independent of accounts) rather than the stale one, and added a permanent
+regression guard — mirroring v3-D236/D244's "pin the AGREEMENT, not a
+wording" technique — that reads `DeviceReset.tsx`'s own real source and
+asserts it never claims account adoption is unbuilt, while separately
+asserting `lib/account/auth.ts#registerAccount`/`loginAccount` and
+`AuthController::register()`'s own "claim the SAME user row" text remain
+real, so the guard cannot pass by merely deleting the sentence while account
+adoption is genuinely unbuilt again.
+
+**RED confirmed directly**: `git stash` of `DeviceReset.tsx` alone (both the
+new regression-guard test and the updated existing "does not offer a
+working destructive action" assertion kept, 8 other pre-existing cases in
+`test/dashboard.test.tsx` untouched) failed exactly 2 of 10 against the
+unmodified component — the new staleness guard on the literal old phrase,
+and the existing assertion's own new expected text ("clearing isn't offered
+yet") not yet present. Restored byte-identically (`git diff` empty before
+re-implementing), reran green: `test/dashboard.test.tsx` 10/10 (was 8, +2 —
+one wholly new regression-guard test, one strengthened pre-existing
+assertion — net apps/web +1 test).
+
+**Verified:** `TZ=UTC make build`: exit 0, 30 routes, unchanged (one
+existing component + one existing test file edited, no new route or
+production file). `TZ=UTC make test`: 2905 passing (was 2904, +1 — exactly
+this run's one net-new test; apps/web 1565, was 1564; no other suite moved:
+255 v2 vitest, 47 v2/api, 402 v3/api, 120 corpus-compiler, 453 engine, 63
+fold-runner). `check-test-floor.mjs`: OK, 2905 >= floor 1899 (+1006 margin,
+unmoved). `npm run gates`: all green — locked-css OK, 1 documented hunk, 294
+v1 lines byte-identical; boundaries OK, 323 files (the +1 over the prior
+recorded 322 is the pre-existing gitignored `next-env.d.ts` Next.js
+bootstrap-artifact fluctuation this history has recorded many times before,
+confirmed via `git status --porcelain --ignored`, not a new production
+file); fonts degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints across 4
+artifacts — all unchanged, this diff carries no corpus data. `npx tsc
+--noEmit`: exit 0, clean. No `v1/**`/`v2/**` edit (`git status --porcelain
+-- v1 v2` empty immediately before committing — a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite
+was reverted twice before committing). No Arabic codepoint (both changed
+files swept programmatically, in Python, over the Arabic, Arabic
+Supplement, Arabic Extended-A and both Presentation Forms Unicode blocks,
+plus a `\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape and
+`fromCharCode`/`fromCodePoint` sweep: CLEAN — every new string is a
+TypeScript identifier, a docblock/comment sentence, or a fixed English
+caption, never corpus text). No oracle/golden-log/fixture/snapshot
+regenerated.
+
+Session start: fresh container, `make setup` ran clean end to end. `HEAD`,
+local `main` and `origin/main` all already agreed at `d0c8c68` (v3-D257) —
+no stale-local-`main` trap this run, confirmed directly via `git fetch
+origin main` before any exploration.
+
+**NOT addressed:** the actual clear-and-restore mechanism itself (a real,
+separate, higher-risk feature needing a real IndexedDB-delete primitive and
+a re-pull-after-clear flow); every item on v3-D257's own "NOT addressed"
+list, unchanged — `DrillPicker.tsx`'s own unused `now` prop; the unused
+`atoms`/`corpus`/`sessions` IndexedDB object stores (v3-D232);
+`session_start`'s own latency metric (v0.8); the streak/away-day day-space
+mismatch (v3-D209, re-confirmed this run still needs a genuine
+day-space-conversion design, not fabricated); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148,
+re-confirmed still blocked on M7's unbuilt checkout flow); `lib/pricing.ts
+#regionFromCountry()` (v3-D163); `PaywallGate` as a whole class (v3-D88,
+v3-D151, v3-D219); `App\Flags\FlagService::enabled()` (v3-D197,
+re-confirmed still zero real-feature callers); multi-surah enrollment; the
+operational mailer/7-night launch window; PAY-1's Stripe fixtures; surah
+67's scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy drift
+(v3-D127); `packages/engine/src/placement.ts`;
+`MacroFacts.litany.rhymeLabel` (v3-D188); `corpusHash`'s zero fold-side
+consumer (v3-D206); `selection_determinism_check` still replaying a
+committed fixture — all unchanged. `DeviceReset.tsx`'s own stale
+account-adoption claim is now CLOSED and permanently guarded — remove it
+from future sweeps.
