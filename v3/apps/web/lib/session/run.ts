@@ -274,9 +274,12 @@ export interface SessionRun {
    * deferred past `scheduler.ts#MAKEUP_CAP`, resolved ONCE at
    * `startFromQueue` from `AssembledQueue.makeupDeferred` (the same "resolve
    * a provenance fact once, stamp it once" shape `pace`/`corpusHash` already
-   * establish) — never re-derived later, so a mid-session sync pull cannot
-   * retroactively change what this session already told the learner it was
-   * deferring.
+   * establish) — never re-derived while the queue it describes stands, so a
+   * mid-session sync pull cannot retroactively change what this session
+   * already told the learner it was deferring. The ONE exception is FR5
+   * "replan" (`replanQueue`), which REPLACES the queue with a fresh
+   * assembly and so carries that assembly's own count (v3-D262) — keeping
+   * the old one would describe a queue that no longer exists.
    *
    * Always `0` — never `undefined` — for `startFloorSession`/
    * `startDrillSession`/`startOpenPractice`: none of those assembles via
@@ -1494,6 +1497,9 @@ async function replanQueue(run: SessionRun, c: Corpus, now: number): Promise<Ses
       lastActivityAt: now,
       // Nothing left to be "at", so no stale visit can mean anything either.
       siteVisit: null,
+      // v3-D262 — the queue this count described is gone; the fresh
+      // assembly's own count replaces it (`0` when nothing could assemble).
+      makeupDeferred: assembled?.makeupDeferred ?? 0,
     };
   }
 
@@ -1518,6 +1524,11 @@ async function replanQueue(run: SessionRun, c: Corpus, now: number): Promise<Ses
     // just because the number matches. `ensureSiteVisit` re-resolves a
     // fresh ordinal for whatever leads the replanned queue.
     siteVisit: null,
+    // v3-D262 — `makeupDeferred` describes THIS run's own queue assembly,
+    // and this function just replaced that assembly. Carrying the old count
+    // across would keep announcing a gate as "coming up over your next few
+    // sessions" while the fresh queue serves it right now.
+    makeupDeferred: assembled.makeupDeferred,
   };
 }
 

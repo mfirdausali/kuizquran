@@ -25178,3 +25178,62 @@ operational mailer/7-night launch window; PAY-1's Stripe fixtures; surah
 `selection_determinism_check` still replaying a committed fixture — all
 unchanged. The canonical-order duplication is now CLOSED — remove it from
 future sweeps.
+
+## v3-D262 (2026-09-28) — a replanned queue kept announcing the DISCARDED queue's make-up deferred count
+
+FR5 "replan" (v3-D255) and FR5 "makeup" (v3-D256) landed on separate nights
+and never met. `lib/session/run.ts#replanQueue` re-runs `assembleFor` — the
+same function that computes `AssembledQueue.makeupDeferred` — and REPLACES
+`run.queue` with the fresh assembly, but its returned run spread `...run` and
+never carried the fresh count across. After a >1hr same-day re-entry,
+`SessionIsland.tsx`'s "N more overdue check-ins will come up over your next
+few sessions" notice kept describing the queue the replan had just thrown
+away. Concretely on surah 112: a churned return queues 3 make-ups and defers
+1; those 3 gates get passed (another device, or before stepping away); the
+learner returns an hour later, the replan now serves the deferred ayah 4 IN
+THIS SESSION — and the notice still says it will come up in a later one. The
+exact false sentence v3-D259 removed from the ordinary assembly path, reborn
+one layer over.
+
+**Fixed**, one production file: both `replanQueue` return branches now set
+`makeupDeferred` from the fresh assembly (`assembled.makeupDeferred`, or `0`
+when the replan ends the session). `SessionRun.makeupDeferred`'s own docblock
+("never re-derived later") is narrowed to what it actually protects against —
+a mid-session sync changing the count while the queue it describes stands —
+and names replan as the one legitimate exception, since replan replaces that
+queue.
+
+**RED confirmed first, committed separately** (`9bf4ef5`), against the
+completely unmodified `run.ts`: 3 new `run.test.ts` cases in a "v3-D262"
+describe block; 2 failed exactly `expected 1 to be +0` (the stale count) —
+after their own preconditions passed (the churned start really deferred 1,
+the replanned queue really serves ayah 4); the third ("nothing ever
+deferred -> 0") passed vacuously by design, guarding against a fix that
+paints permanent chrome. Both load-bearing cases also assert agreement with
+an independent `assembleFor` oracle at the same moment (count AND queue
+order), so the fix cannot pass by hardcoding `0`. GREEN after:
+`run.test.ts` 120/120 (was 117), plus `session-island.test.tsx`/
+`home-today.test.tsx` unaffected (173/173 across the three).
+
+**Verified:** `TZ=UTC make test` (fresh container, `make setup` from scratch,
+exit 0): **2925 passing** — 255 v2 vitest + 47 v2/api + 402 v3/api (2
+incomplete + 6 skipped, unchanged, environment-dependent) + 120
+corpus-compiler + 464 engine + 64 fold-runner + **1573 apps/web** (was 1570,
++3). `check-test-floor.mjs`: OK, 2925 >= floor 1899 (+1026 margin, unmoved).
+`TZ=UTC make build`: exit 0, 30 routes, unchanged; gates green — locked-css
+OK (1 hunk, 294 v1 lines byte-identical), boundaries OK (322 files), fonts
+degraded-but-non-blocking (pre-existing, 2/6), corpus-morphology OK (362
+words), corpus-glyphs OK (206 codepoints, 4 artifacts); staged corpusHashes
+byte-identical to v3-D261's (908ca9edbd2ab2e4/123c6212cc1d074d/
+77722a2b8b1b6aae). `npx tsc --noEmit` (apps/web): clean. No `v1/**`/`v2/**`
+edit (stray `v2/tsconfig.tsbuildinfo` reverted). No Arabic codepoint (145
+added lines swept over every Arabic/Presentation Forms block plus escape and
+`fromCharCode`/`fromCodePoint` patterns: zero). No oracle/fixture/snapshot
+regenerated.
+
+Session start: local `main` was stale at `f1c92ce`; `git fetch` +
+`merge --ff-only` to the true tip `133a4c0` (v3-D261) before any work.
+
+**NOT addressed:** `acknowledgeReentry`'s own "makeup" branch still only logs
+and points the learner at `/home` (v3-D256's verdict unchanged); every other
+item on v3-D261's "NOT addressed" list, unchanged.

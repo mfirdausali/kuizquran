@@ -53,10 +53,17 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2922 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 2925 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 402 v3/api + 120 corpus-compiler
-             # + 464 engine + 64 fold-runner + 1570 apps/web. (v3-D261, 2026-09-27)
+             # + 464 engine + 64 fold-runner + 1573 apps/web. (v3-D262, 2026-09-28)
+             # NOTE (v3-D262, 2026-09-28): `replanQueue` (FR5 replan) replaced
+             # the queue but kept the OLD `makeupDeferred`, so the "N more
+             # overdue check-ins will come up..." notice could name a gate
+             # the replanned queue was serving right now. Fixed: both return
+             # branches carry the fresh assembly's own count. RED committed
+             # first (9bf4ef5, 2 of 3 failing `expected 1 to be +0`). See
+             # DECISIONS.md v3-D262.
              # NOTE (v3-D261, 2026-09-27): the v3-D09 canonical event-order
              # comparator — `(ts, deviceId, deviceSeq, id)` ascending — was
              # hand-declared TWICE with no shared source: once in
