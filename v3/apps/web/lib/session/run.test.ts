@@ -2244,6 +2244,123 @@ describe("v3-D259 — the make-up cap bounds the WHOLE queue, and audit events c
   });
 });
 
+// v3-D262 — FR5 "replan" (v3-D255) and FR5 "makeup" (v3-D256) each landed on
+// their own night and never met. `replanQueue` re-runs `assembleFor` — the
+// SAME function that computes `AssembledQueue.makeupDeferred` — and REPLACES
+// `run.queue` with the fresh assembly, but its returned run spread `...run`
+// and never carried the fresh count across. So after a >1hr same-day
+// re-entry, `SessionIsland`'s own "N more overdue check-ins will come up over
+// your next few sessions" notice kept describing the queue the replan had
+// just thrown away: a deferred gate the fresh assembly now serves IN THIS
+// SESSION was still announced as coming up in a later one — the exact false
+// sentence v3-D259 removed from the ordinary assembly path. `makeupDeferred`
+// is "how many make-up items THIS run's own queue assembly deferred"; once
+// the queue is re-assembled, that is the new assembly's own count.
+describe("v3-D262 — a replanned queue carries its own fresh make-up deferred count, never the discarded queue's", () => {
+  async function encodeAllFourAyat(): Promise<void> {
+    for (let i = 0; i < 4; i++) {
+      await append(
+        {
+          type: "ayah_produced",
+          ts: T0 + i * 1000,
+          tz: TZ,
+          surah: SURAH,
+          ayah: i + 1,
+          rung: "S3",
+          structured: true,
+        } as DrillEvent,
+        { now: T0 + i * 1000, tz: TZ },
+      );
+    }
+  }
+  const DAY = 86_400_000;
+  const churnedReturn = T0 + 21 * DAY;
+
+  async function passGateElsewhere(ayah: number, at: number): Promise<void> {
+    await append(
+      { type: "gate_result", ts: at, tz: TZ, surah: SURAH, ayah, rung: "S3", correct: true, structured: true } as DrillEvent,
+      { now: at, tz: TZ },
+    );
+  }
+
+  it("a deferred gate the replan now serves is no longer announced as deferred", async () => {
+    const c = corpus();
+    await encodeAllFourAyat();
+    const started = await startSession({ surah: SURAH, now: churnedReturn, tz: TZ }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    // Precondition: the churned return really was capped, and really said so.
+    expect(started.run.queue.filter((q) => q.kind === "makeup").map((q) => q.ayah)).toEqual([1, 2, 3]);
+    expect(started.run.makeupDeferred).toBe(1);
+
+    // The three capped make-ups are passed during the gap (another device,
+    // or this learner before stepping away) — real events, as a sync pull
+    // would leave them.
+    for (const ayah of [1, 2, 3]) await passGateElsewhere(ayah, churnedReturn + 10 * 60_000);
+
+    const gapNow = churnedReturn + ONE_HOUR + 60_000;
+    const decision = classifyReentry(started.run, gapNow);
+    expect(decision?.action).toBe("replan");
+    if (!decision) return;
+    const acked = await acknowledgeReentry(started.run, decision, { now: gapNow, tz: TZ }, c);
+
+    // The previously-deferred ayah 4 is served NOW, in this session…
+    expect(acked.queue.some((q) => q.kind === "makeup" && q.ayah === 4)).toBe(true);
+    // …so nothing is deferred any more, and the notice must not claim otherwise.
+    expect(acked.makeupDeferred).toBe(0);
+
+    // Agreement with an independent assembly at the same moment — the count
+    // is the fresh assembly's own, not a hardcoded reset.
+    const oracle = await assembleFor({ surah: SURAH, now: gapNow }, c);
+    expect(oracle).not.toBeNull();
+    if (!oracle) return;
+    expect(acked.makeupDeferred).toBe(oracle.makeupDeferred);
+    expect(acked.queue.map((q) => q.ayah)).toEqual(oracle.queue.map((q) => q.ayah));
+  });
+
+  it("a replan that ends the session (every gate resolved elsewhere) reports nothing deferred", async () => {
+    const c = corpus();
+    await encodeAllFourAyat();
+    const started = await startSession({ surah: SURAH, now: churnedReturn, tz: TZ, pace: "maintain" }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    expect(started.run.makeupDeferred).toBe(1);
+
+    for (const ayah of [1, 2, 3, 4]) await passGateElsewhere(ayah, churnedReturn + 10 * 60_000);
+
+    const gapNow = churnedReturn + ONE_HOUR + 60_000;
+    const decision = classifyReentry(started.run, gapNow);
+    expect(decision?.action).toBe("replan");
+    if (!decision) return;
+    const acked = await acknowledgeReentry(started.run, decision, { now: gapNow, tz: TZ }, c);
+
+    const oracle = await assembleFor({ surah: SURAH, now: gapNow, pace: "maintain" }, c);
+    expect(oracle).not.toBeNull();
+    if (!oracle) return;
+    expect(oracle.makeupDeferred).toBe(0);
+    expect(acked.makeupDeferred).toBe(0);
+    expect(acked.queue.map((q) => q.ayah)).toEqual(oracle.queue.map((q) => q.ayah));
+  });
+
+  it("an ordinary replan with nothing ever deferred still reports zero (not permanent chrome)", async () => {
+    const c = corpus();
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah: 1, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+    const day2 = T0 + DAY;
+    const started = await startSession({ surah: SURAH, now: day2, tz: TZ }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    const gapNow = day2 + ONE_HOUR + 60_000;
+    const decision = classifyReentry(started.run, gapNow);
+    expect(decision?.action).toBe("replan");
+    if (!decision) return;
+    const acked = await acknowledgeReentry(started.run, decision, { now: gapNow, tz: TZ }, c);
+    expect(acked.makeupDeferred).toBe(0);
+  });
+});
+
 // v3-D108 — FR9, the 2-minute floor session
 // (`packages/engine/src/floor.ts#floorQueue`/`floorMinutes`).
 //
