@@ -93,9 +93,17 @@ export type MetaKey =
 /** The structured value `onboardingChoices` holds. Declared STRUCTURALLY here
  *  rather than imported from `lib/onboarding/choices.ts`, so schema.ts stays a
  *  leaf module — the store must not depend on the features that write to it, or
- *  the dependency runs backwards. `choices.ts` declares the authoritative type
- *  and assigns it into this slot, so a drift between the two is a type error at
- *  the write site rather than a surprise at the read site. */
+ *  the dependency runs backwards. `choices.ts` declares the authoritative
+ *  `OnboardingChoices` type and assigns it into this slot at the write site, so
+ *  `OnboardingChoices` LOSING a field this interface still expects is a type
+ *  error there. That protection is ONE-DIRECTIONAL, corrected here at
+ *  v3-D265 (the same gap v3-D264 caught one interface below, on
+ *  `BillingSnapshotRecord`): `commitOnboarding` assigns a VARIABLE, not an
+ *  object literal, so TypeScript's excess-property check never fires —
+ *  `OnboardingChoices` GAINING a field this interface never mirrors compiles
+ *  silently. The field SET is kept in agreement instead by
+ *  `lib/idb/schema-onboarding-agreement.test.ts`'s `keyof` equality guard,
+ *  checked by `tsc --noEmit`, not by this comment's own say-so. */
 export interface MetaRecordValue {
   glossLang: string;
   surah: number;

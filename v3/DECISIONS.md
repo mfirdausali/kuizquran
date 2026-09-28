@@ -25492,3 +25492,124 @@ window; PAY-1's Stripe fixtures; surah 67's scene beats;
 `selection_determinism_check` still replaying a committed fixture — all
 unchanged. `BillingSnapshotRecord`'s own field-set drift is now CLOSED and
 mechanically guarded — remove it from future sweeps.
+
+## v3-D265 (2026-09-28) — `MetaRecordValue` carried the exact same false "drift is a type error" claim v3-D264 just fixed on its sibling interface, one below, never itself touched
+
+`apps/web/lib/idb/schema.ts`'s own `MetaRecordValue` (the offline IndexedDB
+mirror of the four onboarding answers `lib/onboarding/choices.ts` persists)
+made the identical checkable-but-false safety claim `BillingSnapshotRecord`
+made one interface below, closed the immediately preceding night (v3-D264):
+"`choices.ts` declares the authoritative type and assigns it into this slot,
+so a drift between the two is a type error at the write site rather than a
+surprise at the read site." Only half true, same mechanism:
+`commitOnboarding` (`lib/onboarding/choices.ts:76-85`) assigns a VARIABLE
+typed `OnboardingChoices` (`tx.store.put({ key: CHOICES, value: choices
+})`), never an inline object literal, so TypeScript's excess-property check
+never fires — an object with MORE fields than `MetaRecordValue` declares is
+always structurally assignable to it. That protects only `OnboardingChoices`
+LOSING a field `MetaRecordValue` still expects, never the reverse (GAINING
+one `MetaRecordValue` doesn't mirror). `readChoices()`'s own `return value as
+OnboardingChoices` is a blind, unchecked cast — the same shape that let
+v3-D189's drift go undetected on the sibling interface until v3-D264. Not a
+live bug today (both interfaces genuinely agree, four keys each —
+`glossLang`, `surah`, `pace`, `placement`) — a drift-risk fix, matching
+v3-D261/D263/D264's own shape — but WIREFRAME §17 explicitly names this list
+as one that could grow ("Total data captured... nothing else"), and a future
+member added to `OnboardingChoices` alone would silently vanish from every
+persisted/read-back record with no type-checker complaint, the opposite of
+the docblock's promise. Five real production callers trust `readChoices()`'s
+cast today: `components/library/EnrolledMarker.tsx`,
+`components/plan/PlanIsland.tsx`, `components/test/TestGate.tsx`,
+`components/session/SessionGate.tsx`, `components/home/TodaySession.tsx`.
+
+**Fixed:** the docblock is corrected to state the real, one-directional
+protection and point at a new test as the actual enforcement —
+`MetaRecordValue` itself is unchanged (both interfaces already agree
+field-for-field; there is nothing to backfill, only the false claim to
+correct and a mechanical guard to add so a FUTURE divergence cannot repeat
+v3-D189's own undetected history).
+
+**RED confirmed directly**, mirroring v3-D264's own template exactly (a
+`lib/macro/facts-agreement.test.ts`-style full structural-equality check
+would fail for a reason that is correct BY DESIGN — `MetaRecordValue`'s own
+deliberate `string`/`string`/`{kind:string,...}` widening over
+`GlossLang`/`PaceMode`/`PlacementOutcome`'s closed unions — so the guard
+checks `keyof` equality only, via the same `Equal<A,B>` strict type-identity
+trick): a new `lib/idb/schema-onboarding-agreement.test.ts` was written
+FIRST, then a throwaway `__drift_probe_v3D265?: string` field was added to
+`OnboardingChoices` alone (`choices.ts`, the test file untouched) —
+`TZ=UTC npx tsc --noEmit` (apps/web) failed exactly
+`schema-onboarding-agreement.test.ts (43,3): error TS2344: Type 'false' does
+not satisfy the constraint 'true'.`, the predicted failure on the predicted
+line. The probe field was reverted byte-identically (`git diff --
+lib/onboarding/choices.ts` empty before the docblock fix was written), then
+the docblock corrected; reran: clean, exit 0.
+
+`TZ=UTC make test`: 2929 passing (was 2928, +1 — exactly this run's one new
+test; apps/web 1577, was 1576; no other suite moved: 255 v2 vitest, 47
+v2/api, 402 v3/api, 120 corpus-compiler, 464 engine, 64 fold-runner).
+`check-test-floor.mjs`: OK, 2929 >= floor 1899 (+1030 margin, unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 30 routes,
+unchanged (a docblock-plus-one-new-test-file change, no route or component
+touched). `npm run gates`: all green — locked-css OK, 1 documented hunk, 294
+v1 lines byte-identical; boundaries OK, 326 files, up from 325 — the one new
+test file plus the same pre-existing gitignored `next-env.d.ts` Next.js
+bootstrap-artifact fluctuation this file has recorded roughly two dozen
+times before, confirmed via `git status --porcelain --ignored`; fonts
+degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints across 4
+artifacts — all unchanged, this diff carries no corpus data. `TZ=UTC npx tsc
+--noEmit`, run separately across all four v3 node packages: clean in all
+four. No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache
+diff produced by running the suite was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2` empty
+immediately before committing). No Arabic codepoint (the changed file and
+the new file swept programmatically, in Python, over the Arabic, Arabic
+Supplement, Arabic Extended-A and both Presentation Forms Unicode blocks,
+plus a `\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape and
+`fromCharCode`/`fromCodePoint` sweep: CLEAN — every changed line is a
+TypeScript identifier, a wire-adjacent field name, or a fixed English
+docblock sentence, never corpus text). No oracle/golden-log/fixture/snapshot
+regenerated — this diff touches one docblock and one new test file, nothing
+under `fixtures/`, `docs/qa-samples/` or any compiled corpus artifact.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled corpus
+anywhere. `make setup` ran clean end to end from scratch via the documented
+git-mirror composer fallback (dist downloads hit the transient proxy timeout
+for most of `v3/api`'s dependency tree, recovered automatically, no retry
+flag needed). `HEAD`, local `main` and `origin/main` did NOT already agree:
+local `main` was a stale branch ref 17 commits behind (`f1c92ce`, v3-D251),
+while `HEAD` and `origin/main` both already sat at `2f5aae8` (v3-D264) — the
+recurring "stale local main" trap this file has recorded roughly fifty
+times since v3-D77 — caught before any exploration via `git fetch origin
+main`, then `git checkout main && git merge --ff-only origin/main`, a clean
+fast-forward, no work lost or at risk. Found by a dedicated fresh-sweep
+agent (Explore) handed the full exclusion list carried through v3-D264 and
+directed at re-checking `schema.ts`'s own sibling interfaces and fields not
+yet covered by a `keyof`-agreement guard, after v3-D264 closed the identical
+shape one interface below — this `MetaRecordValue` gap was the one genuine,
+previously-unreported instance, independently re-verified directly against
+`schema.ts`, `choices.ts` and the corrected `BillingSnapshotRecord`
+docblock's own wording (reasoning through the same excess-property-check
+mechanics rather than merely trusting the agent's report) before writing any
+test.
+
+**NOT addressed:** every item on v3-D264's own "NOT addressed" list,
+unchanged — `QueueItem.score`'s own missing external reader (v3-D263,
+deliberately left); `acknowledgeReentry`'s own "makeup" branch still only
+logs and points the learner at `/home` (v3-D256's verdict unchanged);
+`DrillPicker.tsx`'s own unused `now` prop; the unused
+`atoms`/`corpus`/`sessions` IndexedDB object stores (v3-D232);
+`session_start`'s own latency metric (v0.8); the streak/away-day day-space
+mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151, v3-D219); `App\Flags\FlagService::enabled()`
+(v3-D197); multi-surah enrollment; the operational mailer/7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `corpusHash`'s zero fold-side consumer (v3-D206);
+`selection_determinism_check` still replaying a committed fixture — all
+unchanged. `MetaRecordValue`'s own field-set drift is now CLOSED and
+mechanically guarded — remove it from future sweeps.
