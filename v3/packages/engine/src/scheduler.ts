@@ -43,7 +43,16 @@ const COST_REVIEW = 0.4;
 const COST_GATE = 0.4;
 const COST_MAKEUP = 0.4;
 const DEFAULT_BUDGET = 8;
-const DEFAULT_CONN_WEIGHT = 1.5;
+/** Connection atoms are weighted up in step 3's ranking — a joint becomes due
+ *  EARLIER than an ayah at the same forgetting risk (exported so a display
+ *  surface that wants the SAME number, e.g. `apps/web/lib/progress
+ *  /retention.ts`'s "slipping" claim, imports it rather than re-declaring
+ *  it, v3-D263). */
+export const DEFAULT_CONN_WEIGHT = 1.5;
+/** Step 3's own due-review cutoff — only actually-due-ish items (some decay
+ *  has happened) are queued as reviews. Exported for the same reason as
+ *  `DEFAULT_CONN_WEIGHT` above (v3-D263). */
+export const REVIEW_RISK_THRESHOLD = 0.15;
 
 /**
  * v3-D256 — FR5 "makeup" / edge case #70 ("Churned learner returns after
@@ -214,7 +223,7 @@ export function assembleQueue(input: AssembleInput): QueueItem[] {
       return { a, score: risk * weight };
     })
     // Only actually-due-ish items (some decay has happened).
-    .filter((r) => r.score > 0.15)
+    .filter((r) => r.score > REVIEW_RISK_THRESHOLD)
     .sort((x, y) => y.score - x.score);
   for (const r of reviews) {
     queue.push({

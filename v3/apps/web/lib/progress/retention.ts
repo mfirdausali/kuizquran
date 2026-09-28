@@ -63,24 +63,22 @@ import type { DayConfig } from "@engine/daybound.ts";
 import { currentBand, currentStrength, forgettingRisk, halfLifeDays } from "@engine/strength.ts";
 import { decaySince } from "@engine/decay.ts";
 import { expand, siteToAtomKey } from "@engine/site.ts";
+import { DEFAULT_CONN_WEIGHT, REVIEW_RISK_THRESHOLD } from "@engine/scheduler.ts";
 import { stageLabelOf } from "@/components/macro/graphNodes.ts";
 
 /**
- * The scheduler's own due-review threshold (`scheduler.ts` step 3:
- * `.filter((r) => r.score > 0.15)`).
- *
- * Duplicated as a named constant because the engine does not export it, and
- * named HERE — rather than written inline at the comparison — so the one place
- * it would have to change is visible. The test asserts an atom the scheduler
- * would queue is an atom this module reports as slipping, so a drift between
- * the two fails rather than merely diverges.
+ * The scheduler's own due-review threshold (`scheduler.ts` step 3), imported
+ * rather than re-declared (v3-D263 — this used to be an independent `0.15`
+ * literal here, the exact "two implementations of one decision, no shared
+ * source" shape this build has repeatedly closed elsewhere). Re-exported so
+ * this module's own callers/tests need no import-path change.
  */
-export const REVIEW_RISK_THRESHOLD = 0.15;
+export { REVIEW_RISK_THRESHOLD };
 
-/** Connection atoms are weighted up by the scheduler (`DEFAULT_CONN_WEIGHT`),
- *  so a joint becomes due EARLIER than an ayah at the same risk. Mirrored here
- *  for the same reason as the threshold above. */
-export const CONNECTION_WEIGHT = 1.5;
+/** Connection atoms are weighted up by the scheduler, so a joint becomes due
+ *  EARLIER than an ayah at the same risk — the engine's own
+ *  `DEFAULT_CONN_WEIGHT`, imported rather than re-declared (v3-D263). */
+export const CONNECTION_WEIGHT = DEFAULT_CONN_WEIGHT;
 
 /** One band of the distribution. A WORD and a NUMBER, always both — §15's
  *  "never colour alone" made structural: there is no code path that produces a

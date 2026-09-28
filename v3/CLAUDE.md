@@ -53,10 +53,141 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2925 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 2927 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 402 v3/api + 120 corpus-compiler
-             # + 464 engine + 64 fold-runner + 1573 apps/web. (v3-D262, 2026-09-28)
+             # + 464 engine + 64 fold-runner + 1575 apps/web. (v3-D263, 2026-09-28)
+             # NOTE (v3-D263, 2026-09-28): `apps/web/lib/progress/retention.ts`'s
+             # own `REVIEW_RISK_THRESHOLD`/`CONNECTION_WEIGHT` were each an
+             # INDEPENDENT re-declaration of a value `packages/engine/src
+             # /scheduler.ts` also decides — the module's own docblock admitted
+             # it plainly: "Duplicated... because the engine does not export
+             # it." `scheduler.ts` itself carried the review-due cutoff only as
+             # an inline `0.15` literal at its step-3 filter (never a named
+             # constant at all, on either side) and its connection-weight
+             # multiplier as a module-private `DEFAULT_CONN_WEIGHT`. The exact
+             # "two implementations of one decision, no shared source" shape
+             # this build has repeatedly closed elsewhere (`gradeClassToWire`
+             # v3-D83, `lastActiveDayMs` v3-D113, `digestsMatch` v3-D159,
+             # `gateStateOf` v3-D211/D212, `canonicalOrder` v3-D261) — here on
+             # the two numbers §10's own retention panel promises are "the SAME
+             # NUMBERS the scheduler uses". Both copies already agreed
+             # byte-for-byte (0.15/1.5 on both sides) — a drift-risk fix, not a
+             # live divergence.
+             #
+             # Fixed: `scheduler.ts` now exports `DEFAULT_CONN_WEIGHT` (was
+             # module-private) and a new named `REVIEW_RISK_THRESHOLD` (was an
+             # inline literal), with the step-3 filter reading the constant
+             # instead of the literal; `retention.ts` imports both and
+             # re-exports them under its own existing names
+             # (`REVIEW_RISK_THRESHOLD`, `CONNECTION_WEIGHT`) rather than
+             # re-declaring them — every existing importer (its own test file)
+             # needed no change.
+             #
+             # RED confirmed directly, committed separately (9c0236e): a new
+             # `lib/progress/retention-config-agreement.test.ts` (2 cases,
+             # reference-equality via `toBe`, not mere value equality — a
+             # value-only check would pass even on two independently
+             # hand-typed `0.15` literals) failed both against the unmodified
+             # tree — `scheduler.ts` exported neither constant, so the engine
+             # import resolved to `undefined` and `expect(0.15).toBe(undefined)`
+             # / `expect(1.5).toBe(undefined)` both failed exactly as
+             # predicted. Implemented, reran: 2/2 green;
+             # `test/progress-retention.test.tsx`'s 33 pre-existing cases and
+             # `packages/engine/test/scheduler.test.ts`'s 14 pre-existing cases
+             # both unaffected (34 and 14, both unchanged).
+             #
+             # `TZ=UTC make test`: 2927 passing (was 2925, +2 — exactly this
+             # run's two new tests; apps/web 1575, was 1573; no other suite
+             # moved: 255 v2 vitest, 47 v2/api, 402 v3/api, 120
+             # corpus-compiler, 464 engine, 64 fold-runner — engine's own
+             # count is unchanged since no new engine test was needed, only an
+             # export widened). `check-test-floor.mjs`: OK, 2927 >= floor 1899
+             # (+1028 margin, unmoved, same discipline as every prior entry).
+             # `TZ=UTC make build`: exit 0, 30 routes, unchanged (an
+             # engine-plus-one-lib-file change, no route or component
+             # touched). `npm run gates`: all green — locked-css OK, 1
+             # documented hunk, 294 v1 lines byte-identical; boundaries OK,
+             # 324 files; fonts degraded-but-non-blocking, pre-existing, 2/6
+             # UI fonts present; corpus-morphology OK, 362 words;
+             # corpus-glyphs OK, 206 codepoints across 4 artifacts — all
+             # unchanged, this diff carries no corpus data. `TZ=UTC npx tsc
+             # --noEmit`, run separately across all four v3 node packages:
+             # clean in all four. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff produced by running
+             # the suite was reverted before committing, same discipline as
+             # every prior entry — `git status --porcelain -- v1 v2` empty
+             # immediately before committing). No Arabic codepoint (the full
+             # diff swept programmatically, in Python, over the Arabic,
+             # Arabic Supplement, Arabic Extended-A and both Presentation
+             # Forms Unicode blocks, plus a `\u06xx`/`\u07xx`/`\u08xx`/
+             # `\uFBxx`/`\uFExx` escape and `fromCharCode`/`fromCodePoint`
+             # sweep: CLEAN — every changed line is a TypeScript identifier, a
+             # wire-adjacent constant name, or a fixed English docblock
+             # sentence, never corpus text). No oracle/golden-log/fixture/
+             # snapshot regenerated — `golden-log-parity.test.ts` (unchanged)
+             # still passes unmodified, since it never depended on which of
+             # the two (already byte-identical) constants fed the filter.
+             #
+             # Session start: fresh container, no `node_modules`/`vendor`/
+             # compiled corpus anywhere. `make setup` ran clean end to end
+             # from scratch, no retries needed. `HEAD`/local `main`/
+             # `origin/main` all already agreed at `879995a` (v3-D262) — no
+             # stale-local-`main` trap this run, confirmed directly via `git
+             # fetch origin main` before any exploration. Found by a
+             # dedicated fresh-sweep agent (Explore) handed the full
+             # exclusion list carried through v3-D262 (streak/away-day,
+             # rhymeClassOf, EntitlementMachine::merge, TrialAttribution,
+             # regionFromCountry, PaywallGate, FlagService::enabled,
+             # multi-surah enrollment, the mailer/7-night window, PAY-1,
+             # surah 67, severity.ts, placement.ts, MacroFacts.litany
+             # .rhymeLabel, corpusHash's zero fold-side consumer,
+             # selection_determinism_check's committed-fixture replay — all
+             # re-confirmed still open for the same stated reasons, not
+             # re-litigated) and directed at the newest workbench panels,
+             # `worker/fold-runner/src` post-v3-D261, `corpus-compiler/src`,
+             # Eloquent relations and Console Commands, and `run.ts`/
+             # `scheduler.ts`/`SessionIsland.tsx`'s newest fields; its own
+             # best lead (`QueueItem.score` reaching no external reader) was
+             # investigated directly by this run and NOT fixed — see
+             # DECISIONS.md v3-D263 for why, and this instance
+             # (`retention.ts`'s duplicated constants) is what this run
+             # found instead, independently re-verified directly against
+             # both real source files before writing any test.
+             #
+             # NOT addressed: `QueueItem.score` (`scheduler.ts:225`) is
+             # computed for every review item and never read outside
+             # `scheduler.ts` itself — genuinely the same "computed, zero
+             # external reader" bug class, but with no clean, low-judgment
+             # fix available: scheduling runs entirely client-side per
+             # learner (no server-side replay capability exists to give an
+             # admin/workbench surface anything to read), and inventing new
+             # learner-facing "urgency score" text has no WIREFRAME mandate
+             # and sits awkwardly next to this product's own stated
+             # anti-manufactured-urgency stance (the landing page's own copy
+             # on "fake urgency" tactics) — a genuine product-design call,
+             # not a wiring gap, left for a future run or a human decision
+             # rather than invented here. Every item on v3-D262's own "NOT
+             # addressed" list, unchanged — `acknowledgeReentry`'s own
+             # "makeup" branch still only logs and points the learner at
+             # `/home` (v3-D256's verdict unchanged); `DrillPicker.tsx`'s own
+             # unused `now` prop; the unused `atoms`/`corpus`/`sessions`
+             # IndexedDB object stores (v3-D232); `session_start`'s own
+             # latency metric (v0.8); the streak/away-day day-space mismatch
+             # (v3-D209); `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()`; `App\Billing\TrialAttribution`
+             # (v3-D148); `lib/pricing.ts#regionFromCountry()` (v3-D163);
+             # `PaywallGate` as a whole class (v3-D88, v3-D151, v3-D219);
+             # `App\Flags\FlagService::enabled()` (v3-D197); multi-surah
+             # enrollment; the operational mailer/7-night launch window;
+             # PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel` (v3-D188); `corpusHash`'s zero
+             # fold-side consumer (v3-D206); `selection_determinism_check`
+             # still replaying a committed fixture — all unchanged. The
+             # scheduler-constant duplication is now CLOSED — remove it from
+             # future sweeps.
              # NOTE (v3-D262, 2026-09-28): `replanQueue` (FR5 replan) replaced
              # the queue but kept the OLD `makeupDeferred`, so the "N more
              # overdue check-ins will come up..." notice could name a gate
