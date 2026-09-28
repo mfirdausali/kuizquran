@@ -25346,3 +25346,149 @@ window; PAY-1's Stripe fixtures; surah 67's scene beats;
 (v3-D188); `corpusHash`'s zero fold-side consumer (v3-D206);
 `selection_determinism_check` still replaying a committed fixture — all
 unchanged.
+
+
+## v3-D264 (2026-09-28) — `BillingSnapshotRecord` never mirrored `EntitlementSnapshot`'s renewal/grace-retry fields, so its own "drift is a type error" claim was false
+
+`apps/web/lib/idb/schema.ts#BillingSnapshotRecord` — the offline IndexedDB
+mirror of the entitlement snapshot `lib/entitlement/sync.ts` persists — was
+missing `currentPeriodEnd`/`graceUntil`, both added to the authoritative
+`EntitlementSnapshot` (`lib/entitlement/types.ts`) at v3-D189 (2026-08-29) to
+carry Stripe's renewal/grace-retry dates to `/settings`'s PlanPanel. The two
+interfaces were never reconciled after that change — six weeks and dozens of
+decisions ago.
+
+Sharper than the usual "shipped, never declared" shape: `schema.ts`'s own
+docblock on `BillingSnapshotRecord` made an explicit, checkable safety claim
+— "the authoritative `EntitlementSnapshot` type ... is assigned into this
+slot at the write site, so a drift between the two is a type error there
+rather than a surprise at the read site." That claim is only half true.
+`lib/entitlement/sync.ts#writeEntitlementSnapshot` does `db.put("meta", {
+key, value: snapshot })`, where `snapshot` is a VARIABLE typed
+`EntitlementSnapshot`, never an inline object literal — so TypeScript's
+excess-property check never fires. An object with MORE fields than
+`BillingSnapshotRecord` declares is always structurally assignable to it via
+a variable. That protects exactly one direction (`EntitlementSnapshot`
+LOSING a field `BillingSnapshotRecord` still expects — a real type error at
+the write site) and not the other (`EntitlementSnapshot` GAINING a field
+`BillingSnapshotRecord` never mirrors — silently accepted). v3-D189 is
+exactly that second case, and it went undetected through every subsequent
+`tsc --noEmit` run since, including this run's own clean baseline.
+
+Not a live data-loss bug today: the one real writer always passes a full
+`EntitlementSnapshot`, so both fields are in fact written to IndexedDB and
+`readEntitlementSnapshot()`'s blind `as EntitlementSnapshot` cast recovers
+them — the same "drift-risk fix, not a live divergence" shape as v3-D261/
+v3-D263. The risk is exactly what the docblock claimed didn't exist: a
+future refactor that builds a `billingSnapshot` row from an object literal
+explicitly typed as `BillingSnapshotRecord` (a natural thing to do, since
+that is the type this file declares for the purpose) would compile cleanly
+while dropping both renewal-date fields, and `PlanPanel`'s offline/stale-cache
+path (the one a learner sees whenever they open `/settings` without
+network) would then silently serve a snapshot with no renewal or grace date
+at all — no error, no type-checker complaint, the opposite of what the
+comment promises.
+
+**Fixed:** `BillingSnapshotRecord` gains `currentPeriodEnd: number | null`
+and `graceUntil: number | null`, matching `EntitlementSnapshot` field for
+field (types kept deliberately widened — `state`/`tier`/`region` stay plain
+`string`, not the closed unions — since this file is a LEAF module with no
+dependency on `lib/entitlement/*`, unchanged reasoning from when the
+interface was first declared). The docblock is corrected to state the real,
+one-directional protection instead of the overclaim, and points at the new
+test as the actual enforcement rather than the comment's own say-so.
+
+**RED confirmed directly:** a new `lib/idb/schema-billing-agreement.test.ts`
+was written FIRST, before `schema.ts` was touched. It cannot use the
+`lib/macro/facts-agreement.test.ts` (v3-D137) template verbatim — a full
+structural-equality check would fail for a reason that is correct BY DESIGN
+(the deliberate `string`-vs-closed-union widening, and `EntitlementSnapshot`'s
+`readonly` modifiers `BillingSnapshotRecord` doesn't carry), which would be a
+false positive, not a real drift. Instead it checks `keyof` equality only —
+the FIELD SET, not the field types — via the same `Equal<A,B>` strict
+type-identity trick, so it fails to compile exactly when a field is added to
+one side and not the other, regardless of type-widening. Run against the
+unmodified `schema.ts`: `TZ=UTC npx tsc --noEmit` failed exactly
+`lib/idb/schema-billing-agreement.test.ts(44,3): error TS2344: Type 'false'
+does not satisfy the constraint 'true'.` — the predicted failure, on the
+predicted line, naming the two-field gap. Implemented, reran: clean, exit 0.
+The `it()` block itself always passes trivially (per the v3-D137 precedent,
+`tsc --noEmit` — `make test`'s `typecheck-v3` step, which runs before vitest
+— is the real gate; the assertion exists only so the guard is a counted,
+running test rather than an unreferenced type).
+
+**Verified:** `TZ=UTC make test`: **2928 passing** (was 2927, +1 — exactly
+this run's one new test; apps/web 1576, was 1575; no other suite moved: 255
+v2 vitest, 47 v2/api, 402 v3/api, 120 corpus-compiler, 464 engine, 64
+fold-runner). `check-test-floor.mjs`: OK, 2928 >= floor 1899 (+1029 margin,
+unmoved, same discipline as every prior entry). `TZ=UTC make build`: exit 0,
+30 routes, unchanged (a `lib/idb/`-only type change plus one new test file,
+no route or component touched). `npm run gates`: all green — locked-css OK,
+1 documented hunk, 294 v1 lines byte-identical; boundaries OK, 325 files (up
+from 323 — the one new test file plus the same pre-existing gitignored
+`next-env.d.ts` Next.js bootstrap-artifact fluctuation this file has
+recorded roughly two dozen times before, confirmed via `git status
+--porcelain --ignored`); fonts degraded-but-non-blocking, pre-existing, 2/6
+UI fonts present; corpus-morphology OK, 362 words; corpus-glyphs OK, 206
+codepoints across 4 artifacts — all unchanged, this diff carries no corpus
+data. `TZ=UTC npx tsc --noEmit` (apps/web, and separately across the other
+three v3 node packages, unaffected by an apps/web-only change): clean in
+all four. `npx vitest run lib/idb/schema-billing-agreement.test.ts
+lib/entitlement/sync.test.ts lib/settings/planSummary.test.ts
+test/settings-plan-panel.test.tsx`: 34/34 green — no regression on any real
+consumer of `EntitlementSnapshot`/`BillingSnapshotRecord`. No `v1/**`/
+`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff produced by
+running the suite was reverted twice before committing, same discipline as
+every prior entry — `git status --porcelain -- v1 v2` empty immediately
+before committing). No Arabic codepoint (the changed file and the new file
+swept programmatically, in Python, over the Arabic, Arabic Supplement,
+Arabic Extended-A and both Presentation Forms Unicode blocks, plus a
+`\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape and
+`fromCharCode`/`fromCodePoint` sweep: CLEAN — every changed line is a
+TypeScript identifier, a wire-adjacent field name, or a fixed English
+docblock sentence, never corpus text). No oracle/golden-log/fixture/snapshot
+regenerated — this diff touches one type declaration and one new test file,
+nothing under `fixtures/`, `docs/qa-samples/` or any compiled corpus
+artifact.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled corpus
+anywhere. `make setup` ran clean end to end from scratch, no retries needed.
+`HEAD`, local `main` and `origin/main` did NOT already agree: local `main`
+was a stale branch ref 16 commits behind (`f1c92ce`, v3-D251-era), while
+`HEAD` and `origin/main` both already sat at `93601d3` (v3-D263) — the
+recurring "stale local main" trap this file has recorded roughly fifty
+times since v3-D77 — caught before any exploration via `git fetch origin
+main`, then `git checkout main && git merge --ff-only origin/main`, a clean
+fast-forward, no work lost or at risk. Found by a dedicated fresh-sweep
+agent (Explore) handed the full exclusion list carried through v3-D263 and
+directed at the newest routes/components (verify-email, reset-password,
+practice, settings/roles), `Admin\*Controller` field-by-field re-audits,
+`packages/engine/src`'s newest exports, Eloquent relations, and a
+docblock/comment grep for stale "unwired"/"not yet built" claims — every one
+of those came back genuinely clean or already-known; this
+`BillingSnapshotRecord` gap, on a KV-store schema type rather than a runtime
+constant or function, was the one genuine, previously-unreported instance,
+independently re-verified directly against `schema.ts`, `types.ts` and
+`sync.ts`'s real source (confirming the one-directional-only protection by
+reasoning through TypeScript's own excess-property-check rules, not merely
+trusting the agent's report) before writing any test.
+
+**NOT addressed:** every item on v3-D263's own "NOT addressed" list,
+unchanged — `QueueItem.score`'s own missing external reader (v3-D263,
+deliberately left, not a wiring gap); `acknowledgeReentry`'s own "makeup"
+branch still only logs and points the learner at `/home` (v3-D256's verdict
+unchanged); `DrillPicker.tsx`'s own unused `now` prop; the unused
+`atoms`/`corpus`/`sessions` IndexedDB object stores (v3-D232);
+`session_start`'s own latency metric (v0.8); the streak/away-day day-space
+mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151, v3-D219); `App\Flags\FlagService::enabled()`
+(v3-D197); multi-surah enrollment; the operational mailer/7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `corpusHash`'s zero fold-side consumer (v3-D206);
+`selection_determinism_check` still replaying a committed fixture — all
+unchanged. `BillingSnapshotRecord`'s own field-set drift is now CLOSED and
+mechanically guarded — remove it from future sweeps.

@@ -107,16 +107,29 @@ export interface MetaRecordValue {
  *  for the same reason `MetaRecordValue` is: schema.ts stays a leaf module
  *  with no dependency on `lib/entitlement/*`, and the authoritative
  *  `EntitlementSnapshot` type (in `lib/entitlement/types.ts`) is assigned into
- *  this slot at the write site, so a drift between the two is a type error
- *  there rather than a surprise at the read site. Named `BillingSnapshotRecord`
- *  rather than the feature-specific word, same reasoning as the `MetaKey`
- *  member above. */
+ *  this slot at the write site, so `EntitlementSnapshot` LOSING a field this
+ *  interface still expects is a type error there. That protection is
+ *  ONE-DIRECTIONAL, corrected here at v3-D264: `writeEntitlementSnapshot`
+ *  assigns a VARIABLE, not an object literal, so TypeScript's excess-property
+ *  check never fires — `EntitlementSnapshot` GAINING a field this interface
+ *  never mirrors compiles silently (exactly what happened at v3-D189's
+ *  `currentPeriodEnd`/`graceUntil`, undetected until now). The field SET is
+ *  kept in agreement instead by `lib/idb/schema-billing-agreement.test.ts`'s
+ *  `keyof` equality guard, checked by `tsc --noEmit`, not by this comment's
+ *  own say-so. Named `BillingSnapshotRecord` rather than the feature-specific
+ *  word, same reasoning as the `MetaKey` member above. */
 export interface BillingSnapshotRecord {
   state: string;
   tier: string;
   region: string;
   trialSurah: number | null;
   trialStartedAt: number | null;
+  /** Mirrors `EntitlementSnapshot.currentPeriodEnd` (v3-D189) — added there
+   *  after this structural mirror already existed, and never carried over
+   *  here until v3-D264 caught the drift. */
+  currentPeriodEnd: number | null;
+  /** Mirrors `EntitlementSnapshot.graceUntil` (v3-D189) — same gap. */
+  graceUntil: number | null;
   cachedAt: number;
 }
 
