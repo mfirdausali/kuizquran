@@ -53,10 +53,123 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2930 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 2931 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 402 v3/api + 120 corpus-compiler
-             # + 464 engine + 65 fold-runner + 1577 apps/web. (v3-D267, 2026-09-29)
+             # + 464 engine + 65 fold-runner + 1578 apps/web. (v3-D268, 2026-09-29)
+             # NOTE (v3-D268, 2026-09-29): `components/onboarding
+             # /OnboardingFlow.tsx`'s own Screen 5 docblock ("choose your
+             # surah") carried a near-verbatim duplicate of the exact stale
+             # claim v3-D236 already fixed once in `lib/onboarding/surahs.ts`'s
+             # own header: "this build has 12, 103 and 112 and NOT 67 ...
+             # When 67 compiles, it appears here by data" — true the day it
+             # was written, false since surah 67 (Al-Mulk) was ratified and
+             # compiled (2026-08-11, v3-D59) and joined `OFFERED_SURAHS`,
+             # which this component already renders from correctly. Not a
+             # live bug — the picker is genuinely data-driven and already
+             # offers Al-Mulk — documentation-only staleness, unfixed for
+             # roughly seven weeks because v3-D236's own fix and its new
+             # regression test both scoped to `surahs.ts` alone and never
+             # touched this file's independent copy of the same claim.
+             # Found on the sixth consecutive empty generic sweep (v3-D262..
+             # D267) by widening to a genuinely fresh corner per those
+             # entries' own advice: Playwright e2e specs re-read line by
+             # line, the gate scripts (`check-boundaries.mjs`,
+             # `check-corpus-morphology.mjs`, `check-corpus-glyphs.mjs`) for
+             # internal bugs, `api/database/factories`/`seeders` against
+             # current schema, a field-by-field re-audit of
+             # `components/onboarding/**`/`components/library/**`, the last
+             # ~15 commits' diffs, `.github/workflows/*.yml` version pins,
+             # and a repo-wide stale-docblock grep — six of those seven came
+             # back clean; this file was the one genuine, previously-
+             # undiscovered instance, independently re-verified against
+             # `OnboardingFlow.tsx`'s and `surahs.ts`'s real source and `git
+             # log --follow`'s own history before writing any test. Fixed:
+             # the docblock now states the RULE (offered IFF compiled,
+             # decided entirely by `OFFERED_SURAHS`) and the history (v3-D59)
+             # rather than restating membership, mirroring v3-D236's own
+             # template exactly, and describes but never quotes the old
+             # stale phrase so it cannot trip its own new guard. RED
+             # confirmed directly: a new test in `test/onboarding.test.tsx`'s
+             # "screen 5" describe block reads the component's own real
+             # source text and asserts, for every `OFFERED_SURAHS` member,
+             # that the docblock never contains `NOT <surah-number>` —
+             # pinning the AGREEMENT, not a wording, the same technique
+             # `surahs.ts`'s own sibling guards already use. Run against the
+             # unmodified component: failed exactly `expected '// SCREEN 5 —
+             # CHOOSE YOUR SURAH (pre-...' not to match /\bNOT\s+67\b/i`,
+             # quoting the real stale text; implemented, reran:
+             # `test/onboarding.test.tsx` 34/34 green (was 33, +1). `TZ=UTC
+             # make test`: 2931 passing (was 2930, +1 — exactly this run's
+             # one new test; apps/web 1578, was 1577; no other suite moved:
+             # 255 v2 vitest, 47 v2/api, 402 v3/api, 120 corpus-compiler, 464
+             # engine, 65 fold-runner). `check-test-floor.mjs`: OK, 2931 >=
+             # floor 1899 (+1032 margin, unmoved). `TZ=UTC make build`: exit
+             # 0, 30 routes, unchanged (a docblock-plus-one-test-file
+             # change, no new route or production file). `npm run gates`:
+             # all green — locked-css OK, 1 documented hunk, 294 v1 lines
+             # byte-identical; boundaries OK, 326 files, unchanged count —
+             # no new production file; fonts degraded-but-non-blocking,
+             # pre-existing, 2/6 UI fonts present; corpus-morphology OK, 362
+             # words; corpus-glyphs OK, 206 codepoints across 4 artifacts —
+             # all unchanged, this diff carries no corpus data. `TZ=UTC npx
+             # tsc --noEmit`, run separately across all four v3 node
+             # packages: clean in all four. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff produced by
+             # running the suite was reverted before committing, same
+             # discipline as every prior entry). No Arabic codepoint (both
+             # changed files swept programmatically, in Python, over the
+             # Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms Unicode blocks, plus a `\u06xx`/`\u07xx`/
+             # `\u08xx`/`\uFBxx`/`\uFExx` escape and `fromCharCode`/
+             # `fromCodePoint` sweep: CLEAN — every new line is a
+             # TypeScript identifier, a docblock/comment sentence, or a
+             # fixed English test-assertion string, never corpus text). No
+             # oracle/golden-log/fixture/snapshot regenerated. Session
+             # start: fresh container, `make setup` ran clean end to end
+             # from scratch (both `v2/api`'s and `v3/api`'s `composer
+             # install` hit the documented transient proxy timeout cloning
+             # several packages via dist and recovered automatically via
+             # the git-mirror fallback, no retry flag needed — slow, ~20
+             # minutes for `v2/api` alone, but no code or config change).
+             # `HEAD` was detached at `ca14e16` (v3-D267), exactly
+             # `origin/main`'s own tip, but local `main` sat 20 commits
+             # behind at `f1c92ce` (v3-D251) — the recurring stale-local-
+             # `main` trap this file has recorded roughly fifty times since
+             # v3-D77 — caught before any implementation work via `git
+             # fetch origin main` + `git checkout main && git merge
+             # --ff-only origin/main`, a clean fast-forward, no work lost or
+             # at risk. NOT addressed: every item on v3-D267's own "NOT
+             # addressed" list, unchanged — `acknowledgeReentry`'s own
+             # "makeup" branch still only logs and points the learner at
+             # `/home` (v3-D256's verdict unchanged); `DrillPicker.tsx`'s
+             # own unused `now` prop; the unused `atoms`/`corpus`/`sessions`
+             # IndexedDB object stores (v3-D232); `session_start`'s own
+             # latency metric (v0.8); the streak/away-day day-space
+             # mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()`; `App\Billing\TrialAttribution`
+             # (v3-D148); `lib/pricing.ts#regionFromCountry()` (v3-D163);
+             # `PaywallGate` as a whole class (v3-D88, v3-D151, v3-D219,
+             # explicitly a stop-and-report product-design question, not a
+             # wiring gap — re-confirmed, not re-attempted);
+             # `App\Flags\FlagService::enabled()` (v3-D197); multi-surah
+             # enrollment; the operational mailer/7-night launch window;
+             # PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel` (v3-D188); `corpusHash`'s zero
+             # fold-side consumer (v3-D206); `selection_determinism_check`
+             # still replaying a committed fixture — all unchanged.
+             # `OnboardingFlow.tsx`'s own stale Screen 5 docblock is now
+             # CLOSED and permanently guarded — remove it from future
+             # "docblock says X, reality is Y" sweeps. The fresh-sweep areas
+             # checked this run and found clean (e2e specs, gate scripts, DB
+             # factories/seeders, `.github/workflows`, the last ~15 commits'
+             # diffs) are recorded in DECISIONS.md v3-D268 so a future run
+             # does not have to re-walk them; the ~180 stale-docblock grep
+             # hits outside onboarding/library were not exhaustively
+             # triaged and are the most promising next vein if one is
+             # needed.
              # NOTE (v3-D267, 2026-09-29): sixth documented empty sweep for
              # this build's recurring "mechanism built and unit-tested, zero
              # production caller / stale docblock / drifted duplicate" bug

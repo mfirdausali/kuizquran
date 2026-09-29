@@ -471,6 +471,35 @@ describe("screen 5 — the surahs actually offered", () => {
     const offered = OFFERED_SURAHS.some((s) => s.surah === WIREFRAME_DEFAULT_SURAH);
     expect(claimsUnoffered).toBe(!offered);
   });
+
+  // -------------------------------------------------------------------------
+  // OnboardingFlow.tsx CARRIES ITS OWN COPY OF THE SAME CLAIM (v3-D268)
+  // -------------------------------------------------------------------------
+  // v3-D236 fixed this exact staleness in `lib/onboarding/surahs.ts`'s own
+  // header, but Screen 5's own docblock in `OnboardingFlow.tsx` restates the
+  // identical membership snapshot independently ("this build has 12, 103 and
+  // 112 and NOT 67 ... When 67 compiles, it appears here by data") and was
+  // never touched by that fix or any sweep since — 67 compiled and joined
+  // `OFFERED_SURAHS` on 2026-08-11 (v3-D59), so the claim has been false for
+  // roughly seven weeks with nothing pinning it. Same discipline as the
+  // `surahs.ts` guards above: pin the AGREEMENT, not a wording, so the prose
+  // stays correct by construction for a surah genuinely absent.
+  const ONBOARDING_FLOW_SRC = resolve(HERE, "../components/onboarding/OnboardingFlow.tsx");
+
+  it("Screen 5's own docblock never tells a reader an offered surah is NOT in this build", () => {
+    const src = readFileSync(ONBOARDING_FLOW_SRC, "utf8");
+    const declIndex = src.indexOf("function ScreenSurah");
+    expect(declIndex).toBeGreaterThan(-1);
+    const docblockStart = src.lastIndexOf("// SCREEN 5", declIndex);
+    expect(docblockStart).toBeGreaterThan(-1);
+    const docblock = src.slice(docblockStart, declIndex);
+    for (const s of OFFERED_SURAHS) {
+      expect(
+        docblock,
+        `surah ${s.surah} is in OFFERED_SURAHS, so this docblock must not also say it is NOT in this build`,
+      ).not.toMatch(new RegExp(String.raw`\bNOT\s+${s.surah}\b`, "i"));
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

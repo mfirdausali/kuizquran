@@ -370,12 +370,14 @@ function ScreenPlacement({
 // ---------------------------------------------------------------------------
 // SCREEN 5 — CHOOSE YOUR SURAH (pre-selected). "The learner's one real choice."
 // ---------------------------------------------------------------------------
-// §17's default is Al-Mulk (30 ayat, ~5 weeks). VERIFIED AGAINST THE COMPILED
-// CORPUS: this build has 12, 103 and 112 and NOT 67 — so offering Al-Mulk here
-// would enroll a learner in a surah the app cannot serve one ayah of. The
-// offered list is derived from what is actually compiled (see
-// lib/onboarding/surahs.ts), and the default is the shortest complete one.
-// When 67 compiles, it appears here by data, not by an edit to this JSX.
+// §17's default is Al-Mulk. Whether Al-Mulk (or any surah) may be offered here
+// is decided ENTIRELY by lib/onboarding/surahs.ts#OFFERED_SURAHS — a surah is
+// offered IFF it is compiled (ratified 2026-08-11, v3-D59, for Al-Mulk/67).
+// DO NOT restate current membership in this comment: that is exactly what went
+// stale here once before (see v3-D236's identical fix on surahs.ts's own
+// header) and was never propagated to this file's own copy of the claim,
+// which excluded Al-Mulk by name for roughly seven weeks after it had
+// already joined the offered list (v3-D268).
 function ScreenSurah({
   value,
   onChoose,
