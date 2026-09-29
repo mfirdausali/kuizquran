@@ -25761,3 +25761,117 @@ zero fold-side consumer (v3-D206); `selection_determinism_check` still
 replaying a committed fixture — all unchanged. `ENGINE_VERSION`'s own
 field-set drift is now CLOSED and mechanically guarded — remove it from
 future sweeps.
+
+## v3-D267 (2026-09-29): sixth empty sweep
+
+Sixth documented empty sweep for this build's recurring "mechanism built
+and unit-tested, zero production caller / stale docblock / drifted
+duplicate" bug class (v3-D82 onward — after v3-D196, v3-D197, v3-D246,
+v3-D248, v3-D254's own five prior empty sweeps). This run's own fresh,
+independent sweep across three separate veins — none of them reused from a
+prior night's own candidate list — came back genuinely clean.
+
+**Vein 1 — `apps/web/lib/**` same-file-only false positives, checked
+individually.** A programmatic zero-external-caller scan (Python regex
+over every `export function`/`export const`/`export class`, cross-checked
+against every OTHER file in the tree) surfaced nine candidates:
+`DEFAULT_LOCALE`/`LOCALES`/`isLocale` (`lib/i18n/dictionaries.ts`),
+`SESSION_HREF` (`lib/home/queue.ts`),
+`STATUS_PRACTISE_ONLY`/`STATUS_UNAVAILABLE` (`lib/library/rows.ts`),
+`clientCorpusUrl` (`lib/demo/loadClientCorpus.ts`), `halfMonthLabel`
+(`lib/plan/forecast.ts`), `isDischarged` (`lib/landing/claims.ts`). Each
+was checked directly with `grep -n` against its own defining file: every
+one of the nine has a real caller a few lines below its own declaration,
+in the SAME file — the exact same-file-only false-positive shape this
+scan method has produced repeatedly before (named explicitly at v3-D248,
+which independently found this identical candidate set — `STATUS_
+UNAVAILABLE`, `halfMonthLabel`, `SESSION_HREF`, `clientCorpusUrl`,
+`LOCALES`/`DEFAULT_LOCALE` by name — and confirmed the same verdict).
+`isDischarged` was the one name not previously recorded by name in this
+file's own run-log; checked directly and confirmed the same shape
+(`lib/landing/claims.ts:237` calls it two lines inside the same file).
+
+**Vein 2 — a WIDE-SEARCH zero-caller sweep of `packages/engine/src`,
+`packages/corpus-compiler/src` and `worker/fold-runner/src`, corrected for
+the cross-package false positive this exact bug class has repeatedly
+produced before.** A first pass, scoped to callers WITHIN each package's
+own `src/` directory only, surfaced 62 + 19 + 9 = 90 "zero-caller"
+candidates — almost entirely the same-package-internal-helper false
+positive this file's own history already discounts. Re-run with the
+caller search widened to the WHOLE repository (every `.ts`/`.tsx`/`.php`
+file, `apps/web` included, since engine/compiler exports are consumed
+across the monorepo boundary — the exact cross-package blind spot v3-D227
+and v3-D244 each independently caught this same scan shape missing)
+narrowed the candidate list to 3 + 6 + 0 = 9. Every one of those 9 was
+checked directly with `grep -n`: `COST_PER_DUE_REVIEW`/`COST_PER_NEW_WORD`
+(`capacity.ts`), `estLearnMinutes` (`scheduler.ts`), `DATA_DIR`/`PKG_ROOT`
+(`io.ts`), `LITANY_MIN_REFRAIN`/`LITANY_MIN_RHYME_SHARE` (`macro.ts`),
+`displayKey` (`foilKernels.ts`), `expandRange` (`sceneBeats.ts`) — every
+one has a real, same-file caller a few lines below its own declaration.
+`worker/fold-runner/src` came back with zero candidates at all once the
+search was widened, confirming this file's own repeated prior verdict
+that this package is genuinely fully wired.
+
+**Vein 3 — a PHP public-method zero-caller sweep of `api/app`, corrected
+for the array-route-registration false positive.** A first pass (methods
+matched by a literal `->name(`/`::name(` call) surfaced 13 candidates.
+Checked directly against `api/routes/api.php`: eight of the thirteen
+(`acknowledge`, `deletionStatus`, `exportCsv`, `override`, `resend`,
+`restoreDeletion`, `review`, `whoami`) are real, live routes registered
+via Laravel's `[Controller::class, 'method']` array syntax, which a
+literal-call-text grep cannot see — the same false-positive shape named
+explicitly at v3-D244. Of the remaining five: `rebuildUsers`
+(`AtomCacheRebuilder.php`) and `firstChosenSurahStart`/`sourceOf`
+(`TrialAttribution.php`) are same-file callers, confirmed directly;
+`actor()` (`AdminAudit.php`) is the already-named, already-excluded
+"raw FK pseudonymized instead of the Eloquent relation" pattern (recorded
+by name at v3-D227's own "NOT addressed" list —
+`AdminAudit::actor()`); `routeNotificationForMail()` (`User.php`) is a
+Laravel `Notifiable` trait hook, invoked by the framework's own mail
+pipeline rather than application code — the same framework-hook false
+positive already named at v3-D248.
+
+No genuine new instance of this bug class was found in any of the three
+veins. `TZ=UTC make test`: 2930 passing, matching v3-D266's own recorded
+count exactly across every one of the seven suites (255 v2 vitest, 47
+v2/api, 402 v3/api, 120 corpus-compiler, 464 engine, 65 fold-runner, 1577
+apps/web) — no drift. `check-test-floor.mjs`: OK, 2930 >= floor 1899
+(+1031 margin, unmoved). `TZ=UTC make build`: exit 0, 30 routes,
+unchanged. No file touched (`git status --porcelain` empty throughout
+this run's own investigation, apart from this documentation commit). No
+`v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the suite twice was reverted both times before
+committing, same discipline as every prior entry). No Arabic codepoint
+(nothing written to any production or test file this run).
+
+**Session start:** fresh container, `make setup` ran clean end to end
+from scratch, no retries needed (dependencies were already installed
+earlier in this same session before this sweep began). `HEAD`, local
+`main` and `origin/main` all already agreed at `3fe50e6` (v3-D266) — no
+stale-local-`main` trap this run, confirmed directly via `git fetch
+origin main` before any exploration, and reconfirmed after the sweep,
+immediately before writing this entry.
+
+**NOT addressed:** every item on v3-D266's own "NOT addressed" list,
+unchanged — `QueueItem.score`'s own missing external reader (v3-D263,
+deliberately left); `acknowledgeReentry`'s own "makeup" branch still only
+logs and points the learner at `/home` (v3-D256's verdict unchanged);
+`DrillPicker.tsx`'s own unused `now` prop; the unused
+`atoms`/`corpus`/`sessions` IndexedDB object stores (v3-D232);
+`session_start`'s own latency metric (v0.8); the streak/away-day day-space
+mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151, v3-D219); `App\Flags\FlagService::enabled()`
+(v3-D197); multi-surah enrollment; the operational mailer/7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127, an
+unrelated shape — no TS/PHP mirroring involved); `packages/engine/src
+/placement.ts`; `MacroFacts.litany.rhymeLabel` (v3-D188); `corpusHash`'s
+zero fold-side consumer (v3-D206); `selection_determinism_check` still
+replaying a committed fixture — all unchanged. A future run should not
+spend a full night on another generic sweep of this exact shape without
+either a genuinely fresh corner (the veins named above are, as far as this
+run and its five predecessors could find, genuinely exhausted) or a
+willingness to take on one of the larger, already-named architectural
+items listed just above.

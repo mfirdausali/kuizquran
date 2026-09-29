@@ -56,7 +56,61 @@ make dev     # SPA :5273, API :8000
 make test    # 2930 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 402 v3/api + 120 corpus-compiler
-             # + 464 engine + 65 fold-runner + 1577 apps/web. (v3-D266, 2026-09-29)
+             # + 464 engine + 65 fold-runner + 1577 apps/web. (v3-D267, 2026-09-29)
+             # NOTE (v3-D267, 2026-09-29): sixth documented empty sweep for
+             # this build's recurring "mechanism built and unit-tested, zero
+             # production caller / stale docblock / drifted duplicate" bug
+             # class (v3-D82 onward — after v3-D196, v3-D197, v3-D246,
+             # v3-D248, v3-D254's own five prior empty sweeps). This run's
+             # own fresh, independent sweep across three separate veins came
+             # back genuinely clean; the full write-up, including every
+             # candidate checked and why each resolved to an already-known
+             # false-positive shape (same-file-only usage; a Laravel
+             # `[Controller::class, 'method']` array-route registration a
+             # literal-call grep cannot see; a cross-package caller a
+             # single-package-scoped search cannot see), is in DECISIONS.md
+             # v3-D267 rather than repeated here. `TZ=UTC make test`: 2930
+             # passing, matching v3-D266's own recorded count exactly, no
+             # drift in any of the seven suites. `check-test-floor.mjs`: OK,
+             # 2930 >= floor 1899 (+1031 margin, unmoved). `TZ=UTC make
+             # build`: exit 0, 30 routes, unchanged. No file touched
+             # (`git status --porcelain` empty throughout this run's own
+             # investigation, apart from this documentation commit). No
+             # `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff produced by running the suite twice was
+             # reverted both times before committing). No Arabic codepoint
+             # (nothing written to any production or test file this run).
+             # Session start: fresh container, `make setup` ran clean end to
+             # end from scratch, no retries needed. `HEAD`, local `main` and
+             # `origin/main` all already agreed at `3fe50e6` (v3-D266) — no
+             # stale-local-`main` trap this run, confirmed directly via `git
+             # fetch origin main` before any exploration. NOT addressed:
+             # every item on v3-D266's own "NOT addressed" list, unchanged —
+             # `QueueItem.score`'s own missing external reader (v3-D263,
+             # deliberately left); `acknowledgeReentry`'s own "makeup"
+             # branch still only logs and points the learner at `/home`
+             # (v3-D256's verdict unchanged); `DrillPicker.tsx`'s own unused
+             # `now` prop; the unused `atoms`/`corpus`/`sessions` IndexedDB
+             # object stores (v3-D232); `session_start`'s own latency metric
+             # (v0.8); the streak/away-day day-space mismatch (v3-D209);
+             # `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution` (v3-D148);
+             # `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate`
+             # as a whole class (v3-D88, v3-D151, v3-D219);
+             # `App\Flags\FlagService::enabled()` (v3-D197); multi-surah
+             # enrollment; the operational mailer/7-night launch window;
+             # PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel` (v3-D188); `corpusHash`'s zero
+             # fold-side consumer (v3-D206); `selection_determinism_check`
+             # still replaying a committed fixture — all unchanged. A future
+             # run should not spend a full night on another generic sweep of
+             # this exact shape without either a genuinely fresh corner (the
+             # three veins this run swept are, as far as this run and its
+             # five predecessors could find, genuinely exhausted) or a
+             # willingness to take on one of the larger, already-named
+             # architectural items above.
              # NOTE (v3-D266, 2026-09-29): `worker/fold-runner/src/engineVersion.ts`'s
              # own `ENGINE_VERSION` ("the pinned engine version this build
              # folds under", its own header) and `api/config/nightly.php`'s
