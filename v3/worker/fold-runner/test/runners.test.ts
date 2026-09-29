@@ -17,12 +17,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AtomState } from "../../../packages/engine/src/atom.ts";
 import type { DrillEvent } from "../../../packages/engine/src/types.ts";
+import { ENGINE_VERSION } from "../src/engineVersion.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PKG = join(HERE, "..");
 const V3 = join(PKG, "..", "..");
 const VITE_NODE = join(PKG, "node_modules", ".bin", "vite-node");
-const VERSION = "v3-engine-0.1.0";
+const VERSION = ENGINE_VERSION;
 
 function run(entry: string, args: string[] = [], stdin?: string) {
   const r = spawnSync(VITE_NODE, [join(PKG, "bin", entry), "--", ...args], {

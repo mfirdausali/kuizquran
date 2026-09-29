@@ -53,10 +53,168 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2929 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 2930 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 402 v3/api + 120 corpus-compiler
-             # + 464 engine + 64 fold-runner + 1577 apps/web. (v3-D265, 2026-09-28)
+             # + 464 engine + 65 fold-runner + 1577 apps/web. (v3-D266, 2026-09-29)
+             # NOTE (v3-D266, 2026-09-29): `worker/fold-runner/src/engineVersion.ts`'s
+             # own `ENGINE_VERSION` ("the pinned engine version this build
+             # folds under", its own header) and `api/config/nightly.php`'s
+             # `engine_version` config default were each an INDEPENDENT
+             # re-declaration of the identical literal string, in two
+             # languages, with no shared source — the exact "two
+             # implementations of one decision, no shared source" shape this
+             # build has repeatedly closed elsewhere (`canonicalOrder`
+             # v3-D261, `scheduler.ts`'s `REVIEW_RISK_THRESHOLD`/
+             # `CONNECTION_WEIGHT` v3-D263, the `MetaRecordValue`/
+             # `BillingSnapshotRecord` docblocks v3-D264/D265), here on the
+             # one pair with no runtime import path available at all — PHP
+             # cannot `import` a `.ts` module, so this pair can only ever be
+             # guarded by a mirror-agreement test, the same template
+             # `pricing-config-agreement.test.ts`/`cache-config-agreement
+             # .test.ts` (v3-D150)/`trial-config-agreement.test.ts` (v3-D151)
+             # already established for other TS-vs-PHP-config pairs. Two
+             # `worker/fold-runner/test/*.test.ts` files also each
+             # hand-declared the identical literal a THIRD and FOURTH time
+             # (`const VERSION = "v3-engine-0.1.0"`) instead of importing the
+             # real constant. Sharper than the usual drift-risk fix:
+             # `severity.ts`'s whole P1-vs-WARN taxonomy ("Divergence = P1;
+             # version skew = WARN", `foldCheck.ts`'s own header) depends
+             # entirely on comparing a cached `atom_cache` row's recorded
+             # `engine_version` against "the engine version THIS run folds
+             # under" — and every real (non-`--fixture`) invocation stamps
+             # that "current" value from PHP's config
+             # (`AtomCacheRebuilder.php:161`, `DeterminismCheckCommand
+             # .php:277`), never from the TS constant `foldCheck.ts`'s own
+             # classification logic is written against — confirmed directly:
+             # `bin/fold-determinism-check.ts`/`bin/rebuild-atom-cache.ts`
+             # both do `parsed.engineVersion ?? ENGINE_VERSION`, and PHP
+             # always sends a value, so `ENGINE_VERSION` is dead code on
+             # every real invocation today. A future engine bump landed in
+             # one file and not the other would not merely mis-tag a row —
+             # it would misclassify every learner sampled that night, either
+             # turning a genuine invariant-#2 divergence into a silently
+             # swallowed WARN, or a stale-cache skew into a false P1, exactly
+             # the false-alarm/deafness risk BUILD-PLAN's own top risk #6
+             # names by name. Not a live divergence today — both copies
+             # already agree byte-for-byte (`"v3-engine-0.1.0"` on both
+             # sides, confirmed via `grep -rn "v3-engine-0.1.0"` across both
+             # trees) — a drift-risk fix, not a live bug.
+             #
+             # Fixed: no runtime coupling invented (none is possible across
+             # the language boundary) — a new
+             # `worker/fold-runner/test/engineVersion-config-agreement.test.ts`
+             # reads `api/config/nightly.php`'s raw text (the same
+             # regex-over-PHP-source technique `PricingConstantsTest`/
+             # `pricing-config-agreement.test.ts` already use) and asserts
+             # the parsed `env('NIGHTLY_ENGINE_VERSION', ...)` default
+             # matches `ENGINE_VERSION` exactly, so any FUTURE divergence
+             # between the two fails a test immediately rather than silently
+             # misclassifying a real nightly run. `foldCheck.test.ts`'s and
+             # `runners.test.ts`'s own hand-declared `const VERSION =
+             # "v3-engine-0.1.0"` literals are now `const VERSION =
+             # ENGINE_VERSION` — importing the real constant instead of a
+             # fourth/fifth independent copy, so a future deliberate engine
+             # version bump updates these fixtures' own notion of "current"
+             # automatically rather than needing a synchronized hand-edit
+             # across four files.
+             #
+             # RED confirmed directly: the new test was written FIRST and
+             # passed vacuously against the unmodified tree (both sides
+             # already agreed) — so RED was confirmed by MUTATION instead,
+             # matching this build's own established precedent for a
+             # drift-risk (not live-bug) fix: `api/config/nightly.php`'s
+             # `engine_version` default was temporarily changed to
+             # `'v3-engine-0.2.0-MUTATED'`, and the new test failed exactly
+             # `expected 'v3-engine-0.1.0' to be 'v3-engine-0.2.0-MUTATED'`
+             # — the predicted failure, naming both real values. Reverted
+             # byte-identically (`git diff --stat api/config/nightly.php`
+             # empty before committing), reran: clean, exit 0.
+             #
+             # `TZ=UTC make test`: 2930 passing (was 2929, +1 — exactly this
+             # run's one new test; fold-runner 65, was 64; no other suite
+             # moved: 255 v2 vitest, 47 v2/api, 402 v3/api, 120
+             # corpus-compiler, 464 engine, 1577 apps/web). `check-test-
+             # floor.mjs`: OK, 2930 >= floor 1899 (+1031 margin, unmoved,
+             # same discipline as every prior entry). `TZ=UTC make build`:
+             # exit 0, 30 routes, unchanged (a fold-runner-test-only change,
+             # no apps/web file touched, no corpus recompile — all three
+             # staged corpusHashes byte-identical to v3-D265's own). `npm
+             # run gates`: all green — locked-css OK, 1 documented hunk, 294
+             # v1 lines byte-identical; boundaries OK, 326 files, unchanged
+             # count — no apps/web file in this diff at all; fonts
+             # degraded-but-non-blocking, pre-existing, 2/6 UI fonts
+             # present; corpus-morphology OK, 362 words; corpus-glyphs OK,
+             # 206 codepoints across 4 artifacts — all unchanged, this diff
+             # touches no corpus data. `TZ=UTC npx tsc --noEmit`, run
+             # separately across all four v3 node packages: clean in all
+             # four. No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff produced by running the suite was reverted
+             # twice before committing, same discipline as every prior entry
+             # — `git status --porcelain -- v1 v2` empty immediately before
+             # committing). No Arabic codepoint (all three changed/new files
+             # swept programmatically, in Python, over the Arabic, Arabic
+             # Supplement, Arabic Extended-A and both Presentation Forms
+             # Unicode blocks, plus a `\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/
+             # `\uFExx` escape and `fromCharCode`/`fromCodePoint` sweep:
+             # CLEAN — every changed/new line is a TypeScript identifier, an
+             # import path, or a fixed English docblock sentence, never
+             # corpus text). No oracle/golden-log/fixture/snapshot
+             # regenerated — this diff touches two existing test files and
+             # one new test file, nothing under `fixtures/`,
+             # `docs/qa-samples/` or any compiled corpus artifact.
+             #
+             # Session start: fresh container, no `node_modules`/`vendor`/
+             # compiled corpus anywhere. `make setup` ran clean end to end
+             # from scratch, no retries needed. `HEAD`, local `main` and
+             # `origin/main` did NOT already agree: local `main` was a stale
+             # branch ref 18 commits behind (`f1c92ce`, v3-D251), while
+             # `HEAD` and `origin/main` both already sat at `e193549`
+             # (v3-D265) — the recurring "stale local main" trap this file
+             # has recorded roughly fifty times since v3-D77 — caught before
+             # any exploration via `git fetch origin main`, then `git
+             # checkout main && git merge --ff-only origin/main`, a clean
+             # fast-forward, no work lost or at risk. Found by a dedicated
+             # fresh-sweep agent (Explore) handed the full exclusion list
+             # carried through v3-D265 and directed at `worker/fold-runner`
+             # vs `corpus-compiler` output cross-boundary fields, the
+             # newest-touched components/routes, optional TS fields with a
+             # producer but no consumer, recent Laravel migrations, and a
+             # "single source of truth" comment-vs-second-implementation
+             # sweep — most candidates were already-closed or already-known
+             # non-gaps (recorded in the agent's own report so a future
+             # sweep does not re-walk them); this was the one genuine,
+             # previously-unreported instance, independently re-verified by
+             # this run directly against `engineVersion.ts`, `nightly.php`,
+             # `DeterminismCheckCommand.php`, `AtomCacheRebuilder.php`,
+             # `foldCheck.test.ts` and `runners.test.ts`'s real source
+             # (including re-deriving why `ENGINE_VERSION` is dead code on
+             # every real invocation, not merely trusting the agent's own
+             # claim) before writing any test.
+             #
+             # NOT addressed: every item on v3-D265's own "NOT addressed"
+             # list, unchanged — `QueueItem.score`'s own missing external
+             # reader (v3-D263, deliberately left); `acknowledgeReentry`'s
+             # own "makeup" branch still only logs and points the learner at
+             # `/home` (v3-D256's verdict unchanged); `DrillPicker.tsx`'s
+             # own unused `now` prop; the unused `atoms`/`corpus`/`sessions`
+             # IndexedDB object stores (v3-D232); `session_start`'s own
+             # latency metric (v0.8); the streak/away-day day-space
+             # mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()`; `App\Billing\TrialAttribution`
+             # (v3-D148); `lib/pricing.ts#regionFromCountry()` (v3-D163);
+             # `PaywallGate` as a whole class (v3-D88, v3-D151, v3-D219);
+             # `App\Flags\FlagService::enabled()` (v3-D197); multi-surah
+             # enrollment; the operational mailer/7-night launch window;
+             # PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127, unrelated shape — no TS/PHP mirroring involved);
+             # `packages/engine/src/placement.ts`; `MacroFacts.litany
+             # .rhymeLabel` (v3-D188); `corpusHash`'s zero fold-side
+             # consumer (v3-D206); `selection_determinism_check` still
+             # replaying a committed fixture — all unchanged.
+             # `ENGINE_VERSION`'s own field-set drift is now CLOSED and
+             # mechanically guarded — remove it from future sweeps.
              # NOTE (v3-D265, 2026-09-28): `apps/web/lib/idb/schema.ts`'s own
              # `MetaRecordValue` — the offline IndexedDB mirror of the four
              # onboarding answers `lib/onboarding/choices.ts` persists — carried

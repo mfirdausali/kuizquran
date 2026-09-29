@@ -33,8 +33,9 @@ vi.mock("../src/determinism.ts", async (importOriginal) => {
 });
 
 import { foldDeterminismCheckRun, type SampledUser } from "../src/foldCheck.ts";
+import { ENGINE_VERSION } from "../src/engineVersion.ts";
 
-const VERSION = "v3-engine-0.1.0";
+const VERSION = ENGINE_VERSION;
 
 /** Structural coordinates only — no Arabic anywhere (CLAUDE.md rule 1). */
 const EVENTS: DrillEvent[] = [
