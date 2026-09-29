@@ -25994,3 +25994,116 @@ future run does not have to re-walk them from scratch; the ~180
 stale-docblock grep hits outside `components/onboarding/**`/
 `components/library/**` were not exhaustively triaged and are the most
 promising next vein if a future run needs one.
+
+## v3-D269 (2026-09-29, nightly) — `DrillEvent.deviceId`'s own docblock misattributed who stamps it, and to a layer that no longer "doesn't exist"
+
+Seventh sweep for this build's recurring "stale docblock claims something
+unbuilt/absent that is actually built/present" class, after v3-D262..D268's
+own six empty passes on the well-mined veins closed that avenue. Per
+v3-D268's own closing note, widened to its named next vein: the ~180
+stale-claim grep hits outside `components/onboarding/**`/`components/library/**`
+were triaged fresh (by a dedicated Explore sweep) rather than re-walking the
+exhausted territory.
+
+**Found:** `packages/engine/src/types.ts`'s own `DrillEvent.deviceId` field
+docblock read, verbatim: "Stamped by the sync layer (M6), which does not
+exist yet — optional until then." Both halves are false. M6 ("Sync,
+Onboarding, Dashboard") has been real and heavily built on since v3-D89
+(`sync.ts`/`merge.ts`/`outbox.ts`/`writeLock.ts` — dozens of later decisions
+build on it). More precisely, the claim's own MECHANISM was never even
+right: `deviceId` is not the sync layer's to stamp at all — it is stamped
+at commit time by `apps/web/lib/idb/append.ts#append()` (`deviceId:
+event.deviceId ?? deviceId`), the same plain local IndexedDB write every
+tap goes through, online or offline, with no dependency on `lib/sync/*`
+whatsoever. The sibling `id` field's docblock in `events.ts` ("If omitted,
+the app shell stamps one on append") already describes this same
+append-time mechanism accurately, and the very next field, `deviceSeq`
+(also stamped by the identical line in `append.ts`), already carries an
+accurate docblock — `deviceId` was the one outlier that never got updated
+when the append-time stamping was built, predating M6's actual sync cycle
+entirely. `grep -rn "sync layer (M6)"` confirmed this exact phrase appears
+nowhere else in the tree — no prior decision ever caught it.
+
+Not a live bug: `deviceId` is genuinely populated on every committed event
+today (proven directly against `append.ts`'s real source, not assumed).
+Documentation-only staleness, the same "docblock says X, reality is Y"
+shape v3-D90/D110/D123/D236/D244/D251/D258/D268 have each already closed
+elsewhere in this tree.
+
+**Fixed:** corrected the docblock to name the real stamping site
+(`append.ts#append()`) and the real reason the field stays optional on the
+type (a caller building an event before that stamp — e.g. a test fixture
+— need not supply one), removing the false "sync layer"/"M6 doesn't exist
+yet" claim entirely.
+
+**RED confirmed directly:** two new cases in a dedicated
+`packages/engine/test/wire-freeze.test.ts` describe block (the existing 4
+cases in the file untouched) — the first reads `types.ts`'s own real
+source text and asserts it never matches `/sync layer[\s\S]{0,60}does not
+exist yet/i`; the second, the biconditional half (mirroring
+v3-D236/D244's own AGREEMENT-not-wording technique), reads
+`apps/web/lib/idb/append.ts`'s own real source and asserts it genuinely
+contains the `deviceId: event.deviceId ?? deviceId` stamp — so the guard
+cannot be satisfied by deleting the docblock's claim alone if the real
+mechanism were ever removed. Run against the unmodified `types.ts`
+(`git stash` of that one file, both new tests kept): failed exactly the
+first case, quoting the real stale text; the second passed (the real
+stamping site was never in question, only the docblock's claim about it).
+Restored the fix, reran: `wire-freeze.test.ts` 6/6 green (was 4, +2).
+
+`TZ=UTC make test`: **2933 passing** (was 2931, +2 — exactly this run's two
+new tests; engine 466, was 464; no other suite moved: 255 v2 vitest, 47
+v2/api, 402 v3/api, 120 corpus-compiler, 65 fold-runner, 1578 apps/web).
+`check-test-floor.mjs`: OK, 2933 >= floor 1899 (+1034 margin, unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 30 routes,
+unchanged (an engine-type-docblock-plus-one-test-file change, no route or
+production file touched). `npm run gates`: all green — locked-css OK, 1
+documented hunk, 294 v1 lines byte-identical; boundaries OK, 326 files,
+unchanged count — no new production file; fonts degraded-but-non-blocking,
+pre-existing, 2/6 UI fonts present; corpus-morphology OK, 362 words;
+corpus-glyphs OK, 206 codepoints across 4 artifacts — all unchanged, this
+diff carries no corpus data. `npx tsc --noEmit`, run separately across all
+four v3 node packages: clean in all four. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite was
+reverted before committing, same discipline as every prior entry — `git
+status --porcelain -- v1 v2` empty immediately before committing). No
+Arabic codepoint (both changed files swept programmatically, in Python,
+over the Arabic, Arabic Supplement, Arabic Extended-A and both Presentation
+Forms Unicode blocks, plus a `\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx`
+escape and `fromCharCode`/`fromCodePoint` mention sweep: CLEAN — every new
+line is a TypeScript identifier, a docblock sentence, or a regex literal,
+never corpus text). No oracle/golden-log/fixture/snapshot regenerated.
+
+Session start: fresh container, `make setup` ran clean end to end from
+scratch, no retries needed. `HEAD` was detached at `bb42854` (v3-D268),
+exactly `origin/main`'s own tip, but local `main` sat 21 commits behind at
+`f1c92ce` (v3-D251) — the recurring stale-local-`main` trap this file has
+recorded roughly fifty times since v3-D77 — caught before any exploration
+via `git fetch origin main` + `git checkout main && git merge --ff-only
+origin/main`, a clean fast-forward, no work lost or at risk.
+
+**NOT addressed:** every item on v3-D268's own "NOT addressed" list,
+unchanged — `acknowledgeReentry`'s own "makeup" branch still only logs and
+points the learner at `/home` (v3-D256's verdict unchanged); `DrillPicker
+.tsx`'s own unused `now` prop; the unused `atoms`/`corpus`/`sessions`
+IndexedDB object stores (v3-D232); `session_start`'s own latency metric
+(v0.8); the streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()`
+(v3-D136); `EntitlementMachine::merge()`; `App\Billing\TrialAttribution`
+(v3-D148); `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as
+a whole class (v3-D88, v3-D151, v3-D219); `App\Flags\FlagService::enabled()`
+(v3-D197); multi-surah enrollment; the operational mailer/7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `corpusHash`'s zero fold-side consumer (v3-D206);
+`selection_determinism_check` still replaying a committed fixture;
+`QueueItem.score`'s own missing external reader (v3-D263) — all unchanged.
+`DrillEvent.deviceId`'s own docblock is now CLOSED and permanently
+guarded — remove it from future "docblock says X, reality is Y" sweeps.
+The fresh-sweep areas this run's dispatched agent checked and found clean
+or already-known (drill-preview seam docblocks, `lib/account/api.ts`,
+`ProgressTable.tsx`, `overrides.ts`, `check-boundaries.mjs`'s PaywallGate
+reference, `FlagRegistry.php`, a zero-external-caller sweep of
+`lib/legal`/`lib/i18n`/`lib/workbench`, and a field-by-field skim of the
+rest of `DrillEvent`) are recorded here so a future run does not have to
+re-walk them.

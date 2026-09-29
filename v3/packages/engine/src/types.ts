@@ -410,8 +410,12 @@ export interface DrillEvent {
    *  reordering; a bug report replays from the log alone. */
   visitOrdinal?: number;
   /** Stable per-device identifier (v3-D09's canonical order:
-   *  `(ts, deviceId, deviceSeq, uuid)`). Stamped by the sync layer (M6),
-   *  which does not exist yet — optional until then. */
+   *  `(ts, deviceId, deviceSeq, uuid)`). Stamped at commit time by
+   *  `apps/web/lib/idb/append.ts#append()` — the same local IndexedDB write
+   *  every tap goes through, online or offline — not by the sync layer,
+   *  which merely relays an already-stamped value. Optional here only so a
+   *  caller building an event before that stamp (e.g. a test fixture) need
+   *  not supply one. */
   deviceId?: string;
   /** Per-device monotonic sequence, assigned at emit (v3-D09) — NOT the
    *  same field as the legacy `seq` above, which is arrival-order and the

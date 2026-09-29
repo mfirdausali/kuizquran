@@ -119,3 +119,28 @@ describe("hard problem 1 (WIREFRAME.md §22): the fold never dereferences the ne
     }
   });
 });
+
+// v3-D269: DrillEvent.deviceId's own docblock still said "Stamped by the
+// sync layer (M6), which does not exist yet — optional until then" — stale
+// on both counts. M6 (sync) has been real since v3-D89, and deviceId was
+// never the sync layer's to stamp in the first place: it is stamped at
+// commit time by apps/web/lib/idb/append.ts#append(), the same local
+// IndexedDB write every tap goes through, online or offline — the sync
+// layer only ever relays an already-stamped value. Pinning the AGREEMENT
+// (the real stamping site, not a wording), mirroring v3-D236/v3-D244's own
+// template: assert the stale claim is gone AND that the real mechanism is
+// genuinely there.
+describe("DrillEvent.deviceId's own docblock does not misattribute who stamps it", () => {
+  it("never claims the sync layer stamps it or that M6 doesn't exist yet", () => {
+    const content = readFileSync(resolve(SRC_DIR, "types.ts"), "utf8");
+    expect(content).not.toMatch(/sync layer[\s\S]{0,60}does not exist yet/i);
+  });
+
+  it("the REAL stamping site — append.ts's own commit path — genuinely stamps deviceId", () => {
+    const appendSrc = readFileSync(
+      resolve(HERE, "..", "..", "..", "apps", "web", "lib", "idb", "append.ts"),
+      "utf8",
+    );
+    expect(appendSrc).toMatch(/deviceId:\s*event\.deviceId\s*\?\?\s*deviceId/);
+  });
+});
