@@ -2361,6 +2361,116 @@ describe("v3-D262 — a replanned queue carries its own fresh make-up deferred c
   });
 });
 
+// v3-D273 — DEFECTS.md#B17. A "makeup" queue item (`scheduler.ts`'s own step
+// 1: an overdue cold gate pulled into the queue, capped, v3-D256/D259/D260)
+// IS the identical mastery-gate check as an ordinary "gate" item — only its
+// timing differs (it is already overdue, not merely due today). But every
+// place `run.ts` decided "is the item I'm drilling a gate" checked `kind ===
+// "gate"` literally, never `"makeup"`: `machineFor`'s `full = kind ===
+// "gate"` sized a makeup item as an ordinary partial REVIEW, never the
+// one-shot whole-ayah cold check; `answerAfterTap`'s `isGateItem` the same;
+// `settleAnswer`'s `isColdGate` the same. So completing a REAL makeup item
+// through the real session loop committed an ordinary `ayah_produced`
+// (S2/S3), never a `gate_result` — and `gate.ts#applyGateResult()`, the ONLY
+// place `gatePassed` is ever set `true`, was never called. The gate stayed
+// due (and overdue) FOREVER, regardless of how many times a learner
+// correctly completed the makeup item that was supposed to be it — the exact
+// "cold gate can never actually be PASSED" shape DEFECTS.md#B11 already
+// closed once (v3-D101), reborn on the one queue-item kind B11's own fix
+// never touched. v3-D256..D262's own tests never caught this because every
+// one of them that needed a makeup gate "resolved" injected a raw
+// `gate_result` event directly (`passGateElsewhere`) rather than driving the
+// real tap loop — this block is the first to actually play one through.
+describe("v3-D273 — a 'makeup' queue item is a gate too: completing one must actually resolve it", () => {
+  const DAY = 86_400_000;
+
+  it("completing a churned learner's makeup item cleanly commits gate_result and passes the gate", async () => {
+    const c = corpus();
+    const gatedAyah = 1;
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah: gatedAyah, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+    const churnedReturn = T0 + 21 * DAY;
+    const started = await startSession({ surah: SURAH, now: churnedReturn, tz: TZ }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    // Precondition: this really is the "makeup" path, not an ordinary
+    // next-day "gate" — the whole point of this block.
+    expect(started.run.queue[0]?.kind).toBe("makeup");
+
+    // NOT this file's own shared `playThrough` — its taps are stamped at a
+    // fixed `T0`-anchored `now` (v3-D133's own documented quirk), which
+    // would land every committed event BEFORE `churnedReturn` and defeat a
+    // `ts`-based filter here; a local, correctly-ordered loop is used
+    // instead, the same precedent v3-D133 itself set.
+    let run = started.run;
+    let taps = 0;
+    let cur = currentItem(run, c);
+    while (cur && taps < 500) {
+      run = await answerCurrent(run, c, correctIndexFor(run, c), { now: churnedReturn + taps * 1000, tz: TZ });
+      taps++;
+      cur = currentItem(run, c);
+    }
+    expect(taps).toBeGreaterThan(0);
+    expect(run.done).toBe(true);
+
+    const events = await getAllEvents();
+    const sessionEvents = events.filter((e) => e.ts >= churnedReturn);
+    // THE BUG, prior to the fix: this was `ayah_produced`, never `gate_result`.
+    expect(sessionEvents.filter((e) => e.type === "gate_result").length).toBe(1);
+    expect(sessionEvents.some((e) => e.type === "ayah_produced")).toBe(false);
+    expect(sessionEvents.find((e) => e.type === "gate_result")?.correct).toBe(true);
+
+    const atoms = rebuild(events);
+    const atom = atoms.get(atomKey(SURAH, "ayah", gatedAyah));
+    // THE BUG, prior to the fix: this read `false` — the gate stayed due
+    // forever no matter how many times the makeup item was completed.
+    expect(atom?.gatePassed).toBe(true);
+  });
+
+  it("a slip during a makeup item still fails the gate, exactly like an ordinary due gate (v3-D107's own rule)", async () => {
+    const c = corpus();
+    const gatedAyah = 1;
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah: gatedAyah, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+    const churnedReturn = T0 + 21 * DAY;
+    const started = await startSession({ surah: SURAH, now: churnedReturn, tz: TZ }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    expect(started.run.queue[0]?.kind).toBe("makeup");
+
+    let run = started.run;
+    const wrong0 = correctIndexFor(run, c) === 0 ? 1 : 0;
+    run = await answerCurrent(run, c, wrong0, { now: churnedReturn + 100, tz: TZ });
+    expect(run.lastTap?.correct).toBe(false);
+
+    let taps = 1;
+    let cur = currentItem(run, c);
+    while (cur && taps < 50) {
+      run = await answerCurrent(run, c, correctIndexFor(run, c), {
+        now: churnedReturn + 200 + taps * 100,
+        tz: TZ,
+      });
+      taps++;
+      cur = currentItem(run, c);
+    }
+    expect(run.done).toBe(true);
+
+    const events = await getAllEvents();
+    const gateResults = events.filter((e) => e.type === "gate_result" && e.ts >= churnedReturn);
+    expect(gateResults.length).toBe(1);
+    expect(gateResults[0]!.correct).toBe(false);
+
+    const atoms = rebuild(events);
+    const atom = atoms.get(atomKey(SURAH, "ayah", gatedAyah));
+    expect(atom?.gatePassed).toBe(false);
+    expect(atom?.gateFails).toBe(1);
+  });
+});
+
 // v3-D108 — FR9, the 2-minute floor session
 // (`packages/engine/src/floor.ts#floorQueue`/`floorMinutes`).
 //
