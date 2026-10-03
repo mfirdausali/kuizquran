@@ -22,8 +22,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        // config('app.frontend_url') — see the doc block there for why this
-        // points at a route apps/web hasn't built yet (build-plan step 17).
+        // config('app.frontend_url') — see the doc block there. Points at
+        // apps/web's own `/reset-password` route (v3-D154).
         ResetPassword::createUrlUsing(function ($notifiable, string $token) {
             $frontend = rtrim(config('app.frontend_url'), '/');
 

@@ -59,12 +59,15 @@ return [
     | Frontend URL
     |--------------------------------------------------------------------------
     |
-    | apps/web (Next.js) does not exist yet — build-plan step 17. Password
-    | reset emails link here + /reset-password?token=..&email=.. so the
-    | link is forward-compatible the moment that route ships; until then it
-    | 404s, which is expected. The reset itself is fully API-testable today
-    | via POST /api/reset-password (see AuthController), independent of the
-    | frontend page existing.
+    | The base URL of apps/web (Next.js). AppServiceProvider's
+    | ResetPassword::createUrlUsing closure points password-reset emails at
+    | {frontend_url}/reset-password?token=..&email=.. (apps/web's own
+    | app/reset-password/page.tsx, v3-D154), and its VerifyEmail closure
+    | points verification emails at
+    | {frontend_url}/verify-email?id=..&hash=..&expires=..&signature=..
+    | (apps/web's own app/verify-email/page.tsx, v3-D155). The reset itself
+    | is also fully API-testable directly via POST /api/reset-password (see
+    | AuthController), independent of either frontend page.
     |
     */
 

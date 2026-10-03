@@ -26107,3 +26107,129 @@ reference, `FlagRegistry.php`, a zero-external-caller sweep of
 `lib/legal`/`lib/i18n`/`lib/workbench`, and a field-by-field skim of the
 rest of `DrillEvent`) are recorded here so a future run does not have to
 re-walk them.
+
+## v3-D270 (2026-10-03, nightly) — four backend doc comments still said apps/web "does not exist yet" for the reset-password/verify-email links, long after both pages shipped
+
+Eighth sweep for this build's recurring "stale docblock claims something
+unbuilt/absent that is actually built/present" class, after v3-D269's own
+closing note widened to its named next vein (the ~180 stale-claim grep hits
+outside `components/onboarding/**`/`components/library/**`) — this instance
+sits in a corner that vein's own React/TS focus never reached: Laravel
+config and provider comments, in PHP, pre-dating build-plan step 17.
+
+**Found:** `v3/api/config/app.php`'s `frontend_url` doc block said, verbatim,
+"apps/web (Next.js) does not exist yet — build-plan step 17 ... until then
+it 404s, which is expected." `app/Providers/AppServiceProvider.php`'s
+`ResetPassword::createUrlUsing` comment said the closure "points at a route
+apps/web hasn't built yet." `app/Http/Controllers/Auth/
+EmailVerificationController.php`'s `verify()` docblock said the endpoint is
+"a plain JSON API response rather than a frontend redirect (apps/web
+doesn't exist yet)." `.env.example`'s `FRONTEND_URL` comment repeated the
+same claim. All four predate v3-D153/D154/D155, which built real
+`apps/web/app/reset-password/page.tsx` and `apps/web/app/verify-email/
+page.tsx` — confirmed directly: both files exist, and
+`AppServiceProvider.php`'s own `VerifyEmail::createUrlUsing` closure (a few
+lines below the stale `ResetPassword` comment, in the SAME file) already
+builds a `{frontend_url}/verify-email?id=&hash=&expires=&signature=` URL
+and its own adjacent comment correctly describes routing through the
+frontend per v3-D154 — so the file contradicted itself, one comment block
+to the next. `git log` confirms none of the three PHP files changed since
+v3-D224 (`7c3bbdd`), well before v3-D153/D154/D155 landed.
+
+Not a live bug — every real link the app sends today already points at the
+real, shipped frontend routes; only the prose describing WHY was stale, the
+same documentation-only shape v3-D90/D110/D123/D236/D244/D251/D258/D268/D269
+have each already closed elsewhere in this tree.
+
+**Fixed:** all four comments corrected to state the real routes
+(`/reset-password`, `/verify-email`) and the real reason the verification
+endpoint returns JSON (the frontend page is the caller, attaching this
+device's own Bearer token via `apiFetch` — never an email client hitting it
+directly), rather than restating a now-false "doesn't exist" claim.
+
+**RED confirmed directly:** a new `tests/Feature/Auth/
+StaleFrontendDocsTest.php` (mirroring v3-D236/D244's own AGREEMENT-not-
+wording technique) scans all four files' real source text for the stale
+phrase and, biconditionally, asserts both frontend route files genuinely
+exist — so the guard cannot be satisfied by deleting the stale prose alone
+if the real routes were ever removed. Run against the unmodified tree:
+failed exactly as predicted, quoting `config/app.php`'s own real stale
+text. Implemented the fix, reran: 2/2 green (4 files checked across both
+assertions, 10 assertions total).
+
+`TZ=UTC make test`: **2935 passing** (was 2933, +2 — exactly this run's two
+new tests; v3/api 404, was 402; no other suite moved: 255 v2 vitest, 47
+v2/api, 120 corpus-compiler, 466 engine, 65 fold-runner, 1578 apps/web).
+`check-test-floor.mjs`: OK, 2935 >= floor 1899 (+1036 margin, unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 30 routes,
+unchanged (a backend-comment-only change, no apps/web file touched). `npm
+run gates`: all green — locked-css OK, 1 documented hunk, 294 v1 lines
+byte-identical; boundaries OK, 325 files, unchanged count — no apps/web
+file in this diff at all; fonts degraded-but-non-blocking, pre-existing, 2/6
+UI fonts present; corpus-morphology OK, 362 words; corpus-glyphs OK, 206
+codepoints across 4 artifacts — all unchanged, this diff carries no corpus
+data. `npx tsc --noEmit`, run separately across all four v3 node packages:
+clean in all four (none touch PHP, confirming this diff stayed backend-only
+except for the one new PHPUnit test file). `./vendor/bin/pint --test` on
+all three changed PHP files: `config/app.php` and
+`EmailVerificationController.php` passed; `AppServiceProvider.php` reports
+the identical pre-existing `single_quote` finding both BEFORE and AFTER
+this diff, confirmed directly by stashing the change and re-running pint —
+pre-existing drift this fix does not introduce, left alone, same discipline
+as `WebhookHandler.php`'s own precedent (v3-D203). No `v1/**`/`v2/**` edit
+(a stray `v2/tsconfig.tsbuildinfo` build-cache diff produced by running the
+suite was reverted before committing, same discipline as every prior
+entry — `git status --porcelain -- v1 v2` empty immediately before
+committing). No Arabic codepoint (all five changed/new files swept
+programmatically, in Python, over the Arabic, Arabic Supplement, Arabic
+Extended-A and both Presentation Forms Unicode blocks, plus a
+`\u06xx`/`\u07xx` escape and `fromCharCode`/`fromCodePoint` mention sweep:
+CLEAN — every new line is a PHP comment sentence, an env-var comment, or a
+PHP identifier, never corpus text). No oracle/golden-log/fixture/snapshot
+regenerated.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled corpus
+anywhere; `HEAD`, local `main` and `origin/main` all already agreed at
+`dc8ed36` (v3-D269) — no stale-local-`main` trap this run, confirmed
+directly via `git fetch origin main` before any exploration. `make setup`
+failed on its first attempt: this container's default PHP is 8.3.6, but
+`v3/api`'s `composer.lock` resolves `symfony/clock`/`-css-selector`/
+`-event-dispatcher`/`-string`/`-translation`/`-yaml` v8.1.x + `nesbot/carbon`
+3.13.2, all requiring PHP >=8.4.1 — the exact version pin v3-D119 already
+set in CI (`php-version: "8.4"`) but which this sandbox's base image never
+carried. Installed `php8.4-*` via the `packages.sury.org` apt repo (the
+`ondrej/php` PPA's own mirror — `add-apt-repository` itself was broken,
+missing its `apt_pkg` Python module, so the repo was added by hand via a
+`sources.list.d` entry + GPG keyring instead) and switched the system
+`php` alternative to it (`v2/api`'s own `^8.3` constraint is unaffected,
+8.4 satisfies it); `make setup` then completed clean on a second attempt
+with no other change. Found by a dedicated fresh-sweep agent (Explore)
+handed the full exclusion list carried through v3-D269 and directed at
+Eloquent relations, Console Commands, admin controller/panel field-by-field
+diffs, `worker/fold-runner`/`corpus-compiler` exports, and a stale-claim
+grep over phrases like "not yet"/"does not exist"/"unwired"/"TODO" across
+the whole tree rather than only `apps/web`'s own TS/TSX files — this was
+the one genuine, previously-unreported instance, independently
+re-verified by this run directly against all four files' real source, the
+two real frontend route files, and `git log`'s own history before writing
+any test.
+
+**NOT addressed:** every item on v3-D269's own "NOT addressed" list,
+unchanged — `acknowledgeReentry`'s own "makeup" branch still only logs and
+points the learner at `/home` (v3-D256's verdict unchanged); `DrillPicker
+.tsx`'s own unused `now` prop; the unused `atoms`/`corpus`/`sessions`
+IndexedDB object stores (v3-D232); `session_start`'s own latency metric
+(v0.8); the streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()`
+(v3-D136); `EntitlementMachine::merge()`; `App\Billing\TrialAttribution`
+(v3-D148); `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as
+a whole class (v3-D88, v3-D151, v3-D219); `App\Flags\FlagService::enabled()`
+(v3-D197); multi-surah enrollment; the operational mailer/7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `corpusHash`'s zero fold-side consumer (v3-D206);
+`selection_determinism_check` still replaying a committed fixture;
+`QueueItem.score`'s own missing external reader (v3-D263) — all unchanged.
+The four `apps/web ... does not exist yet` backend doc comments are now
+CLOSED and permanently guarded — remove them from future "docblock says X,
+reality is Y" sweeps.

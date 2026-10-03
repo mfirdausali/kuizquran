@@ -15,9 +15,12 @@ use Illuminate\Http\Request;
  */
 class EmailVerificationController extends Controller
 {
-    /** Signed link target from the notification email — see
-     *  AppServiceProvider for why this is a plain JSON API response rather
-     *  than a frontend redirect (apps/web doesn't exist yet). */
+    /** Signed link target the notification email's VerifyEmail closure
+     *  (AppServiceProvider) routes through apps/web's own `/verify-email`
+     *  page (v3-D155), which calls this endpoint directly, attaching the
+     *  device's own Bearer token via apiFetch — so a plain JSON response is
+     *  correct: the frontend page is the caller here, never the email
+     *  client itself. */
     public function verify(EmailVerificationRequest $request): JsonResponse
     {
         if ($request->user()->hasVerifiedEmail()) {
