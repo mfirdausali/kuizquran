@@ -9,11 +9,50 @@
 // wiring (reading a real atom_cache table, scheduling the nightly run) is
 // explicitly deferred, see DECISIONS.md v3-D32.
 
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { compareAtomCaches, foldDeterminismCheck } from "../src/determinism.ts";
 import { foldEvents } from "../src/fold.ts";
 import type { AtomState } from "../../../packages/engine/src/atom.ts";
 import type { DrillEvent } from "../../../packages/engine/src/types.ts";
+
+const THIS_FILE = path.resolve(__dirname, "determinism.test.ts");
+const DETERMINISM_SRC = path.resolve(__dirname, "../src/determinism.ts");
+const DETERMINISM_COMMAND = path.resolve(
+  __dirname,
+  "../../../api/app/Console/Commands/DeterminismCheckCommand.php",
+);
+const CONSOLE_ROUTES = path.resolve(__dirname, "../../../api/routes/console.php");
+
+describe("determinism.ts's own docblock does not claim the live deployment wiring is deferred", () => {
+  it("neither this file's own prose nor src/determinism.ts says the DB/schedule wiring is deferred", () => {
+    // Built from separate words, joined at runtime, specifically so this
+    // assertion's own declaration (which reads THIS_FILE, since it lives in
+    // the file it scans) can never accidentally satisfy the very pattern it
+    // forbids — mirroring v3-D251's own technique for the identical trap.
+    const stalePhrase = ["explicitly", "deferred"].join(" ");
+    const stalePattern = new RegExp(stalePhrase, "i");
+    for (const file of [THIS_FILE, DETERMINISM_SRC]) {
+      const src = readFileSync(file, "utf8");
+      expect(src).not.toMatch(stalePattern);
+    }
+  });
+
+  it("the real wiring the old comment called 'deferred' genuinely exists in v3/api", () => {
+    // Biconditional half: the guard above cannot be satisfied merely by
+    // deleting the stale phrase — the real mechanisms it used to deny must
+    // still be there.
+    const commandSrc = readFileSync(DETERMINISM_COMMAND, "utf8");
+    expect(commandSrc).toContain("sampleFromDatabase");
+    expect(commandSrc).toContain("atom_cache");
+    expect(commandSrc).toContain("pageOnCall");
+
+    const consoleSrc = readFileSync(CONSOLE_ROUTES, "utf8");
+    expect(consoleSrc).toContain("DeterminismCheckCommand::class");
+    expect(consoleSrc).toContain("dailyAt");
+  });
+});
 
 function atom(overrides: Partial<AtomState> = {}): AtomState {
   return {
