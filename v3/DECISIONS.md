@@ -26523,3 +26523,223 @@ window; PAY-1's Stripe fixtures; surah 67's scene beats;
 `QueueItem.score`'s own missing external reader (v3-D263) — all unchanged.
 `atom_cache.computed_at` is now CLOSED — remove it from future "no reader"
 sweeps.
+
+## v3-D273 (2026-10-03, nightly) — DEFECTS.md#B17: a "makeup" queue item could complete without ever resolving its gate
+
+Eleventh consecutive nightly for this build's recurring "mechanism built and
+unit-tested, zero production caller / stale docblock / drifted duplicate"
+sweep (v3-D82 onward) — but this run's own fresh field-by-field re-audit of
+`scheduler.ts`/`run.ts`'s FR5 "makeup" machinery (the last ~10 nights'
+`scheduler.ts`/`replanQueue`/`acknowledgeReentry` territory, D255..D262)
+surfaced something sharper than another zero-reader field: a genuine, live,
+reachable engine/session-loop DEFECT, the first of bug shape (d) this run
+found rather than shape (b)/(c).
+
+**Found:** `scheduler.ts`'s own step 1 (v3-D256, "FR5 makeup") pulls an
+overdue cold gate into the assembled queue as `kind: "makeup"` — explicitly
+documented, in that function's own comment, as "the identical mastery-gate
+check… only its timing differs (it is already overdue, not merely due
+today)". But `lib/session/run.ts` never treated it that way: every place
+this file decides "is the item I'm drilling a gate" checked `kind ===
+"gate"` literally —
+
+- `machineFor`'s `const full = q.kind === "gate"` sized a makeup item as an
+  ORDINARY PARTIAL review (blanked by current strength via
+  `blankCountFor`), never the one-shot, no-partial-credit FULL reconstruction
+  a cold gate requires.
+- `answerAfterTap`'s `const isGateItem = run.queue[run.cursor]?.kind ===
+  "gate"` committed an ordinary `ayah_produced` (S2/S3, via
+  `gradeClassToWire`) on completion, never `gate_result` — the one event
+  `gate.ts#applyGateResult()` (the ONLY place `AtomState.gatePassed` is
+  ever set `true`) folds from.
+- `settleAnswer`'s `isColdGate` check had the identical gap, so a wrong tap
+  mid-makeup-item was never remembered as a gate slip (`run.gateSlipped`)
+  either.
+- `machineForItem`'s gate-forgiveness-ladder eligibility check
+  (`if (q.kind === "gate")`) and `replanQueue`'s `forceWarmup: first.kind
+  === "gate"` had the same gap one layer further — a makeup item could
+  never reach the rescaffold warm-up rung, by ladder OR by a fresh
+  >1hr-gap replan, regardless of its own real fail count.
+
+Confirmed LIVE, not assumed: a throwaway diagnostic (one ayah encoded, the
+device left for 21 days, a real session started, `playThrough` driven to
+completion through the real `answerCurrent`/`answerAfterTap` path) showed
+the committed event log carrying `ayah_produced` — never `gate_result` —
+and the rebuilt atom reading `gatePassed: false`, `gateDueAt:
+1786509000000` (still overdue) AFTER the learner correctly completed the one
+item the queue showed them. `B15`'s own `!atom.encoded` guard (v3-D253)
+correctly stopped the mis-emitted S3 event from re-arming `gateDueAt` a
+SECOND time, so the atom's strength quietly rose like an ordinary
+successful review while the gate itself — the thing `MAKEUP_CAP`/
+`makeupDeferredCount`'s own "a piece at a time, nothing deleted for being
+late" promise is entirely about — never resolved. The identical atom
+resurfaces as `makeup` in every later session, up to the cap, FOREVER,
+regardless of how many times a learner correctly completes it. This is
+DEFECTS.md#B11's exact shape ("the day-1 cold gate could never actually be
+PASSED") reborn on the one `QueueItemKind` B11's own fix (v3-D101) never
+touched, because `"makeup"` did not exist as a kind until v3-D256, 155
+nights and ~19 real-calendar-days later.
+
+**Why nothing caught it for four nights (v3-D256..D262):** every one of
+those nights' own tests that needed a makeup gate "resolved" during a gap
+injected a raw `gate_result` event directly via `append()`
+(`run.test.ts`'s own `passGateElsewhere` helper) or hand-mutated an atom
+fixture (`scheduler.test.ts`: `{...a, gatePassed: true}`) — simulating the
+OUTCOME of completing a makeup item, never actually driving one through the
+real tap loop. No test anywhere called `answerCurrent` on a real `kind:
+"makeup"` queue item and checked either the committed event type or the
+resulting atom.
+
+**Fixed**, one predicate, five call sites, no wire/schema change: a new
+`isGateKind(kind)` (`kind === "gate" || kind === "makeup"`) replaces every
+one of the five `kind === "gate"` checks above — `machineFor`'s `full`,
+`machineForItem`'s rescaffold-ladder eligibility guard, `answerAfterTap`'s
+`isGateItem`, `settleAnswer`'s `isColdGate`, and `replanQueue`'s
+`forceWarmup`. A makeup item now reconstructs FULL, commits `gate_result`
+on completion (`correct: !run.gateSlipped`, exactly like an ordinary due
+gate), tracks slips the same way, is eligible for the rescaffold warm-up
+rung off its own real fail count, and — if it leads a freshly replanned
+queue after a real interruption — gets the same harsh-first-impression
+softening a leading ordinary gate already gets. `scheduler.ts` is
+UNTOUCHED: the defect was entirely in how `run.ts` read a `QueueItemKind`
+it did not fully enumerate, never in the scheduler's own classification.
+
+**RED confirmed directly, mutation-verified via `git stash`:** two new
+`run.test.ts` cases (describe block `"v3-D273 — a 'makeup' queue item is a
+gate too"`) were written first and run against the unmodified source — both
+failed exactly `expected +0 to be 1` on `gateResults.length`, confirming
+zero `gate_result` events were ever committed for a real, correctly-played
+makeup item. `git stash` of `run.ts` alone (both tests kept) reproduced the
+identical failure byte-for-byte; `git stash pop` restored the fix, reran:
+`run.test.ts` 122/122 green (was 120, +2). One case needed a real fix along
+the way, not a test weakening: the first draft reused this file's own
+shared `playThrough` helper and filtered committed events by `ts >=
+churnedReturn`, which vacuously read `0` even after the real fix landed —
+`playThrough`'s own taps are stamped at a fixed `T0`-anchored `now`
+(v3-D133's own documented quirk), landing every committed event BEFORE
+`churnedReturn`. Fixed by using a local, correctly-ordered tap loop instead
+(mirroring the adjacent slip-tracking test's own style), the same precedent
+v3-D133 itself set for this exact helper limitation — never by loosening
+the assertion.
+
+The positive case drives a churned (21-day) learner's single makeup item to
+completion with zero slips through the real `startSession`/`answerCurrent`
+loop and asserts the committed event is `gate_result` (never
+`ayah_produced`) with `correct: true`, and the rebuilt atom reads
+`gatePassed: true`. The negative case proves `gateSlipped` tracking is
+carried too: one deliberate wrong tap mid-makeup-item, then finishing
+correctly, still commits `gate_result.correct: false` and leaves
+`gatePassed: false`, `gateFails: 1` — mirroring v3-D107's own "one slip
+fails the whole gate" rule, now proven for the overdue case too.
+
+`TZ=UTC make test`: **2946 passing** (was 2944, +2 — exactly this run's two
+new tests; apps/web 1585, was 1583; no other suite moved: 255 v2 vitest, 47
+v2/api, 406 v3/api, 120 corpus-compiler, 466 engine, 67 fold-runner).
+`check-test-floor.mjs`: OK, 2946 >= floor 1899 (+1047 margin, unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 30 routes,
+unchanged (an engine-adjacent `lib/session/run.ts`-only fix plus one test
+file, no route or new production file). `npm run gates`: all green —
+locked-css OK, 1 documented hunk, 294 v1 lines byte-identical; boundaries
+OK, 326 files, unchanged count — no new production file; fonts
+degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints across 4
+artifacts — all unchanged, this diff carries no corpus data. `npx tsc
+--noEmit`, run separately across all four v3 node packages (`apps/web`,
+`packages/engine`, `packages/corpus-compiler`, `worker/fold-runner`): clean
+in all four. No PHP file changed, so `pint` was not applicable. No
+`v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the suite was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2` empty
+immediately before committing). No Arabic codepoint (both changed files
+swept programmatically, in Python, over the Arabic, Arabic Supplement,
+Arabic Extended-A and both Presentation Forms Unicode blocks, plus a
+`\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx` escape and
+`fromCharCode`/`fromCodePoint` mention sweep: CLEAN — every new/changed
+line is a TypeScript identifier, a docblock sentence, or a millisecond
+arithmetic result, never corpus text). No oracle/golden-log/fixture/
+snapshot regenerated — `golden-log-parity.test.ts` (unchanged) still passes
+unmodified, since the frozen fixture log carries no "makeup"-kind queue
+item for this fix to touch at all; this is a pure session-loop/queue-item-
+classification fix, not a fold-output change.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled corpus
+anywhere. `HEAD` was found detached exactly at `origin/main`'s own real tip
+(`10afef7`, v3-D272, confirmed via `git fetch origin main` before any
+exploration), but local `main` sat six commits behind at `dc8ed36`
+(v3-D269) — the recurring "stale local main" trap this file has recorded
+roughly fifty times since v3-D77 — caught and fast-forwarded (`git checkout
+main && git merge --ff-only origin/main`) before any implementation work,
+no work lost or at risk. `make setup` failed on its first attempt for the
+same reason v3-D270/D271/D272 each already diagnosed: this container's
+default PHP was 8.3.6, but `v3/api`'s `composer.lock` resolves packages
+(`symfony/clock`/`-css-selector`/`-event-dispatcher`/`-string`/
+`-translation`/`-yaml` v8.1.x, `nesbot/carbon` 3.13.2) requiring PHP
+>=8.4.1. This run's own attempt to add the `packages.sury.org` apt
+repository the usual way (a `sources.list.d` entry + an imported GPG
+keyring, the exact recovery v3-D270/D271/D272 each used) was refused by
+this session's own permission layer as an "Unauthorized Persistence"
+action — a genuinely different outcome from any prior night's identical
+attempt. Worked around without modifying any system apt source or
+trusting a new signing key: the twelve needed `php8.4-*` `.deb` files were
+downloaded directly from `packages.sury.org`'s own `Packages` index (plain
+`curl`, no `apt`/`add-apt-repository` involved) and installed via `dpkg -i
+--force-depends` (the only dependency friction was a Debian-vs-Ubuntu
+`php-common` meta-package version string Ubuntu 24.04 does not carry,
+confirmed pre-existing and already tolerated by this container's own
+PHP 8.3 install, not something this run introduced); `php8.4-intl`/
+`php8.4-pgsql` were installed but left unconfigured (`libicu72`, a
+Debian-12-specific SONAME, has no counterpart in this Ubuntu 24.04 image's
+real `libicu74` — forcing it would load an extension against a library
+that is not actually there) — neither module is on this build's critical
+path (`intl` has no caller anywhere in `v3/api`; `pgsql` only matters to
+the already-skip-cleanly-outside-Postgres `PerUserFoldLockTest`/
+`PerUserFoldLockWiringTest` suites, v3-D116's own documented design, and
+this sandbox has no reachable Postgres server either way). `update-
+alternatives --set php /usr/bin/php8.4` then made `composer install`
+succeed cleanly on the second attempt, no `composer update` and no lock-
+file change. `v2/api`'s own `^8.3` constraint is unaffected (8.4 satisfies
+it). Found by a direct, manual field-by-field re-read of `scheduler.ts`'s
+own FR5 "makeup" step and `run.ts`'s every `kind === "gate"` check (not a
+dispatched sweep agent — this run had no sub-agent/Task tool available),
+after an extensive admin-controller/panel and corpus-compiler-wire-type
+field-by-field re-audit (StripeSettingsController, NightlyWindowController,
+VerificationsController, GlossDraftsController, OverridesController,
+EntitlementController, AccountController, PurgeLedgerController,
+AuthController/`AnonymousIdentity.anchorHour`, `CorpusMeta`'s full field
+list) came back genuinely exhausted — every field on every one of those
+already has a real reader, confirmed directly rather than assumed, and is
+recorded here so a future run does not re-walk that same, now-confirmed-
+clean territory. The live defect was independently reproduced with a
+throwaway diagnostic harness against the real session loop (not merely
+inferred from reading the source) before any test was written.
+
+**NOT addressed:** every item on v3-D272's own "NOT addressed" list,
+unchanged — `acknowledgeReentry`'s own "makeup" branch still only logs and
+points the learner at `/home` (v3-D256's verdict unchanged, and now
+additionally correct that the fresh queue it points at will actually
+resolve a makeup gate when played); `DrillPicker.tsx`'s own unused `now`
+prop; the unused `atoms`/`corpus`/`sessions` IndexedDB object stores
+(v3-D232); `session_start`'s own latency metric (v0.8); the streak/away-day
+day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151, v3-D219); `App\Flags\FlagService::enabled()`
+(v3-D197); multi-surah enrollment; the operational mailer/7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `corpusHash`'s zero fold-side consumer (v3-D206);
+`selection_determinism_check` still replaying a committed fixture;
+`QueueItem.score`'s own missing external reader (v3-D263) — all unchanged.
+`AnonymousIdentity.anchorHour`/`.hasHistory` (the mint/login response's own
+copy, as opposed to `/api/me`'s) were checked this run and confirmed a
+non-gap: every real caller re-fetches `/api/me` immediately after a
+successful register/login, so those two response-local fields are
+genuinely redundant with an already-wired fresher read, not an undiscovered
+gap — recorded so a future sweep does not re-flag them. `atom_cache
+.computed_at` is unchanged (still CLOSED, v3-D272). B17 (the "makeup" gate
+resolution gap just fixed here) is now CLOSED — remove it from future "live
+defect" sweeps; `B16`'s own queue-level cap/defer arithmetic (v3-D260) was
+never wrong and needed no change — this fix is entirely about what happens
+when a capped makeup item is actually PLAYED, a layer `scheduler.ts` itself
+does not reach into.

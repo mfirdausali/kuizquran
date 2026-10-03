@@ -46,7 +46,7 @@ import {
   type ReconstructState,
 } from "@engine/reconstruct.ts";
 import { rebuild } from "@engine/rebuild.ts";
-import { assembleQueue, makeupDeferredCount, type QueueItem } from "@engine/scheduler.ts";
+import { assembleQueue, makeupDeferredCount, type QueueItem, type QueueItemKind } from "@engine/scheduler.ts";
 import { summarizeSession, type SessionSummary } from "@engine/sessionSummary.ts";
 import { atomKey } from "@engine/atom.ts";
 // v3-D227 — build-plan step 10 froze `DrillEvent.siteKey`/`.visitOrdinal`
@@ -392,13 +392,34 @@ export interface CurrentItem {
   readonly options: readonly string[];
 }
 
+/**
+ * v3-D273 — DEFECTS.md#B17. A "makeup" queue item (`scheduler.ts`'s own
+ * step 1: an overdue cold gate pulled into the queue, capped by
+ * `MAKEUP_CAP`, v3-D256/D259/D260) is the IDENTICAL mastery-gate check as an
+ * ordinary "gate" item — only its timing differs (it is already overdue,
+ * never merely due today; `scheduler.ts#overdueGates`'s own filter is
+ * `gateDueAt < dayStart(now)`, a strict subset of `gate.ts#gateDue()`'s
+ * `gateDueAt <= now`). Every place this file asked "is the item I'm
+ * drilling a gate" checked `kind === "gate"` literally, so completing a
+ * REAL makeup item never routed through the gate-shaped branches below —
+ * reborn exactly the DEFECTS.md#B11 shape ("a cold gate could never
+ * actually be PASSED") that v3-D101 already closed once, on the one queue-
+ * item kind that fix never touched. One predicate, used everywhere this
+ * file needs to tell a gate-shaped item (due today OR overdue) from an
+ * ordinary review/learn one.
+ */
+function isGateKind(kind: QueueItemKind | undefined): boolean {
+  return kind === "gate" || kind === "makeup";
+}
+
 /** Build the reconstruct machine for a queue item. Strength arrives from the
  *  fold, never from a view: `blankCountFor(strength)` is precisely the kind of
  *  decision clause 5 forbids outside the engine. */
 function machineFor(c: Corpus, surah: number, q: QueueItem, strength: number): ReconstructState {
-  // A gate item reconstructs the WHOLE ayah (`full`); a review blanks a subset
-  // sized by strength. The engine owns that sizing — this only names which.
-  const full = q.kind === "gate";
+  // A gate (or overdue make-up) item reconstructs the WHOLE ayah (`full`); a
+  // review blanks a subset sized by strength. The engine owns that sizing —
+  // this only names which.
+  const full = isGateKind(q.kind);
   return initReconstruct(c, surah, q.ayah, strength, { full });
 }
 
@@ -409,8 +430,9 @@ function machineFor(c: Corpus, surah: number, q: QueueItem, strength: number): R
  * atom sits at the "rescaffold" rung (`gateForgiveness()`,
  * `packages/engine/src/gate.ts`) gets a LIGHTER, non-full S2 warm-up machine
  * first, mirroring v2's `pages/Gate.tsx` (`stage === "rescaffold"`); every
- * other gate, and every non-gate item, is unaffected — `machineFor`'s own
- * `full = kind === "gate"` rule still decides those.
+ * other gate (and overdue "makeup" gate, v3-D273), and every non-gate item,
+ * is unaffected — `machineFor`'s own `full = isGateKind(kind)` rule still
+ * decides those.
  *
  * `opts.forceWarmup` — FR5 "replan" (`replanQueue`, below) reuses this SAME
  * warm-up rung for a different trigger: a gate item that leads a freshly
@@ -431,7 +453,7 @@ function machineForItem(
   atomsMap: ReturnType<typeof rebuild>,
   opts?: { forceWarmup?: boolean },
 ): { machine: ReconstructState; rescaffolding: boolean } {
-  if (q.kind === "gate") {
+  if (isGateKind(q.kind)) {
     const atom = atomsMap.get(atomKey(surah, "ayah", q.ayah));
     const ladderWarmup = atom !== undefined && gateForgiveness(atom) === "rescaffold";
     if (ladderWarmup || opts?.forceWarmup) {
@@ -1193,7 +1215,9 @@ async function answerAfterTap(
   ctx: AppendContext,
 ): Promise<SessionRun> {
   if (adv.ayahProduced) {
-    const isGateItem = run.queue[run.cursor]?.kind === "gate";
+    // v3-D273 — includes an overdue "makeup" item: the identical gate check,
+    // just overdue rather than due today (see `isGateKind`'s own header).
+    const isGateItem = isGateKind(run.queue[run.cursor]?.kind);
 
     // v3-D233 — resolve this pass's GradeClass ONCE. Both completed-pass
     // emit sites below (the rescaffold warm-up and the ordinary completion)
@@ -1357,7 +1381,8 @@ async function settleAnswer(
   // `Gate.tsx`: `stage === "cold" && !correct` is the only place `slipped` is
   // ever set.
   if (!adv.correct) {
-    const isColdGate = run.queue[run.cursor]?.kind === "gate" && !run.rescaffolding;
+    // v3-D273 — includes an overdue "makeup" item (see `isGateKind`).
+    const isColdGate = isGateKind(run.queue[run.cursor]?.kind) && !run.rescaffolding;
     return { ...run, slips, lastTap, gateSlipped: isColdGate ? true : run.gateSlipped };
   }
 
@@ -1505,7 +1530,10 @@ async function replanQueue(run: SessionRun, c: Corpus, now: number): Promise<Ses
 
   const first = queue[0]!;
   const { machine, rescaffolding } = machineForItem(c, run.surah, first, assembled.atoms, {
-    forceWarmup: first.kind === "gate",
+    // v3-D273 — includes an overdue "makeup" item leading the replanned
+    // queue: the identical harsh-first-impression case this warm-up exists
+    // to soften (see `isGateKind`).
+    forceWarmup: isGateKind(first.kind),
   });
 
   return {

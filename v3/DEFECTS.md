@@ -14,10 +14,88 @@ defect (`rebuild.ts`), found immediately downstream of B14's own fix.
 `activity.ts`, retired at v3-D260): v3-D256's make-up cap never actually
 bounded a churned learner's queue across as many sessions as its backlog
 needed to drain.
+**B17** is a v3 session-loop defect (`lib/session/run.ts`), B11 reborn one
+queue-item kind later: v3-D256's own "makeup" kind (an overdue cold gate,
+distinct from an ordinary due-today "gate") was never recognized by any of
+the places this file decides "is the item I'm drilling a gate", so
+completing a real makeup item never resolved the gate it was supposed to be.
 **E-01…E-08** are multi-surah defects that only manifest once a second surah
 exists.
 
 ---
+
+## B17 — a "makeup" queue item could complete without ever resolving its gate ✅ CLOSED (build-plan step 18, v3-D273)
+
+`scheduler.ts`'s own step 1 (v3-D256) pulls an overdue cold gate into the
+queue as `kind: "makeup"` — the IDENTICAL mastery-gate check as an ordinary
+`kind: "gate"` item, only overdue rather than merely due today
+(`overdueGates`'s filter, `gateDueAt < dayStart(now)`, is a strict subset of
+`gate.ts#gateDue()`'s `gateDueAt <= now`). But every place `lib/session
+/run.ts` decided "is the item I'm drilling a gate" checked `kind === "gate"`
+literally, never `"makeup"`:
+
+- `machineFor`'s `full = q.kind === "gate"` sized a makeup item as an
+  ordinary PARTIAL review (blanked by current strength), never the one-shot,
+  no-partial-credit full-ayah reconstruction a cold gate requires.
+- `answerAfterTap`'s `isGateItem = run.queue[run.cursor]?.kind === "gate"`
+  committed an ordinary `ayah_produced` (S2/S3) on completion, never
+  `gate_result`.
+- `settleAnswer`'s `isColdGate` check had the identical gap, so a wrong tap
+  mid-makeup-item was never remembered as a gate slip either.
+
+`gate.ts#applyGateResult()` — the ONLY place `AtomState.gatePassed` is ever
+set `true` — is folded exclusively from a `gate_result` event. A
+mis-emitted `ayah_produced` instead hits the ordinary retrieval-update fold
+branch; B15's own `!atom.encoded` guard (v3-D253) correctly stops it from
+re-arming `gateDueAt` a second time, but nothing else resolves the gate
+either. ⇒ A learner who correctly completed a "makeup" item saw their
+strength go up, exactly like a successful review — and the gate it was
+labelled as making up stayed due, and overdue, FOREVER. The backlog
+`MAKEUP_CAP`/`makeupDeferredCount` promise a learner can clear "a piece at a
+time" never actually shrinks by playing the makeup items as shown; the same
+atoms resurface as makeup in every later session, up to the cap, forever.
+B11's shape, reborn on the one queue-item kind B11's own fix (v3-D101) never
+touched, since "makeup" did not exist as a `QueueItemKind` until v3-D256,
+155 nights later.
+
+**Why nothing caught it:** every v3-D256..D262 test that needed a makeup
+gate "resolved" during a gap injected a raw `gate_result` event directly via
+`append()` (`passGateElsewhere`/manually-mutated `gatePassed: true` atom
+fixtures in `scheduler.test.ts`) rather than driving the real tap loop — no
+test anywhere actually played a real makeup queue item through
+`answerCurrent`/`answerAfterTap` to completion and checked the resulting
+atom or the committed event type.
+
+**Fixed:** one predicate, `isGateKind(kind) = kind === "gate" || kind ===
+"makeup"`, used everywhere `run.ts` needs to tell a gate-shaped item (due
+today OR overdue) from an ordinary review/learn one — `machineFor`'s
+`full`, `machineForItem`'s rescaffold-ladder eligibility, `answerAfterTap`'s
+`isGateItem`, `settleAnswer`'s `isColdGate`, and `replanQueue`'s
+`forceWarmup` (a replanned queue that leads with an overdue makeup item gets
+the identical harsh-first-impression softening a leading ordinary gate
+already gets).
+
+**Verified:**
+- RED confirmed by reverting `run.ts` alone (`git stash`, both new
+  `run.test.ts` cases kept) and re-running: both failed on exactly
+  `gateResults.length` being 0 (zero `gate_result` events committed);
+  restored byte-identically, 122/122 green (was 120, +2).
+- The positive case drives a churned (21-day) learner's single makeup item
+  to completion with zero slips through the real `startSession`/
+  `answerCurrent` loop, and asserts the committed event is `gate_result`
+  (never `ayah_produced`) with `correct: true`, and the rebuilt atom reads
+  `gatePassed: true`.
+- The negative case proves the fix carries `gateSlipped` tracking too: one
+  deliberate wrong tap mid-makeup-item, then finishing correctly, still
+  commits `gate_result.correct: false` and leaves `gatePassed: false`,
+  `gateFails: 1` — mirroring v3-D107's own "one slip fails the whole gate"
+  rule for ordinary due gates.
+- `TZ=UTC make test`: 2946 passing (was 2944, +2 — exactly these two new
+  tests; no other suite moved). `TZ=UTC make build`: exit 0, 30 routes
+  (unchanged). `npx tsc --noEmit` clean across all four v3 node packages.
+  No `v1/**`/`v2/**` edit, no Arabic codepoint introduced.
+
+See DECISIONS.md v3-D273 for the full write-up.
 
 ## B16 — the FR5 make-up cap never bounded the queue across sessions ✅ CLOSED (FR5 makeup, v3-D260)
 
