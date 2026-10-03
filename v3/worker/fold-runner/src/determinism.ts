@@ -3,9 +3,17 @@
 // it to the live atom cache. It must be 100%; ANY divergence is the
 // highest-severity page... Without this check, invariant #2 is a claim;
 // with it, it is monitored." This file is the check's pure core (compare +
-// re-fold-and-compare); a live deployment's DB adapter (reading a real
-// atom_cache table, scheduling the nightly run, paging on divergence) is
-// explicitly deferred — see DECISIONS.md v3-D32.
+// re-fold-and-compare) and stays DB-free by design (v3-D08: Node folds,
+// PHP owns the tables — see `bin/fold-determinism-check.ts`'s own header
+// for why Node never gets its own DB connection). The live deployment
+// wiring this core feeds is real, in `v3/api`:
+// `DeterminismCheckCommand::sampleFromDatabase()` reads the real
+// `atom_cache` table, `routes/console.php` schedules the nightly run, and
+// `DeterminismCheckCommand::pageOnCall()` emails `App\Mail\DeterminismP1Alert`
+// on a confirmed P1 (v3-D82). v3-D32's own list of what still needed
+// building — the DB adapter, the CLI/scheduling wiring, per-user advisory
+// locks, dead-letter quarantine, late-arrival refold — is now fully
+// closed; see v3-D114/D115/D116.
 
 import type { AtomState } from "../../../packages/engine/src/atom.ts";
 import type { AtomsMap } from "../../../packages/engine/src/rebuild.ts";

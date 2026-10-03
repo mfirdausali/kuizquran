@@ -5,9 +5,15 @@
 // invariant #2 is a claim; with it, it is monitored."
 //
 // compareAtomCaches is the comparison primitive; foldDeterminismCheck
-// composes it with a fresh fold. Both pure, DB-free — the live deployment
-// wiring (reading a real atom_cache table, scheduling the nightly run) is
-// explicitly deferred, see DECISIONS.md v3-D32.
+// composes it with a fresh fold. Both stay pure and DB-free by design — the
+// live deployment wiring that feeds them is real, in `v3/api`:
+// `DeterminismCheckCommand::sampleFromDatabase()` reads the real
+// `atom_cache` table, `routes/console.php` schedules the nightly run, and
+// `DeterminismCheckCommand::pageOnCall()` sends `App\Mail\DeterminismP1Alert`
+// on a confirmed P1 (v3-D82). v3-D32's own list of what still needed
+// building — the DB adapter, the CLI/scheduling wiring, per-user advisory
+// locks, dead-letter quarantine, late-arrival refold — is now fully closed;
+// see v3-D114/D115/D116 and `routes/console.php`'s own corrected comment.
 
 import { readFileSync } from "node:fs";
 import path from "node:path";

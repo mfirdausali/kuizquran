@@ -53,10 +53,125 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2933 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 2937 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 402 v3/api + 120 corpus-compiler
-             # + 466 engine + 65 fold-runner + 1578 apps/web. (v3-D269, 2026-09-29)
+             # 255 v2 vitest + 47 v2/api + 404 v3/api + 120 corpus-compiler
+             # + 466 engine + 67 fold-runner + 1578 apps/web. (v3-D271, 2026-10-03)
+             # NOTE (v3-D271, 2026-10-03): `worker/fold-runner/src
+             # /determinism.ts`'s own file header still said "a live
+             # deployment's DB adapter (reading a real atom_cache table,
+             # scheduling the nightly run, paging on divergence) is
+             # explicitly deferred — see DECISIONS.md v3-D32" — stale on
+             # every count: `DeterminismCheckCommand::sampleFromDatabase()`
+             # (v3/api) reads the real `atom_cache` table,
+             # `routes/console.php`'s own nightly schedule block schedules
+             # the run, and `DeterminismCheckCommand::pageOnCall()` has
+             # emailed `App\Mail\DeterminismP1Alert` on a confirmed P1
+             # since v3-D82; per-user advisory locks (v3-D116),
+             # dead-letter quarantine (v3-D114/D115) and late-arrival
+             # refold (v3-D116) — the rest of v3-D32's own "still
+             # explicitly deferred" list — are closed too.
+             # `worker/fold-runner/test/determinism.test.ts` carried the
+             # near-identical claim. Both predate every one of those
+             # closing decisions, none of which touched this file. Not a
+             # live bug — the real wiring has worked since it was built —
+             # a ninth instance of the "docblock says X, reality is Y"
+             # shape v3-D90/D110/D123/D236/D244/D251/D258/D268/D269/D270
+             # already closed elsewhere, found this time by directly
+             # reading every file in `worker/fold-runner/src` rather than
+             # dispatching a sweep agent — the other five files
+             # (`canonicalOrder.ts`, `fold.ts`, `foldCheck.ts`,
+             # `selectionCheck.ts`, `severity.ts`, `engineVersion.ts`) each
+             # already state their real, current scope accurately.
+             # NOTE ALSO: v3-D270's own run forgot to prepend its NOTE
+             # here — this comment block's top summary line sat stale at
+             # v3-D269's own 2933/402/65 numbers through v3-D270's commit;
+             # the real v3-D270 write-up (four backend `apps/web ... does
+             # not exist yet` doc comments) is recorded in full in
+             # DECISIONS.md and is not re-derived here, matching the
+             # `v3-D141 — backfilled` precedent for exactly this gap.
+             # Fixed: both docblocks now name the real wiring
+             # (`sampleFromDatabase`/`routes/console.php`'s schedule/
+             # `pageOnCall`) and say v3-D32's own list is fully closed,
+             # rather than restating the false "explicitly deferred"
+             # claim; `determinism.ts` keeps its real, permanent design
+             # note that Node stays DB-free BY DESIGN (v3-D08) — a
+             # separate fact from the staleness being corrected. RED
+             # confirmed directly: a new describe block in
+             # `determinism.test.ts` reads both files' own real source for
+             # a dynamically-built "explicitly deferred" phrase (built
+             # from two words joined at runtime so the assertion's own
+             # declaration cannot trip its own guard, mirroring v3-D251's
+             # technique) and, biconditionally, asserts
+             # `DeterminismCheckCommand.php`/`routes/console.php`'s real
+             # source genuinely contain `sampleFromDatabase`/`atom_cache`/
+             # `pageOnCall`/the schedule entry. Run against the unmodified
+             # `determinism.ts`: failed exactly 1 of 8, quoting the real
+             # stale text; re-confirmed via `git stash` of that one file
+             # alone (fix in the test file kept): identical failure.
+             # Restored, reran: `determinism.test.ts` 8/8 green (was 6,
+             # +2). `TZ=UTC make test`: 2937 passing (was 2935, +2 —
+             # exactly this run's two new tests; fold-runner 67, was 65;
+             # no other suite moved: 255 v2 vitest, 47 v2/api, 404 v3/api,
+             # 120 corpus-compiler, 466 engine, 1578 apps/web).
+             # `check-test-floor.mjs`: OK, 2937 >= floor 1899 (+1038
+             # margin, unmoved). `TZ=UTC make build`: exit 0, 30 routes,
+             # unchanged (a fold-runner-source-plus-test-file-only change,
+             # no apps/web or API file touched). `npm run gates`: all
+             # green — locked-css OK, 1 documented hunk, 294 v1 lines
+             # byte-identical; boundaries OK, 326 files, unchanged count —
+             # no apps/web file in this diff at all; fonts
+             # degraded-but-non-blocking, pre-existing, 2/6 UI fonts
+             # present; corpus-morphology OK, 362 words; corpus-glyphs OK,
+             # 206 codepoints across 4 artifacts — all unchanged, this
+             # diff carries no corpus data. `TZ=UTC npx tsc --noEmit`, run
+             # separately across all four v3 node packages: clean in all
+             # four. No PHP file changed, so `pint` was not applicable. No
+             # `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff produced by running the suite was reverted
+             # before committing, same discipline as every prior entry).
+             # No Arabic codepoint (both changed files swept
+             # programmatically, in Python, over the Arabic, Arabic
+             # Supplement, Arabic Extended-A and both Presentation Forms
+             # Unicode blocks, plus a `\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/
+             # `\uFExx` escape and `fromCharCode`/`fromCodePoint` mention
+             # sweep: CLEAN). No oracle/golden-log/fixture/snapshot
+             # regenerated. Session start: fresh container, `HEAD`, local
+             # `main` and `origin/main` all already agreed at `9304e96`
+             # (v3-D270) — no stale-local-`main` trap this run. `make
+             # setup` failed on its first attempt: this container's
+             # default PHP was 8.3.6, but `v3/api`'s `composer.lock` needs
+             # PHP >=8.4.1 (the same CI pin v3-D119/v3-D270 already set).
+             # Installed `php8.4-*` via the `packages.sury.org` apt mirror
+             # (added by hand — `add-apt-repository` itself was broken in
+             # this image) and switched the system `php` alternative; a
+             # second `make setup` attempt then completed clean (both
+             # composer installs hit the documented transient proxy
+             # timeout and recovered via the git-mirror fallback). NOT
+             # addressed: every item on v3-D270's own "NOT addressed"
+             # list, unchanged — `acknowledgeReentry`'s own "makeup"
+             # branch still only logs and points the learner at `/home`
+             # (v3-D256's verdict unchanged); `DrillPicker.tsx`'s own
+             # unused `now` prop; the unused `atoms`/`corpus`/`sessions`
+             # IndexedDB object stores (v3-D232); `session_start`'s own
+             # latency metric (v0.8); the streak/away-day day-space
+             # mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()`; `App\Billing\TrialAttribution`
+             # (v3-D148); `lib/pricing.ts#regionFromCountry()` (v3-D163);
+             # `PaywallGate` as a whole class (v3-D88, v3-D151, v3-D219);
+             # `App\Flags\FlagService::enabled()` (v3-D197); multi-surah
+             # enrollment; the operational mailer/7-night launch window;
+             # PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel` (v3-D188); `corpusHash`'s
+             # zero fold-side consumer (v3-D206); `selection_determinism_check`
+             # still replaying a committed fixture; `QueueItem.score`'s
+             # own missing external reader (v3-D263) — all unchanged.
+             # `worker/fold-runner/src/determinism.ts`'s and its test
+             # file's own stale docblocks are now CLOSED — remove them
+             # from future "docblock says X, reality is Y" sweeps. See
+             # DECISIONS.md v3-D271.
              # NOTE (v3-D269, 2026-09-29): `packages/engine/src/types.ts`'s
              # own `DrillEvent.deviceId` docblock said "Stamped by the sync
              # layer (M6), which does not exist yet — optional until then" —
