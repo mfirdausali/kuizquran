@@ -140,6 +140,11 @@ export function SystemHealthPanel() {
           Never invents state — WIREFRAME §16: &quot;staff may never edit
           graded state.&quot;
         </p>
+        <p className="caption">
+          {report.atomCacheLastComputedAt === null
+            ? "Atom cache has never been rebuilt."
+            : `Atom cache last rebuilt: ${new Date(report.atomCacheLastComputedAt).toISOString()}`}
+        </p>
         <button
           type="button"
           className="btn"

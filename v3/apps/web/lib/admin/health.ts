@@ -34,6 +34,11 @@ export interface HealthCheck {
 export interface HealthReport {
   checks: HealthCheck[];
   rebuildRunning: boolean;
+  /** `atom_cache.computed_at`'s own MAX — when the cache was last actually
+   *  rebuilt (manual or the automatic refold on event ingest). `null` for
+   *  a genuinely empty cache, degraded to `null` on anything malformed —
+   *  never a fabricated 0 or a crash. */
+  atomCacheLastComputedAt: number | null;
 }
 
 export type HealthLoad =
@@ -101,8 +106,13 @@ export async function loadHealth(): Promise<HealthLoad> {
   }
 
   const b = body as { checks: HealthCheck[]; rebuildRunning: boolean };
+  const rawLastComputedAt = (body as Record<string, unknown>).atomCacheLastComputedAt;
+  const atomCacheLastComputedAt = typeof rawLastComputedAt === "number" ? rawLastComputedAt : null;
 
-  return { state: "ready", report: { checks: b.checks, rebuildRunning: b.rebuildRunning } };
+  return {
+    state: "ready",
+    report: { checks: b.checks, rebuildRunning: b.rebuildRunning, atomCacheLastComputedAt },
+  };
 }
 
 /** One quarantined learner, as v3-D204's fix reports it — pseudonymized by

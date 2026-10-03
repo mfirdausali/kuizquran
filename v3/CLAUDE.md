@@ -53,10 +53,111 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2937 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 2944 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 404 v3/api + 120 corpus-compiler
-             # + 466 engine + 67 fold-runner + 1578 apps/web. (v3-D271, 2026-10-03)
+             # 255 v2 vitest + 47 v2/api + 406 v3/api + 120 corpus-compiler
+             # + 466 engine + 67 fold-runner + 1583 apps/web. (v3-D272, 2026-10-03)
+             # NOTE (v3-D272, 2026-10-03): `atom_cache.computed_at`
+             # (stamped by every `AtomCacheRebuilder` run — manual and the
+             # automatic refold on event ingest, v3-D116/v3-D198) had a
+             # real writer and zero readers anywhere: `Admin
+             # \SystemHealthController::index()`, the one screen built to
+             # report on this table's health, never selected the column,
+             # so an operator could trigger a rebuild and see that run's
+             # own counts but never tell, on a later visit, whether the
+             # cache behind `fold_determinism_check`'s own comparison was
+             # fresh or stale from days ago. Distinct from this same
+             # panel's own already-excluded `atom_cache_coverage`/
+             # `events_ingested_24h` (deliberately unbuilt — undefined
+             # semantics, not merely unwired): a plain `MAX(computed_at)`
+             # is unambiguous, the identical shape already closed once for
+             # `corpus_ayah_hashes.ingested_at` (v3-D176). Fixed:
+             # `index()` gains `atomCacheLastComputedAt` (`DB::table
+             # ('atom_cache')->max('computed_at')`, `null` only when the
+             # table is genuinely empty, never a fabricated `0` — #167's
+             # own discipline); `lib/admin/health.ts#HealthReport` gains
+             # the matching field with total-degradation parsing;
+             # `SystemHealthPanel.tsx` renders it in the existing ATOM
+             # CACHE section ("Atom cache last rebuilt: {ISO}" / "Atom
+             # cache has never been rebuilt."). RED confirmed directly:
+             # the backend case seeds two rows with the EARLIER timestamp
+             # inserted first and asserts the LATER one is reported —
+             # failed `expected null to be 5000` against the unmodified
+             # controller; three new `health.test.ts` cases and two new
+             # `system-health-panel.test.tsx` cases (the latter needed one
+             # iteration — `getByText` on the bare ISO string is an exact
+             # match against the real caption's full sentence; fixed with
+             # a substring predicate) all failed on the predicted
+             # assertions. Implemented, reran: backend 11/11 (was 9, +2);
+             # `health.test.ts` 19/19 (was 16, +3);
+             # `system-health-panel.test.tsx` 12/12 (was 10, +2). `TZ=UTC
+             # make test`: 2944 passing (was 2937, +7 — exactly this run's
+             # new tests; v3/api 406, was 404; apps/web 1583, was 1578; no
+             # other suite moved: 255 v2 vitest, 47 v2/api, 120
+             # corpus-compiler, 466 engine, 67 fold-runner).
+             # `check-test-floor.mjs`: OK, 2944 >= floor 1899 (+1045
+             # margin, unmoved). `TZ=UTC make build`: exit 0, 30 routes,
+             # unchanged (an existing-controller-plus-existing-lib-plus-
+             # existing-component change, no new route or production
+             # file). `npm run gates`: all green — locked-css OK, 1
+             # documented hunk, 294 v1 lines byte-identical; boundaries OK,
+             # 326 files, unchanged count — no new production file; fonts
+             # degraded-but-non-blocking, pre-existing, 2/6 UI fonts
+             # present; corpus-morphology OK, 362 words; corpus-glyphs OK,
+             # 206 codepoints across 4 artifacts — all unchanged, this
+             # diff carries no corpus data. `TZ=UTC npx tsc --noEmit`
+             # (apps/web): clean. `./vendor/bin/pint --test` on both
+             # changed PHP files: passed. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff produced by
+             # running the suite was reverted before committing, same
+             # discipline as every prior entry). No Arabic codepoint (the
+             # full diff swept programmatically, in Python, over the
+             # Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms Unicode blocks, plus a `\u06xx`/`\u07xx`/
+             # `\u08xx`/`\uFBxx`/`\uFExx` escape and `fromCharCode`/
+             # `fromCodePoint` mention sweep: CLEAN — every new string is
+             # a PHP/TypeScript identifier, a wire field name, or a fixed
+             # English caption, never corpus text). No oracle/golden-log/
+             # fixture/snapshot regenerated. Session start: fresh
+             # container, `HEAD`/local `main`/`origin/main` agreed at
+             # `450b272` (v3-D271) once a stale local `main` (three
+             # commits behind) was fetched and fast-forwarded — the
+             # recurring "stale local main" trap this file has recorded
+             # roughly fifty times since v3-D77. `make setup` needed the
+             # same PHP 8.4 install (`packages.sury.org` apt mirror)
+             # v3-D270/D271 already documented, since this container's
+             # default PHP was 8.3.6 and `v3/api`'s `composer.lock` needs
+             # >=8.4.1. Found by a dedicated fresh-sweep agent (Explore)
+             # directed at `packages/corpus-compiler/src`,
+             # `api/app/Console/Commands`, Eloquent relations and a
+             # `*Props`-field-never-read scan across `apps/web/components`
+             # — independently re-verified by this run directly against
+             # the migration, `AtomCacheRebuilder.php`,
+             # `SystemHealthController.php` and `lib/admin/health.ts`'s
+             # real source before writing any test. NOT addressed: every
+             # item on v3-D271's own "NOT addressed" list, unchanged —
+             # `acknowledgeReentry`'s own "makeup" branch still only logs
+             # and points the learner at `/home` (v3-D256's verdict
+             # unchanged); `DrillPicker.tsx`'s own unused `now` prop; the
+             # unused `atoms`/`corpus`/`sessions` IndexedDB object stores
+             # (v3-D232); `session_start`'s own latency metric (v0.8); the
+             # streak/away-day day-space mismatch (v3-D209);
+             # `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution` (v3-D148);
+             # `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate`
+             # as a whole class (v3-D88, v3-D151, v3-D219);
+             # `App\Flags\FlagService::enabled()` (v3-D197); multi-surah
+             # enrollment; the operational mailer/7-night launch window;
+             # PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel` (v3-D188); `corpusHash`'s
+             # zero fold-side consumer (v3-D206);
+             # `selection_determinism_check` still replaying a committed
+             # fixture; `QueueItem.score`'s own missing external reader
+             # (v3-D263) — all unchanged. `atom_cache.computed_at` is now
+             # CLOSED — remove it from future "no reader" sweeps. See
+             # DECISIONS.md v3-D272.
              # NOTE (v3-D271, 2026-10-03): `worker/fold-runner/src
              # /determinism.ts`'s own file header still said "a live
              # deployment's DB adapter (reading a real atom_cache table,

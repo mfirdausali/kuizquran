@@ -26392,3 +26392,134 @@ remaining files in `worker/fold-runner/src` this run read directly
 a future sweep does not need to re-read them for this exact bug class
 without a reason to suspect one of their own closing decisions has since
 moved.
+
+## v3-D272 (2026-10-03, nightly) — `atom_cache.computed_at` had a real writer and zero readers anywhere
+
+Tenth consecutive nightly for this build's recurring "mechanism built and
+populated, zero production reader" class (v3-D82 onward), found by a
+dedicated fresh-sweep agent directed at corners this file's own exclusion
+list had not yet named: `packages/corpus-compiler/src` exports,
+`api/app/Console/Commands`, Eloquent relations, a `*Props`-field-never-read
+scan across `apps/web/components`, and a migration-column-vs-reader sweep.
+
+**Found:** `atom_cache.computed_at` (`api/database/migrations
+/2026_08_10_223540_create_atom_cache_table.php:44`, "server-stamped epoch
+ms") is stamped by `AtomCacheRebuilder::rebuildLocked()` on every write to
+the table — both the admin's manual "rebuild atom cache" button and the
+automatic refold `EventsController::store()` triggers on every ingest
+(v3-D116/v3-D198) — but `Admin\SystemHealthController::index()`, the one
+screen built to report on this table's health, never read it, and no other
+controller, model or test touched the column outside two PHPUnit fixtures
+that set it to a filler `0`. `grep -rn "computed_at" api/app` outside the
+migration and the writer returned nothing before this fix. An operator on
+`/settings/health` could trigger a rebuild and see `usersProcessed`/
+`atomsWritten` for that one click, but had no way to tell, on a later
+visit, whether the cache behind `fold_determinism_check`'s own comparison
+was freshly rebuilt or stale from days ago — a fact the table already
+recorded on every row.
+
+Distinct from the two already-excluded siblings on this same panel's own
+header (`atom_cache_coverage`/`events_ingested_24h`, deliberately left
+unbuilt because their semantics are undefined/judgment-laden, not merely
+unwired): "when was the cache last computed" is a plain `MAX()` over a
+column that already exists, the identical shape the project already
+closed once for `corpus_ayah_hashes.ingested_at` (v3-D176) — no new
+concept, no new table, no product-design question.
+
+**Fixed**, read-only, no schema change: `SystemHealthController::index()`
+gains `atomCacheLastComputedAt` (`DB::table('atom_cache')->max('computed_at')`,
+cast to `int`, `null` only when the table is genuinely empty — never a
+fabricated `0`, the same #167 discipline every other field on this
+endpoint already follows). `lib/admin/health.ts#HealthReport` gains a
+matching `atomCacheLastComputedAt: number | null`, parsed with the same
+total-degradation discipline as every other field in that file (anything
+but a real `number` degrades to `null`, never a crash). `SystemHealthPanel.tsx`
+renders one new caption in the existing ATOM CACHE section: "Atom cache
+last rebuilt: {ISO timestamp}" or "Atom cache has never been rebuilt."
+when `null` — no second card, no new route, the field reuses the section
+the rebuild button already lives in.
+
+RED confirmed at both layers, each against the unmodified source: the
+backend case seeds TWO `atom_cache` rows with the EARLIER timestamp
+inserted first and asserts the response carries the LATER one, so the fix
+cannot pass by reading the first row inserted — failed exactly `Failed
+asserting that null is identical to 5000` (the unmodified controller never
+sent the key at all); a sibling case asserts a genuinely empty table
+reports `null`, which passed vacuously against the unmodified controller
+(a missing key and a `null` key both read as `null` client-side) and is
+kept as a negative guard, not load-bearing RED on its own. Three new
+`lib/admin/health.test.ts` cases (verbatim pass-through; an explicit
+server-sent `null`; a malformed string value) and two new
+`system-health-panel.test.tsx` cases (the ISO caption renders; the
+never-rebuilt caption renders for `null`) all failed against the
+unmodified frontend on exactly the new assertions — the component case
+needed one iteration: the first draft searched for the bare ISO string via
+`screen.getByText(iso)`, which testing-library matches as an EXACT node
+text match, and the real caption is `"Atom cache last rebuilt: <iso>"` —
+fixed by matching a substring predicate instead of an exact string.
+Implemented, reran: backend 11/11 (was 9, +2); `health.test.ts` 19/19 (was
+16, +3); `system-health-panel.test.tsx` 12/12 (was 10, +2).
+
+`TZ=UTC make test`: **2944 passing** (was 2937, +7 — exactly this run's new
+tests: 2 v3/api + 5 apps/web; v3/api 406, was 404; apps/web 1583, was 1578;
+no other suite moved: 255 v2 vitest, 47 v2/api, 120 corpus-compiler, 466
+engine, 67 fold-runner), exit 0. `check-test-floor.mjs`: OK, 2944 >= floor
+1899 (+1045 margin, unmoved, same discipline as every prior entry). `TZ=UTC
+make build`: exit 0, 30 routes, unchanged (an existing-controller-plus-
+existing-lib-plus-existing-component change, no new route or production
+file). `npm run gates`: all green — locked-css OK, 1 documented hunk, 294
+v1 lines byte-identical; boundaries OK, 326 files, unchanged count — no new
+production file; fonts degraded-but-non-blocking, pre-existing, 2/6 UI
+fonts present; corpus-morphology OK, 362 words; corpus-glyphs OK, 206
+codepoints across 4 artifacts — all unchanged, this diff carries no corpus
+data. `TZ=UTC npx tsc --noEmit` (apps/web): clean. `./vendor/bin/pint
+--test` on both changed PHP files: passed. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite
+was reverted before committing, same discipline as every prior entry —
+`git status --porcelain -- v1 v2` empty immediately before committing). No
+Arabic codepoint (the full diff swept programmatically, in Python, over
+the Arabic, Arabic Supplement, Arabic Extended-A and both Presentation
+Forms Unicode blocks, plus a `\u06xx`/`\u07xx`/`\u08xx`/`\uFBxx`/`\uFExx`
+escape and `fromCharCode`/`fromCodePoint` mention sweep: CLEAN — every new
+string is a PHP/TypeScript identifier, a wire field name, or a fixed
+English caption, never corpus text). No oracle/golden-log/fixture/snapshot
+regenerated.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled corpus
+anywhere. `HEAD`, local `main` and `origin/main` all agreed at `450b272`
+(v3-D271) once fetched and fast-forwarded — local `main` had been three
+commits behind, the recurring "stale local main" trap this file has
+recorded roughly fifty times since v3-D77, caught before any exploration
+via `git fetch origin main` + `git checkout main && git merge --ff-only
+origin/main`, a clean fast-forward, no work lost or at risk. `make setup`
+failed on its first attempt for the same reason v3-D270/D271 already
+diagnosed: this container's default PHP was 8.3.6, but `v3/api`'s
+`composer.lock` needs PHP >=8.4.1. Installed `php8.4-*` via the
+`packages.sury.org` apt mirror (added by hand, the same recovery
+v3-D270/D271 already documented) and switched the system `php` alternative
+to it; `make setup` then completed clean. Found by a dedicated fresh-sweep
+agent (Explore) handed the full exclusion list carried through v3-D271 and
+directed at `packages/corpus-compiler/src`, `api/app/Console/Commands`,
+Eloquent relations, and a `*Props`-field-never-read scan across
+`apps/web/components` — independently re-verified by this run directly
+against the migration, `AtomCacheRebuilder.php`, `SystemHealthController.php`
+and `lib/admin/health.ts`'s real source before writing any test.
+
+**NOT addressed:** every item on v3-D271's own "NOT addressed" list,
+unchanged — `acknowledgeReentry`'s own "makeup" branch still only logs and
+points the learner at `/home` (v3-D256's verdict unchanged); `DrillPicker
+.tsx`'s own unused `now` prop; the unused `atoms`/`corpus`/`sessions`
+IndexedDB object stores (v3-D232); `session_start`'s own latency metric
+(v0.8); the streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()`
+(v3-D136); `EntitlementMachine::merge()`; `App\Billing\TrialAttribution`
+(v3-D148); `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as
+a whole class (v3-D88, v3-D151, v3-D219); `App\Flags\FlagService::enabled()`
+(v3-D197); multi-surah enrollment; the operational mailer/7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `corpusHash`'s zero fold-side consumer (v3-D206);
+`selection_determinism_check` still replaying a committed fixture;
+`QueueItem.score`'s own missing external reader (v3-D263) — all unchanged.
+`atom_cache.computed_at` is now CLOSED — remove it from future "no reader"
+sweeps.

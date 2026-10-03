@@ -138,9 +138,8 @@ describe("SystemHealthPanel — three states, never two", () => {
     ) as unknown as typeof fetch;
 
     render(<SystemHealthPanel />);
-    await waitFor(() =>
-      expect(screen.getByText(new Date(1_700_000_000_000).toISOString())).toBeTruthy(),
-    );
+    const iso = new Date(1_700_000_000_000).toISOString();
+    await waitFor(() => expect(screen.getByText((text) => text.includes(iso))).toBeTruthy());
   });
 
   /** An empty cache (never rebuilt) says so honestly, never a fabricated date. */

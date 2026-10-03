@@ -8,6 +8,7 @@ use App\Support\AtomCacheRebuilder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -77,7 +78,23 @@ class SystemHealthController extends Controller
                 $this->reading('dead_letter_depth', fn () => $this->deadLetterDepth()),
             ],
             'rebuildRunning' => Cache::lock(self::REBUILD_LOCK, 0)->get() === false,
+            'atomCacheLastComputedAt' => $this->atomCacheLastComputedAt(),
         ]);
+    }
+
+    /**
+     * `atom_cache.computed_at` is stamped by every `AtomCacheRebuilder` run
+     * (manual and the automatic refold on event ingest) but had no reader
+     * anywhere — an operator had no way to tell when the cache was last
+     * actually refreshed. A plain `MAX()` over the real column; `null` when
+     * the cache is genuinely empty, never a fabricated `0` (the same #167
+     * discipline as every other reading on this endpoint).
+     */
+    private function atomCacheLastComputedAt(): ?int
+    {
+        $max = DB::table('atom_cache')->max('computed_at');
+
+        return $max === null ? null : (int) $max;
     }
 
     /**
