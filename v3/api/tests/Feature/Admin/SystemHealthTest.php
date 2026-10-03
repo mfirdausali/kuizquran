@@ -332,4 +332,54 @@ class SystemHealthTest extends TestCase
         config(['admin.emails' => []]);
         $this->getJson('/api/admin/health')->assertStatus(403);
     }
+
+    /**
+     * `atom_cache.computed_at` (stamped by every real `AtomCacheRebuilder`
+     * run, including the automatic refold on event ingest) had no reader
+     * anywhere — an operator looking at this console had no way to tell
+     * when the cache was last actually refreshed. A single `MAX(computed_at)`
+     * is unambiguous (unlike `atom_cache_coverage`/`events_ingested_24h`,
+     * whose semantics this panel's own header says are still undefined) —
+     * this proves it reports the REAL maximum across multiple rows, not
+     * merely the first row inserted.
+     *
+     * MUTATION: read `atom_cache`'s first row instead of the max. This test
+     * fails because the two seeded rows deliberately insert the EARLIER
+     * timestamp first.
+     */
+    public function test_atom_cache_last_computed_at_is_the_real_max_across_rows(): void
+    {
+        DB::table('atom_cache')->insert([
+            'user_id' => User::factory()->create()->id, 'surah' => 112, 'kind' => 'ayah', 'ref' => 1,
+            'strength' => 1, 'stability' => 1, 'difficulty' => 1, 'last_retrieval' => null,
+            'reps' => 1, 'lapses' => 0, 'encoded' => false, 'gate_due_at' => null,
+            'gate_passed' => false, 'gate_fails' => 0, 'engine_version' => 'v3-engine-0.1.0',
+            'computed_at' => 1_000,
+        ]);
+        DB::table('atom_cache')->insert([
+            'user_id' => User::factory()->create()->id, 'surah' => 112, 'kind' => 'ayah', 'ref' => 1,
+            'strength' => 1, 'stability' => 1, 'difficulty' => 1, 'last_retrieval' => null,
+            'reps' => 1, 'lapses' => 0, 'encoded' => false, 'gate_due_at' => null,
+            'gate_passed' => false, 'gate_fails' => 0, 'engine_version' => 'v3-engine-0.1.0',
+            'computed_at' => 5_000,
+        ]);
+
+        $response = $this->getJson('/api/admin/health');
+        $response->assertOk();
+        $this->assertSame(5_000, $response->json('atomCacheLastComputedAt'));
+    }
+
+    /**
+     * An empty `atom_cache` table reports `null`, never a fabricated `0` —
+     * the same #167 discipline this whole controller already follows for
+     * every other field.
+     */
+    public function test_atom_cache_last_computed_at_is_null_when_the_cache_is_empty(): void
+    {
+        $this->assertSame(0, DB::table('atom_cache')->count(), 'test setup: the cache must genuinely be empty');
+
+        $response = $this->getJson('/api/admin/health');
+        $response->assertOk();
+        $this->assertNull($response->json('atomCacheLastComputedAt'));
+    }
 }

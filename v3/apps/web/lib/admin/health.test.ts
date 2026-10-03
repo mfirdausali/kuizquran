@@ -106,6 +106,51 @@ describe("loadHealth — failure is a STATE, never an exception", () => {
     if (load.state === "unavailable") expect(load.reason).toContain("admin account");
   });
 
+  /**
+   * `atom_cache.computed_at` has a real writer (every `AtomCacheRebuilder`
+   * run) and had zero readers anywhere — an operator had no way to tell
+   * when the cache was last actually refreshed. Parsed straight through
+   * when the server sends a real number.
+   */
+  it("carries the server's own atomCacheLastComputedAt through, verbatim", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({ checks: [], rebuildRunning: false, atomCacheLastComputedAt: 1_700_000_000_000 }),
+        { status: 200 },
+      ),
+    ) as unknown as typeof fetch;
+
+    const load = await loadHealth();
+    if (load.state !== "ready") throw new Error("expected ready");
+    expect(load.report.atomCacheLastComputedAt).toBe(1_700_000_000_000);
+  });
+
+  /** An empty atom_cache reports `null` server-side — parsed as `null`, never `0`. */
+  it("an absent atomCacheLastComputedAt degrades to null, never a fabricated 0", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ checks: [], rebuildRunning: false, atomCacheLastComputedAt: null }), {
+        status: 200,
+      }),
+    ) as unknown as typeof fetch;
+
+    const load = await loadHealth();
+    if (load.state !== "ready") throw new Error("expected ready");
+    expect(load.report.atomCacheLastComputedAt).toBeNull();
+  });
+
+  /** A malformed value (never sent by the real controller) also degrades to null. */
+  it("a malformed atomCacheLastComputedAt degrades to null rather than crashing", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ checks: [], rebuildRunning: false, atomCacheLastComputedAt: "oops" }), {
+        status: 200,
+      }),
+    ) as unknown as typeof fetch;
+
+    const load = await loadHealth();
+    if (load.state !== "ready") throw new Error("expected ready");
+    expect(load.report.atomCacheLastComputedAt).toBeNull();
+  });
+
   it("a 200 whose JSON has no `checks` becomes `unavailable`, never an empty ready", async () => {
     globalThis.fetch = vi.fn(async () =>
       new Response(JSON.stringify({ rebuildRunning: false }), { status: 200 }),

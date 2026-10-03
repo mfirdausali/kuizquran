@@ -117,6 +117,48 @@ describe("SystemHealthPanel — three states, never two", () => {
     await waitFor(() => expect(screen.getByText(/fold_determinism_check/)).toBeTruthy());
     expect(screen.queryByRole("alert")).toBeNull();
   });
+
+  /**
+   * `atom_cache.computed_at` is a real, server-stamped fact
+   * (`AtomCacheRebuilder`'s own writer) that had no reader on this console
+   * at all. Rendered as an honest ISO timestamp, never a relative/fuzzy
+   * guess — this panel is a diagnostic surface, same discipline as every
+   * other raw timestamp it already shows.
+   */
+  it("shows when the atom cache was last rebuilt", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          checks: [{ metric: "fold_determinism_check", status: "ok", value: 0, detail: null }],
+          rebuildRunning: false,
+          atomCacheLastComputedAt: 1_700_000_000_000,
+        }),
+        { status: 200 },
+      ),
+    ) as unknown as typeof fetch;
+
+    render(<SystemHealthPanel />);
+    await waitFor(() =>
+      expect(screen.getByText(new Date(1_700_000_000_000).toISOString())).toBeTruthy(),
+    );
+  });
+
+  /** An empty cache (never rebuilt) says so honestly, never a fabricated date. */
+  it("says the atom cache has never been rebuilt when the value is null", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          checks: [{ metric: "fold_determinism_check", status: "ok", value: 0, detail: null }],
+          rebuildRunning: false,
+          atomCacheLastComputedAt: null,
+        }),
+        { status: 200 },
+      ),
+    ) as unknown as typeof fetch;
+
+    render(<SystemHealthPanel />);
+    await waitFor(() => expect(screen.getByText(/never been rebuilt/i)).toBeTruthy());
+  });
 });
 
 describe("SystemHealthPanel — the rebuild button, edge case #168", () => {
