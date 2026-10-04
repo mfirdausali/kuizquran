@@ -57,6 +57,93 @@ make test    # 2946 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 406 v3/api + 120 corpus-compiler
              # + 466 engine + 67 fold-runner + 1585 apps/web. (v3-D273, 2026-10-03)
+             # NOTE (v3-D274, 2026-10-04): eighth documented empty sweep for
+             # this build's recurring "mechanism built and unit-tested, zero
+             # production caller / stale docblock / drifted duplicate" bug
+             # class (v3-D82 onward — after v3-D196, v3-D197, v3-D246,
+             # v3-D248, v3-D254, v3-D264 and v3-D267's own seven prior empty
+             # sweeps). Five fresh veins this run, all independent of prior
+             # nights' own candidate lists, all came back clean: a repo-wide
+             # grep for stale "zero caller"/"unwired"/"never rendered" claims
+             # (every hit a historical reference to an already-closed gap); a
+             # corrected zero-external-caller export sweep (a first, naive
+             # pass over `apps/web/lib`/`packages/engine/src`/
+             # `worker/fold-runner/src`/`packages/corpus-compiler/src` alone
+             # surfaced 373 false-positive "orphans" simply because the
+             # caller search excluded `apps/web/components`/`apps/web/app`/
+             # each package's own `bin/` — the dominant false-positive shape
+             # this exact method has produced before; corrected to 32
+             # candidates, every one a known same-file/same-package-internal
+             # helper, a test-only helper, or an already-named deliberately-
+             # deferred module — `placement.ts` (FR10), `selection.ts`'s
+             # `seedFromKey` (`selection_determinism_check` still replaying a
+             # fixture), `lib/pricing.ts#regionFromCountry()` (blocked on the
+             # still-unbuilt checkout flow)); a field-by-field wire-
+             # completeness re-audit of five admin panels
+             # (`AdminRolesPanel.tsx`, `PurgeLedgerPanel.tsx`,
+             # `BillingAuditPanel.tsx`, `GlossDraftsPanel.tsx`'s counts,
+             # `SystemHealthPanel.tsx`'s dead-letter list) — all fields
+             # already rendered; a TS/PHP config-agreement sweep
+             # (`config/pdpa.php`'s `deletion_grace_days` has no client-side
+             # numeric mirror to drift against; `config/corpus.php` is
+             # build-tooling path config only); and a full re-read of
+             # `.github/workflows/ci.yml` against the documented v3-D119..
+             # D122 fix, confirmed live via `gh run list` — the last five
+             # pushes to `main` are all green, ~2m50s each. `docs/BUILD-
+             # PLAN.md`'s own 32-step order was re-read against the repo and
+             # re-confirmed: steps 1-26+29 done, 27/28 human-content-blocked,
+             # 30's engineering done, only the calendar/infra half and
+             # PAY-1 (a live Stripe account) genuinely open. `TZ=UTC make
+             # test`: 2946 passing, matching v3-D273's own recorded count
+             # exactly, no drift in any of the seven suites.
+             # `check-test-floor.mjs`: OK, 2946 >= floor 1899 (+1047 margin,
+             # unmoved). `TZ=UTC make build`: exit 0, 30 routes, unchanged.
+             # `npm run gates`: all green, every number matching v3-D273's
+             # own exactly (326 files, 294 v1 lines, 362 words, 206
+             # codepoints). `npx tsc --noEmit`, run separately across all
+             # four v3 node packages: clean in all four. No file touched
+             # (`git status --porcelain` empty throughout this run's own
+             # investigation, apart from this documentation commit — a
+             # stray `v2/tsconfig.tsbuildinfo` build-cache diff produced by
+             # running the suite was reverted before committing). No
+             # `v1/**`/`v2/**` edit. No Arabic codepoint (nothing written).
+             # Session start: fresh container, `make setup` ran clean from
+             # scratch (the `packages.sury.org` apt-mirror route for PHP 8.4
+             # succeeded cleanly this run, unlike v3-D273's own run, which
+             # hit an "Unauthorized Persistence" refusal and fell back to a
+             # direct `.deb` install — both recoveries are now on record).
+             # `HEAD`, local `main` and `origin/main` all already agreed at
+             # `fca29d1` (v3-D273) — no stale-local-`main` trap this run,
+             # confirmed via `git fetch origin main` before any exploration.
+             # NOT addressed: every item on v3-D273's own "NOT addressed"
+             # list, unchanged and now re-confirmed exhausted an eighth
+             # time — `acknowledgeReentry`'s own "makeup" branch still only
+             # logs and points the learner at `/home` (v3-D256's verdict
+             # unchanged); `DrillPicker.tsx`'s own unused `now` prop; the
+             # unused `atoms`/`corpus`/`sessions` IndexedDB object stores
+             # (v3-D232); `session_start`'s own latency metric (v0.8); the
+             # streak/away-day day-space mismatch (v3-D209);
+             # `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution` (v3-D148);
+             # `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate`
+             # as a whole class (v3-D88, v3-D151, v3-D219);
+             # `App\Flags\FlagService::enabled()` (v3-D197); multi-surah
+             # enrollment; the operational mailer/7-night launch window;
+             # PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel` (v3-D188); `corpusHash`'s zero
+             # fold-side consumer (v3-D206); `selection_determinism_check`
+             # still replaying a committed fixture; `QueueItem.score`'s own
+             # missing external reader (v3-D263) — all unchanged. A future
+             # run should not spend a full night on another generic sweep of
+             # this exact shape without either a genuinely fresh corner (not
+             # yet tried: a byte-for-byte migration-column-vs-model-cast
+             # re-audit on the two newest migrations, `away`/
+             # `resume_massed`; a line-by-line re-read of the Playwright e2e
+             # specs, last fully read at v3-D248) or a willingness to take
+             # on one of the larger, already-named architectural items
+             # above. See DECISIONS.md v3-D274.
              # NOTE (v3-D273, 2026-10-03): DEFECTS.md#B17 — a "makeup"
              # queue item (`scheduler.ts`'s own step 1, v3-D256: an overdue
              # cold gate pulled into the queue, capped at `MAKEUP_CAP`) is
