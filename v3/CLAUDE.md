@@ -57,6 +57,78 @@ make test    # 2946 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 406 v3/api + 120 corpus-compiler
              # + 466 engine + 67 fold-runner + 1585 apps/web. (v3-D273, 2026-10-03)
+             # NOTE (v3-D275, 2026-10-04): both of v3-D274's own named fresh
+             # corners were swept this run, and both came back clean — a
+             # byte-for-byte migration-column-vs-model-cast audit on the two
+             # newest migrations (`away`/`resume_massed`), and a full
+             # line-by-line re-read of all five Playwright e2e specs, last
+             # done at v3-D248.
+             #
+             # Migration audit: `add_away_columns_to_events_table.php`
+             # (`away_day_index` unsignedInteger nullable, `away` boolean
+             # nullable) and `add_resume_massed_column_to_events_table.php`
+             # (`resume_massed` boolean nullable) each have a matching
+             # `Event::$fillable` entry and the correct `boolean` cast
+             # (`away_day_index` needs none — a plain integer column, PHP
+             # 8.4's own native pdo_pgsql handling returns it natively).
+             # `EventsController::FIELD_MAP`/`NULLABLE_FIELDS` carry both
+             # pairs through the ingest AND pull round trip symmetrically —
+             # `store()`'s write loop and `toWire()`'s read loop share the
+             # same list, so neither direction can drift from the other by
+             # construction. `EventWireCodec.php` forwards NEITHER pair to
+             # the fold-runner — confirmed NOT a gap, the same reasoning
+             # v3-D248 already recorded for `resume`/`resumeMassed`:
+             # `rebuild.ts` has no branch for `day_marked_away` or
+             # `interruption` at all (invariant #5's structural-absence
+             # discipline, re-confirmed by reading its own `switch` on
+             # `e.type`), so there is nothing for the fold-runner to read
+             # even if the codec forwarded them.
+             #
+             # E2e re-read: `first-session.test.ts`, `commit-before-
+             # paint.test.ts`, `airplane-mode.test.ts`, `a11y-
+             # geometry.test.ts`, `idb-helpers.test.ts` read in full, line by
+             # line, for the "asserts a gap that has since closed" shape.
+             # All five read current against the real shipped behaviour
+             # (service worker, session loop, drill picker, onboarding,
+             # a11y geometry) — no stale tripwire, no reference to a route
+             # or control that no longer exists.
+             #
+             # Both corners are now CLOSED for future "genuinely fresh
+             # corner" sweeps. `TZ=UTC make test`: 2946 passing, matching
+             # v3-D273's/v3-D274's own recorded count exactly, no drift in
+             # any of the seven suites. `check-test-floor.mjs`: OK, 2946 >=
+             # floor 1899 (+1047 margin, unmoved). `TZ=UTC make build`: exit
+             # 0, 30 routes, unchanged. `npm run gates`: all green — locked-
+             # css OK, 1 documented hunk, 294 v1 lines byte-identical;
+             # boundaries OK, 326 files, unchanged count; fonts degraded-
+             # but-non-blocking, pre-existing, 2/6 UI fonts present; corpus-
+             # morphology OK, 362 words; corpus-glyphs OK, 206 codepoints
+             # across 4 artifacts — all unchanged. `TZ=UTC npx tsc
+             # --noEmit`, run separately across all four v3 node packages:
+             # clean in all four. No file touched (`git status --porcelain`
+             # empty throughout this run's own investigation, apart from
+             # this documentation commit — a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff produced by running the suite was reverted
+             # before committing). No `v1/**`/`v2/**` edit. No Arabic
+             # codepoint (nothing written). Session start: fresh container,
+             # `make setup` needed PHP 8.4 (default was 8.3.6,
+             # `v3/api`'s own `composer.lock` needs >=8.4.1, the same pin
+             # v3-D119/v3-D270..D274 already documented) — installed cleanly
+             # via the documented `packages.sury.org` apt mirror, no
+             # "Unauthorized Persistence" refusal this run. `HEAD`, local
+             # `main` and `origin/main` all already agreed at `f464e08`
+             # (v3-D274) — no stale-local-`main` trap this run. NOT
+             # addressed: every item on v3-D274's own "NOT addressed" list,
+             # unchanged and now re-confirmed exhausted a ninth time — see
+             # DECISIONS.md v3-D275 for the full enumeration (unchanged from
+             # v3-D274's own list). A future run should not attempt a TENTH
+             # generic sweep of this shape without a genuinely new vein (not
+             # yet tried: a full read of `scripts/check-*.mjs`'s gate
+             # scripts themselves for an internal logic bug, as opposed to
+             # merely confirming they run green; or `api/database/
+             # factories`/`seeders` against the current schema) or a
+             # willingness to take on one of the larger, already-named
+             # architectural items. See DECISIONS.md v3-D275.
              # NOTE (v3-D274, 2026-10-04): eighth documented empty sweep for
              # this build's recurring "mechanism built and unit-tested, zero
              # production caller / stale docblock / drifted duplicate" bug

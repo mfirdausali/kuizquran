@@ -26895,3 +26895,130 @@ two newest migrations, `away`/`resume_massed`, which post-date v3-D247's
 own last full pass; a line-by-line re-read of the Playwright e2e specs,
 last fully read at v3-D248) or a willingness to take on one of the
 larger, already-named architectural items above.
+
+## v3-D275 (2026-10-04, nightly) — both of v3-D274's own named fresh corners swept, both clean
+
+v3-D274's own closing note named two genuinely untried veins rather than
+a tenth repeat of the same generic zero-caller sweep: a byte-for-byte
+migration-column-vs-model-cast audit on the two newest migrations
+(`away`/`resume_massed`), and a full line-by-line re-read of the
+Playwright e2e specs, last done at v3-D248. Both were run this night.
+Both came back clean.
+
+**Migration audit.** `2026_09_12_210000_add_away_columns_to_events_table.php`
+(`away_day_index` unsignedInteger nullable, `away` boolean nullable) and
+`2026_09_15_120000_add_resume_massed_column_to_events_table.php`
+(`resume_massed` boolean nullable) each have a matching `Event::$fillable`
+entry and the correct `boolean` cast (`away_day_index` needs none — a
+plain integer column, and PHP 8.4's own pdo_pgsql native-type handling,
+v3-D247's own already-verified reasoning, returns it natively, not as a
+string). `EventsController::FIELD_MAP`/`NULLABLE_FIELDS` carry both pairs
+through the ingest AND pull round trip symmetrically — `store()`'s write
+loop and `toWire()`'s read loop both iterate the SAME `NULLABLE_FIELDS`
+list, so the two directions cannot drift from each other by construction,
+confirmed by reading both loops side by side rather than assumed.
+Confirmed live, not just read: a fresh `php artisan migrate --force`
+against a clean SQLite DB this run applied both migrations cleanly, in
+order, after the twenty that precede them.
+
+`EventWireCodec.php` (the one shared conversion both `AtomCacheRebuilder`
+and `DeterminismCheckCommand::sampleFromDatabase()` use to hand real
+events to the Node fold-runner) forwards NEITHER pair — grep-confirmed
+zero hits for `away`, `away_day_index` or `resume_massed` anywhere in
+that file. This is NOT a gap, the same reasoning v3-D248 already recorded
+for `resume`/`resumeMassed`'s own identical asymmetry:
+`packages/engine/src/types.ts`'s own docblock on both fields states a
+`day_marked_away` event is "a read-only mirror, exactly like test_* ...
+so marking a day away can never move a strength or a due date", and
+`rebuild.ts` has no branch for `day_marked_away` or `interruption` at all
+(invariant #5's structural-absence discipline) — re-confirmed directly
+this run by reading `rebuild.ts`'s own `switch` on `e.type`: tap/
+reconstruct_tap, rung_complete/ayah_produced, gate_result, gate_demote,
+connection_born, junction_result, chain_step, never `day_marked_away` or
+`interruption`. There is nothing for the fold-runner to read even if the
+codec forwarded the fields, so the codec's silence is correct, not an
+oversight.
+
+**E2e re-read.** All five specs under `apps/web/e2e/` —
+`first-session.test.ts`, `commit-before-paint.test.ts`,
+`airplane-mode.test.ts`, `a11y-geometry.test.ts`, `idb-helpers.test.ts` —
+read in full, line by line, specifically checking for the "asserts a gap
+that has since closed" shape v3-D245/D246/D248 each flagged as a risk for
+exactly this suite. All five read current against the real shipped
+behaviour: the service worker (registration, control, shell/corpus
+precaching, the /api never-cached rule, the cold-offline-drill and
+reload-offline walks, the onboarded-steer-offline case); the session loop
+(`/session` mounting, tapping, the reduced-motion text-verdict
+requirement); the drill picker's victory-lap/graded radios and preview
+summary; the commit-before-paint durability proof and the PREVIEW-
+surfaces-write-nothing proof (`/drill`, `/progress/list`, `/plan`); the
+onboarding seven-screen walk (`completeOnboarding`'s own control-by-
+accessible-name discipline); the a11y geometry floor (44px targets
+measured from laid-out boxes across `/`, `/start`, `/drill`,
+`/progress/list`, native table semantics, `aria-sort`, bidi isolation,
+the Amiri font actually resolving). No stale tripwire found: no assertion
+describes a gap that has since closed, no reference to a route or
+control that no longer exists, no header claim contradicted by the
+current source.
+
+Both corners are now CLOSED for future "genuinely fresh corner"
+sweeps — remove them from any future run's list of untried veins.
+
+`TZ=UTC make test`: 2946 passing, matching v3-D273's/v3-D274's own
+recorded count exactly, no drift in any of the seven suites (255 v2
+vitest, 47 v2/api, 406 v3/api, 120 corpus-compiler, 466 engine, 67
+fold-runner, 1585 apps/web). `check-test-floor.mjs`: OK, 2946 >= floor
+1899 (+1047 margin, unmoved, same discipline as every prior entry).
+`TZ=UTC make build`: exit 0, 30 routes, unchanged. `npm run gates`: all
+green — locked-css OK, 1 documented hunk, 294 v1 lines byte-identical;
+boundaries OK, 326 files, unchanged count; fonts degraded-but-non-
+blocking, pre-existing, 2/6 UI fonts present; corpus-morphology OK, 362
+words; corpus-glyphs OK, 206 codepoints across 4 artifacts — all
+unchanged, matching v3-D274's own recorded numbers exactly. `TZ=UTC npx
+tsc --noEmit`, run separately across all four v3 node packages
+(`apps/web`, `packages/engine`, `packages/corpus-compiler`,
+`worker/fold-runner`): clean in all four. No file touched (`git status
+--porcelain` empty throughout this run's own investigation, apart from
+this documentation commit — a stray `v2/tsconfig.tsbuildinfo` build-cache
+diff produced by running the suite was reverted before committing, same
+discipline as every prior entry). No `v1/**`/`v2/**` edit. No Arabic
+codepoint (nothing written to any production or test file this run).
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere. `make setup` needed PHP 8.4 (this container's default was
+PHP 8.3.6, and `v3/api`'s own `composer.lock` needs >=8.4.1, the same pin
+v3-D119/v3-D270/v3-D271/v3-D272/v3-D273/v3-D274 already documented) —
+installed cleanly this run via the documented `packages.sury.org` apt
+mirror (a `sources.list.d` entry + an imported GPG keyring), no
+"Unauthorized Persistence" refusal and no `.deb`-file workaround needed,
+the `apt-get install` call for `php8.4`/`php8.4-cli`/`php8.4-pgsql`/
+`php8.4-intl`/etc. completing cleanly in one pass. `HEAD`, local `main`
+and `origin/main` all already agreed at `f464e08` (v3-D274) — no
+stale-local-`main` trap this run, confirmed via `git fetch origin main`
+before any exploration.
+
+**NOT addressed:** every item on v3-D274's own "NOT addressed" list,
+unchanged and now re-confirmed exhausted a ninth time —
+`acknowledgeReentry`'s own "makeup" branch still only logs and points the
+learner at `/home` (v3-D256's verdict unchanged); `DrillPicker.tsx`'s own
+unused `now` prop; the unused `atoms`/`corpus`/`sessions` IndexedDB
+object stores (v3-D232); `session_start`'s own latency metric (v0.8); the
+streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151, v3-D219); `App\Flags\FlagService::enabled()`
+(v3-D197); multi-surah enrollment; the operational mailer/7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `corpusHash`'s zero fold-side consumer (v3-D206);
+`selection_determinism_check` still replaying a committed fixture;
+`QueueItem.score`'s own missing external reader (v3-D263) — all
+unchanged. With both of v3-D274's own named fresh corners now exhausted
+too, a future run should not attempt a TENTH generic sweep of this exact
+shape without a genuinely new vein (not yet tried: a full read of
+`scripts/check-*.mjs`'s gate scripts themselves for an internal logic
+bug, as opposed to merely confirming they run green; or
+`api/database/factories`/`seeders` against the current schema) or a
+willingness to take on one of the larger, already-named architectural
+items above.
