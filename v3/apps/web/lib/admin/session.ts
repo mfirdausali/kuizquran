@@ -149,10 +149,27 @@ export async function adminLogin(email: string, password: string): Promise<Admin
   return { ok: true, identity };
 }
 
-/** Forgets the current identity. The next `checkAdminSession()` call (or
- *  the next apiFetch) re-mints an ordinary anonymous learner identity, same
- *  as any other 401 recovery — there is no separate "admin logout" concept
- *  server-side, only "this browser stopped presenting a token." */
-export function adminLogout(): void {
+/**
+ * `POST /api/auth/logout` (best-effort, revokes the token server-side) then
+ * forgets the current identity locally — the exact same two steps
+ * `lib/account/auth.ts#logoutAccount` takes, because the header above is
+ * literal: admin auth IS an ordinary Sanctum bearer token for the same
+ * `User` model, so the same revoke endpoint applies to it. Without this, a
+ * clicked "Sign out" only ever stopped THIS browser from presenting the
+ * token — the token itself stayed live in `personal_access_tokens`
+ * indefinitely, so anyone who later obtained the bare string (a log, a
+ * devtools inspection, a copied header) could keep acting as that admin
+ * forever after the admin believed the session had ended.
+ *
+ * The next `checkAdminSession()` call (or the next `apiFetch`) re-mints an
+ * ordinary anonymous learner identity, same as any other 401 recovery — so
+ * there is no separate "signed out" state to hold in the meantime.
+ */
+export async function adminLogout(): Promise<void> {
+  try {
+    await apiFetch("/api/auth/logout", { method: "POST" });
+  } catch {
+    // best-effort — the local token is cleared regardless, below.
+  }
   clearToken();
 }

@@ -75,8 +75,7 @@ export function AdminGate({ children }: { children: ReactNode }) {
             <button
               type="button"
               onClick={() => {
-                adminLogout();
-                refresh();
+                void adminLogout().then(refresh);
               }}
             >
               Sign out

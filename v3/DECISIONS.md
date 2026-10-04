@@ -27023,6 +27023,176 @@ bug, as opposed to merely confirming they run green; or
 willingness to take on one of the larger, already-named architectural
 items above.
 
+## v3-D277 (2026-10-04, nightly) — admin "Sign out" never revoked the token server-side, contradicting this app's own stated identity model
+
+**A genuinely new vein, found by reading the admin console for what it does
+NOT do rather than for another zero-caller export.** `v3/apps/web/components/
+admin/AdminGate.tsx` has gated every `/workbench`/`/settings/*` admin screen
+behind a real server verdict since v3-D127. While confirming there is no
+cross-navigation gap between the ten separate admin routes it gates (a real
+question, resolved as a non-gap: `docs/BUILD-PLAN.md`'s own M8 line, "nav
+homes for flags/reports/templates/audit viewer," names a route per feature,
+already built one at a time across v3-D100/D124/D125/D129 — not a single
+cross-linking index, and "reports"/"templates" are M11 social-suite nouns,
+post-launch and flag-gated, with nothing built yet to link to), this run read
+`lib/admin/session.ts#adminLogout()` end to end and found its own docblock
+contradicted its own neighbour's design principle.
+
+`adminLogout()`'s header (unchanged since v3-D127) said: "there is no
+separate 'admin logout' concept server-side, only 'this browser stopped
+presenting a token.'" But the SAME FILE's own class-level header states
+plainly: "Admin auth is an ordinary Sanctum bearer token for the SAME `User`
+model a learner account is — 'admin' is an allowlist-membership fact about a
+user, not a different kind of session." Those two claims cannot both be
+true. A real, generic, non-admin-specific revocation endpoint already
+exists — `AuthController::logout()` (`POST /api/auth/logout`, built at
+v3-D153), which deletes `$request->user()->currentAccessToken()` — and
+since admin auth is genuinely "an ordinary Sanctum bearer token for the
+same `User` model," that endpoint applies to an admin's own token exactly
+as it does to a learner's. `lib/account/auth.ts#logoutAccount()` (also
+v3-D153, its own docblock: "mirrors `lib/admin/session.ts`'s login/logout
+shape") correctly calls it — `await apiFetch("/api/auth/logout", {method:
+"POST"})` before clearing the local token — but `adminLogout()`, built one
+layer EARLIER in the same v3-D127 run that `logoutAccount()`'s own docblock
+says it was mirrored from, never did. `grep -rn "api/auth/logout"
+apps/web/lib/admin` returned nothing before this fix.
+
+Concretely: clicking "Sign out" in the admin console cleared only THIS
+browser's copy of the bearer token. The token itself stayed live and valid
+in `personal_access_tokens` indefinitely — Sanctum tokens have no
+expiry here and nothing else ever revokes one. Anyone who later obtained
+the bare token string (a server log, a devtools inspection, a copied
+`Authorization` header, a leaked `.env`-adjacent dump) could keep acting as
+that admin — including signing qari-tier verifications, ramping a killed
+flag back on, or running a billing override (v3-D147) — forever after the
+admin themself believed the session had ended. Distinct from every prior
+"computed, zero reader" instance this file has closed roughly a hundred
+times: this is not a value nobody looked at, it is an action a button
+visibly promises ("Sign out") and silently fails to fully perform.
+
+**Fixed, one file plus its one caller, no new wire field, no schema
+change** (the endpoint and the `personal_access_tokens` table both already
+existed): `adminLogout()` is now `async`, and awaits
+`apiFetch("/api/auth/logout", {method: "POST"})` in a `try`/`catch`
+—"best-effort," the exact same phrase and the exact same shape
+`logoutAccount()` already uses, since a revoke failure (network drop,
+already-expired token) must never block the learner-facing half of
+sign-out, which is purely local (`clearToken()`) — before clearing the
+local token, mirroring `logoutAccount()`'s own two-step order exactly.
+`AdminGate.tsx`'s one caller changes from a fire-and-forget
+`adminLogout(); refresh();` to `void adminLogout().then(refresh)`, so the
+re-check (`checkAdminSession()`, which reads `hasLiveToken()`) only runs
+after the local token is genuinely gone — the same ordering guarantee the
+old synchronous version got for free, preserved across the new `await`.
+The stale docblock claim is replaced with the real mechanism and the real
+consequence of skipping it, matching the "docblock says X, reality is Y"
+correction template this build has used roughly a dozen times
+(v3-D90/D110/D123/D236/D244/D251/D258/D268/D269/D270/D276) for exactly this
+contradiction shape.
+
+**RED confirmed directly, against the live (pre-fix) source,** not merely
+asserted: two new cases replace `session.test.ts`'s own single pre-existing
+`adminLogout` case (net +1 test — the old case's own assertion, "forgets
+the current identity," is subsumed by both new cases, which each still
+assert `getToken()` is `null` afterward). The first seeds a live token,
+mocks `fetch` to record every call, awaits `adminLogout()`, and asserts
+`fetch` was called with a URL containing `/api/auth/logout` and
+`method: "POST"` — run against the unmodified (synchronous,
+`clearToken()`-only) `adminLogout`, this failed exactly `expected [] to
+deeply equal [ {…} ]`: zero requests made. The second seeds a live token,
+makes `fetch` throw, and asserts `adminLogout()` still resolves (never
+rejects) and the token is still cleared — run against the unmodified
+source this failed on `TypeError: You must provide a Promise to expect()
+when using .resolves, not 'undefined'` (the old function was not even
+`async`, so there was no promise to await in the first place). Restored
+(implemented the fix), reran: `session.test.ts` 11/11 green (was 9, +2
+new, -1 old, net +1). `test/admin-gate.test.tsx`'s own pre-existing
+"sign-out clears the session and returns to the login form" case needed no
+change — its mocked `fetch` already answers any URL with 200, so the new
+`/api/auth/logout` call it now also makes resolves the same way; reran
+6/6 green, unchanged count, confirming no regression on the real
+login→logout→re-check round trip.
+
+`TZ=UTC make test` (fresh container this run — see session-start note
+below): **2948 passing** (was 2947, +1 — exactly this run's net new test;
+apps/web 1587, was 1586; no other suite moved: 255 v2 vitest, 47 v2/api,
+406 v3/api [2 incomplete/PAY-1 + 6 Postgres/pcntl-gated skips, both
+environment-dependent and unrelated to this run], 120 corpus-compiler, 466
+engine, 67 fold-runner), exit 0. `check-test-floor.mjs`: OK, 2948 >= floor
+1899 (+1049 margin, unmoved, same discipline as every prior entry). `TZ=UTC
+make build`: exit 0, 30 routes, unchanged (a `lib/`-plus-one-component
+change, no new route or production file). `npm run gates`: all green —
+locked-css OK, 1 documented hunk, 294 v1 lines byte-identical; boundaries
+OK, 326 files, unchanged count — no new production file; fonts
+degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints across 4
+artifacts — all unchanged, this diff carries no corpus data. `npx tsc
+--noEmit` (apps/web): clean. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite
+was reverted before committing, same discipline as every prior entry —
+`git status --porcelain -- v1 v2` empty immediately before committing). No
+Arabic codepoint (both changed production files plus the test file swept
+programmatically, in Python, over the Arabic, Arabic Supplement, Arabic
+Extended-A and both Presentation Forms Unicode blocks: zero matches —
+every new string is a TypeScript identifier, an HTTP path, a fixed English
+docblock/comment sentence, or a synthetic test-fixture token string, never
+corpus text). No oracle/golden-log/fixture/snapshot regenerated — this
+diff touches one production module, one component, and one test file,
+nothing under `fixtures/`, `docs/qa-samples/` or any compiled corpus
+artifact.
+
+**Session start and recovery:** fresh container — no `node_modules`/
+`vendor`/compiled corpus anywhere, and this container's default PHP was
+8.3.6 while `v3/api`'s `composer.lock` needs `>=8.4.1` (the same pin
+roughly a dozen prior entries have recorded); installed PHP 8.4 cleanly via
+the documented `packages.sury.org` apt mirror in one pass, no
+"Unauthorized Persistence" refusal, `make setup` then completed clean end
+to end with no retries. **The recurring stale-local-`main` trap recurred
+again**, this time caught BEFORE any test was run rather than after: this
+run's very first `git fetch origin main` showed `origin/main` already at
+`5d683b4` (v3-D276) while the local `main` branch ref sat eleven commits
+behind at `dc8ed36` (v3-D269) — the work was fully pushed, only the local
+ref was stale, confirmed via `git log -1 --oneline HEAD`/`origin/main`
+agreeing exactly once `HEAD` itself was checked (this run had started on a
+detached `HEAD` already at the true tip, `5d683b4`, matching v3-D77
+Finding 0's own "detached HEAD, stale local `main`" shape exactly).
+Recovered with `git checkout main && git merge --ff-only origin/main`, a
+clean fast-forward carrying this run's own uncommitted fix through
+untouched — `git status --porcelain` showed the identical three modified
+files before and after, and the three targeted test files were rerun green
+post-merge before trusting the fast-forward.
+
+**NOT addressed:** the admin-console cross-navigation question raised and
+resolved as a non-gap above (recorded so a future run does not re-open it:
+BUILD-PLAN M8's "nav homes" phrase means one route per feature, already
+satisfied; a single staff-facing index page linking all ten
+`/settings/*`+`/workbench` routes together would be a genuine, separate,
+larger UX improvement — not a defect — and was deliberately not built
+here, since nothing in WIREFRAME.md or BUILD-PLAN.md requires one and
+every route is independently reachable and independently gated). Every
+item on v3-D276's own "NOT addressed" list, unchanged and now re-confirmed
+exhausted a tenth time — `acknowledgeReentry`'s own "makeup" branch still
+only logs and points the learner at `/home` (v3-D256's verdict unchanged);
+`DrillPicker.tsx`'s own unused `now` prop; the unused
+`atoms`/`corpus`/`sessions` IndexedDB object stores (v3-D232);
+`session_start`'s own latency metric (v0.8); the streak/away-day
+day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151, v3-D219); `App\Flags\FlagService::enabled()`
+(v3-D197); multi-surah enrollment; the operational mailer/7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `corpusHash`'s zero fold-side consumer (v3-D206);
+`selection_determinism_check` still replaying a committed fixture;
+`QueueItem.score`'s own missing external reader (v3-D263) — all
+unchanged. `adminLogout()`'s own token-revocation gap is now CLOSED —
+remove it from future sweeps. A future run should widen past the admin
+console's own `lib/`/`components/` tree (now read closely twice in two
+nights) toward a corner not yet named in this list, or take on one of the
+larger architectural items above.
+
 ## v3-D276 (2026-10-04, nightly) — a genuinely new vein, `scripts/check-*.mjs` read line by line: one real documentation gap found and closed, no live bug
 
 v3-D275's own closing note named the one untried vein left for this bug

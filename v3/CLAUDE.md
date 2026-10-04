@@ -53,10 +53,132 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2947 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 2948 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 406 v3/api + 120 corpus-compiler
-             # + 466 engine + 67 fold-runner + 1586 apps/web. (v3-D276, 2026-10-04)
+             # + 466 engine + 67 fold-runner + 1587 apps/web. (v3-D277, 2026-10-04)
+             # NOTE (v3-D277, 2026-10-04): admin "Sign out"
+             # (`lib/admin/session.ts#adminLogout()`, wired v3-D127) never
+             # revoked the bearer token server-side — it only called
+             # `clearToken()`, the local half — contradicting this same
+             # file's own class-level header, which states admin auth "is
+             # an ordinary Sanctum bearer token for the SAME `User` model a
+             # learner account is." `AuthController::logout()`
+             # (`POST /api/auth/logout`, v3-D153) is a real, generic,
+             # non-admin-specific revocation endpoint that deletes
+             # `$request->user()->currentAccessToken()` — if admin auth is
+             # genuinely an ordinary Sanctum token on the same model, that
+             # endpoint applies to it exactly as it does to a learner's, and
+             # `lib/account/auth.ts#logoutAccount()` (also v3-D153, its own
+             # docblock: "mirrors `lib/admin/session.ts`'s login/logout
+             # shape") already calls it correctly — `adminLogout()`, built
+             # one layer earlier in the very run `logoutAccount()` claims to
+             # mirror, never did. `grep -rn "api/auth/logout"
+             # apps/web/lib/admin` returned nothing before this fix. Not
+             # cosmetic: clicking "Sign out" cleared only this browser's
+             # copy of the token; the token itself stayed live and valid in
+             # `personal_access_tokens` indefinitely (no expiry, nothing
+             # else revokes one), so anyone who later obtained the bare
+             # string (a log, a devtools inspection, a copied header) could
+             # keep acting as that admin — signing qari verifications,
+             # ramping a killed flag back on, running a billing override —
+             # forever after the admin believed the session had ended.
+             # Found while confirming a separate, adjacent question —
+             # whether the ten independent `/settings/*`+`/workbench` admin
+             # routes need a single cross-navigation index — and resolving
+             # that one as a non-gap: BUILD-PLAN M8's "nav homes for
+             # flags/reports/templates/audit viewer" means one route per
+             # feature (already satisfied, built one at a time across
+             # v3-D100/D124/D125/D129), not a linking index, and
+             # "reports"/"templates" are M11 social-suite nouns with
+             # nothing built yet to link to; a cross-nav index would be a
+             # genuine but separate UX improvement, not a defect, and was
+             # deliberately not built. Fixed: `adminLogout()` is now
+             # `async`, awaits `apiFetch("/api/auth/logout", {method:
+             # "POST"})` in a `try`/`catch` ("best-effort," mirroring
+             # `logoutAccount()`'s own shape exactly — a revoke failure must
+             # never block local sign-out) before `clearToken()`;
+             # `AdminGate.tsx`'s one caller changes from a fire-and-forget
+             # `adminLogout(); refresh();` to `void
+             # adminLogout().then(refresh)`, preserving the same
+             # token-already-gone-before-recheck ordering the old
+             # synchronous call got for free. RED confirmed directly against
+             # the live pre-fix source: two new `session.test.ts` cases
+             # (replacing the one pre-existing `adminLogout` case, net +1)
+             # — the first asserts a request to `/api/auth/logout` with
+             # `method: "POST"` is made, which failed `expected [] to deeply
+             # equal [ {…} ]` (zero requests) against the unmodified,
+             # synchronous function; the second asserts `adminLogout()`
+             # still resolves (never throws) when the revoke request fails,
+             # which failed on `You must provide a Promise to expect()...,
+             # not 'undefined'` (the old function returned nothing to
+             # await). Implemented, reran: `session.test.ts` 11/11 green
+             # (was 9, +2 new/-1 old, net +1); `test/admin-gate.test.tsx`'s
+             # own pre-existing sign-out round-trip case needed no change
+             # (its mocked `fetch` already answers any URL 200) and reran
+             # 6/6 green, unchanged. `TZ=UTC make test`: 2948 passing (was
+             # 2947, +1 — exactly this run's net new test; apps/web 1587,
+             # was 1586; no other suite moved: 255 v2 vitest, 47 v2/api, 406
+             # v3/api, 120 corpus-compiler, 466 engine, 67 fold-runner).
+             # `check-test-floor.mjs`: OK, 2948 >= floor 1899 (+1049 margin,
+             # unmoved). `TZ=UTC make build`: exit 0, 30 routes, unchanged
+             # (a `lib/`-plus-one-component change, no new route or
+             # production file). `npm run gates`: all green — locked-css OK,
+             # 1 documented hunk, 294 v1 lines byte-identical; boundaries
+             # OK, 326 files, unchanged count; fonts
+             # degraded-but-non-blocking, pre-existing, 2/6 UI fonts
+             # present; corpus-morphology OK, 362 words; corpus-glyphs OK,
+             # 206 codepoints across 4 artifacts — all unchanged, this diff
+             # carries no corpus data. `npx tsc --noEmit` (apps/web): clean.
+             # No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff produced by running the suite was reverted
+             # before committing, same discipline as every prior entry). No
+             # Arabic codepoint (every changed file swept programmatically,
+             # in Python, over the Arabic, Arabic Supplement, Arabic
+             # Extended-A and both Presentation Forms Unicode blocks: zero
+             # matches — every new string is a TypeScript identifier, an
+             # HTTP path, a fixed English docblock sentence, or a synthetic
+             # test-fixture token, never corpus text). No oracle/golden-log/
+             # fixture/snapshot regenerated. Session start: fresh container,
+             # no `node_modules`/`vendor`/compiled corpus anywhere; `make
+             # setup` needed PHP 8.4 (the same `v3/api` `composer.lock`
+             # >=8.4.1 pin roughly a dozen prior entries have recorded),
+             # installed cleanly via the documented `packages.sury.org` apt
+             # mirror in one pass, no "Unauthorized Persistence" refusal.
+             # THE STALE-LOCAL-`main` TRAP RECURRED AGAIN, caught before any
+             # commit: this run's `HEAD` was already detached at the real
+             # `origin/main` tip (`5d683b4`, v3-D276, confirmed via `git
+             # fetch origin main`), while the local `main` branch ref sat
+             # eleven commits behind at `dc8ed36` (v3-D269) — no work at
+             # risk, nothing unpushed; `git checkout main && git merge
+             # --ff-only origin/main` fast-forwarded cleanly, carrying this
+             # run's own uncommitted fix through untouched (`git status
+             # --porcelain` identical before and after), reconfirmed green
+             # post-merge before committing. NOT addressed: the admin
+             # cross-navigation question above, resolved as a non-gap, not
+             # a deferral; every item on v3-D276's own "NOT addressed" list,
+             # unchanged and now re-confirmed exhausted a tenth time —
+             # `acknowledgeReentry`'s own "makeup" branch still only logs
+             # and points the learner at `/home` (v3-D256's verdict
+             # unchanged); `DrillPicker.tsx`'s own unused `now` prop; the
+             # unused `atoms`/`corpus`/`sessions` IndexedDB object stores
+             # (v3-D232); `session_start`'s own latency metric (v0.8); the
+             # streak/away-day day-space mismatch (v3-D209);
+             # `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution` (v3-D148);
+             # `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate`
+             # as a whole class (v3-D88, v3-D151, v3-D219);
+             # `App\Flags\FlagService::enabled()` (v3-D197); multi-surah
+             # enrollment; the operational mailer/7-night launch window;
+             # PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel` (v3-D188); `corpusHash`'s zero
+             # fold-side consumer (v3-D206); `selection_determinism_check`
+             # still replaying a committed fixture; `QueueItem.score`'s own
+             # missing external reader (v3-D263) — all unchanged.
+             # `adminLogout()`'s own token-revocation gap is now CLOSED —
+             # remove it from future sweeps. See DECISIONS.md v3-D277.
              # NOTE (v3-D276, 2026-10-04): v3-D275's own named fresh vein —
              # `scripts/check-*.mjs` read line by line for an internal logic
              # bug, not merely confirmed green — found exactly one real gap,

@@ -144,11 +144,37 @@ describe("adminLogin", () => {
 });
 
 describe("adminLogout", () => {
-  beforeEach(() => resetTokenForTests());
+  const realFetch = globalThis.fetch;
 
-  it("forgets the current identity", () => {
+  beforeEach(() => {
+    resetApiFetchForTests();
+    resetTokenForTests();
+  });
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  it("revokes the token server-side (POST /api/auth/logout) before forgetting it locally — admin auth is an ordinary Sanctum token for the same User model, so the same revoke endpoint applies", async () => {
     setToken("admin-tok", "admin-tok");
-    adminLogout();
+    const seen: Array<{ url: string; method: string | undefined }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      seen.push({ url: String(input), method: init?.method });
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await adminLogout();
+
+    expect(seen).toEqual([{ url: expect.stringContaining("/api/auth/logout"), method: "POST" }]);
+    expect(getToken()).toBeNull();
+  });
+
+  it("still forgets the local token when the revoke request fails — best-effort, never blocks sign-out", async () => {
+    setToken("admin-tok", "admin-tok");
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error("network down");
+    }) as unknown as typeof fetch;
+
+    await expect(adminLogout()).resolves.toBeUndefined();
     expect(getToken()).toBeNull();
   });
 });
