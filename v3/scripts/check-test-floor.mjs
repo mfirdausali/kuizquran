@@ -88,6 +88,22 @@ if (!Number.isInteger(floor) || floor <= 0) {
 // for a suite's summary shape) is what stops one suite's marker being
 // mistaken for another's: five of the seven suites share the identical
 // vitest "Tests  N passed (N)" line.
+//
+// v2/api and v3/api run the IDENTICAL command (`php artisan test`, no flags)
+// yet are deliberately given DIFFERENT `kind`s — not a drift between two
+// implementations of one decision (the shape this file's own history keeps
+// finding elsewhere), but a real difference in what each actually prints.
+// `v2/api/composer.json` requires `laravel/pao` (PHPUnit 12-13 only; v2/api
+// runs PHPUnit ^12.5); it silently compacts `php artisan test`'s output to
+// one line of real JSON (`{"tool":"phpunit","result":"passed","tests":N,...}`)
+// whenever it detects an AI-agent shell — true in this project's own case,
+// since every run is this kind of agent. `v3/api` runs PHPUnit ^11.0, below
+// `laravel/pao`'s supported floor, and does not depend on it at all — so its
+// `php artisan test` keeps Collision's ordinary human-readable "Tests: N
+// passed (...)" summary, the same shape every vitest suite prints. Confirmed
+// directly against each real `vendor/`: `grep laravel/pao v2/api/composer.json`
+// hits, `grep laravel/pao v3/api/composer.json` does not, and running each
+// command live reproduces exactly the shape its own `kind` expects.
 const SUITES = [
   { name: "v2 vitest", marker: "cd v2 && npm test", kind: "vitest" },
   { name: "v2/api PHPUnit", marker: "cd v2/api && php artisan test", kind: "phpunit-json" },

@@ -27022,3 +27022,151 @@ bug, as opposed to merely confirming they run green; or
 `api/database/factories`/`seeders` against the current schema) or a
 willingness to take on one of the larger, already-named architectural
 items above.
+
+## v3-D276 (2026-10-04, nightly) — a genuinely new vein, `scripts/check-*.mjs` read line by line: one real documentation gap found and closed, no live bug
+
+v3-D275's own closing note named the one untried vein left for this bug
+class: a full read of `scripts/check-*.mjs`'s gate scripts for an
+internal logic bug, not merely confirming they run green. Read every one
+line by line this run: `apps/web/scripts/check-boundaries.mjs` (all 15
+clauses), `check-corpus-morphology.mjs`, `check-corpus-glyphs.mjs`
+(including hand-tracing the WOFF2 table-directory parser and the cmap
+format-4/format-12 decoders against the real shipped fonts),
+`check-fonts.mjs`, `check-locked-css.mjs` (re-verified its own pinned
+`V1_SHA256`/`V1_LINES`/`V1_BYTES` constants directly against a fresh
+`sha256sum`/`wc` of the real `v1/styles/iman-ui.css` — all three still
+agree), and `v3/scripts/check-test-floor.mjs`. Fourteen of fifteen came
+back clean — no logic bug, no stale constant, no drifted regex.
+
+One genuine gap, on the fifteenth: `check-test-floor.mjs`'s own `SUITES`
+array gives v2/api and v3/api different `kind`s (`phpunit-json` vs
+`phpunit-human`) for the IDENTICAL command, `php artisan test`, with zero
+explanation anywhere in the file for why. That absence cost this run real
+investigation time — the natural first read is "these two should behave
+the same; a kind mismatch on an identical command is exactly the kind of
+two-implementations-of-one-decision drift this build has repeatedly
+closed elsewhere" — and very nearly produced a false-positive bug report.
+Verified directly rather than assumed: `v2/api/composer.json` requires
+`laravel/pao` (`^1.0.6`, under `require-dev`) — a real, installed
+package (confirmed in `v2/api/vendor/laravel/pao`) whose own README
+states it detects "when your tools are running inside an AI agent" and,
+only then, compacts `php artisan test`'s human-readable Collision output
+into one line of real JSON (`{"tool":"phpunit","result":"passed",
+"tests":N,...}`) — requires PHPUnit 12-13, and v2/api runs PHPUnit
+`^12.5.12`. `v3/api/composer.json` has no `laravel/pao` entry at all, and
+runs PHPUnit `^11.0.1` — below `laravel/pao`'s own stated floor, so it
+could not run there even if added. Reproduced live, not inferred: ran
+`cd v2/api && php artisan test` directly in this run's own actual
+container (an AI-agent shell, by construction — the premise `laravel/pao`
+is checking for) and it printed exactly the one-line JSON shape
+`check-test-floor.mjs`'s `phpunit-json` extractor expects; the full
+`make test` run this night independently confirms the same thing end to
+end — `v2/api PHPUnit` extracted cleanly as `47`, matching its real test
+count, inside the overall 2946/2947-passing total. So the `kind` split is
+real and correct, not drift — it was simply never explained, the one gap
+in an otherwise carefully-commented file.
+
+**Fixed:** a comment block above `SUITES` states the real mechanism
+(`laravel/pao`, its PHPUnit 12-13 floor, v2/api having it and v3/api not,
+each confirmed by name against the real `composer.json`/`vendor/`) so a
+future run does not have to re-derive it from a cold read the way this
+one did. A new regression test,
+`apps/web/test/check-test-floor-gate.test.ts`'s tenth case, pins the
+dependency itself (`v2/api/composer.json`'s `require-dev` contains
+`laravel/pao`; `v3/api/composer.json`'s does not) directly against both
+real files — so a future composer bump that drops `laravel/pao` from
+v2/api, or adds it to v3/api once that app's own PHPUnit reaches 12+,
+fails this test first rather than silently flipping which shape each
+suite prints and turning into a confusing floor-gate false negative
+somewhere else.
+
+**RED confirmed by mutation**, not by a live defect (there was none — the
+dependency split was already correct): the two `toContain`/
+`not.toContain` assertions were swapped, reproducing exactly the wrong
+claim this run almost made, and the test failed exactly as predicted —
+`expected [ 'fakerphp/faker', …(6) ] to not include 'laravel/pao'` against
+the real, unmodified `v2/api/composer.json`. Reverted byte-identically
+(`diff` against a saved copy, empty), reran: 10/10 green (was 9, +1).
+
+`TZ=UTC make test`: 2947 passing (was 2946, +1 — exactly this run's one
+new test; apps/web 1586, was 1585; no other suite moved: 255 v2 vitest,
+47 v2/api, 406 v3/api, 120 corpus-compiler, 466 engine, 67 fold-runner).
+`check-test-floor.mjs`: OK, 2947 >= floor 1899 (+1048 margin, unmoved,
+same discipline as every prior entry). `TZ=UTC make build`: exit 0, 30
+routes, unchanged (a comment-plus-one-test-file change to a build script,
+no apps/web production file touched, no route added). `npx tsc --noEmit`
+(apps/web): clean. No `v1/**`/`v2/**` edit (`git status --porcelain --
+v1 v2` empty immediately before committing — a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite
+was reverted twice before committing, same discipline as every prior
+entry). No Arabic codepoint (both changed files swept programmatically,
+in Python, over the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks: zero matches — every new string is a
+TypeScript/JS identifier, a package name, a wire-adjacent JSON shape, or
+a fixed English comment/assertion sentence, never corpus text). No
+oracle/golden-log/fixture/snapshot regenerated — this diff touches one
+script's comment and one new test case, nothing under `fixtures/`,
+`docs/qa-samples/` or any compiled corpus artifact.
+
+**Session start and recovery, worth recording in full:** this run's own
+`HEAD` started DETACHED at `ee14c35` (v3-D275), ten commits ahead of both
+the local `main` branch ref AND (per this run's own very first,
+pre-fetch `git branch -a -v`) what looked like a ten-commits-behind
+`origin/main` at `dc8ed36` (v3-D269) — the mirror image of this file's
+own roughly-fifty-times-recorded "stale local `main`" trap, except this
+time the INITIAL read made it look like real work sat unpushed on a
+remote that had silently fallen behind. A `git fetch origin main`, run
+before any other action per this file's own standing rule, resolved it
+immediately: `origin/main` was already at `ee14c35` — the prior ten
+nights (v3-D270 through v3-D275) had every one been pushed correctly: the
+pre-fetch reading was simply a stale LOCAL remote-tracking ref from
+container start, the same shape this file already warns "always `git
+fetch` before reading `origin/main`" about, just encountered from the
+"looks unpushed" side rather than the usual "looks pushed" side. No work
+was ever at risk; `git checkout -B main ee14c35` + `git push origin main`
+confirmed `Everything up-to-date`. Recorded here because it is exactly
+the scenario this file's own standing advice exists to prevent a wasted
+recovery effort over — and because, unusually, this run's own first,
+pre-fetch impression was the wrong one, worth naming so a future run does
+not skip the fetch on the reasoning "the diff direction looks safe
+either way."
+
+`make setup` needed PHP 8.4 (the same `v3/api`'s `composer.lock`
+`>=8.4.1` pin this file has recorded roughly a dozen times); installed
+cleanly via the documented `packages.sury.org` apt mirror in one pass, no
+"Unauthorized Persistence" refusal, no `.deb`-file fallback needed — the
+same clean path v3-D275's own run also got. Both `v2/api`'s and
+`v3/api`'s `composer install` needed the documented git-mirror fallback
+for several `sebastian/*`/`phpunit/phpunit` packages (a transient proxy
+timeout on dist downloads), recovering automatically, no retry flag
+needed, ~15 minutes total for `make setup` end to end.
+
+**NOT addressed:** every item on v3-D275's own "NOT addressed" list,
+unchanged — `acknowledgeReentry`'s own "makeup" branch still only logs
+and points the learner at `/home` (v3-D256's verdict unchanged);
+`DrillPicker.tsx`'s own unused `now` prop; the unused
+`atoms`/`corpus`/`sessions` IndexedDB object stores (v3-D232);
+`session_start`'s own latency metric (v0.8); the streak/away-day
+day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151, v3-D219); `App\Flags\FlagService::enabled()`
+(v3-D197); multi-surah enrollment; the operational mailer/7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `corpusHash`'s zero fold-side consumer (v3-D206);
+`selection_determinism_check` still replaying a committed fixture;
+`QueueItem.score`'s own missing external reader (v3-D263) — all
+unchanged. The other suggested fresh vein (`api/database/factories`/
+`seeders` against the current schema) was also checked this run:
+`v3/api/database/factories/UserFactory.php` and
+`database/seeders/DatabaseSeeder.php` are both stock, unmodified Laravel
+scaffolding, every factory field matches its model's real columns, and
+neither is exercised by anything beyond the default scaffold — a
+genuinely empty corner, not a gap. `check-boundaries.mjs`,
+`check-corpus-morphology.mjs`, `check-corpus-glyphs.mjs`,
+`check-fonts.mjs` and `check-locked-css.mjs` are now read line by line
+and CLOSED for this exact "internal gate-script logic bug" vein — a
+future run should not re-read them from scratch looking for the same
+shape without a new reason to suspect one.

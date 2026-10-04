@@ -53,10 +53,42 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2946 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 2947 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 406 v3/api + 120 corpus-compiler
-             # + 466 engine + 67 fold-runner + 1585 apps/web. (v3-D273, 2026-10-03)
+             # + 466 engine + 67 fold-runner + 1586 apps/web. (v3-D276, 2026-10-04)
+             # NOTE (v3-D276, 2026-10-04): v3-D275's own named fresh vein —
+             # `scripts/check-*.mjs` read line by line for an internal logic
+             # bug, not merely confirmed green — found exactly one real gap,
+             # a documentation one, no live bug: `check-test-floor.mjs` gives
+             # v2/api and v3/api different extraction `kind`s
+             # (`phpunit-json`/`phpunit-human`) for the IDENTICAL command,
+             # `php artisan test`, with no comment anywhere explaining why.
+             # Verified directly: `v2/api/composer.json` requires
+             # `laravel/pao` (PHPUnit 12-13 only; v2/api runs ^12.5), which
+             # detects an AI-agent shell and compacts `php artisan test`'s
+             # output to one JSON line; `v3/api` runs PHPUnit ^11.0, below
+             # `laravel/pao`'s floor, and does not depend on it, so it keeps
+             # the ordinary human-readable Collision summary. Reproduced
+             # live (`cd v2/api && php artisan test` really does print the
+             # JSON line in this container). Fixed: a comment names the real
+             # mechanism; a new regression test pins both composer.json
+             # files directly (v2/api has `laravel/pao`, v3/api does not),
+             # mutation-confirmed RED by swapping the two assertions —
+             # failed exactly as predicted against the real files, reverted,
+             # green again. Fourteen of the fifteen gate-script clauses read
+             # this run (`check-boundaries.mjs`'s 15 clauses,
+             # `check-corpus-morphology.mjs`, `check-corpus-glyphs.mjs`
+             # including the WOFF2/cmap parser, `check-fonts.mjs`,
+             # `check-locked-css.mjs` re-verified against a fresh
+             # `sha256sum`/`wc` of the real v1 file) came back clean — no
+             # other logic bug found. `api/database/factories`/`seeders`
+             # (the sweep's other named vein) are stock Laravel scaffolding,
+             # confirmed non-gaps. See DECISIONS.md v3-D276 for the full
+             # write-up, including this run's own stale-local-ref recovery
+             # (ten prior nights' work, v3-D270..D275, were already pushed —
+             # only this container's local ref was stale; `git fetch`
+             # caught it before any action, no work at risk).
              # NOTE (v3-D275, 2026-10-04): both of v3-D274's own named fresh
              # corners were swept this run, and both came back clean — a
              # byte-for-byte migration-column-vs-model-cast audit on the two

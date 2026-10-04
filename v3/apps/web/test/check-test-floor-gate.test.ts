@@ -247,4 +247,21 @@ describe("check-test-floor.mjs — the gate", () => {
     expect(code).toBe(0);
     expect(out).toMatch(/OK/);
   });
+
+  it("the real reason v2/api and v3/api get different `kind`s still holds: v2/api depends on laravel/pao (PHPUnit 12-13 only, compacts `php artisan test` to one JSON line for an AI-agent shell), v3/api does not (PHPUnit 11, below pao's floor)", () => {
+    // v2/api and v3/api run the IDENTICAL `php artisan test` command — the
+    // script's own `kind` split (phpunit-json vs phpunit-human) is real only
+    // because of this dependency difference, not an arbitrary choice. A
+    // future composer bump that drops laravel/pao from v2/api, or adds it to
+    // v3/api once its own PHPUnit reaches 12+, would silently flip which
+    // shape each suite actually prints and make check-test-floor.mjs read
+    // real test output as "marker found, no summary line matched" — this
+    // pins the dependency the script's own comment now explains, so that
+    // drift fails here first, not as a confusing floor-gate false negative.
+    const repoRoot = path.resolve(V3, "..");
+    const v2apiComposer = JSON.parse(readFileSync(path.join(repoRoot, "v2/api/composer.json"), "utf8"));
+    const v3apiComposer = JSON.parse(readFileSync(path.join(repoRoot, "v3/api/composer.json"), "utf8"));
+    expect(Object.keys(v2apiComposer["require-dev"] ?? {})).toContain("laravel/pao");
+    expect(Object.keys(v3apiComposer["require-dev"] ?? {})).not.toContain("laravel/pao");
+  });
 });
