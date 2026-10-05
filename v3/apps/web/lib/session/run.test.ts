@@ -1063,6 +1063,34 @@ describe("this file's own docblocks do not claim a wired door is unwired", () =>
     const islandSrc = readFileSync(SESSION_ISLAND_SRC, "utf8");
     expect(islandSrc).toMatch(/\bacceptAdoption\b/);
   });
+
+  // The SAME staleness recurred a THIRD time, one function EARLIER in this
+  // file: `extraLearnOfferFor`'s own docblock ("FR6 Door 1") said "Door 2
+  // (weak-spot gym) and Door 3 (open practice) each need a real UI surface of
+  // their own... that does not exist and is out of scope here" — written
+  // before either door existed, never updated once Door 2 wired at v3-D106
+  // and Door 3 at v3-D117. The two checks above only scan the docblocks
+  // directly above `weakSpotOfferFor`, never the one above `extraLearnOfferFor`
+  // one function earlier — so this exact sentence sat uncorrected through
+  // every later run.
+  it("extraLearnOfferFor's docblock never claims Door 2 / Door 3 have no UI surface and do not exist", () => {
+    const runSrc = readFileSync(RUN_SRC, "utf8");
+    const decl = runSrc.indexOf("export async function extraLearnOfferFor");
+    expect(decl).toBeGreaterThan(-1);
+    const docblockStart = runSrc.lastIndexOf("/**", decl);
+    expect(docblockStart).toBeGreaterThan(-1);
+    const docblock = runSrc.slice(docblockStart, decl);
+
+    expect(docblock).not.toMatch(/door 2[\s\S]{0,300}does not exist/i);
+    expect(docblock).not.toMatch(/door 3[\s\S]{0,300}does not exist/i);
+    expect(docblock).not.toMatch(/out of scope here/i);
+
+    // The biconditional half: the claim above is honest only if Door 2/Door 3
+    // genuinely have no caller. Assert the opposite is real.
+    const islandSrc = readFileSync(SESSION_ISLAND_SRC, "utf8");
+    expect(islandSrc).toMatch(/\bweakSpotOfferFor\b/);
+    expect(islandSrc).toMatch(/\bstartOpenPractice\b/);
+  });
 });
 
 // FR6's diminishing-returns nudge (`packages/engine/src/freeplay.ts#diminishingReturns`)

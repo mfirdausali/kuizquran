@@ -27795,3 +27795,112 @@ window; PAY-1's Stripe fixtures; surah 67's scene beats;
 `QueueItem.score`'s own missing external reader (v3-D263) — all unchanged.
 `BillingSnapshot.trialStartedAt` is now CLOSED — remove it from future "no
 reader" sweeps.
+
+## v3-D281 (2026-10-05): `extraLearnOfferFor`'s own docblock went stale a
+third time — the exact "docblock says X, reality is Y" shape v3-D90/D110/
+D123/D236/D244/D251 each already closed elsewhere in this tree, recurring one
+function EARLIER in `lib/session/run.ts` than the two prior instances already
+guarded.
+
+`extraLearnOfferFor`'s docblock (FR6 Door 1, written when Door 1 alone was
+wired at v3-D98) said, in as many words: "This is Door 1 only: Door 2
+(weak-spot gym) and Door 3 (open practice) each need a real UI surface of
+their own (a ranked list, an any-ayah picker) that does not exist and is out
+of scope here." False since 2026-09-23 at the latest: Door 2
+(`weakSpotOfferFor`/`startWeakSpotDrill`) was wired at v3-D106, genuinely
+called from `components/session/SessionIsland.tsx`; Door 3
+(`startOpenPractice`) was wired at v3-D117, with its own `/practice` route
+(`app/(app)/practice/page.tsx`, `components/practice/PracticePicker.tsx`),
+also called from `SessionIsland.tsx`.
+
+The SAME staleness, one function below this one (on `weakSpotOfferFor`'s own
+docblock), was already found and fixed once at v3-D244, with a permanent
+regression test added (`lib/session/run.test.ts`'s `describe("this file's
+own docblocks do not claim a wired door is unwired", ...)` block) — but that
+guard only ever scanned the docblock immediately preceding
+`weakSpotOfferFor`, never the one preceding `extraLearnOfferFor` one function
+earlier in the identical file. A second guard added at v3-D251 extended
+coverage to a stale comment inside this same test file, again never to Door
+1's own docblock. So the identical false sentence sat uncorrected through
+every one of the ~35 nightly runs since v3-D106 landed, on the one function
+neither existing check looks at — precisely the trap v3-D77 Finding 0/v3-D167
+each warn a stale signpost can spring: a future run reading this file's own
+comments top to bottom could be steered into re-implementing Door 2/Door 3 as
+if neither existed.
+
+**Fixed:** the docblock is corrected to state the real history (Door 1 wired
+alone at v3-D98; Door 2 at v3-D106; Door 3 at v3-D117) and points at both
+real functions by name, mirroring the CORRECTED-note template v3-D244 already
+used one function below. A third case was added to the SAME `describe` block
+that guards the other two doors, locating `extraLearnOfferFor`'s own
+docblock the same way the existing cases locate `weakSpotOfferFor`'s, and
+asserting it never matches `/door 2[\s\S]{0,300}does not exist/i` /
+`/door 3[\s\S]{0,300}does not exist/i` / `/out of scope here/i`, plus the
+same biconditional check (`weakSpotOfferFor`/`startOpenPractice` both
+genuinely referenced in `SessionIsland.tsx`) the sibling cases already use —
+so the guard cannot be satisfied by deleting the claim alone if either door
+were ever genuinely un-wired again.
+
+**Verified:** RED confirmed directly against the unmodified `run.ts`: the new
+test case failed exactly `expected '/**\n * FR6 Door 1 — "extra Learn"
+(\`…' not to match /door 2[\s\S]{0,300}does not exist/i`, quoting the real
+stale docblock verbatim — 122 passed, 1 failed in `lib/session/run.test.ts`.
+Implemented, reran: 123/123 green (was 122, +1).
+
+`TZ=UTC make test`: 2967 passing (was 2966, +1 — exactly this run's one new
+test; apps/web 1603, was 1602; no other suite moved: 255 v2 vitest, 47
+v2/api, 409 v3/api, 120 corpus-compiler, 466 engine, 67 fold-runner).
+`check-test-floor.mjs`: OK, 2967 >= floor 1899 (+1068 margin, unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 30 routes,
+unchanged (a docblock-plus-one-test-case change, no route or production file
+touched). `npm run gates`: all green — locked-css OK, 1 documented hunk, 294
+v1 lines byte-identical; boundaries OK, 327 files, unchanged count; fonts
+degraded-but-non-blocking, pre-existing, 2/6 UI fonts present; corpus-
+morphology OK, 362 words; corpus-glyphs OK, 206 codepoints across 4
+artifacts — all unchanged, this diff carries no corpus data. `npx tsc
+--noEmit` (apps/web): clean. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite was
+reverted before committing, same discipline as every prior entry). No Arabic
+codepoint (both changed files swept programmatically, in Python, over the
+Arabic, Arabic Supplement, Arabic Extended-A and both Presentation Forms
+Unicode blocks — zero matches; every new string is a TypeScript identifier,
+a regex literal, or a fixed English docblock sentence, never corpus text).
+No oracle/golden-log/fixture/snapshot regenerated.
+
+Session start: fresh container, PHP defaulted to 8.3.6 (`v3/api` needs
+>=8.4.1); installed PHP 8.4 cleanly via the documented `packages.sury.org`
+apt mirror, no refusal. `HEAD` was detached exactly at `origin/main`'s own
+tip (`e14dc43`, v3-D280) on a stale local `main` 15 commits behind
+(`dc8ed36`), caught before any exploration via `git fetch` + `git checkout
+main && git merge --ff-only origin/main`, a clean fast-forward, no work at
+risk — the recurring stale-local-`main` trap this file has recorded roughly
+fifty times since v3-D77.
+
+Found by a dedicated fresh-sweep agent (Explore) directed at a
+zero-external-caller sweep over under-checked `apps/web/lib/**`
+subdirectories plus a stale-docblock grep across the whole tree —
+independently re-verified by this run directly against `run.ts`'s real
+source, `SessionIsland.tsx`'s real imports, and the two prior guard tests'
+own scan scope before writing any test.
+
+NOT addressed: every item on v3-D280's own "NOT addressed" list, unchanged —
+`acknowledgeReentry`'s own "makeup" branch still only logs and points the
+learner at `/home` (v3-D256's verdict unchanged); `DrillPicker.tsx`'s own
+unused `now` prop; the unused `atoms`/`corpus`/`sessions` IndexedDB object
+stores (v3-D232); `session_start`'s own latency metric (v0.8); the
+streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151, v3-D219); `App\Flags\FlagService::enabled()`
+(v3-D197); multi-surah enrollment; the operational mailer/7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `corpusHash`'s zero fold-side consumer (v3-D206);
+`selection_determinism_check` still replaying a committed fixture;
+`QueueItem.score`'s own missing external reader (v3-D263) — all unchanged.
+`extraLearnOfferFor`'s own stale Door 2/Door 3 docblock is now CLOSED and
+permanently guarded — remove it from future "docblock says X, reality is Y"
+sweeps. See DEFECTS.md (no new defect filed — this is documentation-only,
+no learner-facing behavior ever changed, both doors were already correctly
+wired).

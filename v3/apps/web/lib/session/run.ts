@@ -1676,10 +1676,11 @@ export async function sessionSummaryOf(run: SessionRun): Promise<SessionSummary>
  * callers anywhere in this app or in v2 — a learner who finished today's
  * assembled queue was simply done, with no offer of one more gate-intact,
  * cost-disclosed ayah the way FR6's own "three doors after session complete"
- * describes. This is Door 1 only: Door 2 (weak-spot gym) and Door 3 (open
- * practice) each need a real UI surface of their own (a ranked list, an
- * any-ayah picker) that does not exist and is out of scope here; Door 1 needs
- * none — it slots into the summary screen this app already has.
+ * describes. This was Door 1 only when first wired (v3-D98) — Door 2
+ * (weak-spot gym) and Door 3 (open practice) each got their own real UI
+ * surface in later runs, not here: see `weakSpotOfferFor` (v3-D106) and
+ * `startOpenPractice` (v3-D117) below, both called from
+ * `SessionIsland.tsx`.
  *
  * Re-derives the fold the same way `assembleFor` does, AFTER the session's own
  * commits have landed (`run.done` is true by the time a caller asks) — never

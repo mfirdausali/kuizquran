@@ -53,10 +53,102 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2966 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 2967 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 409 v3/api + 120 corpus-compiler
-             # + 466 engine + 67 fold-runner + 1602 apps/web. (v3-D280, 2026-10-05)
+             # + 466 engine + 67 fold-runner + 1603 apps/web. (v3-D281, 2026-10-05)
+             # NOTE (v3-D281, 2026-10-05): `extraLearnOfferFor`'s own docblock
+             # (FR6 Door 1, `lib/session/run.ts`) went stale a THIRD time —
+             # the same "docblock says X, reality is Y" shape v3-D90/D110/
+             # D123/D236/D244/D251 each already closed elsewhere, recurring
+             # one function EARLIER in this same file than the two prior
+             # instances v3-D244/D251 already guarded. It said "Door 2
+             # (weak-spot gym) and Door 3 (open practice) each need a real UI
+             # surface of their own... that does not exist and is out of
+             # scope here" — written when only Door 1 was wired (v3-D98),
+             # false since Door 2 wired at v3-D106 and Door 3 at v3-D117
+             # (`startOpenPractice`, its own `/practice` route), both real
+             # and called from `SessionIsland.tsx`. The existing regression
+             # test (`describe("this file's own docblocks do not claim a
+             # wired door is unwired", ...)`) only ever scanned the docblock
+             # above `weakSpotOfferFor`, never the one above
+             # `extraLearnOfferFor` one function earlier, so this exact
+             # sentence sat uncorrected through every one of the ~35 nightly
+             # runs since v3-D106 landed. Fixed: docblock corrected to name
+             # the real history and both real functions, mirroring v3-D244's
+             # own CORRECTED-note template; a third case added to the SAME
+             # describe block, locating `extraLearnOfferFor`'s own docblock
+             # the identical way and asserting it never matches `/door
+             # 2[\s\S]{0,300}does not exist/i` / `/door 3[\s\S]{0,300}does
+             # not exist/i` / `/out of scope here/i`, plus the same
+             # biconditional (`weakSpotOfferFor`/`startOpenPractice` both
+             # genuinely referenced in `SessionIsland.tsx`) the sibling
+             # cases already use. RED confirmed directly against the
+             # unmodified `run.ts`: the new case failed exactly `expected
+             # '/**\n * FR6 Door 1 ...' not to match /door 2[\s\S]{0,300}does
+             # not exist/i`, quoting the real stale docblock verbatim — 122
+             # passed, 1 failed; implemented, reran: 123/123 green (was 122,
+             # +1). `TZ=UTC make test`: 2967 passing (was 2966, +1 — exactly
+             # this run's one new test; apps/web 1603, was 1602; no other
+             # suite moved). `check-test-floor.mjs`: OK, 2967 >= floor 1899
+             # (+1068 margin, unmoved). `TZ=UTC make build`: exit 0, 30
+             # routes, unchanged (a docblock-plus-one-test-case change, no
+             # route or production file touched). `npm run gates`: all
+             # green — locked-css OK, 1 documented hunk, 294 v1 lines
+             # byte-identical; boundaries OK, 327 files, unchanged count;
+             # fonts degraded-but-non-blocking, pre-existing, 2/6 UI fonts
+             # present; corpus-morphology OK, 362 words; corpus-glyphs OK,
+             # 206 codepoints across 4 artifacts — all unchanged, this diff
+             # carries no corpus data. `npx tsc --noEmit` (apps/web): clean.
+             # No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff produced by running the suite was reverted
+             # before committing, same discipline as every prior entry). No
+             # Arabic codepoint (both changed files swept programmatically,
+             # in Python, over the Arabic, Arabic Supplement, Arabic
+             # Extended-A and both Presentation Forms Unicode blocks — zero
+             # matches; every new string is a TypeScript identifier, a
+             # regex literal, or a fixed English docblock sentence, never
+             # corpus text). No oracle/golden-log/fixture/snapshot
+             # regenerated. Session start: fresh container, PHP defaulted
+             # to 8.3.6 (`v3/api` needs >=8.4.1); installed PHP 8.4 cleanly
+             # via the documented `packages.sury.org` apt mirror, no
+             # refusal. `HEAD` was detached exactly at `origin/main`'s own
+             # tip (`e14dc43`, v3-D280) on a stale local `main` 15 commits
+             # behind (`dc8ed36`) — the recurring stale-local-`main` trap
+             # this file has recorded roughly fifty times since v3-D77 —
+             # caught before any exploration via `git fetch` + `git
+             # checkout main && git merge --ff-only origin/main`, a clean
+             # fast-forward, no work at risk. Found by a dedicated
+             # fresh-sweep agent (Explore) directed at a zero-external-
+             # caller sweep over under-checked `apps/web/lib/**`
+             # subdirectories plus a stale-docblock grep across the whole
+             # tree — independently re-verified by this run directly
+             # against `run.ts`'s real source, `SessionIsland.tsx`'s real
+             # imports and the two prior guard tests' own scan scope before
+             # writing any test. NOT addressed: every item on v3-D280's own
+             # "NOT addressed" list, unchanged — `acknowledgeReentry`'s own
+             # "makeup" branch still only logs and points the learner at
+             # `/home` (v3-D256's verdict unchanged); `DrillPicker.tsx`'s
+             # own unused `now` prop; the unused `atoms`/`corpus`/`sessions`
+             # IndexedDB object stores (v3-D232); `session_start`'s own
+             # latency metric (v0.8); the streak/away-day day-space
+             # mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()`; `App\Billing\TrialAttribution`
+             # (v3-D148); `lib/pricing.ts#regionFromCountry()` (v3-D163);
+             # `PaywallGate` as a whole class (v3-D88, v3-D151, v3-D219);
+             # `App\Flags\FlagService::enabled()` (v3-D197); multi-surah
+             # enrollment; the operational mailer/7-night launch window;
+             # PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel` (v3-D188); `corpusHash`'s zero
+             # fold-side consumer (v3-D206); `selection_determinism_check`
+             # still replaying a committed fixture; `QueueItem.score`'s own
+             # missing external reader (v3-D263) — all unchanged.
+             # `extraLearnOfferFor`'s own stale Door 2/Door 3 docblock is
+             # now CLOSED and permanently guarded — remove it from future
+             # "docblock says X, reality is Y" sweeps. See DECISIONS.md
+             # v3-D281.
              # NOTE (v3-D280, 2026-10-05): `BillingSnapshot.trialStartedAt`
              # (v3-D279's own new field, same night) was fetched,
              # type-validated by `isBillingSnapshot()` and already seeded in
