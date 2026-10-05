@@ -32,12 +32,23 @@
 // advisory only; the server enforces the same rule and its 422 message
 // renders verbatim on rejection, same discipline as `FlagsPanel`'s ceremony
 // form.
+//
+// "LOOK UP CURRENT SNAPSHOT" (v3-D279): `override()`'s own 409 says, verbatim,
+// "Re-read and retry" — this button is what finally makes that performable.
+// Until now there was no admin-facing read of a learner's CURRENT entitlement
+// row anywhere (the transition log above never stored tier/region/trialSurah/
+// currentPeriodEnd/graceUntil/provider ids at all, and `GET /api/entitlement`
+// is hard-scoped to the calling learner's own id). A successful override
+// re-reads automatically if a snapshot is already on screen, so it never goes
+// stale right after the write that would make it stale.
 
 import { useCallback, useEffect, useState } from "react";
 import {
   loadBillingAudit,
+  loadBillingSnapshot,
   submitBillingOverride,
   type BillingAuditLoad,
+  type BillingSnapshotLoad,
   type BillingStateValue,
   type BillingTierValue,
 } from "@/lib/admin/billingAudit";
@@ -68,6 +79,22 @@ export function BillingAuditPanel() {
   const [overrideMessage, setOverrideMessage] = useState<string | null>(null);
   const [overrideBusy, setOverrideBusy] = useState(false);
 
+  // v3-D279 — makes override()'s own 409 ("Re-read and retry") literally
+  // performable for the first time: a real read of the CURRENT snapshot,
+  // not the transition log above, which never stored tier/region/trialSurah/
+  // currentPeriodEnd/graceUntil/provider ids at all.
+  const [snapshot, setSnapshot] = useState<BillingSnapshotLoad | null>(null);
+
+  const lookUp = useCallback(() => {
+    const parsed = Number.parseInt(overrideUserIdDraft.trim(), 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setSnapshot({ state: "unavailable", reason: "enter a valid learner id" });
+      return;
+    }
+    setSnapshot({ state: "loading" });
+    void (async () => setSnapshot(await loadBillingSnapshot(parsed)))();
+  }, [overrideUserIdDraft]);
+
   const onOverride = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
@@ -95,10 +122,16 @@ export function BillingAuditPanel() {
         setOverrideMessage(
           outcome.ok ? `applied — state: ${outcome.state}, tier: ${outcome.tier}` : outcome.message,
         );
-        if (outcome.ok) refresh(appliedUserId);
+        if (outcome.ok) {
+          refresh(appliedUserId);
+          // A 409 says "Re-read and retry" — a successful apply re-reads too,
+          // so the snapshot on screen (if one was looked up) never goes stale
+          // the moment it would matter most: right after a write.
+          if (snapshot !== null) setSnapshot(await loadBillingSnapshot(parsed));
+        }
       })();
     },
-    [overrideUserIdDraft, overrideState, overrideTier, overrideReason, appliedUserId, refresh],
+    [overrideUserIdDraft, overrideState, overrideTier, overrideReason, appliedUserId, refresh, snapshot],
   );
 
   const onFilter = useCallback(
@@ -162,6 +195,77 @@ export function BillingAuditPanel() {
             onChange={(e) => setOverrideUserIdDraft(e.target.value)}
           />
         </label>
+        <button type="button" className="btn" onClick={lookUp}>
+          Look up current snapshot
+        </button>
+        {snapshot !== null && snapshot.state === "loading" ? <p className="caption">Looking up…</p> : null}
+        {snapshot !== null && snapshot.state === "unavailable" ? (
+          <p className="caption" role="alert">
+            {snapshot.reason}
+          </p>
+        ) : null}
+        {snapshot !== null && snapshot.state === "ready" ? (
+          snapshot.snapshot.exists ? (
+            <dl className="stack" aria-label="Current billing snapshot">
+              <div>
+                <dt>State</dt>
+                <dd>{snapshot.snapshot.state}</dd>
+              </div>
+              <div>
+                <dt>Tier</dt>
+                <dd>{snapshot.snapshot.tier}</dd>
+              </div>
+              <div>
+                <dt>Region</dt>
+                <dd>{snapshot.snapshot.region}</dd>
+              </div>
+              <div>
+                <dt>Trial surah</dt>
+                <dd>{snapshot.snapshot.trialSurah ?? "—"}</dd>
+              </div>
+              <div>
+                <dt>Current period end</dt>
+                <dd>
+                  {snapshot.snapshot.currentPeriodEnd !== null
+                    ? new Date(snapshot.snapshot.currentPeriodEnd).toISOString()
+                    : "—"}
+                </dd>
+              </div>
+              <div>
+                <dt>Grace until</dt>
+                <dd>
+                  {snapshot.snapshot.graceUntil !== null
+                    ? new Date(snapshot.snapshot.graceUntil).toISOString()
+                    : "—"}
+                </dd>
+              </div>
+              <div>
+                <dt>Provider</dt>
+                <dd>{snapshot.snapshot.provider ?? "—"}</dd>
+              </div>
+              <div>
+                <dt>Provider customer</dt>
+                <dd>
+                  <code className="ltr-island">{snapshot.snapshot.providerCustomerId ?? "—"}</code>
+                </dd>
+              </div>
+              <div>
+                <dt>Provider subscription</dt>
+                <dd>
+                  <code className="ltr-island">{snapshot.snapshot.providerSubscriptionId ?? "—"}</code>
+                </dd>
+              </div>
+              <div>
+                <dt>State version</dt>
+                <dd>{snapshot.snapshot.stateVersion ?? "—"}</dd>
+              </div>
+            </dl>
+          ) : (
+            <p className="caption" role="status">
+              No billing row for this learner — an override here would 404.
+            </p>
+          )
+        ) : null}
         <label>
           State
           <select value={overrideState} onChange={(e) => setOverrideState(e.target.value as BillingStateValue | "")}>

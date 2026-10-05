@@ -160,6 +160,62 @@ class AdminBillingController extends Controller
     }
 
     /**
+     * READ ONE LEARNER'S CURRENT SNAPSHOT (v3-D279). `override()`'s own 409
+     * response literally says "Re-read and retry" — until this method, there
+     * was nothing to re-read: `GET /api/entitlement` is hard-scoped to the
+     * calling learner's own id (self-service only), and `index()` above reads
+     * the TRANSITION LOG, which never stored `tier`/`region`/`trialSurah`/
+     * `currentPeriodEnd`/`graceUntil`/`provider`/`providerCustomerId`/
+     * `providerSubscriptionId` at all — those fields exist only on this row.
+     * Mirrors `EntitlementController::show()`'s own "no row" defaults exactly
+     * (trial/none/INTL, every optional field null — never a bespoke "none"
+     * state the client union has no member for), plus `exists`, which that
+     * self-service endpoint has no reason to expose but an admin does: it is
+     * what lets a support admin tell, before typing a reason, whether
+     * `override()` would 404. `provider`/`providerCustomerId`/
+     * `providerSubscriptionId` are included here (the self-service endpoint
+     * omits them — a learner does not need their own Stripe ids surfaced)
+     * because an admin reconciling a billing complaint against Stripe's own
+     * dashboard has no other way to find them anywhere in this product.
+     */
+    public function show(int $userId): JsonResponse
+    {
+        $entitlement = Entitlement::where('user_id', $userId)->first();
+
+        if (! $entitlement) {
+            return response()->json([
+                'exists' => false,
+                'state' => 'trial',
+                'tier' => 'none',
+                'region' => 'INTL',
+                'trialSurah' => null,
+                'trialStartedAt' => null,
+                'currentPeriodEnd' => null,
+                'graceUntil' => null,
+                'provider' => null,
+                'providerCustomerId' => null,
+                'providerSubscriptionId' => null,
+                'stateVersion' => null,
+            ]);
+        }
+
+        return response()->json([
+            'exists' => true,
+            'state' => $entitlement->state->value,
+            'tier' => $entitlement->tier->value,
+            'region' => $entitlement->region,
+            'trialSurah' => $entitlement->trial_surah,
+            'trialStartedAt' => $entitlement->trial_started_at,
+            'currentPeriodEnd' => $entitlement->current_period_end,
+            'graceUntil' => $entitlement->grace_until,
+            'provider' => $entitlement->provider,
+            'providerCustomerId' => $entitlement->provider_customer_id,
+            'providerSubscriptionId' => $entitlement->provider_subscription_id,
+            'stateVersion' => $entitlement->state_version,
+        ]);
+    }
+
+    /**
      * 'system' (every non-override call site) renders verbatim. A numeric
      * string — an admin user id, written by `override()` above — is
      * pseudonymized like any other admin identity, never leaked as a raw

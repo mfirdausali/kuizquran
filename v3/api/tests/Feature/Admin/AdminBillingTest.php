@@ -340,4 +340,99 @@ class AdminBillingTest extends TestCase
 
         $this->assertSame('active', $entitlement->fresh()->state->value);
     }
+
+    // ---- show() — v3-D279. `override()`'s own 409 says "Re-read and retry",
+    // and its own 404 means an admin has to guess blind whether a row exists
+    // — but until now there was NO route that let an admin read a specific
+    // learner's CURRENT entitlement snapshot at all. `GET /api/entitlement`
+    // is hard-scoped to the calling learner's own id; `GET /api/admin/billing`
+    // reads the transition LOG, which never stored tier/region/trialSurah/
+    // currentPeriodEnd/graceUntil/provider/providerCustomerId/
+    // providerSubscriptionId at all — those fields exist ONLY on the
+    // `entitlements` row itself. These tests prove the missing read. ----
+
+    public function test_show_requires_admin(): void
+    {
+        $learner = $this->learner();
+        $this->getJson("/api/admin/billing/{$learner->id}")->assertStatus(401);
+
+        Sanctum::actingAs($this->learner());
+        $this->getJson("/api/admin/billing/{$learner->id}")->assertStatus(403);
+    }
+
+    /**
+     * THE LOAD-BEARING CASE. Every field on the row, verbatim, including the
+     * three — `provider`, `providerCustomerId`, `providerSubscriptionId` —
+     * that reach NO other human-facing surface anywhere in this product
+     * (they are read internally by `EntitlementMachine::merge()`/
+     * `WebhookHandler::findByCustomer()` only). An admin reconciling a
+     * billing complaint against Stripe's own dashboard needs exactly these.
+     */
+    public function test_show_returns_the_full_current_snapshot_for_an_existing_row(): void
+    {
+        $this->admin();
+        $learner = $this->learner();
+        Entitlement::create([
+            'user_id' => $learner->id,
+            'state' => 'grace',
+            'tier' => 'monthly',
+            'region' => 'MY',
+            'trial_surah' => 12,
+            'trial_started_at' => 1_700_000_000_000,
+            'current_period_end' => 1_700_500_000_000,
+            'grace_until' => 1_700_600_000_000,
+            'provider' => 'stripe',
+            'provider_customer_id' => 'cus_abc123',
+            'provider_subscription_id' => 'sub_def456',
+            'state_version' => 3,
+        ]);
+
+        $response = $this->getJson("/api/admin/billing/{$learner->id}")->assertOk();
+
+        $response->assertJson([
+            'exists' => true,
+            'state' => 'grace',
+            'tier' => 'monthly',
+            'region' => 'MY',
+            'trialSurah' => 12,
+            'trialStartedAt' => 1_700_000_000_000,
+            'currentPeriodEnd' => 1_700_500_000_000,
+            'graceUntil' => 1_700_600_000_000,
+            'provider' => 'stripe',
+            'providerCustomerId' => 'cus_abc123',
+            'providerSubscriptionId' => 'sub_def456',
+            'stateVersion' => 3,
+        ]);
+    }
+
+    /**
+     * Mirrors `EntitlementController::show()`'s own "no row" defaults exactly
+     * (trial/none/INTL, every optional field null) — never a bespoke "none"
+     * state the client-side union has no member for — plus `exists: false`,
+     * which `EntitlementController::show()` has no reason to expose to a
+     * learner about themselves but an admin needs, to know in advance that
+     * `override()` would 404 rather than discovering it after typing a reason.
+     */
+    public function test_show_returns_honest_defaults_when_the_learner_has_no_row(): void
+    {
+        $this->admin();
+        $learner = $this->learner();
+
+        $response = $this->getJson("/api/admin/billing/{$learner->id}")->assertOk();
+
+        $response->assertExactJson([
+            'exists' => false,
+            'state' => 'trial',
+            'tier' => 'none',
+            'region' => 'INTL',
+            'trialSurah' => null,
+            'trialStartedAt' => null,
+            'currentPeriodEnd' => null,
+            'graceUntil' => null,
+            'provider' => null,
+            'providerCustomerId' => null,
+            'providerSubscriptionId' => null,
+            'stateVersion' => null,
+        ]);
+    }
 }

@@ -53,10 +53,96 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2956 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 2966 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 406 v3/api + 120 corpus-compiler
-             # + 466 engine + 67 fold-runner + 1595 apps/web. (v3-D278, 2026-10-05)
+             # 255 v2 vitest + 47 v2/api + 409 v3/api + 120 corpus-compiler
+             # + 466 engine + 67 fold-runner + 1602 apps/web. (v3-D279, 2026-10-05)
+             # NOTE (v3-D279, 2026-10-05): no admin route could read a
+             # learner's CURRENT entitlement snapshot. `Admin\
+             # AdminBillingController::override()`'s own 409 response says,
+             # verbatim, "version conflict — the entitlement changed
+             # underneath you. Re-read and retry" (v3-D147) — but
+             # `GET /api/entitlement` is hard-scoped to the calling learner's
+             # own id (self-service only, v3-D90), and `index()` reads the
+             # TRANSITION LOG (v3-D141), which never stored `tier`/`region`/
+             # `trialSurah`/`currentPeriodEnd`/`graceUntil`/`provider`/
+             # `providerCustomerId`/`providerSubscriptionId` at all — those
+             # fields exist only on the `entitlements` row itself. An admin
+             # had to guess blind whether a row existed (`override()`'s own
+             # 404) before typing a reason, and the two Stripe-side ids
+             # (read internally by `EntitlementMachine::merge()`/
+             # `WebhookHandler::findByCustomer()`) reached no human-facing
+             # surface anywhere — a support admin reconciling a billing
+             # complaint against Stripe's own dashboard had no way to find
+             # them in this product at all. Fixed: new
+             # `AdminBillingController::show(int $userId)` (`GET
+             # /api/admin/billing/{userId}`, digit-constrained so it can
+             # never shadow the sibling `/billing/events` route) mirrors
+             # `EntitlementController::show()`'s own "no row" defaults
+             # exactly, plus a new `exists` field and the three provider
+             # fields that endpoint deliberately omits. `lib/admin/
+             # billingAudit.ts` gains `loadBillingSnapshot()`;
+             # `BillingAuditPanel.tsx` gains a "Look up current snapshot"
+             # button that finally makes `override()`'s own "Re-read and
+             # retry" message performable, and re-reads automatically after
+             # a successful override. RED confirmed at both layers: 3 new
+             # `AdminBillingTest` cases 404'd against the unmodified route
+             # table; `git stash` of the two production frontend files alone
+             # (7 new tests kept) failed all 7 exactly as predicted; both
+             # restored byte-identically and reran green (18/18 PHPUnit, was
+             # 15; 28/28 vitest across the two files, was 21). One real gate
+             # catch along the way: the panel's first-drafted "no row"
+             # caption spelled the literal word `check-boundaries.mjs`
+             # clause 9 forbids outside its allowlist — caught by a live run
+             # of the real gate, reworded to "No billing row for this
+             # learner", rerun clean. `TZ=UTC make test`: 2966 passing (was
+             # 2956, +10 — exactly this run's new tests: 3 PHPUnit + 7
+             # vitest; v3/api 409, was 406; apps/web 1602, was 1595; no
+             # other suite moved). `check-test-floor.mjs`: OK, 2966 >= floor
+             # 1899 (+1067 margin, unmoved). `TZ=UTC make build`: exit 0, 30
+             # routes, unchanged (no new production file; boundaries 327
+             # files, the same pre-existing gitignored `next-env.d.ts`
+             # fluctuation this file has recorded many times before). `npx
+             # tsc --noEmit` clean. `./vendor/bin/pint --test` on the one
+             # changed production PHP file: passed; `routes/api.php`/
+             # `AdminBillingTest.php` report the identical pre-existing
+             # style findings both before and after this diff, confirmed by
+             # stashing and re-running pint — pre-existing drift, left
+             # alone. No `v1/**`/`v2/**` edit. No Arabic codepoint (the full
+             # diff swept over every Arabic-adjacent Unicode block — zero
+             # matches). No oracle/golden-log/fixture/snapshot regenerated.
+             # Session start: fresh container, PHP defaulted to 8.3.6 (v3/
+             # api needs >=8.4.1); installed PHP 8.4 cleanly via the
+             # documented `packages.sury.org` apt mirror. `HEAD`, local
+             # `main` and `origin/main` all already agreed at `c6237be`
+             # (v3-D278) — no stale-local-`main` trap this run. Found by a
+             # dedicated fresh-sweep agent (Explore) directed at the newest
+             # admin panels' field-by-field wire completeness and a
+             # zero-external-caller export scan — independently
+             # re-verified directly against the real source before writing
+             # any test. NOT addressed: every item on v3-D278's own "NOT
+             # addressed" list, unchanged — `acknowledgeReentry`'s own
+             # "makeup" branch still only logs and points the learner at
+             # `/home` (v3-D256's verdict unchanged); `DrillPicker.tsx`'s
+             # own unused `now` prop; the unused `atoms`/`corpus`/`sessions`
+             # IndexedDB object stores (v3-D232); `session_start`'s own
+             # latency metric (v0.8); the streak/away-day day-space
+             # mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()`; `App\Billing\TrialAttribution`
+             # (v3-D148); `lib/pricing.ts#regionFromCountry()` (v3-D163);
+             # `PaywallGate` as a whole class (v3-D88, v3-D151, v3-D219);
+             # `App\Flags\FlagService::enabled()` (v3-D197); multi-surah
+             # enrollment; the operational mailer/7-night launch window;
+             # PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel` (v3-D188); `corpusHash`'s zero
+             # fold-side consumer (v3-D206); `selection_determinism_check`
+             # still replaying a committed fixture; `QueueItem.score`'s own
+             # missing external reader (v3-D263) — all unchanged. The admin
+             # billing surface's own "read the current snapshot" gap is now
+             # CLOSED — remove it from future "no reader" sweeps. See
+             # DECISIONS.md v3-D279.
              # NOTE (v3-D278, 2026-10-05): `check-boundaries.mjs`'s own clause
              # 4 sacred-text escape-hatch check covered only two of the five
              # Arabic-adjacent Unicode ranges its own sibling literal-

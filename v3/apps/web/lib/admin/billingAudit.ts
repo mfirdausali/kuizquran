@@ -123,6 +123,104 @@ export async function loadBillingAudit(userId?: number): Promise<BillingAuditLoa
   return { state: "ready", entries, limit };
 }
 
+// ---- loadBillingSnapshot — v3-D279. ----
+//
+// `override()`'s own 409 response says, verbatim, "Re-read and retry" — but
+// until now there was NOTHING to re-read: `GET /api/entitlement` is
+// hard-scoped to the calling learner's own id (self-service only), and
+// `loadBillingAudit` above reads the TRANSITION LOG, which never stored
+// `tier`/`region`/`trialSurah`/`currentPeriodEnd`/`graceUntil`/`provider`/
+// `providerCustomerId`/`providerSubscriptionId` at all — those fields exist
+// only on the current row this function reads. This is also the only way an
+// admin can tell, BEFORE typing a reason and submitting, whether
+// `override()` would 404 for a learner with no row at all (`exists: false`).
+
+/** Mirrors `AdminBillingController::show()`'s wire shape exactly. */
+export interface BillingSnapshot {
+  exists: boolean;
+  state: BillingStateValue;
+  tier: BillingTierValue;
+  region: string;
+  trialSurah: number | null;
+  trialStartedAt: number | null;
+  currentPeriodEnd: number | null;
+  graceUntil: number | null;
+  /** Reaches no other human-facing surface in this product — an admin
+   *  reconciling against Stripe's own dashboard needs it here. */
+  provider: string | null;
+  providerCustomerId: string | null;
+  providerSubscriptionId: string | null;
+  stateVersion: number | null;
+}
+
+export type BillingSnapshotLoad =
+  | { state: "loading" }
+  | { state: "ready"; snapshot: BillingSnapshot }
+  | { state: "unavailable"; reason: string };
+
+const STATE_VALUES: readonly BillingStateValue[] = ["trial", "active", "grace", "lapsed_review_only"];
+const TIER_VALUES: readonly BillingTierValue[] = ["none", "monthly", "lifetime"];
+
+function isBillingSnapshot(v: unknown): v is BillingSnapshot {
+  if (typeof v !== "object" || v === null) return false;
+  const s = v as Record<string, unknown>;
+  return (
+    typeof s.exists === "boolean" &&
+    (STATE_VALUES as readonly string[]).includes(s.state as string) &&
+    (TIER_VALUES as readonly string[]).includes(s.tier as string) &&
+    typeof s.region === "string" &&
+    (typeof s.trialSurah === "number" || s.trialSurah === null) &&
+    (typeof s.trialStartedAt === "number" || s.trialStartedAt === null) &&
+    (typeof s.currentPeriodEnd === "number" || s.currentPeriodEnd === null) &&
+    (typeof s.graceUntil === "number" || s.graceUntil === null) &&
+    (typeof s.provider === "string" || s.provider === null) &&
+    (typeof s.providerCustomerId === "string" || s.providerCustomerId === null) &&
+    (typeof s.providerSubscriptionId === "string" || s.providerSubscriptionId === null) &&
+    (typeof s.stateVersion === "number" || s.stateVersion === null)
+  );
+}
+
+/**
+ * Fetch one learner's CURRENT billing snapshot by their raw id (from a
+ * support ticket, the same convention `loadBillingAudit`/`lib/admin/
+ * reveal.ts` already established). Never throws — the same discipline as
+ * every other loader in this module.
+ */
+export async function loadBillingSnapshot(userId: number): Promise<BillingSnapshotLoad> {
+  let response: Response;
+  try {
+    response = await apiFetch(`/api/admin/billing/${encodeURIComponent(String(userId))}`);
+  } catch (err) {
+    return {
+      state: "unavailable",
+      reason: err instanceof Error ? `request failed: ${err.message}` : "request failed",
+    };
+  }
+
+  if (!response.ok) {
+    return {
+      state: "unavailable",
+      reason:
+        response.status === 403
+          ? "this screen requires an admin account"
+          : `the API answered ${response.status}`,
+    };
+  }
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return { state: "unavailable", reason: "the API's answer was not JSON" };
+  }
+
+  if (!isBillingSnapshot(body)) {
+    return { state: "unavailable", reason: "the API's answer carried no billing snapshot" };
+  }
+
+  return { state: "ready", snapshot: body };
+}
+
 // ---- submitBillingOverride — the ONE write on this surface (v3-D147). ----
 //
 // `App\Billing\EntitlementMachine::CAUSE_ADMIN_OVERRIDE` existed since the

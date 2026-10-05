@@ -139,6 +139,12 @@ Route::middleware('auth:sanctum')->group(function () {
         // anywhere; a different table than the one `/billing` above reads. Read-only —
         // see BillingEventsController's own header.
         Route::get('/billing/events', [BillingEventsController::class, 'index']);
+        // Read one learner's CURRENT entitlement snapshot (v3-D279). Until now
+        // `override()`'s own 409 ("Re-read and retry") had nothing to re-read —
+        // see AdminBillingController::show()'s own header. Constrained to
+        // digits so it can never shadow the sibling `/billing/events` route
+        // above regardless of registration order.
+        Route::get('/billing/{userId}', [AdminBillingController::class, 'show'])->where('userId', '[0-9]+');
 
         // System Health (step 24). #167: a failed probe renders `unknown`,
         // never 0 — the console must distinguish "healthy" from "blind".

@@ -242,3 +242,127 @@ describe("BillingAuditPanel — the admin override form", () => {
     expect(seen.every((u) => !u.includes("/override"))).toBe(true);
   });
 });
+
+// v3-D279 — `override()`'s own 409 says "Re-read and retry"; these prove the
+// panel finally gives an admin something to re-read.
+describe("BillingAuditPanel — looking up the current snapshot", () => {
+  const realFetch = globalThis.fetch;
+
+  beforeEach(() => resetApiFetchForTests());
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    vi.restoreAllMocks();
+  });
+
+  it("looking up an existing learner renders their current state/tier/region and provider ids", async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/billing/42")) {
+        return jsonResponse({
+          exists: true,
+          state: "grace",
+          tier: "monthly",
+          region: "MY",
+          trialSurah: 12,
+          trialStartedAt: 1_700_000_000_000,
+          currentPeriodEnd: 1_700_500_000_000,
+          graceUntil: 1_700_600_000_000,
+          provider: "stripe",
+          providerCustomerId: "cus_abc123",
+          providerSubscriptionId: "sub_def456",
+          stateVersion: 3,
+        });
+      }
+      return jsonResponse({ entries: [], limit: 200 });
+    }) as unknown as typeof fetch;
+
+    render(<BillingAuditPanel />);
+    await waitFor(() => expect(screen.getByText(/no billing activity recorded yet/i)).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText(/target user id/i), { target: { value: "42" } });
+    fireEvent.click(screen.getByRole("button", { name: /look up current snapshot/i }));
+
+    await waitFor(() => expect(screen.getByText("grace", { ignore: "script, style, option" })).toBeTruthy());
+    expect(screen.getByText("monthly", { ignore: "script, style, option" })).toBeTruthy();
+    expect(screen.getByText("MY")).toBeTruthy();
+    expect(screen.getByText("cus_abc123")).toBeTruthy();
+    expect(screen.getByText("sub_def456")).toBeTruthy();
+  });
+
+  it("looking up a learner with no row says so honestly instead of a fabricated snapshot", async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/billing/99")) {
+        return jsonResponse({
+          exists: false,
+          state: "trial",
+          tier: "none",
+          region: "INTL",
+          trialSurah: null,
+          trialStartedAt: null,
+          currentPeriodEnd: null,
+          graceUntil: null,
+          provider: null,
+          providerCustomerId: null,
+          providerSubscriptionId: null,
+          stateVersion: null,
+        });
+      }
+      return jsonResponse({ entries: [], limit: 200 });
+    }) as unknown as typeof fetch;
+
+    render(<BillingAuditPanel />);
+    await waitFor(() => expect(screen.getByText(/no billing activity recorded yet/i)).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText(/target user id/i), { target: { value: "99" } });
+    fireEvent.click(screen.getByRole("button", { name: /look up current snapshot/i }));
+
+    await waitFor(() => expect(screen.getByText(/would 404/i)).toBeTruthy());
+    expect(screen.queryByText("cus_abc123")).toBeNull();
+  });
+
+  it("a successful override re-reads an already-looked-up snapshot automatically", async () => {
+    let overrideCalls = 0;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/override")) {
+        overrideCalls++;
+        return jsonResponse({ applied: true, state: "lapsed_review_only", tier: "monthly" });
+      }
+      if (url.includes("/billing/42")) {
+        return jsonResponse({
+          exists: true,
+          state: overrideCalls > 0 ? "lapsed_review_only" : "active",
+          tier: "monthly",
+          region: "MY",
+          trialSurah: null,
+          trialStartedAt: null,
+          currentPeriodEnd: null,
+          graceUntil: null,
+          provider: "stripe",
+          providerCustomerId: "cus_abc123",
+          providerSubscriptionId: "sub_def456",
+          stateVersion: overrideCalls,
+        });
+      }
+      return jsonResponse({ entries: [], limit: 200 });
+    }) as unknown as typeof fetch;
+
+    render(<BillingAuditPanel />);
+    await waitFor(() => expect(screen.getByText(/no billing activity recorded yet/i)).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText(/target user id/i), { target: { value: "42" } });
+    fireEvent.click(screen.getByRole("button", { name: /look up current snapshot/i }));
+    await waitFor(() => expect(screen.getByText("active", { ignore: "script, style, option" })).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText(/^state$/i), { target: { value: "lapsed_review_only" } });
+    fireEvent.change(screen.getByLabelText(/^reason$/i), {
+      target: { value: "refund per support ticket 9911" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /apply override/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText("lapsed_review_only", { ignore: "script, style, option" })).toBeTruthy(),
+    );
+  });
+});

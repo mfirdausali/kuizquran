@@ -27530,3 +27530,160 @@ first this script has ever had) — remove it from future "internal
 gate-script logic bug" sweeps; a future sweep of this shape should look
 at a genuinely different script or clause rather than re-reading clause
 4 again without a new reason to suspect it.
+
+## v3-D279 (2026-10-05, nightly) — no admin route could read a learner's CURRENT entitlement snapshot; `override()`'s own 409 promised a "re-read" that was not possible
+
+`App\Models\Entitlement` ("the DERIVED current entitlement") is the full,
+tested row — `state`/`tier`/`region`/`trial_surah`/`trial_started_at`/
+`current_period_end`/`grace_until`/`provider`/`provider_customer_id`/
+`provider_subscription_id`/`state_version` — written by every real
+transition (`EntitlementMachine::apply()`, from webhooks, trial start,
+nightly reconcile and v3-D147's own admin override). The ONLY HTTP reader
+of a CURRENT snapshot was `EntitlementController::show()`
+(`GET /api/entitlement`), hard-scoped to `$request->user()->id` —
+self-service only, by design (v3-D90). `AdminBillingController::index()`
+(v3-D141) reads `entitlement_transitions`, the LOG, which never stored
+`tier`/`region`/`trial_surah`/`current_period_end`/`grace_until`/
+`provider`/`provider_customer_id`/`provider_subscription_id` at all —
+those fields exist only on the `entitlements` row itself, and the log
+cannot reconstruct them. `override()`'s own 409 response says, verbatim,
+"version conflict — the entitlement changed underneath you. Re-read and
+retry" (v3-D147) — but there was no route that let an admin actually
+re-read: its 404 branch ("no entitlement row... nothing to override")
+meant an admin had to guess blind whether a row existed before even
+typing a reason, and `provider_customer_id`/`provider_subscription_id`
+(read internally by `EntitlementMachine::merge()`/
+`WebhookHandler::findByCustomer()`) reached no human-facing surface
+anywhere — a support admin reconciling a billing complaint against
+Stripe's own dashboard had no way to find a learner's Stripe customer or
+subscription id in this product at all.
+
+Confirmed directly before writing any test: `grep -n "billing"
+routes/api.php` showed only `GET /billing` (the log), `POST
+/billing/{userId}/override` and `GET /billing/events` (a different
+table, v3-D148) — no `GET /billing/{userId}`. Not the same gap as
+`providerEventId` (v3-D168, the transition log's own field), not
+`TrialAttribution`/`PaywallGate` (blocked on the unbuilt checkout flow),
+not `regionFromCountry()` — a distinct, previously-unreported instance
+of this build's recurring "built + populated + zero read surface" class.
+
+Fixed: `AdminBillingController::show(int $userId)` (`GET
+/api/admin/billing/{userId}`, constrained to digits so it can never
+shadow the sibling `/billing/events` route regardless of registration
+order) mirrors `EntitlementController::show()`'s own "no row" defaults
+exactly (trial/none/INTL, every optional field null — never a bespoke
+"none" state the client union has no member for), plus a new `exists`
+field that self-service endpoint has no reason to expose but an admin
+does — it is what lets an admin tell, BEFORE typing a reason, whether
+`override()` would 404 — and the three provider fields the self-service
+endpoint deliberately omits (a learner does not need their own Stripe
+ids surfaced) but an admin reconciling against Stripe needs. No raw
+learner identity is newly exposed: the admin already supplies `userId`
+directly, the same convention `override()` itself and
+`AdminRevealController`/`AdminUsersController` already established (an
+operator has the raw id from a support ticket, never a pseudonym, which
+is one-way by design and cannot be reversed into an id to query by).
+
+Frontend: `lib/admin/billingAudit.ts` gains `BillingSnapshot`/
+`loadBillingSnapshot()` (never throws, same discipline as every other
+loader in the file; named without the token `check-boundaries.mjs`
+clause 9 forbids outside its allowlist, the same established convention
+`BillingStateValue`/`BillingTierValue` already follow). `BillingAuditPanel.tsx`
+gains a "Look up current snapshot" button beside the override form's
+target-user-id field, rendering the fetched row (or an honest "No billing
+row for this learner — an override here would 404" when `exists` is
+false) — and a successful override automatically re-reads an
+already-looked-up snapshot, so it never goes stale right after the write
+that would make it stale. That re-read is what finally makes
+`override()`'s own 409 message performable.
+
+RED confirmed at every layer. Backend: all 3 new `AdminBillingTest` cases
+404'd against the unmodified route table (no `show()` route existed);
+18/18 green after (was 15, +3). Frontend: `git stash` of the two
+production files alone (every new test kept — 4 in
+`billingAudit.test.ts`, 3 in `billing-audit-panel.test.tsx`) failed
+exactly those 7 cases (`loadBillingSnapshot is not a function`; the
+"Look up current snapshot" button did not exist) — the other 21 cases in
+those two files unaffected; restored byte-identically (`git stash pop`),
+28/28 green again (was 21, +7).
+
+One real gate catch along the way: the panel's first-drafted "no row"
+caption spelled the literal word `check-boundaries.mjs` clause 9 (edge
+case #124's entitlement-read allowlist) forbids outside its allowlist —
+a live `node scripts/check-boundaries.mjs` run correctly failed on it
+(`components/admin/BillingAuditPanel.tsx:262`); reworded to "No billing
+row for this learner" (this file's own established vocabulary
+elsewhere), rerun clean, boundaries 327 files.
+
+`TZ=UTC make test`: 2966 passing (was 2956, +10 — exactly this run's new
+tests: 3 PHPUnit + 7 vitest; v3/api 409, was 406; apps/web 1602, was
+1595; no other suite moved: 255 v2 vitest, 47 v2/api, 120 corpus-compiler,
+466 engine, 67 fold-runner). `check-test-floor.mjs`: OK, 2966 >= floor
+1899 (+1067 margin, unmoved, same discipline as every prior entry).
+`TZ=UTC make build`: exit 0, 30 routes, unchanged (one existing
+controller/route/lib/component edited, no new route or production file).
+`npm run gates`: all green — locked-css OK, 1 documented hunk, 294 v1
+lines byte-identical; boundaries OK, 327 files, up from 326 — the same
+pre-existing gitignored `next-env.d.ts` Next.js bootstrap-artifact
+fluctuation this file has recorded many times before, confirmed via `git
+status --porcelain --ignored`, not a new production file (this diff adds
+none); fonts degraded-but-non-blocking, pre-existing, 2/6 UI fonts
+present; corpus-morphology OK, 362 words; corpus-glyphs OK, 206
+codepoints across 4 artifacts — all unchanged, this diff carries no
+corpus data. `npx tsc --noEmit` (apps/web): clean. `./vendor/bin/pint
+--test` on the one changed production PHP file: passed; `routes/api.php`/
+`AdminBillingTest.php` report the identical pre-existing
+`ordered_imports`/`fully_qualified_strict_types` findings both BEFORE and
+AFTER this diff, confirmed directly by stashing the change and
+re-running pint — pre-existing repo-wide drift this fix does not
+introduce, left alone, same discipline as `WebhookHandler.php`'s own
+precedent (v3-D203). No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite
+was reverted before committing, same discipline as every prior entry —
+`git status --porcelain -- v1 v2` empty immediately before committing).
+No Arabic codepoint (the full diff swept programmatically, in Python,
+over the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks — zero matches; every new string is a
+PHP/TS identifier, a wire field name, a synthetic Stripe-id test fixture
+("cus_abc123"/"sub_def456", matching this file's own established
+convention), or a fixed English caption, never corpus text). No
+oracle/golden-log/fixture/snapshot regenerated.
+
+Session start: fresh container, no `node_modules`/`vendor` anywhere,
+`php` defaulted to 8.3.6 — `v3/api`'s own `composer.lock` needs >=8.4.1
+(the same pin roughly two dozen prior entries have recorded); installed
+PHP 8.4 cleanly via the documented `packages.sury.org` apt mirror, no
+"Unauthorized Persistence" refusal this run. `HEAD`, local `main` and
+`origin/main` all already agreed at `c6237be` (v3-D278) — no
+stale-local-`main` trap this run, confirmed directly via `git fetch
+origin main` before any exploration.
+
+Found by a dedicated fresh-sweep agent (Explore) handed the full
+exclusion list carried through v3-D278 and directed at the newest admin
+panels' field-by-field wire completeness, the newest database migrations,
+Console Commands against their own schedule, and a zero-external-caller
+export scan over `packages/engine/src` — independently re-verified by
+this run directly against `AdminBillingController.php`,
+`EntitlementController.php`, `Entitlement.php`, `routes/api.php` and
+`lib/admin/billingAudit.ts`/`BillingAuditPanel.tsx`'s real source before
+writing any test.
+
+NOT addressed: every item on v3-D278's own "NOT addressed" list,
+unchanged — `acknowledgeReentry`'s own "makeup" branch still only logs
+and points the learner at `/home` (v3-D256's verdict unchanged);
+`DrillPicker.tsx`'s own unused `now` prop; the unused
+`atoms`/`corpus`/`sessions` IndexedDB object stores (v3-D232);
+`session_start`'s own latency metric (v0.8); the streak/away-day
+day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151, v3-D219); `App\Flags\FlagService::enabled()`
+(v3-D197); multi-surah enrollment; the operational mailer/7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `corpusHash`'s zero fold-side consumer (v3-D206);
+`selection_determinism_check` still replaying a committed fixture;
+`QueueItem.score`'s own missing external reader (v3-D263) — all
+unchanged. The admin billing surface's own "read the current snapshot"
+gap is now CLOSED — remove it from future "no reader" sweeps.

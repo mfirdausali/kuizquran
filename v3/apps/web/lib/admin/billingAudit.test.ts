@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetApiFetchForTests } from "@/lib/sync/apiFetch";
-import { loadBillingAudit, submitBillingOverride } from "./billingAudit";
+import { loadBillingAudit, loadBillingSnapshot, submitBillingOverride } from "./billingAudit";
 
 describe("loadBillingAudit — failure is a STATE, never an exception", () => {
   const realFetch = globalThis.fetch;
@@ -191,5 +191,108 @@ describe("submitBillingOverride — never throws, the server decides everything"
     const outcome = await submitBillingOverride(42, { state: "active", reason: "refund per support ticket 9911" });
     expect(outcome.ok).toBe(false);
     expect(outcome.message).toContain("Failed to fetch");
+  });
+});
+
+// v3-D279 — `override()`'s own 409 says "Re-read and retry"; this is what it
+// now has to re-read, through the single egress, scoped by raw learner id.
+describe("loadBillingSnapshot — makes override()'s 409 performable", () => {
+  const realFetch = globalThis.fetch;
+
+  beforeEach(() => resetApiFetchForTests());
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    vi.restoreAllMocks();
+  });
+
+  it("requests /api/admin/billing/{userId} through the single egress", async () => {
+    const seen: string[] = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      seen.push(String(input));
+      return new Response(
+        JSON.stringify({
+          exists: true,
+          state: "grace",
+          tier: "monthly",
+          region: "MY",
+          trialSurah: 12,
+          trialStartedAt: 1_700_000_000_000,
+          currentPeriodEnd: 1_700_500_000_000,
+          graceUntil: 1_700_600_000_000,
+          provider: "stripe",
+          providerCustomerId: "cus_abc123",
+          providerSubscriptionId: "sub_def456",
+          stateVersion: 3,
+        }),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+
+    const result = await loadBillingSnapshot(42);
+
+    expect(seen).toEqual(["/api/admin/billing/42"]);
+    expect(result).toEqual({
+      state: "ready",
+      snapshot: {
+        exists: true,
+        state: "grace",
+        tier: "monthly",
+        region: "MY",
+        trialSurah: 12,
+        trialStartedAt: 1_700_000_000_000,
+        currentPeriodEnd: 1_700_500_000_000,
+        graceUntil: 1_700_600_000_000,
+        provider: "stripe",
+        providerCustomerId: "cus_abc123",
+        providerSubscriptionId: "sub_def456",
+        stateVersion: 3,
+      },
+    });
+  });
+
+  it("a learner with no row reads `exists: false` with honest defaults, never a crash", async () => {
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            exists: false,
+            state: "trial",
+            tier: "none",
+            region: "INTL",
+            trialSurah: null,
+            trialStartedAt: null,
+            currentPeriodEnd: null,
+            graceUntil: null,
+            provider: null,
+            providerCustomerId: null,
+            providerSubscriptionId: null,
+            stateVersion: null,
+          }),
+          { status: 200 },
+        ),
+    ) as unknown as typeof fetch;
+
+    const result = await loadBillingSnapshot(99);
+    expect(result.state).toBe("ready");
+    if (result.state === "ready") {
+      expect(result.snapshot.exists).toBe(false);
+      expect(result.snapshot.providerCustomerId).toBeNull();
+    }
+  });
+
+  it("a non-2xx becomes unavailable with the status named, never a fabricated snapshot", async () => {
+    globalThis.fetch = vi.fn(async () => new Response("nope", { status: 403 })) as unknown as typeof fetch;
+
+    const result = await loadBillingSnapshot(42);
+    expect(result).toEqual({ state: "unavailable", reason: "this screen requires an admin account" });
+  });
+
+  it("a network throw becomes unavailable, never a rejected promise", async () => {
+    globalThis.fetch = vi.fn(async () => {
+      throw new TypeError("Failed to fetch");
+    }) as unknown as typeof fetch;
+
+    const result = await loadBillingSnapshot(42);
+    expect(result.state).toBe("unavailable");
   });
 });
