@@ -27687,3 +27687,111 @@ window; PAY-1's Stripe fixtures; surah 67's scene beats;
 `QueueItem.score`'s own missing external reader (v3-D263) — all
 unchanged. The admin billing surface's own "read the current snapshot"
 gap is now CLOSED — remove it from future "no reader" sweeps.
+
+## v3-D280 (2026-10-05, nightly) — `BillingSnapshot.trialStartedAt` was fetched, type-validated and test-fixtured, but `BillingAuditPanel.tsx` never rendered it
+
+v3-D279 (the immediately preceding decision, same night's own earlier run)
+built `AdminBillingController::show()`/`BillingSnapshot` specifically so an
+admin reconciling a billing complaint finally has something to "re-read" per
+`override()`'s own 409 message — and rendered every field of that snapshot
+except one. `show()` returns a real, nullable `trial_started_at` epoch-ms
+column (`app/Http/Controllers/Admin/AdminBillingController.php:191-192,208`,
+not a constant); `lib/admin/billingAudit.ts`'s `BillingSnapshot.trialStartedAt:
+number | null` is a *required* field and `isBillingSnapshot()`'s own runtime
+guard (lines 164-181) validates its shape before accepting the object at
+all — but `BillingAuditPanel.tsx`'s snapshot `<dl>` rendered State, Tier,
+Region, Trial surah, Current period end, Grace until, Provider, Provider
+customer, Provider subscription and State version, with no "Trial started"
+row anywhere. `grep -n "trialStartedAt" components/admin/BillingAuditPanel.tsx`
+returned nothing before this fix. The existing test
+(`test/billing-audit-panel.test.tsx`'s own "looking up an existing learner"
+case) already seeded `trialStartedAt: 1_700_000_000_000` in its mock response
+and asserted nothing about it being displayed — confirming the gap was live,
+not merely theoretical, from the moment the field was introduced.
+
+Sharper than the usual instance of this bug class because of WHEN it exists:
+`trialStartedAt` did not exist before v3-D279 landed a few hours earlier the
+same night, so no prior sweep could possibly have found it — this is the
+first night it was even possible to name.
+
+**Fixed:** one new `<dt>Trial started</dt>`/`<dd>` pair, placed directly
+after "Trial surah" (mirroring the adjacent "Current period end"/"Grace
+until" rows' own `!== null ? new Date(...).toISOString() : "—"` pattern
+exactly) — display-only, no server/wire change.
+
+**Verified:** RED confirmed directly against the unmodified component: a new
+assertion on the existing "looking up an existing learner" test
+(`expect(screen.getByText(new Date(1_700_000_000_000).toISOString()))`)
+failed with `TestingLibraryElementError: Unable to find an element with the
+text` (the ISO string was genuinely absent from the DOM); a new assertion on
+the existing "a successful override re-reads an already-looked-up snapshot"
+test (whose own fixture already carries `trialStartedAt: null`) failed on
+`screen.getByText("Trial started")` throwing — no such label existed at all.
+Both fail for the predicted reason (no new testid, no new field, nothing
+fabricated to make a vacuous pass possible), not a wiring accident. Restored
+byte-identically, reran: `test/billing-audit-panel.test.tsx` 12/12 green
+(unchanged count — both are strengthened existing assertions, no new `it()`
+block, the same "test-only, no new test case" shape several prior entries
+have used).
+
+`TZ=UTC make test`: 2966 passing, matching v3-D279's own recorded count
+exactly (no new test case, so no suite's count moved: 255 v2 vitest, 47
+v2/api, 409 v3/api, 120 corpus-compiler, 466 engine, 67 fold-runner, 1602
+apps/web). `check-test-floor.mjs`: OK, 2966 >= floor 1899 (+1067 margin,
+unmoved, same discipline as every prior entry). `TZ=UTC make build`: exit 0,
+30 routes, unchanged (one existing component edited, no new route or
+production file). `npm run gates`: all green — locked-css OK, 1 documented
+hunk, 294 v1 lines byte-identical; boundaries OK, 327 files, unchanged count
+from v3-D279's own recorded number (no new production file, one existing
+component plus its existing test file edited); fonts degraded-but-non-
+blocking, pre-existing, 2/6 UI fonts present; corpus-morphology OK, 362
+words; corpus-glyphs OK, 206 codepoints across 4 artifacts — all unchanged,
+this diff carries no corpus data. `npx tsc --noEmit` (apps/web): clean. No
+`v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the suite was reverted before committing, same
+discipline as every prior entry). No Arabic codepoint (both changed files
+swept programmatically, in Python, over the Arabic, Arabic Supplement,
+Arabic Extended-A and both Presentation Forms Unicode blocks — zero matches;
+every new string is a fixed English label or a `new Date(...).toISOString()`
+call over an already-existing fixture integer, never corpus text). No
+oracle/golden-log/fixture/snapshot regenerated.
+
+Session start: fresh container, PHP defaulted to 8.3.6 (`v3/api` needs
+>=8.4.1); installed PHP 8.4 cleanly via the documented `packages.sury.org`
+apt mirror, no "Unauthorized Persistence" refusal. `HEAD` was detached
+exactly at `origin/main`'s own tip (`87c1295`, v3-D279), on a stale LOCAL
+`main` branch ref 14 commits behind (`dc8ed36`, v3-D269) — the recurring
+"stale local main" trap this file has recorded roughly fifty times since
+v3-D77 — caught before any exploration via `git fetch origin main` + `git
+checkout main && git merge --ff-only origin/main`, a clean fast-forward, no
+work lost or at risk.
+
+Found by a dedicated fresh-sweep agent (Explore) handed the full exclusion
+list carried through v3-D279 and directed at the newest admin panel field
+added that same night, plus every other admin lib/component pair
+(`nightlyWindow`, `purgeLedger`, `health`, `roles`, `glossDrafts`,
+`flagAudit`, `flags`, `reveal`, `billingEvents`, `users`) checked
+field-by-field and confirmed fully rendered — independently re-verified by
+this run directly against `AdminBillingController.php`,
+`billingAudit.ts` and `BillingAuditPanel.tsx`'s real source, and the
+existing test's own already-seeded-but-unasserted fixture value, before
+writing any test.
+
+NOT addressed: every item on v3-D279's own "NOT addressed" list, unchanged
+— `acknowledgeReentry`'s own "makeup" branch still only logs and points the
+learner at `/home` (v3-D256's verdict unchanged); `DrillPicker.tsx`'s own
+unused `now` prop; the unused `atoms`/`corpus`/`sessions` IndexedDB object
+stores (v3-D232); `session_start`'s own latency metric (v0.8); the
+streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151, v3-D219); `App\Flags\FlagService::enabled()`
+(v3-D197); multi-surah enrollment; the operational mailer/7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `corpusHash`'s zero fold-side consumer (v3-D206);
+`selection_determinism_check` still replaying a committed fixture;
+`QueueItem.score`'s own missing external reader (v3-D263) — all unchanged.
+`BillingSnapshot.trialStartedAt` is now CLOSED — remove it from future "no
+reader" sweeps.

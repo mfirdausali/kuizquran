@@ -224,6 +224,14 @@ export function BillingAuditPanel() {
                 <dd>{snapshot.snapshot.trialSurah ?? "—"}</dd>
               </div>
               <div>
+                <dt>Trial started</dt>
+                <dd>
+                  {snapshot.snapshot.trialStartedAt !== null
+                    ? new Date(snapshot.snapshot.trialStartedAt).toISOString()
+                    : "—"}
+                </dd>
+              </div>
+              <div>
                 <dt>Current period end</dt>
                 <dd>
                   {snapshot.snapshot.currentPeriodEnd !== null

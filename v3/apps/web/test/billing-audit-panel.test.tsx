@@ -7,7 +7,7 @@
 // Mirrors `test/audit-log-panel.test.tsx`'s three-state discipline.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { resetApiFetchForTests } from "@/lib/sync/apiFetch";
 import { BillingAuditPanel } from "@/components/admin/BillingAuditPanel";
 
@@ -287,6 +287,7 @@ describe("BillingAuditPanel — looking up the current snapshot", () => {
     expect(screen.getByText("MY")).toBeTruthy();
     expect(screen.getByText("cus_abc123")).toBeTruthy();
     expect(screen.getByText("sub_def456")).toBeTruthy();
+    expect(screen.getByText(new Date(1_700_000_000_000).toISOString())).toBeTruthy();
   });
 
   it("looking up a learner with no row says so honestly instead of a fabricated snapshot", async () => {
@@ -354,6 +355,10 @@ describe("BillingAuditPanel — looking up the current snapshot", () => {
     fireEvent.change(screen.getByLabelText(/target user id/i), { target: { value: "42" } });
     fireEvent.click(screen.getByRole("button", { name: /look up current snapshot/i }));
     await waitFor(() => expect(screen.getByText("active", { ignore: "script, style, option" })).toBeTruthy());
+
+    const trialStartedRow = screen.getByText("Trial started").closest("div");
+    expect(trialStartedRow).not.toBeNull();
+    expect(within(trialStartedRow as HTMLElement).getByText("—")).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText(/^state$/i), { target: { value: "lapsed_review_only" } });
     fireEvent.change(screen.getByLabelText(/^reason$/i), {

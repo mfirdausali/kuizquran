@@ -56,7 +56,50 @@ make dev     # SPA :5273, API :8000
 make test    # 2966 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 409 v3/api + 120 corpus-compiler
-             # + 466 engine + 67 fold-runner + 1602 apps/web. (v3-D279, 2026-10-05)
+             # + 466 engine + 67 fold-runner + 1602 apps/web. (v3-D280, 2026-10-05)
+             # NOTE (v3-D280, 2026-10-05): `BillingSnapshot.trialStartedAt`
+             # (v3-D279's own new field, same night) was fetched,
+             # type-validated by `isBillingSnapshot()` and already seeded in
+             # the existing test's own fixture — but
+             # `BillingAuditPanel.tsx`'s snapshot `<dl>` never rendered it,
+             # the one field missing from a row that otherwise renders
+             # State/Tier/Region/Trial surah/Current period end/Grace
+             # until/Provider/Provider customer/Provider subscription/State
+             # version in full. Fixed: one new "Trial started" `<dt>/<dd>`
+             # row after "Trial surah", mirroring the adjacent
+             # currentPeriodEnd/graceUntil `!== null ? toISOString() : "—"`
+             # pattern exactly — display-only, no server/wire change. RED
+             # confirmed directly: a new assertion on the existing "looking
+             # up an existing learner" test failed on the ISO string being
+             # absent from the DOM; a new assertion on the existing
+             # "re-reads" test (whose fixture already carries
+             # `trialStartedAt: null`) failed on `getByText("Trial
+             # started")` throwing, no such label existing. Both
+             # strengthened existing assertions, no new `it()` block.
+             # `TZ=UTC make test`: 2966 passing, matching v3-D279's own
+             # recorded count exactly (no suite moved). `check-test-
+             # floor.mjs`: OK, 2966 >= floor 1899 (+1067 margin, unmoved).
+             # `TZ=UTC make build`: exit 0, 30 routes, unchanged. `npm run
+             # gates`: all green — boundaries 327 files, unchanged count;
+             # locked-css/fonts/corpus-morphology/corpus-glyphs all
+             # unchanged. `npx tsc --noEmit`: clean. No `v1/**`/`v2/**`
+             # edit. No Arabic codepoint (both changed files swept over
+             # every Arabic-adjacent Unicode block: zero matches). No
+             # oracle/golden-log/fixture/snapshot regenerated. Session
+             # start: fresh container, PHP 8.4 installed via
+             # `packages.sury.org`, no refusal. `HEAD` was detached exactly
+             # at `origin/main`'s tip (`87c1295`, v3-D279) on a stale local
+             # `main` 14 commits behind — the recurring stale-local-`main`
+             # trap, caught before any exploration via `git fetch` + `git
+             # checkout main && git merge --ff-only origin/main`, no work
+             # at risk. Found by a dedicated fresh-sweep agent (Explore)
+             # directed at v3-D279's own brand-new field plus every other
+             # admin lib/component pair, checked field-by-field and
+             # confirmed fully rendered. NOT addressed: every item on
+             # v3-D279's own "NOT addressed" list, unchanged — see
+             # DECISIONS.md v3-D280 for the full enumeration.
+             # `BillingSnapshot.trialStartedAt` is now CLOSED — remove it
+             # from future "no reader" sweeps. See DECISIONS.md v3-D280.
              # NOTE (v3-D279, 2026-10-05): no admin route could read a
              # learner's CURRENT entitlement snapshot. `Admin\
              # AdminBillingController::override()`'s own 409 response says,
