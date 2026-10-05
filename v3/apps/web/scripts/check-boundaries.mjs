@@ -13,7 +13,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(dir, "..");
+// `--root <path>` overrides the scanned tree for testability (mirrors
+// check-corpus-glyphs.mjs's own `--corpus-root`) — every real invocation
+// (`npm run gates`, `prebuild`) omits it and gets the real apps/web tree,
+// unchanged.
+const ROOT_ARG_IDX = process.argv.indexOf("--root");
+const ROOT = ROOT_ARG_IDX !== -1 ? path.resolve(process.argv[ROOT_ARG_IDX + 1]) : path.resolve(dir, "..");
 const SKIP = new Set(["node_modules", ".next", ".git", "public", "scripts"]);
 
 function walk(start) {
@@ -83,6 +88,17 @@ for (const f of files) {
 // sacred-text scan would flag its own detector — the one false positive
 // guaranteed to teach people to ignore the scan. Same ranges, zero literals.
 const ARABIC = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
+// The escape-hatch check used to cover only \u06xx/\u07xx — main Arabic and
+// Arabic Supplement — leaving THREE of the five ranges the literal-character
+// check above (and INVARIANTS.md's own Absolute B) names completely
+// unguarded as an escape: \u08xx (Arabic Extended-A), \uFBxx/\uFCxx/\uFDxx
+// (Presentation Forms-A) and \uFExx (Presentation Forms-B). A `\u08A1` or
+// `\uFE70` written into source as an ESCAPE, rather than typed as a literal
+// glyph, passed this gate silently — confirmed live before this fix: a
+// throwaway file containing exactly those two escapes plus a
+// `String.fromCodePoint` call (below) reported `boundaries: OK`. Widened to
+// all five ranges, case-insensitively over the hex digits.
+const ARABIC_ESCAPE = /\\u0[6-8][0-9A-Fa-f]{2}|\\u(?:fb|fc|fd|fe)[0-9A-Fa-f]{2}/i;
 for (const f of files) {
   const src = read(f);
   const lines = src.split("\n");
@@ -90,12 +106,33 @@ for (const f of files) {
     if (ARABIC.test(line)) {
       violations.push(`${rel(f)}:${i + 1}: literal Arabic codepoint. Arabic comes from the corpus at runtime.`);
     }
-    if (/\\u0[6-7][0-9A-Fa-f]{2}/.test(line)) {
+    if (ARABIC_ESCAPE.test(line)) {
       violations.push(`${rel(f)}:${i + 1}: \\u escape in the Arabic range — the same violation, escaped.`);
     }
   });
   if (/String\.fromCharCode/.test(src)) {
     violations.push(`${rel(f)}: String.fromCharCode — never synthesise Arabic codepoints.`);
+  }
+}
+// `String.fromCodePoint` is the SAME escape hatch as `fromCharCode` above —
+// a single numeric literal that reconstructs an Arabic codepoint with no
+// literal glyph and no \u escape in the source — but is deliberately NOT
+// banned blanket like fromCharCode is: several test files
+// (check-corpus-glyphs-gate.test.ts, content-freeze-gate.test.ts) already
+// use it, by established and documented convention, to synthesize
+// SYNTHETIC (never real Quranic) Arabic-range bytes for testing
+// infrastructure that must see real Arabic-range codepoints — e.g. a
+// WOFF2/cmap glyph-coverage parser. Banning it there would break that
+// sanctioned pattern for no safety gain, since the synthesized bytes are
+// never Quranic text. Scoped instead to PRODUCTION code only
+// (app/components/lib, never a *.test.ts(x) file) — mirroring clauses
+// 5/13/14/15's own production-only scope — which is exactly where this
+// escape hatch has no legitimate use at all.
+for (const f of files.filter((f) => /^(app|components|lib)\//.test(rel(f)))) {
+  const r = rel(f);
+  if (r.endsWith(".test.ts") || r.endsWith(".test.tsx")) continue;
+  if (/String\.fromCodePoint/.test(stripComments(read(f)))) {
+    violations.push(`${r}: String.fromCodePoint — never synthesise Arabic codepoints.`);
   }
 }
 

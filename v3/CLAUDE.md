@@ -53,10 +53,133 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2948 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 2956 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 406 v3/api + 120 corpus-compiler
-             # + 466 engine + 67 fold-runner + 1587 apps/web. (v3-D277, 2026-10-04)
+             # + 466 engine + 67 fold-runner + 1595 apps/web. (v3-D278, 2026-10-05)
+             # NOTE (v3-D278, 2026-10-05): `check-boundaries.mjs`'s own clause
+             # 4 sacred-text escape-hatch check covered only two of the five
+             # Arabic-adjacent Unicode ranges its own sibling literal-
+             # character check (and INVARIANTS.md's own Absolute B) already
+             # covers: the regex matched hex 0600-07FF only, leaving Arabic
+             # Extended-A (08A0-08FF) and both Presentation-Forms blocks
+             # (FB50-FDFF, FE70-FEFF) completely unguarded AS A SOURCE-LEVEL
+             # ESCAPE (`\u08A1`, `\uFE70`, etc — never a literal glyph, which
+             # the sibling check still catches everywhere). `String
+             # .fromCodePoint` — the same numeric-literal escape hatch its
+             # own neighbor `String.fromCharCode` already is — had no check
+             # at all on either side of the regex. Confirmed live, before
+             # any fix: a throwaway file under `lib/` containing exactly
+             # those three constructs made the real, unmodified
+             # `check-boundaries.mjs` print `boundaries: OK`. Not a live
+             # defect against any real learner-facing surface today (no
+             # existing file in the tree used any of the three) — a gap in
+             # the ONE mechanical gate INVARIANTS.md names as Absolute B's
+             # enforcement, previously believed exhausted by v3-D276's own
+             # "read every gate script line by line" sweep, which checked
+             # that clause 4 RUNS, not that its regex matches what its own
+             # header and INVARIANTS.md both already promise. Fixed:
+             # `ARABIC_ESCAPE` widened to all five ranges, case-
+             # insensitively; a new, separate check bans `String
+             # .fromCodePoint` but — unlike the blanket `fromCharCode`
+             # ban — scoped to production code only (`app/`/`components`/
+             # `lib/`, never a `*.test.ts(x)` file), since two existing
+             # test files already use it, by established and explicitly
+             # documented convention, to synthesize SYNTHETIC (never real
+             # Quranic) Arabic-range bytes for testing infrastructure that
+             # must see real Arabic-range codepoints (the WOFF2/cmap glyph-
+             # coverage parser). `fromCharCode`'s own existing blanket-
+             # everywhere ban is completely unchanged — nothing already
+             # enforced became weaker anywhere. Also added: an optional
+             # `--root <path>` override (mirroring `check-corpus-glyphs
+             # .mjs`'s own `--corpus-root`), so a test can spawn the real
+             # script against a synthetic fixture tree instead of writing
+             # fixture files into the real tracked repo; every real
+             # invocation omits it and is byte-for-byte unaffected. RED
+             # confirmed directly, mutation-verified via `git stash` of
+             # `check-boundaries.mjs` alone (this script had ZERO prior
+             # test coverage of its own logic — the first `*-gate.test.ts`
+             # it has ever had, 8 new cases, all kept): without `--root`
+             # support the pre-fix script ignores the flag and scans the
+             # REAL tree instead of the fixture, so 5 of 8 cases failed
+             # genuinely against the real tree's own then-current content;
+             # restored byte-identically, reran green, 8/8. Caught and
+             # fixed before committing: this test file's own first-drafted
+             # header prose, describing the widened ranges with literal
+             # backslash-u notation, was silently expanded by the authoring
+             # tool into REAL Unicode codepoints in the committed bytes —
+             # caught by an independent Python codepoint sweep (not by the
+             # gate itself, though a live run of the real, unmodified gate
+             # against the tree with this file in place DID correctly flag
+             # it as a literal Arabic codepoint, the never-broken half of
+             # clause 4 working exactly as designed) — rewritten to
+             # describe every range in plain hex prose with no backslash-u
+             # notation anywhere, re-swept clean. `TZ=UTC make test`: 2956
+             # passing (was 2948, +8 — exactly this run's eight new cases;
+             # apps/web 1595, was 1587; no other suite moved: 255 v2
+             # vitest, 47 v2/api, 406 v3/api, 120 corpus-compiler, 466
+             # engine, 67 fold-runner). `check-test-floor.mjs`: OK, 2956 >=
+             # floor 1899 (+1057 margin, unmoved, same discipline as every
+             # prior entry). `TZ=UTC make build`: exit 0, 30 routes,
+             # unchanged (a gate-script-plus-one-new-test-file change, no
+             # apps/web production route or component touched). `npm run
+             # gates`: all green — locked-css OK, 1 documented hunk, 294 v1
+             # lines byte-identical; boundaries OK, 326 files, up from 325
+             # — exactly the one new test file; fonts degraded-but-non-
+             # blocking, pre-existing, 2/6 UI fonts present; corpus-
+             # morphology OK, 362 words; corpus-glyphs OK, 206 codepoints
+             # across 4 artifacts — all unchanged, this diff carries no
+             # corpus data. `npx tsc --noEmit` (apps/web): clean. No
+             # `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff produced by running the suite was reverted
+             # before committing, same discipline as every prior entry).
+             # No Arabic codepoint in the final committed diff (both
+             # changed/new files swept programmatically, in Python, over
+             # all five Arabic-adjacent Unicode blocks plus the same
+             # widened escape pattern the fix itself implements: CLEAN —
+             # the one violation this sweep caught, described above, was
+             # fixed before committing, not after). No oracle/golden-log/
+             # fixture/snapshot regenerated. Session start: fresh
+             # container, no `node_modules`/`vendor` anywhere, no PHP 8.4
+             # (installed cleanly via the documented `packages.sury.org`
+             # apt mirror, no "Unauthorized Persistence" refusal). THE
+             # STALE-LOCAL-`main` TRAP RECURRED AGAIN, caught before any
+             # commit: a first, un-fetched read showed local `main` eight
+             # commits behind a detached `HEAD` already at `cc423ac`
+             # (v3-D277) — looking like eight nights' work sat unpushed;
+             # `git fetch origin main` showed `origin/main` was ALREADY at
+             # `cc423ac` — every one of those eight nights had been pushed
+             # correctly, only this container's cached remote-tracking ref
+             # was stale. `git checkout main && git merge --ff-only
+             # origin/main` fast-forwarded cleanly, no work ever at risk.
+             # Found by a direct, manual read of clause 4 against
+             # INVARIANTS.md's own Absolute B wording, not a dispatched
+             # sweep agent — independently reproduced live against the
+             # real script before writing any test. NOT addressed: every
+             # item on v3-D277's own "NOT addressed" list, unchanged —
+             # `acknowledgeReentry`'s own "makeup" branch still only logs
+             # and points the learner at `/home` (v3-D256's verdict
+             # unchanged); `DrillPicker.tsx`'s own unused `now` prop; the
+             # unused `atoms`/`corpus`/`sessions` IndexedDB object stores
+             # (v3-D232); `session_start`'s own latency metric (v0.8); the
+             # streak/away-day day-space mismatch (v3-D209);
+             # `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution` (v3-D148);
+             # `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate`
+             # as a whole class (v3-D88, v3-D151, v3-D219);
+             # `App\Flags\FlagService::enabled()` (v3-D197); multi-surah
+             # enrollment; the operational mailer/7-night launch window;
+             # PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel` (v3-D188); `corpusHash`'s
+             # zero fold-side consumer (v3-D206); `selection_determinism_check`
+             # still replaying a committed fixture; `QueueItem.score`'s own
+             # missing external reader (v3-D263) — all unchanged. Clause
+             # 4's own escape-hatch blind spot is now CLOSED and
+             # permanently guarded by this script's first-ever dedicated
+             # gate-test file — remove it from future "internal gate-
+             # script logic bug" sweeps. See DECISIONS.md v3-D278.
              # NOTE (v3-D277, 2026-10-04): admin "Sign out"
              # (`lib/admin/session.ts#adminLogout()`, wired v3-D127) never
              # revoked the bearer token server-side — it only called

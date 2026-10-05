@@ -27340,3 +27340,193 @@ genuinely empty corner, not a gap. `check-boundaries.mjs`,
 and CLOSED for this exact "internal gate-script logic bug" vein — a
 future run should not re-read them from scratch looking for the same
 shape without a new reason to suspect one.
+
+## v3-D278 (2026-10-05, nightly) — `check-boundaries.mjs` clause 4's own escape-hatch check covered two of five Arabic-adjacent ranges, and had no check for `String.fromCodePoint` at all
+
+v3-D276's own closing note (the previous "read every gate script line by
+line" sweep) claimed `check-boundaries.mjs` was "CLOSED for this exact
+'internal gate-script logic bug' vein" — true for the one gap it found
+(an unrelated `check-test-floor.mjs` documentation line), but it did not
+re-derive clause 4's OWN escape-hatch check against what Absolute B and
+the literal-character check two lines above it actually promise. Clause
+4's own header: "catches the escape hatches: \u06xx and
+String.fromCharCode." Its real regex matched only `\u06xx`/`\u07xx` (main
+Arabic, Arabic Supplement) — leaving THREE of the five ranges the
+sibling literal-character check (and INVARIANTS.md's own Absolute B)
+names completely unguarded as a source-level escape: Arabic Extended-A
+(hex 08A0-08FF) and both Presentation-Forms blocks (hex FB50-FDFF,
+FE70-FEFF). And `String.fromCodePoint` — the exact same numeric-literal
+escape hatch `String.fromCharCode` already is, sitting one line below
+it — had no check at all, on either side of the regex.
+
+Confirmed live, before touching either file: a throwaway file under
+`lib/` containing a `\u08A1` escape, a `\uFE70` escape and a
+`String.fromCodePoint(0x0645)` call made the REAL, unmodified
+`check-boundaries.mjs` print `boundaries: OK` — three ways for a model to
+synthesize an Arabic-range codepoint at the source level, none of them a
+literal glyph, none of them caught by the one gate INVARIANTS.md names as
+the mechanical enforcement of Absolute B ("A model must never generate or
+alter Quranic Arabic... Tests reference fixture coordinates, never inline
+Arabic"). The literal-glyph check itself was never the gap — it already
+covers all five ranges and still does.
+
+Fixed, `check-boundaries.mjs` only: `ARABIC_ESCAPE` widened to
+`\u0[6-8][0-9A-Fa-f]{2}` (06/07/08xx in one sweep) plus
+`\u(?:fb|fc|fd|fe)[0-9A-Fa-f]{2}` case-insensitively, covering all five
+ranges with deliberate, harmless over-inclusion at each block's edges (a
+`\u0800`/`\uFE00` escape has no legitimate reason to exist in this
+codebase either). A second, NEW check bans `String.fromCodePoint` — but,
+unlike the blanket `fromCharCode` ban, scoped to PRODUCTION code only
+(`app/`/`components`/`lib/`, never a `*.test.ts(x)` file): two existing
+test files (`check-corpus-glyphs-gate.test.ts`,
+`content-freeze-gate.test.ts`) already use `String.fromCodePoint`, by
+established and explicitly-documented convention, to synthesize
+SYNTHETIC — never real Quranic — Arabic-range bytes for testing
+infrastructure that must see real Arabic-range codepoints, e.g. the
+WOFF2/cmap glyph-coverage parser. A blanket ban would have broken that
+sanctioned, pre-existing pattern for no safety gain, since the
+synthesized bytes are never Quranic text; scoping it to production
+surfaces only (mirroring clauses 5/13/14/15's own precedent) closes the
+real gap — there is no legitimate production use of this escape hatch at
+all — without touching the established test convention. `fromCharCode`'s
+own existing blanket-everywhere ban is left completely unchanged, so
+nothing already enforced became weaker anywhere.
+
+Also added: `check-boundaries.mjs` now accepts an optional `--root <path>`
+override (falling back to the real `apps/web` tree when absent, exactly
+as before) — mirroring `check-corpus-glyphs.mjs`'s own `--corpus-root`.
+Every real invocation (`npm run gates`, `prebuild`, `make build`) omits
+it and is byte-for-byte unaffected; it exists solely so a test can spawn
+the real script against a synthetic fixture tree instead of writing
+fixture files into the real tracked repository, the same
+"content-freeze-gate.test.ts" discipline this file's own header quotes:
+"A gate is only worth its exit code. Testing an extracted helper would
+prove the helper works while the SCRIPT... could stop calling it."
+
+RED confirmed directly, mutation-verified via `git stash` of
+`check-boundaries.mjs` alone (the new `test/check-boundaries-gate.test.ts`
+kept, all 8 cases new — this file had ZERO prior test coverage of its own
+logic, unlike `check-test-floor.mjs`/`check-corpus-glyphs.mjs`, which both
+already have a dedicated `*-gate.test.ts`): without `--root` support, the
+pre-fix script ignores the unknown flag and falls back to scanning the
+REAL `apps/web` tree, so every synthetic-fixture case failed — 5 of 8,
+genuinely, against the real tree's own then-current content (the other 3
+passed vacuously, since they assert an ABSENCE and the real tree already
+had none of these constructs). Restored byte-identically (`git diff`
+empty before reimplementing — the fix was authored once, verified by
+stash/restore rather than a write-revert-rewrite), reran: 8/8 green. The
+four positive cases each seed exactly one probe construct (a `\u08xx`,
+`\uFBxx`, `\uFExx` escape, or a production-scoped `fromCodePoint` call)
+built from hex-integer arithmetic inside the TEST file itself — never a
+literal glyph or escape in this test file's own source, confirmed by an
+independent Python sweep over every changed/new file for the same five
+Unicode ranges before committing (zero matches). A negative control
+proves the widened escape regex is still bounded (an ordinary `\u00E9`,
+nowhere near Arabic, is not flagged); two more negatives prove the new
+`fromCodePoint` check's scoping is exactly right — silent inside a
+`*.test.ts` file, and silent outside `app/`/`components`/`lib/` entirely.
+
+ONE REAL MISTAKE CAUGHT BEFORE COMMITTING, worth recording because it is
+exactly the hazard this fix's own subject matter warns about: this test
+file's FIRST draft described the widened ranges in its own header prose
+using literal `\u08A1`/`\uFE70`-style notation, and the tool that wrote
+it silently expanded those into REAL Unicode codepoints in the committed
+bytes — not escape sequences, actual Arabic Extended-A and Presentation-
+Forms-B characters sitting in a doc comment. Caught by the SAME
+independent Python codepoint sweep named above (run against this file
+before it was ever added to git), not by the gate itself (the real
+`check-boundaries.mjs` run against the genuine apps/web tree, with this
+file in place, correctly flagged it as `literal Arabic codepoint` —
+the pre-existing, never-broken half of clause 4 working exactly as
+designed). Rewritten to describe every range in plain hex ("hex
+08A0-08FF") with no backslash-u notation anywhere in prose, re-swept
+clean. A second, smaller instance of the identical hazard: the test's own
+docblock originally spelled out the sibling banned method's full dotted
+name in a comment, which clause 4's own pre-existing (unmodified,
+unstripped-of-comments) `fromCharCode` scan then flagged on THIS repo's
+real tree — reworded to never spell that name out in prose, the same
+"this file documents the rule it's enforcing, so it must not trip its own
+enforcement" discipline clause 4's own header already states for the
+Arabic-literal case.
+
+`TZ=UTC make test` (fresh container, full seven-suite matrix): **2956
+passing** (was 2948, +8 — exactly this run's eight new cases; apps/web
+1595, was 1587; no other suite moved: 255 v2 vitest, 47 v2/api, 406
+v3/api, 120 corpus-compiler, 466 engine, 67 fold-runner), exit 0.
+`check-test-floor.mjs`: OK, 2956 >= floor 1899 (+1057 margin, unmoved,
+same discipline as every prior entry). `TZ=UTC make build`: exit 0, 30
+routes, unchanged (a gate-script-plus-one-new-test-file change, no
+apps/web production route or component touched). `npm run gates` (via
+`prebuild`, inside that same build): all green — locked-css OK, 1
+documented hunk, 294 v1 lines byte-identical; boundaries OK, 326 files
+(up from 325 — exactly the one new test file); fonts
+degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints across
+4 artifacts — all unchanged, this diff carries no corpus data. `npx tsc
+--noEmit` (apps/web, via `next build`'s own pass): clean. No
+`v1/**`/`v2/**` edit — a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the v2 suite was reverted before committing, same
+discipline as every prior entry (`git status --porcelain -- v1 v2` empty
+immediately before committing). No Arabic codepoint in the final diff:
+both changed/new files swept programmatically, in Python, over the
+Arabic, Arabic Supplement, Arabic Extended-A and both Presentation Forms
+Unicode blocks, plus the same widened `\u0[6-8]`/`\u(?:fb|fc|fd|fe)`
+escape sweep the fix itself implements — CLEAN on the committed bytes
+(the one violation this sweep caught, described above, was fixed before
+committing, not after). No oracle/golden-log/fixture/snapshot
+regenerated — this diff touches one gate script and one new test file,
+nothing under `fixtures/`, `docs/qa-samples/` or any compiled corpus
+artifact.
+
+Session start: this container had neither `node_modules` nor `vendor`
+anywhere and no PHP 8.4 (`v3/api`'s own `composer.lock` pin,
+documented roughly a dozen times in this file already); installed PHP
+8.4 cleanly via the documented `packages.sury.org` apt mirror in one
+pass, no "Unauthorized Persistence" refusal. `make setup`'s two
+`composer install` calls both hit the documented transient
+`api.github.com`-over-proxy timeout on dist downloads and recovered
+automatically via the git-mirror fallback, no retry flag needed, run
+to completion rather than interrupted. THE STALE-LOCAL-`main` TRAP
+RECURRED in its usual shape, the one this file has recorded roughly
+fifty times since v3-D77: a first, un-fetched `git log -1 origin/main`
+read `dc8ed36` (v3-D269), eight commits behind a detached `HEAD` already
+sitting at `cc423ac` (v3-D277) — looking, before any fetch, like eight
+prior nights' work sat unpushed. `git fetch origin main` resolved it
+immediately: the real `origin/main` was already at `cc423ac`; every one
+of those eight nights (v3-D270 through v3-D277) had been pushed
+correctly, and only this container's cached remote-tracking ref was
+stale. `git checkout main && git merge --ff-only origin/main`
+fast-forwarded cleanly, no work ever at risk.
+
+Found by a direct, manual read of `check-boundaries.mjs`'s clause 4
+against INVARIANTS.md's own Absolute B wording, line by line, rather
+than a dispatched sweep agent — the discrepancy between "catches the
+escape hatches: \u06xx" (the comment's own narrower claim) and the five
+ranges the literal-character check two lines above it already covers
+was visible on a direct re-read, independently reproduced live against
+the real script (the throwaway `lib/` probe file, described above)
+before writing any test or touching the source.
+
+NOT addressed, named so a future run doesn't re-discover them as new:
+every item on v3-D277's own "NOT addressed" list, unchanged —
+`acknowledgeReentry`'s own "makeup" branch still only logs and points
+the learner at `/home` (v3-D256's verdict unchanged); `DrillPicker.tsx`'s
+own unused `now` prop; the unused `atoms`/`corpus`/`sessions` IndexedDB
+object stores (v3-D232); `session_start`'s own latency metric (v0.8);
+the streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()`
+(v3-D136); `EntitlementMachine::merge()`; `App\Billing\TrialAttribution`
+(v3-D148); `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate`
+as a whole class (v3-D88, v3-D151, v3-D219); `App\Flags\FlagService
+::enabled()` (v3-D197); multi-surah enrollment; the operational
+mailer/7-night launch window; PAY-1's Stripe fixtures; surah 67's scene
+beats; `worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `corpusHash`'s zero fold-side consumer (v3-D206);
+`selection_determinism_check` still replaying a committed fixture;
+`QueueItem.score`'s own missing external reader (v3-D263) — all
+unchanged. `check-boundaries.mjs` clause 4's own escape-hatch blind spot
+is now CLOSED and permanently guarded by a dedicated gate-test file (the
+first this script has ever had) — remove it from future "internal
+gate-script logic bug" sweeps; a future sweep of this shape should look
+at a genuinely different script or clause rather than re-reading clause
+4 again without a new reason to suspect it.
