@@ -29,16 +29,29 @@
 // an unclassifiable surah lands on ARC — where `authored: false` makes the
 // panel say out loud that its structure is derived.
 //
-// WHEN THE COMPILER EMITS `meta.macro` (corpus-compiler/src/macro.ts, already
-// written and tested), this module reads it directly and the fallback below
-// stops being reachable. That is the one-line change; nothing else moves.
+// CORRECTED (nightly run, 2026-10-06): this comment used to frame "the
+// compiler emits meta.macro" as a FUTURE, not-yet-made change ("WHEN the
+// compiler emits... that is the one-line change; nothing else moves") —
+// true when written, false since `corpus-compiler/src/buildCorpus.ts`
+// started stamping `macro` on every compile, unconditionally, at v3-D43
+// (the same decision this module's own `classify()` call cites). The real
+// production of it is `const macro = classify(...)` spread into the
+// returned `meta` object with no guard; `types.ts` declares it
+// `macro: MacroFacts` — required, not optional. `macroFactsFor`'s own
+// `if (meta.macro) return meta.macro;` branch below is therefore the LIVE
+// path for every real compiled corpus today, not a pending one-line
+// change — the `classify()` fallback beneath it is reachable only for a
+// pre-emission corpus subset, e.g. the engine's own frozen test fixture.
 
 import type { Corpus } from "@engine/types.ts";
 import { classify } from "../../../../packages/corpus-compiler/src/macro.ts";
 import type { MacroFacts } from "@/components/macro/facts.ts";
 
-/** The shape a compiled corpus will carry once the compiler's `meta.macro`
- *  emission ships. Optional today, authoritative tomorrow. */
+/** The shape a compiled corpus carries since the compiler's `meta.macro`
+ *  emission shipped (v3-D43). Optional here only so a pre-emission corpus
+ *  subset (e.g. the engine's own frozen test fixture) degrades honestly
+ *  via the `classify()` fallback below, rather than reading as
+ *  required-but-absent. */
 type CorpusWithMacro = Corpus & {
   meta: Corpus["meta"] & {
     macro?: MacroFacts;

@@ -27981,3 +27981,121 @@ committed fixture, `QueueItem.score`'s own missing external reader — all
 unchanged). `startOpenPractice`'s own stale adoption-offer docblock is now
 CLOSED and permanently guarded — remove it from future "docblock says X,
 reality is Y" sweeps.
+
+### v3-D283 — `lib/macro/facts.ts`'s own header still described the compiler's `meta.macro` emission as a pending, future one-line change (2026-10-06, nightly)
+
+A fifth instance of the recurring "docblock says X, reality is Y" shape
+(v3-D90/D110/D123/D236/D244/D251/D281/D282), found by a dedicated fresh-sweep
+agent (Explore) in a file none of those prior sweeps had touched —
+`apps/web/lib/macro/facts.ts`, not `lib/session/run.ts` — and independently
+re-verified by this run before writing any test.
+
+The file's own top-of-file header (lines 32-34) said, in as many words:
+"WHEN THE COMPILER EMITS `meta.macro` (corpus-compiler/src/macro.ts, already
+written and tested), this module reads it directly and the fallback below
+stops being reachable. That is the one-line change; nothing else moves."
+Framed as a FUTURE change — true when written (v3-D21, before the compiler
+side existed), false since v3-D43 wired the compiler's own emission:
+`packages/corpus-compiler/src/buildCorpus.ts` computes `const macro =
+classify(...)` and spreads it into the returned `meta` object on EVERY
+compile, unconditionally — no guard anywhere — and
+`packages/corpus-compiler/src/types.ts` declares the field `macro:
+MacroFacts` (required, not optional). The function immediately below the
+header, `macroFactsFor`, already has its own `if (meta.macro) return
+meta.macro;` branch — the "one-line change" the header describes as not yet
+made has, in fact, already been made and is the live path for every real
+compiled corpus today; the `classify()` fallback beneath it is reachable
+only for a pre-emission corpus subset (the engine's own frozen test
+fixture). A second, smaller instance of the same staleness sat on the
+`CorpusWithMacro` type's own doc comment ("Optional today, authoritative
+tomorrow").
+
+Not a live bug — `macroFactsFor` already preferred the compiler's own
+emission correctly, confirmed by the module's own pre-existing tests and by
+every real caller (`WorkbenchIsland.tsx`, `/surah/[surah]`,
+`/surah/[surah]/[ayah]`, `/progress`, both `/workbench` pages) loading a
+real compiled `Corpus` via `loadCorpus`/`loadEffectiveCorpus`. The project's
+own `apps/web/test/macro-facts.test.ts` header already half-corrected this
+independently ("The compiler now emits it unconditionally... so this is the
+one-line change's own missing proof") — but the production source file's
+header, one directory over, was never updated to match, and nothing
+mechanically checked the two stayed in agreement.
+
+**Fixed:** both stale comments replaced with a CORRECTED note (mirroring the
+template `run.ts` already uses for this exact shape) naming the real history
+(v3-D43) and the real mechanism (`buildCorpus.ts`'s unconditional
+`const macro = classify(...)`, `types.ts`'s required field). A new describe
+block was added to `macro-facts.test.ts`: one case reads `facts.ts`'s own
+real source text and asserts it never frames the emission as pending (the
+search phrase built from two words joined at runtime so the assertion's own
+declaration cannot trip its own guard, mirroring this codebase's established
+technique), plus a direct check against the stale "Optional today,
+authoritative tomorrow" phrase; a second, biconditional case reads
+`buildCorpus.ts`'s and `types.ts`'s real source and asserts the compiler
+genuinely still emits `macro` unconditionally and declares it required — so
+the guard cannot be satisfied by deleting the claim alone if the real wiring
+were ever genuinely made conditional again.
+
+**Verified:** RED confirmed directly against the unmodified `facts.ts`: the
+new test failed exactly on `expect(factsSrc).not.toMatch(/optional today,\s*
+authoritative tomorrow/i)`, quoting the real stale phrase; 4 passed, 1
+failed. Implemented, reran: `macro-facts.test.ts` 5/5 green (was 4, +1).
+
+`TZ=UTC make test`: 2970 passing (was 2968, +2 — exactly this run's two new
+test cases; apps/web 1606, was 1604; no other suite moved: 255 v2 vitest, 47
+v2/api, 409 v3/api, 120 corpus-compiler, 466 engine, 67 fold-runner).
+`check-test-floor.mjs`: OK, 2970 >= floor 1899 (+1071 margin, unmoved).
+`TZ=UTC make build`: exit 0, 30 routes, unchanged (a docblock-plus-test-case
+change, no route or other production file touched). `npm run gates` (via
+`prebuild`): all green — locked-css OK, 1 documented hunk, 294 v1 lines
+byte-identical; boundaries OK, 326 files, unchanged count; fonts
+degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints across 4
+artifacts — all unchanged, this diff carries no corpus data. `npx tsc
+--noEmit` (apps/web): clean. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite was
+reverted before committing, same discipline as every prior entry). No
+Arabic codepoint (both changed files swept programmatically, in Python,
+over the Arabic, Arabic Supplement, Arabic Extended-A and both Presentation
+Forms Unicode blocks — zero matches; every new string is a TypeScript
+identifier, a regex literal, or a fixed English docblock sentence, never
+corpus text). No oracle/golden-log/fixture/snapshot regenerated.
+
+Session start: fresh container, PHP defaulted to 8.3.6 (`v3/api` needs
+>=8.4.1); installed PHP 8.4 cleanly via the documented `packages.sury.org`
+apt mirror, no refusal this run. `HEAD`, local `main` and `origin/main` all
+already agreed at `6ce8fcd` (v3-D282) — no stale-local-`main` trap this run.
+`make setup`'s `v2/api` composer install hit the documented transient
+GitHub-API proxy timeout and recovered automatically via the git-mirror
+source fallback, no retry flag needed; every npm install (`apps/web`,
+`packages/engine`, `packages/corpus-compiler`, `worker/fold-runner`, `v2`)
+was run directly in parallel rather than waiting on the sequential `make
+setup` chain, the same shortcut several prior entries record.
+
+Found by a dedicated fresh-sweep agent (Explore) directed at the recurring
+"built and tested, zero real caller" / "docblock says X, reality is Y" bug
+class, explicitly steered away from every already-known/already-closed
+instance named on prior nights' "NOT addressed" lists — independently
+re-verified by this run directly against `facts.ts`, `buildCorpus.ts` and
+`types.ts`'s real source, and against every real caller of `macroFactsFor`,
+before writing any test.
+
+NOT addressed: every item on v3-D282's own "NOT addressed" list, unchanged
+— `acknowledgeReentry`'s own "makeup" branch still only logs and points the
+learner at `/home` (v3-D256's verdict unchanged); `DrillPicker.tsx`'s own
+unused `now` prop; the unused `atoms`/`corpus`/`sessions` IndexedDB object
+stores (v3-D232); `session_start`'s own latency metric (v0.8); the
+streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151, v3-D219); `App\Flags\FlagService::enabled()`
+(v3-D197); multi-surah enrollment; the operational mailer/7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `corpusHash`'s zero fold-side consumer (v3-D206);
+`selection_determinism_check` still replaying a committed fixture;
+`QueueItem.score`'s own missing external reader (v3-D263) — all unchanged.
+`lib/macro/facts.ts`'s own stale "pending compiler emission" docblock is now
+CLOSED and permanently guarded — remove it from future "docblock says X,
+reality is Y" sweeps.

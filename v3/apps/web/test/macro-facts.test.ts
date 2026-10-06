@@ -10,6 +10,8 @@
 // Absolute B).
 
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import type { Corpus } from "@engine/types.ts";
 import type { MacroFacts } from "@/components/macro/facts.ts";
 import { macroFactsFor } from "@/lib/macro/facts.ts";
@@ -59,5 +61,46 @@ describe("macroFactsFor — prefers the compiler's own emission (v3-D43)", () =>
     // Shrink the verses array to match the overridden ayahCount.
     corpus.verses = corpus.verses.slice(0, 3);
     expect(macroFactsFor(corpus).archetype).toBe("ATOMIC");
+  });
+});
+
+describe("lib/macro/facts.ts's own header does not describe the compiler emission as pending", () => {
+  it("never frames meta.macro as a future one-line change the compiler has not made yet", () => {
+    const factsPath = fileURLToPath(
+      new URL("../lib/macro/facts.ts", import.meta.url),
+    );
+    const factsSrc = readFileSync(factsPath, "utf8");
+    // Built from two words joined at runtime so this assertion's own
+    // declaration can never accidentally satisfy the pattern it forbids.
+    const whenPhrase = ["WHEN", "THE COMPILER EMITS"].join(" ");
+    expect(factsSrc).not.toMatch(
+      new RegExp(`${whenPhrase}[\\s\\S]{0,160}one-line change`, "i"),
+    );
+    expect(factsSrc).not.toMatch(/optional today,\s*authoritative tomorrow/i);
+  });
+
+  it("agreement, not wording: the compiler genuinely emits meta.macro unconditionally today", () => {
+    const buildCorpusPath = fileURLToPath(
+      new URL(
+        "../../../packages/corpus-compiler/src/buildCorpus.ts",
+        import.meta.url,
+      ),
+    );
+    const buildCorpusSrc = readFileSync(buildCorpusPath, "utf8");
+    // The real production of `meta.macro` — `classify(...)` assigned to a
+    // `macro` const, unconditionally, then spread into the returned `meta`
+    // object with no guard. If a future change made this conditional again,
+    // this half of the guard (not the wording check above) is what would
+    // catch it.
+    expect(buildCorpusSrc).toMatch(/const macro = classify\(/);
+    expect(buildCorpusSrc).toMatch(/\bmacro,/);
+
+    const typesPath = fileURLToPath(
+      new URL("../../../packages/corpus-compiler/src/types.ts", import.meta.url),
+    );
+    const typesSrc = readFileSync(typesPath, "utf8");
+    // Required, not optional — `macro?:` would mean the compiler itself
+    // still treats emission as conditional.
+    expect(typesSrc).toMatch(/\n\s*macro: MacroFacts;/);
   });
 });
