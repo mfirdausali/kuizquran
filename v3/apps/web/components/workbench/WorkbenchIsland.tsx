@@ -155,7 +155,10 @@ export function WorkbenchIsland({ surah, corpus, macro }: WorkbenchIslandProps) 
 
       <MentalModelPanel mentalModel={corpus.meta.mentalModel} />
 
-      <GeneratedFromPanel generatedFrom={corpus.meta.generatedFrom} />
+      <GeneratedFromPanel
+        generatedFrom={corpus.meta.generatedFrom}
+        corpusHash={corpus.meta.corpusHash}
+      />
 
       <section className="card" aria-labelledby="spec-h">
         <div className="card-header">

@@ -28099,3 +28099,147 @@ window; PAY-1's Stripe fixtures; surah 67's scene beats;
 `lib/macro/facts.ts`'s own stale "pending compiler emission" docblock is now
 CLOSED and permanently guarded — remove it from future "docblock says X,
 reality is Y" sweeps.
+
+### v3-D284 — `Corpus["meta"].corpusHash` had no reviewer-facing render anywhere, despite `GeneratedFromPanel.tsx`'s own docblock claiming otherwise (2026-10-06, nightly)
+
+A sixth instance of the recurring "docblock says X, reality is Y" shape
+(v3-D90/D110/D123/D236/D244/D251/D281/D282/D283), found by a dedicated
+fresh-sweep agent (Explore) directed away from every already-known/excluded
+instance in `apps/web/lib/session/run.ts`, `apps/web/lib/macro/facts.ts` and
+the rest of the long-mined territory — and independently re-verified by this
+run before writing any test.
+
+`GeneratedFromPanel.tsx`'s own header (v3-D239, the night `generatedFrom`
+itself was wired) said: "a reviewer on `/workbench` — the one screen that
+already audits `corpusHash`/`hashSpecVersion`/`droppedCollisions` for
+exactly this kind of build provenance." True for `droppedCollisions`
+(`DroppedCollisionsPanel.tsx`, v3-D193) — false for `corpusHash`: the
+sentence conflates two unrelated hash mechanisms. `hashSpecVersion` in that
+sentence is `VerificationRow.hashSpecVersion`, the per-AYAH tiered-
+verification hash's own schema version, rendered in `QariMode.tsx`'s
+signature history (v3-D177, DEFECTS.md#B3) — a completely different field
+from `Corpus["meta"].corpusHash`, the FILE-level compiler content hash
+`DrillEvent.corpusHash` exists to pin event provenance against (v3-D206).
+Confirmed directly: `grep -rn "corpusHash" apps/web` outside this file's own
+prose and tests turned up only IndexedDB/event-stamping plumbing
+(`lib/idb/db.ts`, `lib/idb/schema.ts`, `lib/idb/append.ts`,
+`lib/session/run.ts`) — no React component anywhere read or rendered
+`meta.corpusHash` to a human. Every sibling `Corpus.meta` diagnostic panel
+built since (`DroppedCollisionsPanel` v3-D193, `DistractorYieldPanel`
+v3-D192, `MentalModelPanel` v3-D202, `GeneratedFromPanel` itself v3-D239)
+renders its OWN field correctly — `corpusHash` was the one field this
+panel's own docblock claimed was already covered by a DIFFERENT panel, and
+never was.
+
+Not a live learner-facing bug (a reviewer diagnostic only, writes nothing),
+but material for the same reason every prior instance of this field-shaped
+gap has been: the real staged corpus genuinely carries a real value
+(confirmed directly — `packages/corpus-compiler/output/manifest.json`'s
+surah 112 entry and the staged `apps/web/public/corpus/112.json`'s own
+`meta.corpusHash` both read `908ca9edbd2ab2e4`, byte-identical) that a
+reviewer auditing WHICH exact compile produced the corpus in front of them
+had no way to see on the one screen built for exactly that question.
+
+**Fixed:** `GeneratedFromPanel` gains a `corpusHash: string | undefined`
+prop, rendered as a new "Content hash: `<hash>`" caption beneath the
+existing `generatedFrom` list — present only when defined, never fabricated
+for an older corpus subset or a frozen test fixture that predates the
+field (the same "optional, never fabricated" discipline every sibling
+`Corpus.meta` field already follows). `WorkbenchIsland.tsx`'s one call site
+now passes `corpus.meta.corpusHash` alongside the existing
+`corpus.meta.generatedFrom` — `corpus` was already fully in scope there, no
+new prop threading needed upstream. The docblock is corrected to a
+CORRECTED note (this file's own established template) naming the real
+history and the real distinction between the two hash mechanisms, so a
+future sweep does not re-conflate them.
+
+**Verified:** RED confirmed directly against the unmodified panel: two new
+cases added to `workbench-ui.test.tsx`'s existing "a corpus's own generation
+provenance reaches the reviewer" describe block — the positive case
+attaches a synthetic 16-hex hash to a COPY of the frozen fixture (which
+genuinely predates `meta.corpusHash`, confirmed via `expect(corpus.meta
+.corpusHash).toBeUndefined()` before the attach, the same precedent this
+file's own `meta.mentalModel`/`meta.macro` positive cases already use for a
+field the frozen fixture does not itself carry) and asserts the hash string
+renders; the negative case uses the frozen fixture UNMODIFIED and asserts
+no "content hash" text appears at all, proving the fallback is a real
+branch rather than this case accidentally not reaching the render. Run
+against the unmodified component: the positive case failed exactly
+`expected 'PROVENANCEkuizquran/data/yusuf-verses…' to match
+/deadbeefcafef00d/`; the negative case passed vacuously (no fallback to be
+wrong, since nothing rendered a hash either way). Implemented, reran:
+`workbench-ui.test.tsx` 53/53 green (was 51, +2 — exactly these two new
+cases; no other case in the file affected).
+
+`grep -rln "GeneratedFromPanel"` confirmed exactly one call site
+(`WorkbenchIsland.tsx`) and the file's own test — widening the required
+prop could not silently break another caller.
+
+`TZ=UTC make test`: 2972 passing (was 2970, +2 — exactly this run's two new
+tests; apps/web 1608, was 1606; no other suite moved: 255 v2 vitest, 47
+v2/api, 409 v3/api, 120 corpus-compiler, 466 engine, 67 fold-runner).
+`check-test-floor.mjs`: OK, 2972 >= floor 1899 (+1073 margin, unmoved).
+`TZ=UTC make build`: exit 0, 30 routes, unchanged (two existing production
+files edited plus one existing test file, no new route or production
+file). `npm run gates` (via `prebuild`): all green — locked-css OK, 1
+documented hunk, 294 v1 lines byte-identical; boundaries OK, 327 files,
+unchanged count; fonts degraded-but-non-blocking, pre-existing, 2/6 UI
+fonts present; corpus-morphology OK, 362 words; corpus-glyphs OK, 206
+codepoints across 4 artifacts — all unchanged, this diff carries no corpus
+data. `npx tsc --noEmit` (apps/web): clean. No `v1/**`/`v2/**` edit (a
+stray `v2/tsconfig.tsbuildinfo` build-cache diff produced by running the
+suite was reverted before committing, same discipline as every prior
+entry). No Arabic codepoint (all three changed files swept
+programmatically, in Python, over the Arabic, Arabic Supplement, Arabic
+Extended-A and both Presentation Forms Unicode blocks — zero matches; every
+new string is a TypeScript identifier, a wire field name, a synthetic
+16-hex test placeholder, or a fixed English caption/docblock sentence,
+never corpus text). No oracle/golden-log/fixture/snapshot regenerated.
+
+One real flake caught and ruled out along the way, not weakened around: a
+full `make test` run reported `test/session-island.test.tsx` failing on a
+`screen.findByTestId("reentry-notice")` timeout (`waitFor`-based, the same
+real-`Date.now`-plus-fake-focus-event shape v3-D217's own closing note
+already flagged as timing-sensitive). Re-ran that file alone immediately
+after: 37/37 green. Re-ran the full `make test` a second time, clean: 2972
+passing, exit 0 — the same number reported above. Not this run's own
+regression (the file is untouched by this diff, confirmed via `git diff
+--stat`) and not papered over: diagnosed as CPU-contention flakiness from
+background `make build`/`make test` invocations overlapping in this
+session, re-confirmed clean, no test skipped or weakened.
+
+Session start: fresh container, PHP defaulted to 8.3.6 (`v3/api` needs
+>=8.4.1); installed PHP 8.4 cleanly via the documented
+`packages.sury.org` apt mirror, no refusal this run. `HEAD`, local `main`
+and `origin/main` all already agreed at `a877180` (v3-D283) — no
+stale-local-`main` trap this run (checked directly via `git fetch origin
+main` before any exploration — found local `main` two commits behind and
+fast-forwarded it, matching the real tip exactly, no work at risk).
+
+Found by a dedicated fresh-sweep agent (Explore), told the full exclusion
+list carried through v3-D283 and directed at the Playwright e2e specs,
+`worker/fold-runner/src`, `corpus-compiler/src`, unnamed `components/**`
+files, and a fresh grep for stale phrases ("not yet", "unwired", "out of
+scope", etc.) across the whole tree — independently re-verified by this run
+directly against `GeneratedFromPanel.tsx`, `QariMode.tsx`,
+`DroppedCollisionsPanel.tsx`, `types.ts`'s own `CorpusMeta.corpusHash`
+docblock, and the real compiled manifest/staged corpus before writing any
+test.
+
+NOT addressed: every item on v3-D283's own "NOT addressed" list, unchanged
+— `acknowledgeReentry`'s own "makeup" branch still only logs and points the
+learner at `/home` (v3-D256's verdict unchanged); `DrillPicker.tsx`'s own
+unused `now` prop; the unused `atoms`/`corpus`/`sessions` IndexedDB object
+stores (v3-D232); `session_start`'s own latency metric (v0.8); the
+streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151, v3-D219); `App\Flags\FlagService::enabled()`
+(v3-D197); multi-surah enrollment; the operational mailer/7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `selection_determinism_check` still replaying a committed
+fixture; `QueueItem.score`'s own missing external reader (v3-D263) — all
+unchanged. `Corpus["meta"].corpusHash` is now CLOSED for `/workbench` —
+remove it from future "no reviewer-facing render" sweeps.

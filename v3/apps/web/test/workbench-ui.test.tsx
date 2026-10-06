@@ -1175,6 +1175,53 @@ describe("WorkbenchIsland — a corpus's own generation provenance reaches the r
     // (per this case's own construction) carries none.
     expect(section.textContent).not.toMatch(/yusuf-verses\.json/);
   });
+
+  // v3-D284: this describe block's own docblock above (and this panel's own
+  // header, `GeneratedFromPanel.tsx`) claimed "/workbench — the one screen
+  // that already audits `corpusHash`/`hashSpecVersion`/`droppedCollisions`
+  // for exactly this kind of build provenance" — true for
+  // `droppedCollisions` (`DroppedCollisionsPanel.tsx`), but `hashSpecVersion`
+  // on that sentence was `VerificationRow.hashSpecVersion` (the per-AYAH
+  // tiered-verification hash's own schema version, `QariMode.tsx`), a
+  // DIFFERENT field from `Corpus["meta"].corpusHash` (the file-level
+  // compiler content hash, v3-D206) entirely. `corpusHash` itself had no
+  // reviewer-facing render anywhere — confirmed directly, `grep -rn
+  // "corpusHash" apps/web` outside this file's own prose/tests turned up
+  // only IndexedDB/event-stamping plumbing (`lib/idb/**`,
+  // `lib/session/run.ts`), never a component. Fixed by rendering it here,
+  // alongside `generatedFrom`, the sibling fact this same panel already
+  // closed the identical gap for.
+  it("renders the corpus's own file-level content hash (v3-D284)", async () => {
+    globalThis.fetch = vi.fn(async () => readyFrontier()) as unknown as typeof fetch;
+    // The frozen fixture predates `meta.corpusHash` (confirmed: it is
+    // `undefined` on the real fixture object) — attached here as a
+    // synthetic, clearly-labelled value, the same precedent this file's
+    // own `meta.mentalModel`/`meta.macro` positive cases already use for a
+    // field the frozen fixture does not itself carry.
+    expect(corpus.meta.corpusHash).toBeUndefined();
+    const withHash: Corpus = {
+      ...corpus,
+      meta: { ...corpus.meta, corpusHash: "deadbeefcafef00d" },
+    };
+
+    render(<WorkbenchIsland surah={12} corpus={withHash} macro={macroFactsFor(corpus)} />);
+
+    const section = await screen.findByRole("region", { name: /provenance/i });
+    expect(section.textContent).toMatch(/deadbeefcafef00d/);
+  });
+
+  it("never fabricates a content hash when the corpus subset carries none", async () => {
+    globalThis.fetch = vi.fn(async () => readyFrontier()) as unknown as typeof fetch;
+    // The frozen fixture genuinely carries no `corpusHash` — not stripped
+    // here, it is simply absent, proving the fallback is a real branch
+    // rather than this case accidentally never reaching the render.
+    expect(corpus.meta.corpusHash).toBeUndefined();
+
+    render(<WorkbenchIsland surah={12} corpus={corpus} macro={macroFactsFor(corpus)} />);
+
+    const section = await screen.findByRole("region", { name: /provenance/i });
+    expect(section.textContent).not.toMatch(/content hash/i);
+  });
 });
 
 describe("the workbench route reads the corpus through loadEffectiveCorpus (SSR override gap)", () => {
