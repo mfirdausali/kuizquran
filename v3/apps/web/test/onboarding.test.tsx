@@ -38,7 +38,12 @@ import { ayahWords } from "@engine/corpus.ts";
 import { paceConfig } from "@engine/pace.ts";
 
 import { assemblePass, displayOrder, filledSoFar } from "@/lib/onboarding/pass";
-import { OFFERED_SURAHS, DEFAULT_SURAH, WIREFRAME_DEFAULT_SURAH } from "@/lib/onboarding/surahs";
+import {
+  OFFERED_SURAHS,
+  ENROLLABLE_SURAHS,
+  DEFAULT_SURAH,
+  WIREFRAME_DEFAULT_SURAH,
+} from "@/lib/onboarding/surahs";
 import { defaultGlossLang } from "@/lib/onboarding/choices";
 import { CLIENT_SURAHS, DEMO_AYAH, DEMO_SURAH } from "@/lib/corpus/client";
 import { FirstRecall } from "@/components/onboarding/FirstRecall";
@@ -500,6 +505,20 @@ describe("screen 5 — the surahs actually offered", () => {
       ).not.toMatch(new RegExp(String.raw`\bNOT\s+${s.surah}\b`, "i"));
     }
   });
+
+  it("Screen 5's picker renders ENROLLABLE_SURAHS, never the full OFFERED_SURAHS list", () => {
+    // The wiring proof for the fix above: a correct `ENROLLABLE_SURAHS` list
+    // with no reader is the identical class of defect this codebase has
+    // repeatedly closed elsewhere (a mechanism built, never called).
+    const src = readFileSync(ONBOARDING_FLOW_SRC, "utf8");
+    const declIndex = src.indexOf("function ScreenSurah");
+    expect(declIndex).toBeGreaterThan(-1);
+    const bodyEnd = src.indexOf("// SCREEN 6", declIndex);
+    expect(bodyEnd).toBeGreaterThan(declIndex);
+    const body = src.slice(declIndex, bodyEnd);
+    expect(body).toContain("ENROLLABLE_SURAHS.map(");
+    expect(body).not.toMatch(/\bOFFERED_SURAHS\.map\(/);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -614,19 +633,31 @@ describe("the corpus staging contract", () => {
     expect(CLIENT_SURAHS).toContain(DEFAULT_SURAH);
   });
 
-  it("every surah onboarding can enroll a learner in is servable", () => {
-    // Enrolling someone in a surah the app cannot serve is a promise it cannot
-    // keep. Yusuf (12) is the deliberate exception: it is offered but served
-    // from the SERVER (`lib/corpus/load.ts`) because it is 3.4 MB and must
-    // never be shipped to a browser — so it is excluded here BY NUMBER rather
-    // than by a rule that would silently absorb a future mistake.
-    const clientServed = OFFERED_SURAHS.map((s) => s.surah).filter((n) => n !== 12);
-    for (const surah of clientServed) {
+  it("every surah ENROLLABLE_SURAHS offers is servable — no numeric carve-out", () => {
+    // `ENROLLABLE_SURAHS` exists precisely so this holds with NO exception:
+    // Screen 5 used to read `OFFERED_SURAHS` directly and offered surah 12
+    // (Yusuf) as a genuine enrollment choice, though it is 3.4 MB compiled
+    // and never staged for the browser (`CLIENT_SURAHS` excludes it) — a
+    // learner who picked it finished onboarding and hit a permanent "this
+    // surah is not available on this device yet" the first time `/session`
+    // tried to load it. Non-vacuous: asserted below.
+    expect(ENROLLABLE_SURAHS.length).toBeGreaterThan(0);
+    for (const s of ENROLLABLE_SURAHS) {
       expect(
         CLIENT_SURAHS,
-        `surah ${surah} is offered at onboarding but not staged for the client`,
-      ).toContain(surah);
+        `surah ${s.surah} is enrollable at onboarding but not staged for the client`,
+      ).toContain(s.surah);
     }
+  });
+
+  it("surah 12 is listed for the library but excluded from onboarding's enrollment choices", () => {
+    // The concrete regression this guards: `OFFERED_SURAHS` backs TWO
+    // surfaces — the library's honest "browse only · practice coming" row
+    // (`lib/library/rows.ts`) and onboarding's enrollment picker — and the
+    // picker used to read the same list directly, conflating "may be
+    // listed" with "may be enrolled in."
+    expect(OFFERED_SURAHS.some((s) => s.surah === 12)).toBe(true);
+    expect(ENROLLABLE_SURAHS.some((s) => s.surah === 12)).toBe(false);
   });
 });
 

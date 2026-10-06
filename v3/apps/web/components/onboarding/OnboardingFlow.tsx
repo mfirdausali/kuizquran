@@ -45,7 +45,12 @@ import {
   type OnboardingChoices,
   type PlacementOutcome,
 } from "@/lib/onboarding/choices";
-import { OFFERED_SURAHS, DEFAULT_SURAH, surahLabel } from "@/lib/onboarding/surahs";
+import {
+  OFFERED_SURAHS,
+  ENROLLABLE_SURAHS,
+  DEFAULT_SURAH,
+  surahLabel,
+} from "@/lib/onboarding/surahs";
 
 type Step = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
@@ -378,6 +383,15 @@ function ScreenPlacement({
 // header) and was never propagated to this file's own copy of the claim,
 // which excluded Al-Mulk by name for roughly seven weeks after it had
 // already joined the offered list (v3-D268).
+//
+// THIS SCREEN RENDERS `ENROLLABLE_SURAHS`, NEVER `OFFERED_SURAHS` DIRECTLY.
+// `OFFERED_SURAHS` also backs the LIBRARY's listing (`lib/library/rows.ts`),
+// which may honestly show a surah as "browse only · practice coming" —
+// compiled, but not staged for the browser. Enrolling a learner HERE in one
+// of those is a promise `/session` cannot keep: it reads the browser-staged
+// corpus only (`lib/corpus/client.ts#fetchCorpus`), never the server loader
+// the detail page uses. `ENROLLABLE_SURAHS` (`lib/onboarding/surahs.ts`) is
+// the practisable subset — see its own docblock for the defect this closed.
 function ScreenSurah({
   value,
   onChoose,
@@ -399,7 +413,7 @@ function ScreenSurah({
         years, not something short.
       </p>
       <div className="stack stack--tight">
-        {OFFERED_SURAHS.map((s) => (
+        {ENROLLABLE_SURAHS.map((s) => (
           <button
             key={s.surah}
             type="button"

@@ -36,6 +36,8 @@
 // are corpus META and not Quranic text — and the test asserts they match the
 // compiled manifest, so a drift fails rather than misleads.
 
+import { CLIENT_SURAHS } from "@/lib/corpus/staged.ts";
+
 /** The surah §17 names as the default. Kept as a named constant because the
  *  offered-IFF-compiled test asserts against it, and it has been on both sides
  *  of that biconditional: absent when this file was written, offered since
@@ -65,14 +67,21 @@ export interface OfferedSurah {
 }
 
 /**
- * The surahs this build can honestly enroll a learner in.
+ * Every surah this build can show something for — the LIBRARY's list
+ * (`lib/library/rows.ts`), not onboarding's enrollment list (that is
+ * `ENROLLABLE_SURAHS`, declared right below).
  *
  * Ordered shortest-first: a learner choosing their first surah is choosing a
  * commitment, and the honest ordering is by what that commitment costs.
  *
- * Surah 12 (Yusuf) is 111 ayat — a genuine multi-month commitment, and the only
- * one here with authored distractors and a mental model. It is offered, not
- * defaulted, for exactly that reason.
+ * Surah 12 (Yusuf) is 111 ayat — a genuine multi-month commitment, and the
+ * only one here with authored distractors and a mental model — but it is
+ * deliberately excluded from `ENROLLABLE_SURAHS`: it is 3.4 MB compiled and
+ * `lib/corpus/staged.ts#CLIENT_SURAHS` never ships it to a browser
+ * (`lib/library/rows.ts`'s own "stays browse-only ON PURPOSE"), so
+ * `/session` can never serve a single ayah of it. It stays a member of
+ * THIS list so the library can still show it as a real, honestly-labelled
+ * "browse only · practice coming" row.
  */
 export const OFFERED_SURAHS: readonly OfferedSurah[] = [
   { surah: 112, name: "Al-Ikhlas", ayahCount: 4 },
@@ -89,6 +98,26 @@ export const OFFERED_SURAHS: readonly OfferedSurah[] = [
   { surah: 67, name: "Al-Mulk", ayahCount: 30 },
   { surah: 12, name: "Yusuf", ayahCount: 111 },
 ];
+
+/**
+ * The subset of `OFFERED_SURAHS` onboarding's Screen 5 may actually offer as
+ * an ENROLLMENT choice: practisable, not merely listed — staged for the
+ * browser (`CLIENT_SURAHS`), because that is what `/session`
+ * (`lib/corpus/client.ts#fetchCorpus`) reconstructs from.
+ *
+ * Screen 5 used to read `OFFERED_SURAHS` directly and offered surah 12 as a
+ * genuine enrollment choice. A learner who picked it finished onboarding and
+ * hit a permanent "this surah is not available on this device yet" the first
+ * time `/session` tried to load a corpus `CLIENT_SURAHS` never stages — the
+ * same failure shape v3-D71 fixed once for `DEFAULT_SURAH`, reborn here
+ * because `OFFERED_SURAHS` was quietly answering two different questions
+ * (what the library may list vs. what onboarding may promise) with one
+ * list. `test/onboarding.test.tsx` asserts this is exactly `OFFERED_SURAHS
+ * ∩ CLIENT_SURAHS`, with no numeric carve-out.
+ */
+export const ENROLLABLE_SURAHS: readonly OfferedSurah[] = OFFERED_SURAHS.filter((s) =>
+  CLIENT_SURAHS.includes(s.surah),
+);
 
 /**
  * The pre-selected default (§17: "no, pre-selected").
