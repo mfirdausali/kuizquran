@@ -28243,3 +28243,133 @@ window; PAY-1's Stripe fixtures; surah 67's scene beats;
 fixture; `QueueItem.score`'s own missing external reader (v3-D263) — all
 unchanged. `Corpus["meta"].corpusHash` is now CLOSED for `/workbench` —
 remove it from future "no reviewer-facing render" sweeps.
+
+### v3-D285 — onboarding's enrollment picker offered Yusuf (12), a surah `/session` can never serve (2026-10-06, nightly)
+
+Found by a dedicated fresh-sweep agent (Explore), directed away from the long
+list of already-known/excluded candidates (`EntitlementMachine::merge()`,
+`PaywallGate`, `rhymeClassOf()`, the mailer/7-night window, PAY-1, surah 67's
+scene beats, and the rest) and told to look at Laravel Console Commands,
+corpus-compiler/fold-runner internals, admin-panel field completeness, the
+Playwright e2e specs, and a stale-phrase grep instead — and independently
+re-verified by this run directly against the real source before any test was
+written.
+
+`lib/onboarding/surahs.ts#OFFERED_SURAHS` backs TWO different surfaces with
+two different meanings: the library's listing (`lib/library/rows.ts`), which
+is honest about a surah that is compiled but not staged for the browser
+(`STATUS_BROWSE_ONLY`, built for exactly surah 12's case) — and onboarding's
+Screen 5 enrollment picker (`OnboardingFlow.tsx#ScreenSurah`), which read the
+SAME list directly and offered every member, including 12, as a genuine
+enrollment choice. `OFFERED_SURAHS`'s own docblock said so explicitly: "Surah
+12 (Yusuf) is 111 ayat — a genuine multi-month commitment... It is offered,
+not defaulted, for exactly that reason."
+
+That is a promise the app cannot keep. `lib/corpus/staged.ts#CLIENT_SURAHS =
+[112, 103, 67]` deliberately excludes 12 (3.4MB compiled, never shipped to a
+browser — `lib/corpus/client.ts`'s own header states this explicitly).
+`/session`'s only corpus loader, `components/session/SessionIsland.tsx`,
+calls `fetchCorpus(surah)` from `lib/corpus/client.ts` — never
+`lib/corpus/load.ts`, the SSR loader that serves `/surah/[surah]`'s detail
+page and reads the wider `AVAILABLE_SURAHS = [12, 67, 103, 112]`. Confirmed
+directly: `grep -rn "loadCorpus|lib/corpus/load" app/\(app\)/session` returns
+nothing — the `/session` route file only reads the enrollment and hands it
+to `SessionGate`/`SessionIsland`, both of which import exclusively from
+`client.ts`. So a learner who enrolled in Yusuf at onboarding finished the
+flow and hit a permanent `{kind:"unavailable", reason:"no-corpus"}` — "This
+surah is not available on this device yet." — the first time they tried an
+ordinary session. The same failure shape v3-D71 fixed once for
+`DEFAULT_SURAH`; reborn here for one specific surah because `OFFERED_SURAHS`
+was quietly answering two questions with one list.
+
+The existing regression test's own carve-out hid this for the entire window
+the two lists have disagreed: `test/onboarding.test.tsx`'s "every surah
+onboarding can enroll a learner in is servable" filtered surah 12 out BY
+NUMBER, on a comment claiming it "is offered but served from the SERVER
+(`lib/corpus/load.ts`)" — false for `/session`, which never imports that
+module.
+
+**Fixed**, without removing surah 12 from `OFFERED_SURAHS` (which would have
+silently deleted the library's own already-correct, already-tested
+browse-only row for it — `lib/library/rows.ts` iterates `OFFERED_SURAHS`
+directly to build every row): `lib/onboarding/surahs.ts` gains
+`ENROLLABLE_SURAHS = OFFERED_SURAHS.filter((s) =>
+CLIENT_SURAHS.includes(s.surah))`, importing `CLIENT_SURAHS` from
+`lib/corpus/staged.ts` (the one file with no `"use client"` directive, safe
+to import from both server and client modules — the same reason that file
+exists at all, per its own header). `OnboardingFlow.tsx#ScreenSurah` now maps
+over `ENROLLABLE_SURAHS` instead of `OFFERED_SURAHS`; `OFFERED_SURAHS`'s own
+two `.find()` lookups elsewhere in that file (resolving the CHOSEN surah's
+label on later screens) are untouched — every surah a learner can now choose
+is, by construction, a member of both lists. The stale docblocks on both
+`OFFERED_SURAHS` and Screen 5's own header are corrected to name the real
+split rather than restate a now-false "offered, not defaulted" claim about
+surah 12.
+
+**Verified:** RED confirmed directly against the unmodified source: 3
+new/replaced cases in `test/onboarding.test.tsx` — the strengthened
+replacement for the old carve-out test (asserting `ENROLLABLE_SURAHS` is
+non-vacuous and every member is in `CLIENT_SURAHS`, no numeric exception), a
+new case pinning the concrete regression (`OFFERED_SURAHS` contains 12,
+`ENROLLABLE_SURAHS` does not), and a source-scan wiring proof that
+`ScreenSurah`'s render body references `ENROLLABLE_SURAHS.map(` and never
+`OFFERED_SURAHS.map(` — all three failed exactly as predicted against the
+unmodified tree (`ENROLLABLE_SURAHS` undefined; the picker's body still
+containing the old `OFFERED_SURAHS.map(` call). Implemented, reran:
+`test/onboarding.test.tsx` 36/36 green (was 33, net +3). Also checked and
+ruled out as a second reachable path for the same defect:
+`components/home/MySurahs.tsx`'s empty-state "start" links iterate
+`OFFERED_SURAHS` too, but they link to `/surah/${s.surah}` (the SSR detail
+page, which genuinely serves 12) and carry no enrollment action of their
+own (`grep -rn "commitOnboarding" app/\(app\)/surah` returns nothing) — not
+the same dead end, left untouched.
+
+`TZ=UTC make test`: 2974 passing (was 2972, +2 — exactly this run's net new
+tests; apps/web 1610, was 1608; no other suite moved: 255 v2 vitest, 47
+v2/api, 409 v3/api, 120 corpus-compiler, 466 engine, 67 fold-runner).
+`check-test-floor.mjs`: OK, 2974 >= floor 1899 (+1075 margin, unmoved).
+`TZ=UTC make build`: exit 0, 30 routes, unchanged (three existing files
+edited, no new route or production file). `npm run gates` (via `prebuild`):
+all green — locked-css OK, 1 documented hunk, 294 v1 lines byte-identical;
+boundaries OK, 327 files, unchanged count; fonts degraded-but-non-blocking,
+pre-existing, 2/6 UI fonts present; corpus-morphology OK, 362 words;
+corpus-glyphs OK, 206 codepoints across 4 artifacts — all unchanged, this
+diff carries no corpus data. `npx tsc --noEmit` (apps/web): clean. No
+`v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the suite was reverted before committing, same
+discipline as every prior entry). No Arabic codepoint (all three changed
+files swept programmatically, in Python, over the Arabic, Arabic Supplement,
+Arabic Extended-A and both Presentation Forms Unicode blocks — zero matches;
+every new string is a TypeScript identifier, a wire/list name, or a fixed
+English docblock sentence, never corpus text). No oracle/golden-log/
+fixture/snapshot regenerated.
+
+Session start: fresh container, no `node_modules`/`vendor` anywhere; PHP
+defaulted to 8.3.6 (`v3/api` needs >=8.4.1); installed PHP 8.4 cleanly via
+the documented `packages.sury.org` apt mirror, no refusal. `HEAD` was
+detached exactly at `origin/main`'s own tip (`630a118`, v3-D284) at session
+start — no stale-ref trap on arrival, confirmed via `git fetch origin main`
+— but the local `main` BRANCH REF was found three commits behind once
+checked out for the commit (a concurrent session's own three pushes landing
+mid-run, v3-D282/D283/D284's own commits), fast-forwarded cleanly via `git
+merge --ff-only origin/main` immediately before committing, carrying this
+run's own staged changes through untouched.
+
+NOT addressed: `components/home/MySurahs.tsx`'s own "start" links for
+surah 12 (confirmed non-reachable as the same dead end, see above); every
+item on v3-D284's own "NOT addressed" list, unchanged — `acknowledgeReentry`'s
+own "makeup" branch still only logs and points the learner at `/home`
+(v3-D256's verdict unchanged); `DrillPicker.tsx`'s own unused `now` prop; the
+unused `atoms`/`corpus`/`sessions` IndexedDB object stores (v3-D232);
+`session_start`'s own latency metric (v0.8); the streak/away-day day-space
+mismatch (v3-D209); `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`;
+`App\Billing\TrialAttribution` (v3-D148); `lib/pricing.ts#regionFromCountry()`
+(v3-D163); `PaywallGate` as a whole class (v3-D88, v3-D151, v3-D219);
+`App\Flags\FlagService::enabled()` (v3-D197); multi-surah enrollment; the
+operational mailer/7-night launch window; PAY-1's Stripe fixtures; surah
+67's scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy drift
+(v3-D127); `packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `selection_determinism_check` still replaying a committed
+fixture; `QueueItem.score`'s own missing external reader (v3-D263) — all
+unchanged. Onboarding's own Yusuf enrollment dead end is now CLOSED — remove
+it from future "mechanism built, zero reachable caller" sweeps.
