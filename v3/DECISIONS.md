@@ -27904,3 +27904,80 @@ permanently guarded — remove it from future "docblock says X, reality is Y"
 sweeps. See DEFECTS.md (no new defect filed — this is documentation-only,
 no learner-facing behavior ever changed, both doors were already correctly
 wired).
+
+### v3-D282 — `startOpenPractice`'s own docblock claimed the adoption offer was out of scope (2026-10-06)
+
+A FOURTH surviving instance of the recurring "docblock says X, reality is Y"
+shape v3-D90/D110/D123/D236/D244/D251/D281 each already closed elsewhere in
+`apps/web/lib/session/run.ts`, found by a dedicated fresh-sweep agent (Explore)
+and independently re-verified by this run before writing any test: the
+docblock above `startOpenPractice` (FR6 Door 3) still said "though wiring the
+adoption offer itself remains out of scope here, named so a future run does
+not re-discover it as new" — true the night it was written, false since
+v3-D118 wired `adoptionOfferFor`/`acceptAdoption`, both real, exported later
+in this same file and genuinely called from `SessionIsland.tsx` (`void
+adoptionOfferFor(run)`, `acceptAdoption(run, ...)`).
+
+Why none of v3-D244/D251/D281's own guard tests caught it: each anchors on
+the docblock *immediately* above a function's own declaration
+(`runSrc.lastIndexOf("/**", decl)`, where `decl` is the index of `export
+async function <name>`). `startOpenPractice`'s real stale docblock (its own
+header, spanning the module's FR6-Door-3 introduction) is separated from the
+`startOpenPractice` declaration by two smaller, intervening docblocks (for
+`OPEN_PRACTICE_STRENGTH` and `OpenPracticeStartInput`), so `lastIndexOf`
+from the real declaration lands on the wrong, nearer comment and none of the
+three existing guard cases ever scanned the one that actually mattered.
+
+**Fixed:** the docblock is corrected to name the real history (wired at
+v3-D118, called from `SessionIsland.tsx`), mirroring the CORRECTED-note
+template this file already uses (e.g. the one above `weakSpotOfferFor`). A
+fourth case was added to the same `describe("this file's own docblocks do
+not claim a wired door is unwired")` block in `run.test.ts`, locating this
+particular docblock by a unique phrase inside it (`'FR6 Door 3 — "open
+practice"'`) from its own opening `/**` to its own closing `*/`, rather than
+by proximity to a declaration — so a future recurrence in this same
+multi-docblock corner cannot slip past this guard the way it slipped past
+the other three.
+
+**Verified:** RED confirmed directly against the unmodified file — the new
+test failed exactly on `expect(docblock).not.toMatch(/coldSuccessAdoption
+[\s\S]{0,200}out of scope here/i)`, printing the real stale docblock text
+verbatim. Implemented, reran: `run.test.ts` 124/124 green (was 123, +1).
+`TZ=UTC make test`: 2968 passing (was 2967, +1 — exactly this run's one new
+test; apps/web 1604, was 1603; no other suite moved: 255 v2 vitest, 47
+v2/api, 409 v3/api, 120 corpus-compiler, 466 engine, 67 fold-runner).
+`check-test-floor.mjs`: OK, 2968 >= floor 1899 (+1069 margin, unmoved).
+`TZ=UTC make build`: exit 0, 30 routes, unchanged (a docblock-plus-one-test-
+case change, no route or production file touched). `npm run gates`: all
+green — locked-css OK, 1 documented hunk, 294 v1 lines byte-identical;
+boundaries OK, 326 files, unchanged count; fonts degraded-but-non-blocking,
+pre-existing, 2/6 UI fonts present; corpus-morphology OK, 362 words;
+corpus-glyphs OK, 206 codepoints across 4 artifacts — all unchanged, this
+diff carries no corpus data. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite was
+reverted before committing, same discipline as every prior entry). No
+Arabic codepoint (both changed files swept programmatically, in Python,
+over the Arabic, Arabic Supplement, Arabic Extended-A and both Presentation
+Forms Unicode blocks — zero matches; every new string is a TypeScript
+identifier, a regex literal, or a fixed English docblock sentence, never
+corpus text). No oracle/golden-log/fixture/snapshot regenerated.
+
+Session start: fresh container, PHP defaulted to 8.3.6 (`v3/api` needs
+>=8.4.1); installed PHP 8.4 cleanly via the documented `packages.sury.org`
+apt mirror, no refusal. `HEAD`, local `main` and `origin/main` all already
+agreed at `977eae0` (v3-D281) — no stale-local-`main` trap this run.
+
+NOT addressed: every item on v3-D281's own "NOT addressed" list, unchanged
+(see that entry and the long chain before it for the full enumeration —
+`acknowledgeReentry`'s "makeup" branch, the unused IndexedDB object stores,
+`session_start`'s latency metric, the streak/away-day day-space mismatch,
+`rhymeClassOf()`, `EntitlementMachine::merge()`, `TrialAttribution`,
+`regionFromCountry()`, `PaywallGate`, `FlagService::enabled()`, multi-surah
+enrollment, the operational mailer/7-night launch window, PAY-1's Stripe
+fixtures, surah 67's scene beats, `severity.ts`'s taxonomy drift,
+`placement.ts`, `MacroFacts.litany.rhymeLabel`, `corpusHash`'s zero
+fold-side consumer, `selection_determinism_check` still replaying a
+committed fixture, `QueueItem.score`'s own missing external reader — all
+unchanged). `startOpenPractice`'s own stale adoption-offer docblock is now
+CLOSED and permanently guarded — remove it from future "docblock says X,
+reality is Y" sweeps.

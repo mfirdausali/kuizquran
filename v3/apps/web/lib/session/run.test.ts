@@ -1091,6 +1091,37 @@ describe("this file's own docblocks do not claim a wired door is unwired", () =>
     expect(islandSrc).toMatch(/\bweakSpotOfferFor\b/);
     expect(islandSrc).toMatch(/\bstartOpenPractice\b/);
   });
+
+  // A FOURTH instance of the same staleness, in a FOURTH location none of the
+  // three checks above ever scans: `startOpenPractice`'s own docblock (FR6
+  // Door 3) still says "wiring the adoption offer itself remains out of
+  // scope here" — true when written, false since v3-D118 wired
+  // `adoptionOfferFor`/`acceptAdoption`. The checks above anchor on the
+  // docblock IMMEDIATELY above a function's own declaration
+  // (`lastIndexOf("/**", decl)`); this docblock sits above `startOpenPractice`
+  // but is separated from it by two smaller docblocks (for
+  // `OPEN_PRACTICE_STRENGTH` and `OpenPracticeStartInput`), so that technique
+  // never reaches it. Located instead by a unique phrase inside the docblock
+  // itself, from its own opening `/**` to its own closing `*/`.
+  it("startOpenPractice's docblock never claims the adoption offer is out of scope", () => {
+    const runSrc = readFileSync(RUN_SRC, "utf8");
+    const marker = runSrc.indexOf('FR6 Door 3 — "open practice"');
+    expect(marker).toBeGreaterThan(-1);
+    const docblockStart = runSrc.lastIndexOf("/**", marker);
+    expect(docblockStart).toBeGreaterThan(-1);
+    const docblockEnd = runSrc.indexOf("*/", marker);
+    expect(docblockEnd).toBeGreaterThan(-1);
+    const docblock = runSrc.slice(docblockStart, docblockEnd);
+
+    expect(docblock).not.toMatch(/coldSuccessAdoption[\s\S]{0,200}out of scope here/i);
+    expect(docblock).not.toMatch(/adoption offer itself[\s\S]{0,40}out of scope here/i);
+
+    // The biconditional half: the claim above is honest only if the adoption
+    // offer genuinely has no caller. Assert the opposite is real.
+    const islandSrc = readFileSync(SESSION_ISLAND_SRC, "utf8");
+    expect(islandSrc).toMatch(/\badoptionOfferFor\b/);
+    expect(islandSrc).toMatch(/\bacceptAdoption\b/);
+  });
 });
 
 // FR6's diminishing-returns nudge (`packages/engine/src/freeplay.ts#diminishingReturns`)

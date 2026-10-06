@@ -771,9 +771,21 @@ export async function startDrillSession(input: DrillStartInput, c: Corpus): Prom
  * Door 3 differs from every other entry point in this file in the one way
  * that makes it "open" practice: the learner chooses BOTH the ayah — taught
  * or not; an untaught ayah is exactly what `coldSuccessAdoption` exists for,
- * though wiring the adoption offer itself remains out of scope here, named so
- * a future run does not re-discover it as new — AND the drill's difficulty,
- * independent of the atom's real progress. So this never filters by
+ * and the adoption offer itself (`adoptionOfferFor`/`acceptAdoption`, near
+ * the bottom of this file) was wired the very next decision, v3-D118, and is
+ * called from `SessionIsland.tsx` — AND the drill's difficulty, independent
+ * of the atom's real progress.
+ *
+ * CORRECTED (nightly run, 2026-10-06): this sentence used to say wiring the
+ * adoption offer "remains out of scope here, named so a future run does not
+ * re-discover it as new" — true when written, false since v3-D118, never
+ * caught up. Same "docblock says X, reality is Y" shape v3-D90/D110/D123/
+ * D236/D244/D251/D281 each already closed elsewhere in this file — this
+ * docblock sits above `startOpenPractice` but is separated from its own
+ * declaration by two smaller docblocks (`OPEN_PRACTICE_STRENGTH`,
+ * `OpenPracticeStartInput`), so none of those prior fixes' docblock-scanning
+ * guard tests — which all anchor on the comment immediately above a
+ * function's own declaration — ever reached this one. So this never filters by
  * `encoded` the way `startDrillSession` does (BUG-3's gap guard is about
  * GRADING a guess; free play grades nothing) and never sizes the
  * reconstruction off the atom's real strength the way every other entry
