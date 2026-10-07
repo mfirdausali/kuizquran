@@ -256,10 +256,18 @@ function concreteItems(
     for (const l of due.learn) items.push({ kind: "learn", label: `Learn ${l.surah}:${l.ayah}` });
     return items;
   }
-  // +1..+3: the ayat learned today become tomorrow's cold gates (the day-1
-  // gate is scheduled at encode), so naming them is a fact, not a guess.
-  for (const l of due.learn) {
-    items.push({ kind: "gate", label: `Gate ${l.surah}:${l.ayah + offset - 1}` });
+  // +1 only: the ayat learned today become TOMORROW's cold gates
+  // (`gate.ts#scheduleGate` arms a gate for the next learning-day the moment
+  // an ayah encodes), so naming them at +1 is a fact, not a guess. +2 and +3
+  // have no such anchor — nothing schedules a gate that far out, since doing
+  // so would mean guessing which ayah a FUTURE day's Learn pass picks, and
+  // whether it completes and encodes. Naming one there is the exact lie this
+  // module's own header forbids, just inside the concrete zone instead of
+  // past it.
+  if (offset === 1) {
+    for (const l of due.learn) {
+      items.push({ kind: "gate", label: `Gate ${l.surah}:${l.ayah}` });
+    }
   }
   const reviews = Math.max(1, due.reviews - offset);
   items.push({ kind: "review", label: `${reviews} review${reviews === 1 ? "" : "s"}` });

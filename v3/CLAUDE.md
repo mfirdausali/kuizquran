@@ -53,10 +53,121 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2979 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 2984 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 410 v3/api + 120 corpus-compiler
-             # + 466 engine + 67 fold-runner + 1614 apps/web. (v3-D287, 2026-10-07)
+             # + 466 engine + 69 fold-runner + 1617 apps/web. (v3-D289, 2026-10-07)
+             # NOTE (v3-D289, 2026-10-07): `lib/plan/forecast.ts#concreteItems`
+             # (the "/plan" calendar's honesty mechanic, WIREFRAME §14: "today
+             # → +3d CONCRETE: exact items... populating every future day with
+             # specific ayat would... be a LIE") fabricated a NAMED gate for
+             # day offsets +2 and +3, not only the genuinely-knowable +1. The
+             # function's own comment justifies +1 correctly — `gate.ts
+             # #scheduleGate()` arms a cold gate for the very next
+             # learning-day the moment an ayah encodes, so "today's learn
+             # candidate becomes tomorrow's gate" is a real, already-decided
+             # fact — but the SAME `Gate ${surah}:${ayah + offset - 1}`
+             # arithmetic ran for offset 2 and 3 too, naming a DIFFERENT,
+             # not-yet-learned ayah as if its own gate were already scheduled
+             # two or three days out. Nothing schedules a gate that far
+             # ahead — it depends on whether the learner opens the app
+             # tomorrow, whether `assembleQueue` issues a new Learn item that
+             # day at all, and whether that pass reaches encode — exactly the
+             # overclaim this module's own header exists to forbid, smuggled
+             # one day inside the zone boundary it polices. A learner opening
+             # `/plan` the day after starting a fresh ayah saw, under "the day
+             # after tomorrow," a specific "Gate 12:16"-shaped line styled
+             # identically to today's genuinely-due gate. For a Sprint-pace
+             # learner with several concurrent Learn candidates the bug
+             # multiplied: every one got a phantom, shifted-ayah gate at both
+             # +2 and +3. Found by a dedicated fresh-sweep agent (Explore)
+             # directed at this build's own "mechanism built, docblock drift"
+             # bug class plus a repo-wide stale-claim grep — independently
+             # re-verified by this run directly against `forecast.ts`,
+             # `gate.ts#scheduleGate()` and `PlanIsland.tsx#dueToday()` before
+             # writing any test. Fixed: the gate-naming branch now fires only
+             # when `offset === 1`; +2/+3 name no gate at all (the sibling
+             # decaying `reviews` COUNT — never a named ayah, a weaker
+             # overclaim — is left as a separate, smaller gap, not addressed
+             # this run). RED confirmed directly: 3 new `forecast.test.ts`
+             # cases run against the unmodified function — the unshifted-+1
+             # case passed vacuously (that arithmetic was already right); the
+             # +2/+3 cases failed exactly `expected [...] to have a length of
+             # +0 but got 1` (single learn candidate) and `got 3`
+             # (three-item Sprint fixture); implemented, reran: 6/6 green
+             # (was 3, +3); `test/plan-calendar.test.tsx` 25/25 unaffected
+             # (its own fixtures never assert +2/+3 gate content). `TZ=UTC
+             # make test`: 2984 passing (was 2981, +3 — exactly this run's
+             # new tests; apps/web 1617, was 1614; no other suite moved: 255
+             # v2 vitest, 47 v2/api, 410 v3/api, 120 corpus-compiler, 466
+             # engine, 69 fold-runner). `check-test-floor.mjs`: OK, 2984 >=
+             # floor 1899 (+1085 margin, unmoved). `TZ=UTC make build`: exit
+             # 0, 30 routes, unchanged (a `lib/plan/forecast.ts`-only fix
+             # plus its own test file, no route or other production file
+             # touched). `npm run gates`: all green — locked-css OK, 1
+             # documented hunk, 294 v1 lines byte-identical; boundaries OK,
+             # 326 files, unchanged count; fonts degraded-but-non-blocking,
+             # pre-existing, 2/6 UI fonts present; corpus-morphology OK, 362
+             # words; corpus-glyphs OK, 206 codepoints across 4 artifacts —
+             # all unchanged, this diff carries no corpus data. `npx tsc
+             # --noEmit`, run separately across all four v3 node packages:
+             # clean in all four. No PHP file changed, so `pint` was not
+             # applicable. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff produced by running
+             # the suite was reverted before committing, same discipline as
+             # every prior entry). No Arabic codepoint (the full diff swept
+             # programmatically, in Python, over the Arabic, Arabic
+             # Supplement, Arabic Extended-A and both Presentation Forms
+             # Unicode blocks: CLEAN — every new string is a TypeScript
+             # identifier, a wire-shaped test fixture integer, or a fixed
+             # English docblock/assertion sentence, never corpus text). No
+             # oracle/golden-log/fixture/snapshot regenerated. Session start:
+             # fresh container, no `node_modules`/`vendor` anywhere; `make
+             # setup` hit the documented transient proxy timeout on `v2/api`'s
+             # own `composer install` (a `git clone --mirror` of
+             # `sebastianbergmann/phpunit` exceeding the 300s default) —
+             # recovered with a manual `COMPOSER_PROCESS_TIMEOUT=900` retry;
+             # PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1, confirmed
+             # directly from the resolved lockfile's `symfony/clock` v8.1.0
+             # requirement); installed PHP 8.4 cleanly via the documented
+             # `packages.sury.org` apt mirror, no refusal. `HEAD` was found
+             # detached exactly at `origin/main`'s own tip (`196d102`,
+             # v3-D288 — itself landed cleanly but, per this file's own
+             # recurring gap, never got its own prepended NOTE here; its full
+             # write-up lives only in DECISIONS.md v3-D288), on a stale LOCAL
+             # `main` branch ref eight commits behind (`977eae0`, v3-D281) —
+             # the recurring stale-local-`main` trap this file has recorded
+             # roughly fifty times since v3-D77 — caught before committing
+             # via `git fetch origin main` + `git checkout main && git merge
+             # --ff-only origin/main`, a clean fast-forward that carried this
+             # run's own uncommitted fix through untouched, no work lost or
+             # at risk. NOT addressed: `concreteItems`'s own sibling
+             # overclaim — the decaying `reviews` count at +2/+3 is still a
+             # guess, just a weaker, count-only one; every item on v3-D288's
+             # own "NOT addressed" list, unchanged — `acknowledgeReentry`'s
+             # own "makeup" branch still only logs and points the learner at
+             # `/home` (v3-D256's verdict unchanged); `DrillPicker.tsx`'s own
+             # unused `now` prop; the unused `atoms`/`corpus`/`sessions`
+             # IndexedDB object stores (v3-D232); `session_start`'s own
+             # latency metric (v0.8); the streak/away-day day-space mismatch
+             # (v3-D209); `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()`; `App\Billing\TrialAttribution`
+             # (v3-D148); `lib/pricing.ts#regionFromCountry()` (v3-D163);
+             # `PaywallGate` as a whole class (v3-D88, v3-D151, v3-D219);
+             # `App\Flags\FlagService::enabled()` (v3-D197); multi-surah
+             # enrollment; the operational mailer/7-night launch window;
+             # PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `packages/engine/src/placement.ts`; `MacroFacts.litany
+             # .rhymeLabel` (v3-D188); `selection_determinism_check` still
+             # replaying a committed fixture; `QueueItem.score`'s own missing
+             # external reader (v3-D263); `worker/fold-runner/src
+             # /selectionCheck.ts`'s cosmetic `tracesCompared` statistic
+             # (v3-D286); `GrantAdminRoleCommand`'s own missing
+             # pending-deletion guard (v3-D287) — all unchanged.
+             # `forecast.ts`'s own concrete-zone gate fabrication is now
+             # CLOSED for its clearer half — remove it from future sweeps;
+             # its weaker reviews-count sibling stays open. See DECISIONS.md
+             # v3-D289.
              # NOTE (v3-D287, 2026-10-07): `PurgeDueAccountsCommand`'s own
              # `$skipped` counter conflated two different outcomes — a benign
              # stale request (the user already gone) and a GENUINE per-user

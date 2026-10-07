@@ -28760,3 +28760,137 @@ guard (v3-D287) — all unchanged. `worker/fold-runner/src/severity.ts`'s own
 cross-runtime taxonomy duplication is now mechanically guarded — remove it
 from future "NOT addressed" lists; it should no longer be cited as an
 unguarded drift risk, only as a closed one.
+
+### v3-D289 — `/plan`'s "concrete" zone fabricated a named gate for a day the engine has never scheduled (2026-10-07, nightly)
+
+Found by a dedicated fresh-sweep agent (Explore), directed at this build's own
+"mechanism built, zero reader / docblock drift" bug class plus a repo-wide
+stale-claim grep — this was the one genuine, previously-unreported instance,
+independently re-verified directly against `forecast.ts`'s real source,
+`gate.ts#scheduleGate()` and `PlanIsland.tsx#dueToday()` before writing any
+test.
+
+`apps/web/lib/plan/forecast.ts#concreteItems()` is the one function this
+module's own header exists to police — WIREFRAME §14's honesty mechanic:
+"today → +3d CONCRETE: exact items... populating every future day with
+specific ayat would... be a LIE." For offset 0 (today) every item is real —
+`dueToday()`'s own live read of the atoms. For offset 1 (tomorrow) the
+function's own comment correctly claims a fact: `gate.ts#scheduleGate()`
+arms a cold gate for the very next learning-day the moment an ayah encodes,
+so "today's learn candidate becomes tomorrow's named gate" is already
+decided, not guessed.
+
+But the loop applied the IDENTICAL arithmetic — `Gate ${l.surah}:${l.ayah +
+offset - 1}` — for offset 2 and 3 too, inside the SAME "exact items" zone.
+At offset 2 that's `Gate surah:(ayah+1)` and at offset 3 `Gate
+surah:(ayah+2)` — a DIFFERENT, not-yet-learned ayah, named as if its own
+gate were already scheduled two or three days out. Nothing schedules a gate
+that far ahead: it depends on whether the learner opens the app at all
+tomorrow, whether `assembleQueue` actually issues a NEW Learn item that day
+(pace ceiling, the floor-session fallback, the make-up merge, an away-day
+mark can all change it), and whether that Learn pass reaches S3/encode
+rather than stalling at S2 — none of which `dueToday()`'s snapshot of TODAY
+can know. For a Sprint-pace learner with several concurrent Learn
+candidates today, the bug multiplies: every one of them gets a phantom,
+shifted-ayah gate named at both +2 and +3.
+
+Concretely: a learner opening `/plan` the day after they started a fresh
+ayah sees, under "the day after tomorrow," a specific line like "Gate
+12:16" styled identically to today's genuinely-due "Gate 12:13" — a settled
+fact in the UI for an obligation the scheduler has not actually scheduled
+and may never produce that way. Exactly the overclaim the module's own
+header forbids, just smuggled one day earlier than the zone boundary it is
+written to guard.
+
+**Why no prior night caught it:** `lib/plan/forecast.test.ts` (the only
+test file for this function) only ever seeded `dueToday.learn: []`, so
+`concreteItems`'s own learn→gate projection was never exercised by any
+assertion at all. `test/plan-calendar.test.tsx` always seeds exactly one
+`learn` item and only checks (a) that *some* `surah:ayah` string appears in
+the concrete zone and (b) that none appears past +3 — never that the +2/+3
+labels are the right, knowable ones. The one prior DECISIONS.md mention of
+this function (v3-D238) fixed a different bug — `dueToday` ignoring pace —
+and never touched the offset-1 projection logic itself.
+
+**Fixed:** the gate-naming branch now fires only when `offset === 1`; +2
+and +3 name no gate at all (the existing decaying `reviews` count, a
+weaker, count-only — never a named-ayah — guess, is left exactly as it was;
+flagged by the sweep as a smaller, separate overclaim not addressed here).
+
+**Verified:** RED confirmed directly, three new `forecast.test.ts` cases
+run against the unmodified function — the first (tomorrow's gate is the
+SAME, unshifted ayah) passed vacuously, since offset-1's arithmetic was
+already correct; the other two failed exactly as predicted:
+`expected [ { kind: 'gate', … } ] to have a length of +0 but got 1` at
+offset 2 and 3 for a single learn candidate, and `got 3` for a three-item
+Sprint-pace fixture. Implemented, reran: `forecast.test.ts` 6/6 green (was
+3, +3); `test/plan-calendar.test.tsx` 25/25 unaffected (its own fixtures
+never assert on +2/+3 gate content, so the fix is additive there, not a
+regression fix).
+
+`TZ=UTC make test`: 2984 passing (was 2981, +3 — exactly this run's three
+new tests; apps/web 1617, was 1614; no other suite moved: 255 v2 vitest, 47
+v2/api, 410 v3/api, 120 corpus-compiler, 466 engine, 69 fold-runner).
+`check-test-floor.mjs`: OK, 2984 >= floor 1899 (+1085 margin, unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 30 routes,
+unchanged (a `lib/plan/forecast.ts`-only fix plus its own test file, no
+route or other production file touched). `npm run gates`: all green —
+locked-css OK, 1 documented hunk, 294 v1 lines byte-identical; boundaries
+OK, 326 files, unchanged count — no new production file, one existing file
+edited plus its one existing test file; fonts degraded-but-non-blocking,
+pre-existing, 2/6 UI fonts present; corpus-morphology OK, 362 words;
+corpus-glyphs OK, 206 codepoints across 4 artifacts — all unchanged, this
+diff carries no corpus data. `npx tsc --noEmit`, run separately across all
+four v3 node packages: clean in all four. No PHP file changed, so `pint`
+was not applicable. No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff produced by running the suite was reverted before
+committing, same discipline as every prior entry). No Arabic codepoint
+(the full diff swept programmatically, in Python, over the Arabic, Arabic
+Supplement, Arabic Extended-A and both Presentation Forms Unicode blocks:
+CLEAN — every new string is a TypeScript identifier, a wire-shaped test
+fixture integer, or a fixed English docblock/assertion sentence, never
+corpus text). No oracle/golden-log/fixture/snapshot regenerated.
+
+Session start: fresh container, no `node_modules`/`vendor` anywhere; `make
+setup` hit the documented transient proxy timeout on `v2/api`'s own
+`composer install` (a `git clone --mirror` of `sebastianbergmann/phpunit`
+exceeding the 300s default) — recovered with a manual
+`COMPOSER_PROCESS_TIMEOUT=900` retry, then PHP defaulted to 8.3.6 (`v3/api`
+needs >=8.4.1, confirmed directly from the resolved lockfile's
+`symfony/clock` v8.1.0 requirement); installed PHP 8.4 cleanly via the
+documented `packages.sury.org` apt mirror, no refusal. The remaining
+`make setup` steps (`.env`/`APP_KEY`/migrations for both Laravel apps, the
+five remaining `npm install`s) were then run by hand since the original
+`make setup` invocation had aborted partway. `HEAD` was found detached
+exactly at `origin/main`'s own tip (`196d102`, v3-D288), on a stale LOCAL
+`main` branch ref eight commits behind (`977eae0`, v3-D281) — the
+recurring stale-local-`main` trap this file has recorded roughly fifty
+times since v3-D77 — caught before committing via `git fetch origin main`
++ `git checkout main && git merge --ff-only origin/main`, a clean
+fast-forward that carried this run's own uncommitted fix through
+untouched, no work lost or at risk.
+
+NOT addressed: `concreteItems`'s own sibling overclaim — the decaying
+`reviews` count at +2/+3 (`Math.max(1, due.reviews - offset)`) is still a
+guess, just a weaker one (a bare count, never a named ayah) — flagged by
+this run's own sweep and deliberately left, narrower scope than the gate
+fix; every item on v3-D288's own "NOT addressed" list, unchanged —
+`acknowledgeReentry`'s own "makeup" branch still only logs and points the
+learner at `/home` (v3-D256's verdict unchanged); `DrillPicker.tsx`'s own
+unused `now` prop; the unused `atoms`/`corpus`/`sessions` IndexedDB object
+stores (v3-D232); `session_start`'s own latency metric (v0.8); the
+streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151, v3-D219); `App\Flags\FlagService::enabled()`
+(v3-D197); multi-surah enrollment; the operational mailer/7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `selection_determinism_check` still replaying a committed
+fixture; `QueueItem.score`'s own missing external reader (v3-D263);
+`worker/fold-runner/src/selectionCheck.ts`'s cosmetic `tracesCompared`
+statistic (v3-D286); `GrantAdminRoleCommand`'s own missing
+pending-deletion guard (v3-D287) — all unchanged. `forecast.ts`'s own
+concrete-zone gate fabrication is now CLOSED for its clearer half (the
+named-ayah guess) — remove it from future sweeps; its weaker
+reviews-count sibling stays open for a future run.

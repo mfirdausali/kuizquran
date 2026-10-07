@@ -54,3 +54,77 @@ describe("buildForecast — the first-week habit-protocol ramp (WIREFRAME §14)"
     expect(f.finishLabel).toMatch(/^(early|mid|late)-/);
   });
 });
+
+describe("buildForecast — the concrete zone may only name what is actually scheduled", () => {
+  // `gate.ts#scheduleGate` arms a cold gate for the NEXT learning-day the
+  // moment an ayah encodes — so "tomorrow's gate is today's learn item" is a
+  // real, already-scheduled fact once today's encode happens. Nothing
+  // schedules a gate two or three days out: that would require guessing
+  // which ayah a FUTURE day's Learn pass will pick, whether that pass
+  // completes, and whether it reaches S3/encode — none of which `dueToday`
+  // knows. §14's own rule: "a review three weeks out depends on how the next
+  // twenty sessions actually go" — the identical reasoning applies one day
+  // earlier than +4, to day +2 and +3 inside the concrete zone itself.
+  it("names tomorrow's gate as the SAME ayah learned today, never a shifted one", () => {
+    const f = buildForecast({
+      now: NOW,
+      tz: TZ,
+      minutesPerDay: 8,
+      enrolled: [{ surah: 112, remainingAyat: 10, avgWordsPerAyah: 5 }],
+      dueToday: { gates: [], reviews: 0, learn: [{ surah: 112, ayah: 5 }] },
+      awayDays: [],
+    });
+    const tomorrow = f.days.find((d) => d.offset === 1);
+    expect(tomorrow?.items).toContainEqual({ kind: "gate", label: "Gate 112:5" });
+  });
+
+  it("never fabricates a gate for a day +2 or +3 — nothing schedules one that far out", () => {
+    const f = buildForecast({
+      now: NOW,
+      tz: TZ,
+      minutesPerDay: 8,
+      enrolled: [{ surah: 112, remainingAyat: 10, avgWordsPerAyah: 5 }],
+      dueToday: { gates: [], reviews: 0, learn: [{ surah: 112, ayah: 5 }] },
+      awayDays: [],
+    });
+    const dayAfterTomorrow = f.days.find((d) => d.offset === 2);
+    const inThreeDays = f.days.find((d) => d.offset === 3);
+    expect(dayAfterTomorrow?.items.filter((i) => i.kind === "gate")).toHaveLength(0);
+    expect(inThreeDays?.items.filter((i) => i.kind === "gate")).toHaveLength(0);
+    // Not merely absent — specifically never the shifted-ayah guess the old
+    // code produced ("Gate 112:6" at +2, "Gate 112:7" at +3).
+    const allLabels = f.days.flatMap((d) => d.items.map((i) => i.label));
+    expect(allLabels).not.toContain("Gate 112:6");
+    expect(allLabels).not.toContain("Gate 112:7");
+  });
+
+  it("holds for a Sprint-pace learner with several learn candidates today, not only a single one", () => {
+    const f = buildForecast({
+      now: NOW,
+      tz: TZ,
+      minutesPerDay: 16,
+      enrolled: [{ surah: 112, remainingAyat: 10, avgWordsPerAyah: 5 }],
+      dueToday: {
+        gates: [],
+        reviews: 0,
+        learn: [
+          { surah: 112, ayah: 5 },
+          { surah: 112, ayah: 6 },
+          { surah: 112, ayah: 7 },
+        ],
+      },
+      awayDays: [],
+    });
+    const tomorrow = f.days.find((d) => d.offset === 1);
+    // Tomorrow's gates are exactly today's three learn candidates, unshifted.
+    expect(tomorrow?.items.filter((i) => i.kind === "gate")).toEqual([
+      { kind: "gate", label: "Gate 112:5" },
+      { kind: "gate", label: "Gate 112:6" },
+      { kind: "gate", label: "Gate 112:7" },
+    ]);
+    const dayAfterTomorrow = f.days.find((d) => d.offset === 2);
+    const inThreeDays = f.days.find((d) => d.offset === 3);
+    expect(dayAfterTomorrow?.items.filter((i) => i.kind === "gate")).toHaveLength(0);
+    expect(inThreeDays?.items.filter((i) => i.kind === "gate")).toHaveLength(0);
+  });
+});
