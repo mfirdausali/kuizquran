@@ -53,10 +53,94 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2967 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 2979 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 409 v3/api + 120 corpus-compiler
-             # + 466 engine + 67 fold-runner + 1603 apps/web. (v3-D281, 2026-10-05)
+             # 255 v2 vitest + 47 v2/api + 410 v3/api + 120 corpus-compiler
+             # + 466 engine + 67 fold-runner + 1614 apps/web. (v3-D287, 2026-10-07)
+             # NOTE (v3-D287, 2026-10-07): `PurgeDueAccountsCommand`'s own
+             # `$skipped` counter conflated two different outcomes — a benign
+             # stale request (the user already gone) and a GENUINE per-user
+             # purge FAILURE (a `restrictOnDelete` violation on
+             # `admin_audit.actor_admin_id`, exactly the case this command's
+             # own docblock already names: "must not silently drop the
+             # request... reports it loudly for a human to resolve"). The
+             # exit code only read `self::FAILURE` when EVERY due account was
+             # skipped and NONE purged, so a night with one clean purge
+             # alongside one genuine failure reported `self::SUCCESS`,
+             # masking the one signal an ops wrapper actually acts on.
+             # Reachable, not theoretical: `GrantAdminRoleCommand` has no
+             # pending-deletion-request guard, so a user can request
+             # deletion, later be granted an admin role, perform one audited
+             # action, and collide with `restrictOnDelete` when
+             # `pdpa:purge-due` runs — exactly the scenario the command's own
+             # comment anticipates. No existing test exercised a mixed
+             # success/failure run. Fixed: split into `$failed` (the catch
+             # branch only) and `$skipped` (the benign stale-request drop);
+             # exit code is now `$failed > 0 ? self::FAILURE : self::SUCCESS`,
+             # independent of `$purged`. RED confirmed directly: a new
+             # `AccountDeletionTest` case seeds one due account blocked by a
+             # real `restrictOnDelete` collision alongside a second, ordinary
+             # due account with no conflict — against the unmodified command
+             # it failed exactly `Unexpected status code 0 was received`;
+             # implemented, reran: 17/17 green (was 16, +1). `TZ=UTC make
+             # test`: 2979 passing (was 2978, +1 — exactly this run's one new
+             # test; v3/api 410, was 409; no other suite moved). `check-test-
+             # floor.mjs`: OK, 2979 >= floor 1899 (+1080 margin, unmoved).
+             # `TZ=UTC make build`: exit 0, 30 routes, unchanged (a
+             # backend-only fix, no apps/web file touched). `npm run gates`:
+             # all green — boundaries 327 files, unchanged count; locked-css/
+             # fonts/corpus-morphology/corpus-glyphs all unchanged.
+             # `./vendor/bin/pint --test` on both changed files: the
+             # production file passed; the test file reports the identical
+             # pre-existing `fully_qualified_strict_types`/`ordered_imports`
+             # findings both before and after this diff, confirmed by
+             # stashing the change and re-running pint — pre-existing drift,
+             # left alone. No `v1/**`/`v2/**` edit. No Arabic codepoint (both
+             # changed files swept over every Arabic-adjacent Unicode block:
+             # zero matches). No oracle/golden-log/fixture/snapshot
+             # regenerated. Session start: fresh container, PHP defaulted to
+             # 8.3.6 (`v3/api` needs >=8.4.1); installed PHP 8.4 cleanly via
+             # the documented `packages.sury.org` apt mirror, no refusal.
+             # `HEAD`, local `main` and `origin/main` all already agreed at
+             # `753f2d5` (v3-D286) — no stale-local-`main` trap this run.
+             # Found by a dedicated fresh-sweep agent (Explore) directed at
+             # `v3/api/app/Console/Commands/*.php` re-read against their own
+             # docblocks, a repo-wide stale-claim grep, and the newest
+             # workbench panels — independently re-verified by this run
+             # directly against the real source before writing any test.
+             # Runners-up checked and deliberately not picked:
+             # `lib/drill/sites.ts#pagesForSurah`'s own single-page
+             # `pageCapacity` fallback (already named and accepted in
+             # v3-D286 itself, not fresh); `GrantAdminRoleCommand`'s own
+             # missing pending-deletion guard (the root enabler, but a
+             # weaker fix target than the exit-code masking itself — the
+             # command already reports the collision loudly rather than
+             # needing to prevent it). NOT addressed: every item on
+             # v3-D286's own "NOT addressed" list, unchanged —
+             # `acknowledgeReentry`'s own "makeup" branch still only logs
+             # and points the learner at `/home` (v3-D256's verdict
+             # unchanged); `DrillPicker.tsx`'s own unused `now` prop; the
+             # unused `atoms`/`corpus`/`sessions` IndexedDB object stores
+             # (v3-D232); `session_start`'s own latency metric (v0.8); the
+             # streak/away-day day-space mismatch (v3-D209);
+             # `rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution` (v3-D148);
+             # `lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate`
+             # as a whole class (v3-D88, v3-D151, v3-D219);
+             # `App\Flags\FlagService::enabled()` (v3-D197); multi-surah
+             # enrollment; the operational mailer/7-night launch window;
+             # PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy drift
+             # (v3-D127); `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel` (v3-D188);
+             # `selection_determinism_check` still replaying a committed
+             # fixture; `QueueItem.score`'s own missing external reader
+             # (v3-D263); `worker/fold-runner/src/selectionCheck.ts`'s
+             # cosmetic `tracesCompared` statistic (v3-D286) — all
+             # unchanged. `PurgeDueAccountsCommand`'s own exit-code masking
+             # is now CLOSED — remove it from future "Console Commands
+             # re-read against their own docblock" sweeps. See
+             # DECISIONS.md v3-D287.
              # NOTE (v3-D281, 2026-10-05): `extraLearnOfferFor`'s own docblock
              # (FR6 Door 1, `lib/session/run.ts`) went stale a THIRD time —
              # the same "docblock says X, reality is Y" shape v3-D90/D110/

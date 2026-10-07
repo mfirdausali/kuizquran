@@ -4,6 +4,7 @@ namespace Tests\Feature\Account;
 
 use App\Console\Commands\PurgeDueAccountsCommand;
 use App\Models\AccountDeletionRequest;
+use App\Models\AdminAudit;
 use App\Models\AdminRole;
 use App\Models\BillingEvent;
 use App\Models\Entitlement;
@@ -380,6 +381,49 @@ class AccountDeletionTest extends TestCase
 
         $this->assertNotNull(User::find($keeper->id));
         $this->assertSame(0, PurgeLedgerEntry::count());
+    }
+
+    /**
+     * v3-D287: `$skipped` conflated two different reasons behind one counter
+     * — a benign stale request (the user already gone by some other path)
+     * and a genuine per-user purge FAILURE (a `restrictOnDelete` violation,
+     * exactly the case this command's own docblock says "must not silently
+     * drop the request... reports it loudly for a human to resolve, rather
+     * than retrying forever with no visibility"). The exit code only read
+     * FAILURE when EVERY due account was skipped and NONE purged — so a
+     * night with one clean purge alongside one genuine failure reported
+     * SUCCESS, masking the one outcome an ops wrapper actually needs to act
+     * on.
+     */
+    public function test_a_genuine_purge_failure_fails_the_command_even_when_another_account_purges_cleanly(): void
+    {
+        $blocked = User::factory()->create(['email' => 'blocked@example.com']);
+        AdminRole::create(['user_id' => $blocked->id, 'role' => 'operator', 'granted_at' => 1_700_000_000_000]);
+        AdminAudit::create([
+            'actor_admin_id' => $blocked->id,
+            'action' => 'test.action',
+            'at' => 1_700_000_000_000,
+        ]);
+        AccountDeletionRequest::create([
+            'user_id' => $blocked->id,
+            'token_hash' => hash('sha256', 'blocked'),
+            'requested_at_ms' => 1_700_000_000_000,
+            'purge_at_ms' => (int) round(microtime(true) * 1000) - 1000,
+        ]);
+
+        $clean = User::factory()->create(['email' => 'clean@example.com']);
+        AccountDeletionRequest::create([
+            'user_id' => $clean->id,
+            'token_hash' => hash('sha256', 'clean'),
+            'requested_at_ms' => 1_700_000_000_000,
+            'purge_at_ms' => (int) round(microtime(true) * 1000) - 1000,
+        ]);
+
+        $this->artisan(PurgeDueAccountsCommand::class)->assertFailed();
+
+        $this->assertNotNull(User::find($blocked->id), 'a restrictOnDelete violation must leave the row untouched');
+        $this->assertSame(1, AccountDeletionRequest::where('user_id', $blocked->id)->count(), 'the blocked request must stay pending, not be dropped');
+        $this->assertNull(User::find($clean->id), 'the OTHER due account must still purge cleanly in the same run');
     }
 
     // ──────────────────────── purge_ledger is append-only ───────────────────

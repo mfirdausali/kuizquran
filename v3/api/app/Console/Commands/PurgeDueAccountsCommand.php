@@ -47,6 +47,7 @@ class PurgeDueAccountsCommand extends Command
 
         $purged = 0;
         $skipped = 0;
+        $failed = 0;
 
         foreach ($due as $request) {
             $userId = $request->user_id;
@@ -94,12 +95,18 @@ class PurgeDueAccountsCommand extends Command
                 // command reports it loudly for a human to resolve, rather
                 // than retrying forever with no visibility.
                 $this->error("pdpa:purge-due — user {$userId} FAILED to purge: ".$e->getMessage());
-                $skipped++;
+                $failed++;
             }
         }
 
-        $this->line("pdpa:purge-due — purged {$purged}, skipped {$skipped}");
+        $this->line("pdpa:purge-due — purged {$purged}, skipped {$skipped}, failed {$failed}");
 
-        return $skipped > 0 && $purged === 0 ? self::FAILURE : self::SUCCESS;
+        // A genuine per-user failure (e.g. a restrictOnDelete violation) must
+        // fail the whole command regardless of how many OTHER due accounts
+        // purged cleanly in the same run — this is the one signal an ops
+        // wrapper actually acts on, and it must never be masked by an
+        // unrelated success sitting in the same batch. A benign stale-request
+        // drop ($skipped) is not itself a failure.
+        return $failed > 0 ? self::FAILURE : self::SUCCESS;
     }
 }

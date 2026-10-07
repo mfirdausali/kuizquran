@@ -28531,3 +28531,123 @@ than the real per-seed union size it actually iterates — purely cosmetic
 deliberately left as lower-consequence than the fix above — all unchanged.
 `lib/drill/sites.ts#pagesForSurah`'s own opens/closes tautology is now
 CLOSED — remove it from future "docblock says X, reality is Y" sweeps.
+
+### v3-D287 — `PurgeDueAccountsCommand`'s exit code masked a genuine per-user purge failure whenever another due account purged cleanly in the same run (2026-10-07, nightly)
+
+Found by a dedicated fresh-sweep agent (Explore), told the full exclusion list
+carried through v3-D286 and directed at `v3/api/app/Console/Commands/*.php`
+(re-read fully against its own docblock and its real scheduling), a repo-wide
+stale-claim grep, the Playwright e2e specs, and the newest workbench panels —
+independently re-verified by this run directly against the real source before
+writing any test.
+
+`PurgeDueAccountsCommand::handle()` (the nightly PDPA hard-purge, gate 19)
+tracked exactly one `$skipped` counter for two unrelated outcomes: a BENIGN
+stale request (the user already gone by some other path — `$request->delete()`
+and move on) and a GENUINE per-user purge FAILURE (a `restrictOnDelete`
+violation on `admin_audit.actor_admin_id` — an admin who performed an audited
+action after their own deletion request was created, exactly the case this
+command's own docblock already names: "must not silently drop the request...
+reports it loudly for a human to resolve, rather than retrying forever with no
+visibility"). The exit code read `self::FAILURE` only when `$skipped > 0 &&
+$purged === 0` — so a night with two due accounts, one purging cleanly and one
+hitting a real exception, reported `purged=1, skipped=1` and returned
+`self::SUCCESS`. The one signal an ops wrapper/scheduler actually acts on
+contradicted the docblock's own stated promise, in precisely the realistic
+mixed-outcome case (nothing in this codebase limits a night to exactly one due
+account).
+
+Reachable, not theoretical: `GrantAdminRoleCommand` has no check for a pending
+`AccountDeletionRequest` before granting a role, so a user can request
+deletion, later be granted an admin role, perform one audited action
+(stamping `admin_audit.actor_admin_id`), and collide with the restrictOnDelete
+constraint when `pdpa:purge-due` runs two weeks later — exactly the scenario
+the command's own inline comment anticipates. No existing test exercised a
+mixed success/failure run or asserted the command's exit code as `FAILURE`
+(`AccountDeletionTest.php`'s own purge-command group only ever called
+`assertSuccessful()`).
+
+**Fixed:** split the counter — `$failed` now tracks only the catch branch
+(a genuine exception); `$skipped` stays scoped to the benign stale-request
+drop. The exit code is now `$failed > 0 ? self::FAILURE : self::SUCCESS`,
+independent of `$purged`/`$skipped` entirely. As a direct, correct side
+effect (not separately pursued scope creep — it falls out of the same fix),
+an all-stale-skip run with zero purges and zero failures now also correctly
+returns `self::SUCCESS` rather than the old, backwards `FAILURE` the sweep
+agent separately flagged as lower-priority.
+
+**Verified:** RED confirmed directly against the unmodified command: a new
+`test_a_genuine_purge_failure_fails_the_command_even_when_another_account_purges_cleanly`
+case in `AccountDeletionTest.php` seeds one user with a pending, elapsed
+deletion request who also holds an admin role and an `admin_audit` row (the
+real `restrictOnDelete` collision) alongside a second, ordinary due user with
+no such conflict. Run against the unmodified command: failed exactly
+`Unexpected status code 0 was received. Failed asserting that 0 is not equal
+to 0` — the command reported `self::SUCCESS` despite the blocked user's
+purge genuinely throwing. Implemented, reran: `AccountDeletionTest.php` 17/17
+green (was 16, +1) — the blocked admin's row survives untouched and remains
+due, the ordinary user is genuinely purged in the same run.
+
+`TZ=UTC make test`: 2979 passing (was 2978, +1 — exactly this run's one new
+test; v3/api 410, was 409; no other suite moved: 255 v2 vitest, 47 v2/api,
+120 corpus-compiler, 466 engine, 67 fold-runner, 1614 apps/web).
+`check-test-floor.mjs`: OK, 2979 >= floor 1899 (+1080 margin, unmoved).
+`TZ=UTC make build`: exit 0, 30 routes, unchanged (a backend-only fix, no
+apps/web file touched). `npm run gates`: all green — locked-css OK, 1
+documented hunk, 294 v1 lines byte-identical; boundaries OK, 327 files,
+unchanged count; fonts degraded-but-non-blocking, pre-existing, 2/6 UI
+fonts present; corpus-morphology OK, 362 words; corpus-glyphs OK, 206
+codepoints across 4 artifacts — all unchanged, this diff carries no corpus
+data. `./vendor/bin/pint --test` on both changed files: the production file
+passed; the test file reports the identical pre-existing
+`fully_qualified_strict_types`/`ordered_imports` findings both before and
+after this diff, confirmed directly by stashing the change and re-running
+pint — pre-existing repo-wide drift this fix does not introduce, left alone,
+same discipline as every prior entry. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite was
+reverted before committing). No Arabic codepoint (both changed files swept
+programmatically, in Python, over the Arabic, Arabic Supplement, Arabic
+Extended-A and both Presentation Forms Unicode blocks — zero matches; every
+new line is a PHP identifier, a synthetic email/timestamp test fixture
+value, or a fixed English comment/error-message sentence, never corpus
+text). No oracle/golden-log/fixture/snapshot regenerated.
+
+Session start: fresh container, no `node_modules`/`vendor` anywhere; PHP
+defaulted to 8.3.6 (`v3/api` needs >=8.4.1); installed PHP 8.4 cleanly via
+the documented `packages.sury.org` apt mirror, no refusal. `HEAD`, local
+`main` and `origin/main` all already agreed at `753f2d5` (v3-D286) — no
+stale-local-`main` trap this run, confirmed directly via `git fetch origin
+main` before any exploration.
+
+Runners-up checked and deliberately not picked, recorded so a future sweep
+does not re-walk them: `lib/drill/sites.ts#pagesForSurah`'s own single-page
+`pageCapacity` fallback still answers via the old membership tautology for a
+hypothetical surah that starts at mushaf line 1 — already named and accepted
+as a known, harmless limitation in v3-D286 itself, not a fresh finding;
+`GrantAdminRoleCommand` having no pending-deletion-request guard is the root
+enabler of this defect but is a weaker standalone fix target than the
+exit-code masking itself, since the command's own docblock already
+anticipates the collision as an expected (if rare) case to REPORT, not
+prevent.
+
+NOT addressed: every item on v3-D286's own "NOT addressed" list, unchanged
+— `acknowledgeReentry`'s own "makeup" branch still only logs and points the
+learner at `/home` (v3-D256's verdict unchanged); `DrillPicker.tsx`'s own
+unused `now` prop; the unused `atoms`/`corpus`/`sessions` IndexedDB object
+stores (v3-D232); `session_start`'s own latency metric (v0.8); the
+streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151, v3-D219); `App\Flags\FlagService::enabled()`
+(v3-D197); multi-surah enrollment; the operational mailer/7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `selection_determinism_check` still replaying a committed
+fixture; `QueueItem.score`'s own missing external reader (v3-D263);
+`worker/fold-runner/src/selectionCheck.ts`'s cosmetic `tracesCompared`
+statistic (v3-D286); `GrantAdminRoleCommand`'s own missing pending-deletion
+guard (above, deliberately left — the purge command already reports the
+collision loudly rather than needing to prevent it) — all unchanged.
+`PurgeDueAccountsCommand`'s own exit-code masking is now CLOSED — remove it
+from future "Console Commands re-read against their own docblock" sweeps.
