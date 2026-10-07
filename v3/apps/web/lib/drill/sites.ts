@@ -141,7 +141,7 @@ export function ayatForSelection(corpus: Corpus, sel: DrillSelection): number[] 
     if (!Number.isInteger(lo) || !Number.isInteger(hi) || lo < 1 || hi > ayahCount) return [];
     sites = sitesForRange(surah, lo, hi, ayahCount);
   } else {
-    const spans = pagesForSurah(corpus.verses.map((v) => ({ ayah: v.ayah, page: v.page })));
+    const spans = pagesForSurah(verseGeometryFor(corpus));
     const span = spans.find((p) => p.page === sel.page);
     if (!span) return [];
     sites = sitesForPage(surah, span, ayahCount);
@@ -149,11 +149,44 @@ export function ayatForSelection(corpus: Corpus, sel: DrillSelection): number[] 
   return sites.filter((s) => s.kind === "ayah").map((s) => s.ayah);
 }
 
+/**
+ * Builds `pagesForSurah`'s own input from a real `Corpus` — the ONE place
+ * that derives a verse's `firstLine`/`lastLine` from `CorpusWord.line`
+ * (v3-D191), so this corpus→geometry mapping cannot drift between its two
+ * real callers (`ayatForSelection` here, and `DrillPicker.tsx`'s own page
+ * picker — the actual screen `sharedWithOtherSurah` reaches a learner on).
+ */
+export function verseGeometryFor(corpus: Corpus): VerseGeometry[] {
+  const linesByAyah = new Map<number, number[]>();
+  for (const w of corpus.words) {
+    if (typeof w.line !== "number") continue;
+    const list = linesByAyah.get(w.ayah);
+    if (list) list.push(w.line);
+    else linesByAyah.set(w.ayah, [w.line]);
+  }
+  return corpus.verses.map((v) => {
+    const lines = linesByAyah.get(v.ayah);
+    return {
+      ayah: v.ayah,
+      page: v.page,
+      firstLine: lines ? Math.min(...lines) : null,
+      lastLine: lines ? Math.max(...lines) : null,
+    };
+  });
+}
+
 /** A verse's geometry as the corpus reports it. `page: null` means this build
- *  has no geometry for that verse — never a reason to guess. */
+ *  has no geometry for that verse — never a reason to guess. `firstLine`/
+ *  `lastLine` are the min/max mushaf LINE this ayah's own words reach on
+ *  that page (`CorpusWord.line`, derived by `ayatForSelection`) — `null`
+ *  when this build has no word-level line data for the verse, which
+ *  `pagesForSurah` treats the same way it treats a null `page`: a signal to
+ *  degrade, not a reason to guess. */
 export interface VerseGeometry {
   ayah: number;
   page: number | null;
+  firstLine: number | null;
+  lastLine: number | null;
 }
 
 /**
@@ -166,13 +199,40 @@ export interface VerseGeometry {
  * reason a partial map is dangerous — pages built from half a geometry would
  * orphan seams exactly the way #38 describes, while looking complete.
  *
- * `sharedWithOtherSurah` is derived from the ayah count on the page versus the
- * page's own extent: if this surah's ayat do not begin at the page's start or
- * do not run to its end, other content shares it. We cannot see the neighbour
- * surah's verses from here, so the honest signal is positional — the FIRST page
- * of a surah that does not begin the page, and the LAST page that does not fill
- * it, are shared. (Yusuf 12:1 sits at page 235 line 11, so page 235 holds only
- * 4 of its ayat — the canonical instance of #11.)
+ * `sharedWithOtherSurah` names whether OTHER content sits on this page beside
+ * this surah's own ayat. We cannot see the neighbour surah's verses from
+ * here, so the signal is positional, checked at both ends:
+ *
+ * - OPENING: a page is shared at its start unless the surah's own first ayah
+ *   on it begins at mushaf LINE 1 — line 1 of a page is always the top, so
+ *   nothing else could precede it there.
+ * - CLOSING: a page is shared at its end unless the surah's own last ayah on
+ *   it runs all the way to the page's own physical line CAPACITY — the
+ *   greatest line number this mushaf edition ever prints on one page.
+ *
+ * (v3-D286, DEFECTS.md#38.) THE BUG THIS REPLACED: `firstAyah ===
+ * firstAyahOfSurah` / `lastAyah === lastAyahOfSurah` are true for exactly
+ * the page holding the surah's first/last ayah, BY DEFINITION — regardless
+ * of whether that page is actually full. For Yusuf (12), ayat 1-110 all end
+ * mid-page, so the tautology happened to read the same as the real line
+ * check every time — until ayah 111, which runs to line 15 on page 248, the
+ * SAME line every other page of this surah also reaches. Page 248 is
+ * genuinely full; the old check still called it shared.
+ *
+ * The page's own true line capacity is derived from THIS surah's own data,
+ * never assumed: the greatest `lastLine` observed on any of its pages OTHER
+ * than the closing one. Any such page is, by continuous pagination, filled
+ * start-to-end — there is more of this surah after it, so it cannot stop
+ * short of the page's real end. When the surah has no such page (it fits
+ * entirely on the one page that is both its first and its last), there is
+ * nothing here to derive a capacity from, and the closing check falls back
+ * to the pre-refinement page-membership answer rather than guess — the
+ * opening check (needing no capacity, only the ayah's own first line) still
+ * applies independently, which is why a short, single-page surah (like
+ * surahs 103/112 in the real launch corpus) is still correctly flagged
+ * shared via its OPENING line alone. Line data absent entirely (an older
+ * corpus subset) degrades both checks to the original tautology, same as a
+ * null page degrades the whole function to `[]`.
  */
 export function pagesForSurah(verses: readonly VerseGeometry[]): PageSpan[] {
   if (verses.length === 0) return [];
@@ -192,15 +252,38 @@ export function pagesForSurah(verses: readonly VerseGeometry[]): PageSpan[] {
   const firstAyahOfSurah = Math.min(...verses.map((v) => v.ayah));
   const lastAyahOfSurah = Math.max(...verses.map((v) => v.ayah));
 
+  // Line data must also be TOTAL to be trusted, for the same reason a
+  // partial page map is treated as absent above — refining some boundary
+  // pages and silently leaving others on the coarser heuristic would be its
+  // own kind of invisible gap.
+  const hasLineData = verses.every((v) => v.firstLine !== null && v.lastLine !== null);
+  const lineOf = new Map<number, { first: number; last: number }>();
+  if (hasLineData) {
+    for (const v of verses) {
+      lineOf.set(v.ayah, { first: v.firstLine as number, last: v.lastLine as number });
+    }
+  }
+
+  const closingPage = verses.find((v) => v.ayah === lastAyahOfSurah)?.page ?? null;
+  const nonClosingLastLines = hasLineData
+    ? verses.filter((v) => v.page !== closingPage).map((v) => v.lastLine as number)
+    : [];
+  const pageCapacity = nonClosingLastLines.length > 0 ? Math.max(...nonClosingLastLines) : null;
+
   return pages.map((page) => {
     const ayat = byPage.get(page) as number[];
     const firstAyah = Math.min(...ayat);
     const lastAyah = Math.max(...ayat);
-    // The surah's opening page is shared unless the surah opens the page;
-    // its closing page is shared unless the surah closes the page. A middle
-    // page is wholly this surah's by definition.
-    const opensSurah = firstAyah === firstAyahOfSurah;
-    const closesSurah = lastAyah === lastAyahOfSurah;
+    // The surah's opening page is shared unless the surah opens the page AT
+    // LINE 1; its closing page is shared unless the surah closes it AT THE
+    // PAGE'S OWN CAPACITY. A middle page is wholly this surah's by
+    // definition (neither check below can fire — see this function's own
+    // header).
+    const opensSurah =
+      firstAyah === firstAyahOfSurah && (!hasLineData || lineOf.get(firstAyah)!.first !== 1);
+    const closesSurah =
+      lastAyah === lastAyahOfSurah &&
+      (pageCapacity === null || lineOf.get(lastAyah)!.last !== pageCapacity);
     return {
       page,
       firstAyah,

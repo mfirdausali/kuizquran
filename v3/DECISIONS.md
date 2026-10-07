@@ -28373,3 +28373,161 @@ operational mailer/7-night launch window; PAY-1's Stripe fixtures; surah
 fixture; `QueueItem.score`'s own missing external reader (v3-D263) — all
 unchanged. Onboarding's own Yusuf enrollment dead end is now CLOSED — remove
 it from future "mechanism built, zero reachable caller" sweeps.
+
+### v3-D286 — `pagesForSurah`'s own `sharedWithOtherSurah` was a page-membership tautology that silently diverged from Yusuf's real last page (2026-10-07, nightly)
+
+Found by a dedicated fresh-sweep agent (Explore), directed away from the long
+exclusion list carried through v3-D285 (`rhymeClassOf()`, `PaywallGate`,
+`EntitlementMachine::merge()`, the mailer/7-night window, PAY-1, surah 67's
+scene beats, and the rest) and told to look at genuinely fresh corners
+instead — it chose `apps/web/lib/drill/sites.ts`, a module none of the prior
+~285 nights had read line-by-line against real vendored geometry data. This
+is neither of this build's two usual shapes (zero-caller / stale docblock):
+it is a mechanism that is wired and rendered, whose own docblock describes
+one algorithm while the code silently implements a cruder one that happens
+to agree with the documented algorithm for 110 of Yusuf's 111 ayat and
+diverges on the 111th — independently re-verified by this run directly
+against the real vendored geometry before writing any test.
+
+`lib/drill/sites.ts#pagesForSurah()` computes each mushaf page's
+`sharedWithOtherSurah` — rendered as a "shares this page" label on the real,
+shipped `/drill` route's page picker (`DrillPicker.tsx`) — from
+`opensSurah = firstAyah === firstAyahOfSurah` / `closesSurah = lastAyah ===
+lastAyahOfSurah`. Both are true by definition for exactly the page holding
+the surah's global first/last ayah, regardless of whether that page is
+actually full. The function's own header already describes a different,
+POSITIONAL algorithm ("if this surah's ayat do not begin at the page's
+start or do not run to its end, other content shares it") that the code
+never implemented — it only ever checked PAGE MEMBERSHIP, never the actual
+mushaf LINE position.
+
+Verified wrong against real, currently-compiled data, not merely
+theoretical: read directly from `packages/corpus-compiler/data/raw/
+12-geometry.json` (word-level `line_number` only — no Quranic text read).
+Every one of Yusuf's 14 pages tops out at line 15 (a uniform 15-line mushaf
+edition, confirmed across all 14). Ayah 111 (the surah's own last ayah)
+reaches line 15 on page 248 — the SAME capacity every other page of this
+surah also reaches — meaning page 248 is genuinely full and nothing else
+can share it. The old membership check still reported it shared. The other
+three launch surahs (67, 103, 112) each happen to end several lines short
+of their own page's capacity, so the tautology happened to agree with
+reality for all of them — the exact kind of coincidence that let this ship
+unnoticed since build-plan step 20.
+
+**Fixed:** `VerseGeometry` gains `firstLine`/`lastLine: number | null` (the
+min/max mushaf line this ayah's own words reach, derived from
+`CorpusWord.line`, v3-D191 — `null` degrades cleanly, same discipline as a
+null `page`). `pagesForSurah()` now checks REAL positions at both ends,
+matching its own header's original stated intent (previously only
+implemented for neither end, by coincidence for three surahs out of four):
+opening is shared unless the ayah's own first line is exactly line 1;
+closing is shared unless the ayah's own last line equals the page's own
+physical line CAPACITY. Capacity is derived from this surah's OWN data,
+never assumed (no `MUSHAF_LINES_PER_PAGE` constant exists anywhere in this
+tree, and inventing one would be guessing at an edition-specific fact the
+corpus doesn't need to assert): the greatest `lastLine` observed on any of
+this surah's pages OTHER than its closing one. Any such page is, by
+continuous pagination, filled start-to-end — there is more of the surah
+after it, so it cannot stop short of the page's real end — making this
+estimate exact whenever the surah spans 2+ pages (proof: for a 2-page
+surah, the ONLY non-closing page is the first page, and the same
+"more content follows" argument applies to it too). When the surah fits
+entirely on its one page (both opening and closing at once, as the real
+launch corpus's own surahs 103/112 do), there is nothing non-closing to
+derive a capacity from, and the closing check degrades to the ORIGINAL
+membership answer rather than guess — harmless in practice, since the
+opening check (needing no capacity, only the ayah's own first line, always
+reliably known) independently and correctly flags such a page as shared
+whenever it genuinely is one (confirmed: both 103 and 112 start at line 3,
+never line 1). No regression risk for a genuinely closed single-page surah
+(Al-Fatiha's own real-world shape) was introduced beyond what already
+existed: the pre-fix code already answered that exact case by the identical
+tautology, unconditionally — the fix does not touch it (`pageCapacity ===
+null` short-circuits to the old answer). Both real call sites —
+`ayatForSelection` (the drill's own ayah resolution) and `DrillPicker.tsx`'s
+page picker (the actual screen a learner reads `sharedWithOtherSurah` on)
+— were duplicating the corpus→geometry mapping independently before this
+fix; both now route through one new, shared `verseGeometryFor(corpus)`
+export, so the two cannot drift into disagreeing about the same surah's own
+geometry, the same "two implementations of one decision" discipline this
+build has repeatedly enforced elsewhere (`gradeClassToWire`, `gateStateOf`,
+`canonicalOrder`).
+
+**Verified:** RED confirmed directly against the unmodified module: 4 new
+cases in `test/drill-sites.test.ts`'s existing `pagesForSurah` describe
+block — the real-corpus regression (page 248 must read `sharedWithOtherSurah
+=== false`), two synthetic-geometry mechanism tests (a non-full closing
+page reads shared; a closing page that fills to the SAME capacity an
+earlier page already established reads NOT shared), and a degrade-when-
+line-data-absent case. Run against the unmodified source, 3 of the 4 failed
+exactly as predicted (`expected true to be false`, each on the real/
+synthetic capacity-filling case); the degrade case passed vacuously, since
+it pins the OLD, unrefined behavior as the honest fallback and the
+unmodified code already is that behavior unconditionally. Implemented,
+reran: `test/drill-sites.test.ts` 25/25 green (was 21, +4).
+`test/drill-preview.test.ts` (20, unaffected — its own `PageSpan` literals
+need no new field, only `VerseGeometry` widened) and `test/drill-
+picker.test.tsx` (17, unaffected) both reran green, confirming no
+regression on either real consumer.
+
+`TZ=UTC make test`: 2978 passing (was 2974, +4 — exactly this run's four
+new tests; apps/web 1614, was 1610; no other suite moved: 255 v2 vitest, 47
+v2/api, 409 v3/api, 120 corpus-compiler, 466 engine, 67 fold-runner).
+`check-test-floor.mjs`: OK, 2978 >= floor 1899 (+1079 margin, unmoved).
+`TZ=UTC make build`: exit 0, 30 routes, unchanged (two existing production
+files edited plus two existing test files, no new route or production
+file). `npm run gates` (via `prebuild`): all green — locked-css OK, 1
+documented hunk, 294 v1 lines byte-identical; boundaries OK, 326 files,
+unchanged count; fonts degraded-but-non-blocking, pre-existing, 2/6 UI
+fonts present; corpus-morphology OK, 362 words; corpus-glyphs OK, 206
+codepoints across 4 artifacts — all unchanged, this diff carries no new
+corpus data (only a derived read of word-level line numbers already
+compiled). `npx tsc --noEmit` (apps/web): clean. No `v1/**`/`v2/**` edit (a
+stray `v2/tsconfig.tsbuildinfo` build-cache diff produced by running the
+suite was reverted before committing, same discipline as every prior
+entry). No Arabic codepoint (all four changed files swept
+programmatically, in Python, over the Arabic, Arabic Supplement, Arabic
+Extended-A and both Presentation Forms Unicode blocks — zero matches;
+every new string is a TypeScript identifier, a page/ayah/line integer, or a
+fixed English docblock/assertion sentence, never corpus text). No
+oracle/golden-log/fixture/snapshot regenerated — the widened
+`YUSUF_GEOMETRY` fixture is a mechanical addition of REAL line numbers
+read directly from the already-committed vendored geometry source
+(`packages/corpus-compiler/data/raw/12-geometry.json`), not a regenerated
+oracle; the pre-existing page numbers in it are untouched.
+
+Session start: fresh container, no `node_modules`/`vendor` anywhere; PHP
+defaulted to 8.3.6 (`v3/api` needs >=8.4.1); installed PHP 8.4 cleanly via
+the documented `packages.sury.org` apt mirror, no refusal. A first `make
+setup` attempt raced two concurrent `composer install` invocations against
+the same `v2/api` vendor directory (an operator error this run made and
+caught itself, not a tooling defect) and corrupted it
+(`phpunit/phpunit`'s own autoload path going missing mid-install); fixed by
+removing both `v2/api/vendor` and `v3/api/vendor` and re-running `make
+setup` once, serially, which completed clean. `HEAD`, local `main` and
+`origin/main` all already agreed at `5b74929` (v3-D285) — no
+stale-local-`main` trap this run, confirmed directly via `git fetch origin
+main` before any commit.
+
+NOT addressed: every item on v3-D285's own "NOT addressed" list, unchanged
+— `acknowledgeReentry`'s own "makeup" branch still only logs and points the
+learner at `/home` (v3-D256's verdict unchanged); `DrillPicker.tsx`'s own
+unused `now` prop; the unused `atoms`/`corpus`/`sessions` IndexedDB object
+stores (v3-D232); `session_start`'s own latency metric (v0.8); the
+streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151, v3-D219); `App\Flags\FlagService::enabled()`
+(v3-D197); multi-surah enrollment; the operational mailer/7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy drift (v3-D127);
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `selection_determinism_check` still replaying a committed
+fixture; `QueueItem.score`'s own missing external reader (v3-D263);
+`worker/fold-runner/src/selectionCheck.ts#selectionDeterminismCheckRun`'s
+own `tracesCompared` statistic using `baseline.size * seeds.length` rather
+than the real per-seed union size it actually iterates — purely cosmetic
+(it feeds no severity decision), noted by this run's own sweep agent and
+deliberately left as lower-consequence than the fix above — all unchanged.
+`lib/drill/sites.ts#pagesForSurah`'s own opens/closes tautology is now
+CLOSED — remove it from future "docblock says X, reality is Y" sweeps.

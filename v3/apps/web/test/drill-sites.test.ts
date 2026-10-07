@@ -53,6 +53,73 @@ describe("pagesForSurah", () => {
     expect(mid.sharedWithOtherSurah).toBe(false);
   });
 
+  // The surah's LAST page, 248, genuinely runs its content to line 15 — the
+  // same max line every other page of this surah reaches (confirmed directly
+  // against the real vendored geometry: every one of Yusuf's 14 pages tops
+  // out at line 15). Nothing can follow on that page. The page-MEMBERSHIP
+  // tautology (`lastAyah === lastAyahOfSurah`) is true here too, exactly as
+  // it is for every other surah's last page, regardless of whether the page
+  // is actually full — this test is the one case in the real launch corpus
+  // where that tautology diverges from reality. MUTATION: revert to
+  // `closesSurah = lastAyah === lastAyahOfSurah` with no line check —
+  // confirmed RED (`sharedWithOtherSurah` reads `true`).
+  it("the surah's last page fills to the mushaf's own line capacity and is NOT shared (#38/opens-closes)", () => {
+    const last = must(spans().find((s) => s.page === 248), "page 248");
+    expect(last.lastAyah).toBe(YUSUF_AYAH_COUNT);
+    expect(last.sharedWithOtherSurah).toBe(false);
+  });
+
+  // The direct mechanism test, independent of any one real surah: a
+  // synthetic two-page surah whose closing page does NOT reach the capacity
+  // the surah's own non-closing page establishes (line 15) must still read
+  // as shared — proving the fix is a real line comparison, not a hardcoded
+  // "page 248 is special" exception, and that the opening/closing checks are
+  // each reachable and correct in both directions.
+  it("opens/closes correctly from synthetic line data, not just Yusuf's own", () => {
+    const synthetic: VerseGeometry[] = [
+      { ayah: 1, page: 900, firstLine: 1, lastLine: 15 }, // true middle-shaped page
+      { ayah: 2, page: 900, firstLine: 1, lastLine: 15 },
+      { ayah: 3, page: 901, firstLine: 1, lastLine: 6 }, // closing page, stops short
+    ];
+    const result = pagesForSurah(synthetic);
+    const opening = must(result.find((s) => s.page === 900), "opening page");
+    const closing = must(result.find((s) => s.page === 901), "closing page");
+    // Opens at line 1 of its own page — genuinely NOT shared at the start.
+    expect(opening.sharedWithOtherSurah).toBe(false);
+    // Closes at line 6 of a page whose own capacity is 15 — genuinely shared.
+    expect(closing.sharedWithOtherSurah).toBe(true);
+  });
+
+  it("a closing page that fills to capacity is NOT shared, even synthetically", () => {
+    const synthetic: VerseGeometry[] = [
+      { ayah: 1, page: 900, firstLine: 1, lastLine: 15 },
+      { ayah: 2, page: 901, firstLine: 1, lastLine: 15 }, // closes, reaches the
+    ]; // same capacity the first page already established.
+    const closing = must(
+      pagesForSurah(synthetic).find((s) => s.page === 901),
+      "closing page",
+    );
+    expect(closing.sharedWithOtherSurah).toBe(false);
+  });
+
+  // No line data at all (an older corpus subset) must degrade to the
+  // pre-existing page-membership answer, never throw, and never silently
+  // under-share.
+  it("degrades to the page-membership answer when line data is absent", () => {
+    const noLines: VerseGeometry[] = YUSUF_GEOMETRY.map((v) => ({
+      ...v,
+      firstLine: null,
+      lastLine: null,
+    }));
+    const result = pagesForSurah(noLines);
+    const first = must(result.find((s) => s.page === 235), "page 235");
+    const last = must(result.find((s) => s.page === 248), "page 248");
+    expect(first.sharedWithOtherSurah).toBe(true);
+    // The pre-fix behavior for page 248 — still wrong in the absence of line
+    // data, which is exactly why this is a *degrade*, not a second fix.
+    expect(last.sharedWithOtherSurah).toBe(true);
+  });
+
   it("covers every ayah exactly once across pages", () => {
     const seen = new Set<number>();
     for (const s of spans()) {
@@ -70,6 +137,8 @@ describe("pagesForSurah", () => {
     const noGeometry: VerseGeometry[] = Array.from({ length: 10 }, (_, i) => ({
       ayah: i + 1,
       page: null,
+      firstLine: null,
+      lastLine: null,
     }));
     expect(() => pagesForSurah(noGeometry)).not.toThrow();
     expect(pagesForSurah(noGeometry)).toEqual([]);
@@ -79,9 +148,9 @@ describe("pagesForSurah", () => {
   // orphan seams while looking complete. MUTATION: treat partial as usable.
   it("treats a partial geometry as absent", () => {
     const partial: VerseGeometry[] = [
-      { ayah: 1, page: 235 },
-      { ayah: 2, page: null },
-      { ayah: 3, page: 235 },
+      { ayah: 1, page: 235, firstLine: 11, lastLine: 11 },
+      { ayah: 2, page: null, firstLine: null, lastLine: null },
+      { ayah: 3, page: 235, firstLine: 12, lastLine: 14 },
     ];
     expect(pagesForSurah(partial)).toEqual([]);
   });

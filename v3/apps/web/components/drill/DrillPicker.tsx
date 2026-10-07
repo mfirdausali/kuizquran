@@ -45,6 +45,7 @@ import {
   pagesForSurah,
   sitesForPage,
   sitesForRange,
+  verseGeometryFor,
   type PageSpan,
 } from "@/lib/drill/sites";
 import { drillHref } from "@/lib/drill/handoff";
@@ -77,10 +78,7 @@ export function DrillPicker({ corpus, now }: DrillPickerProps) {
   // The page map. Empty when this build has no geometry for the surah, which
   // is what disables the page picker — edge case #63, expressed as an absence
   // of options rather than as a check anyone has to remember.
-  const pages: PageSpan[] = useMemo(
-    () => pagesForSurah(corpus.verses.map((v) => ({ ayah: v.ayah, page: v.page }))),
-    [corpus],
-  );
+  const pages: PageSpan[] = useMemo(() => pagesForSurah(verseGeometryFor(corpus)), [corpus]);
 
   // `empty` is a real, readable log with no events in it — the first-run state,
   // in which nothing is drillable and the preview says so honestly. Only
