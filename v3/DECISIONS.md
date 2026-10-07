@@ -28651,3 +28651,112 @@ guard (above, deliberately left — the purge command already reports the
 collision loudly rather than needing to prevent it) — all unchanged.
 `PurgeDueAccountsCommand`'s own exit-code masking is now CLOSED — remove it
 from future "Console Commands re-read against their own docblock" sweeps.
+
+### v3-D288 — `severity.ts#EXIT_CODE` and `DeterminismCheckCommand::SEVERITY_BY_EXIT` were two independent, unguarded declarations of the same P1/WARN/green/error taxonomy (2026-10-07, nightly)
+
+Picked up by re-reading v3-D127's own repeatedly-carried "NOT addressed" note
+directly, rather than dispatching a fresh sweep: that entry has named
+`worker/fold-runner/src/severity.ts`'s "taxonomy drift" as a real
+cross-runtime duplication on every one of roughly 160 subsequent nights'
+"NOT addressed" lists, each time annotated "deliberately not restructured"
+— correct, since PHP cannot import a `.ts` module — but no prior night
+checked whether that reasoning had already been closed elsewhere for the
+identical shape. It has: `worker/fold-runner/test/
+engineVersion-config-agreement.test.ts` (v3-D266) guards the near-identical
+`ENGINE_VERSION`/`config('nightly.engine_version')` pair with exactly this
+technique — a vitest test that reads the PHP file's raw source via regex
+and asserts agreement — and that precedent was never applied to this pair.
+
+`worker/fold-runner/src/severity.ts#EXIT_CODE` (green=0/warn=3/p1=4/error=5,
+the file's own header: "the narrowest, hardest-to-fake channel available
+across the Node/PHP boundary") and `App\Console\Commands\
+DeterminismCheckCommand::SEVERITY_BY_EXIT` (the PHP side's own independent
+copy, used to decode a real nightly run's exit code back into the severity
+written into the ledger row the 7-consecutive-green-nights window counts)
+declare the SAME mapping twice, in two languages, with no shared source and
+no test anywhere asserting they still agree — `grep -rln
+"SEVERITY_BY_EXIT\|EXIT_CODE"` across the tree turned up only the two
+declarations themselves and their own direct callers, no agreement guard.
+Both sides already agree today (verified directly, byte for byte) — this is
+a drift-risk fix matching v3-D150/D151/D158/D261/D263/D264/D265/D266's own
+precedent, not a live divergence. But a future edit to EITHER side's
+exit-code taxonomy that is not mirrored on the other would mis-decode every
+real nightly run from that point on — a genuine P1 silently read back as a
+WARN (never resetting the 7-night window) or the reverse (resetting an
+earned streak over a stale-cache skew that was never a real divergence) —
+exactly the 3am false-alarm/deafness risk BUILD-PLAN's own top risk #6
+names, and precisely the failure mode `fold_determinism_check`'s own exit
+codes exist to make impossible.
+
+**Fixed:** no runtime coupling invented (none is possible across the
+language boundary, same as v3-D266's own precedent) — a new
+`worker/fold-runner/test/severity-exitcode-agreement.test.ts` reads
+`DeterminismCheckCommand.php`'s raw text, parses `SEVERITY_BY_EXIT`'s own
+`code => 'severity'` entries, and asserts each one matches what the real TS
+`severityFromExitCode()` returns for that code, plus a second case asserting
+neither side declares a code the other does not (parsed via `Object.keys`,
+not a hardcoded `[0,3,4,5]`, so the guard tracks `EXIT_CODE`'s own real
+keys rather than restating them).
+
+**Verified:** RED confirmed by mutation, the same template v3-D266 itself
+used, since both sides already agreed and a vacuous "written first, failed
+naturally" RED was unavailable: `DeterminismCheckCommand.php`'s own
+`4 => 'p1'` entry was temporarily changed to `4 => 'warn'` and the new test
+failed exactly `expected 'p1' to be 'warn'`, naming the real mismatch; `git
+diff --stat` confirmed the file reverted byte-identically before this
+entry's own commit, reran clean: `severity-exitcode-agreement.test.ts` 2/2
+green. `TZ=UTC make test`: 2981 passing (was 2979, +2 — exactly this run's
+two new tests; fold-runner 69, was 67; no other suite moved: 255 v2 vitest,
+47 v2/api, 410 v3/api, 120 corpus-compiler, 466 engine, 1614 apps/web).
+`check-test-floor.mjs`: OK, 2981 >= floor 1899 (+1082 margin, unmoved).
+`TZ=UTC make build`: exit 0, 30 routes, unchanged (a fold-runner-test-only
+change, no apps/web or API file touched — the PHP mutation used to confirm
+RED was reverted before this build ran). `npm run gates`: all green —
+locked-css OK, 1 documented hunk, 294 v1 lines byte-identical; boundaries
+OK, 327 files, unchanged count — no apps/web file in this diff at all;
+fonts degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints across 4
+artifacts — all unchanged, this diff carries no corpus data. `npx tsc
+--noEmit`, run separately across all four v3 node packages: clean in all
+four. No PHP file changed in the final diff, so `pint` was not applicable.
+No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the suite was reverted before committing, same
+discipline as every prior entry). No Arabic codepoint (the new file swept
+programmatically, in Python, over the Arabic, Arabic Supplement, Arabic
+Extended-A and both Presentation Forms Unicode blocks, plus a
+`fromCharCode`/`fromCodePoint` mention check: CLEAN — every new string is a
+TypeScript identifier, a file path, or a fixed English docblock sentence,
+never corpus text). No oracle/golden-log/fixture/snapshot regenerated.
+
+Session start: fresh container, no `node_modules`/`vendor` anywhere; PHP
+defaulted to 8.3.6 (`v3/api` needs >=8.4.1); installed PHP 8.4 cleanly via
+the documented `packages.sury.org` apt mirror (the direct `apt-get update`
+needed a proxy conf correction mid-run — the default container environment
+already reaches both `archive.ubuntu.com` and `packages.sury.org` over
+plain HTTP without an explicit `Acquire::http::Proxy` entry, and adding one
+pointed at the HTTPS forward proxy broke the HTTP sources with `405 Method
+Not Allowed`; removed the file and reran clean). `HEAD`, local `main` and
+`origin/main` all already agreed at `1b8b4f4` (v3-D287) — no
+stale-local-`main` trap this run, confirmed directly via `git fetch origin
+main` before any exploration.
+
+NOT addressed: every item on v3-D287's own "NOT addressed" list, unchanged
+— `acknowledgeReentry`'s own "makeup" branch still only logs and points the
+learner at `/home` (v3-D256's verdict unchanged); `DrillPicker.tsx`'s own
+unused `now` prop; the unused `atoms`/`corpus`/`sessions` IndexedDB object
+stores (v3-D232); `session_start`'s own latency metric (v0.8); the
+streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151, v3-D219); `App\Flags\FlagService::enabled()`
+(v3-D197); multi-surah enrollment; the operational mailer/7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `selection_determinism_check` still replaying a committed
+fixture; `QueueItem.score`'s own missing external reader (v3-D263);
+`worker/fold-runner/src/selectionCheck.ts`'s cosmetic `tracesCompared`
+statistic (v3-D286); `GrantAdminRoleCommand`'s own missing pending-deletion
+guard (v3-D287) — all unchanged. `worker/fold-runner/src/severity.ts`'s own
+cross-runtime taxonomy duplication is now mechanically guarded — remove it
+from future "NOT addressed" lists; it should no longer be cited as an
+unguarded drift risk, only as a closed one.
