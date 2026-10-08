@@ -1495,6 +1495,69 @@ describe("v3-D107 — gate forgiveness ladder: demoteOfferFor / acceptGateDemote
     expect(atomAfterDemote?.gateFails).toBe(0);
   });
 
+  it("v3-D293 — offers to demote a 'makeup' (overdue) gate too, not only an ordinary due-today one", async () => {
+    // Same shape as the test above (DEMOTE_OFFER_AFTER_FAILS consecutive
+    // cold-gate fails), but the learner does NOT return the very next
+    // learning-day — they churn out for long enough that `scheduler.ts`'s
+    // own `overdueGates` cutoff (`gateDueAt < dayStart(now)`) reclassifies
+    // the identical gate as `kind: "makeup"` rather than `kind: "gate"`.
+    // `demoteOfferFor`/`acceptGateDemote` still checked `q.kind !== "gate"`
+    // literally — the one pair of call sites v3-D273's own `isGateKind()`
+    // sweep (five other sites in this file) missed — so a churned-return
+    // learner who had already earned the demote offer on an ordinary due
+    // gate lost it the moment the SAME gate aged into "makeup", with no way
+    // back to Learn short of retaking the full cold check forever.
+    const c = corpus();
+    const gatedAyah = 1;
+    await append(
+      { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah: gatedAyah, rung: "S3", structured: true } as DrillEvent,
+      { now: T0, tz: TZ },
+    );
+    for (let day = 1; day <= DEMOTE_OFFER_AFTER_FAILS; day++) {
+      await append(
+        {
+          type: "gate_result",
+          ts: T0 + day * 86_400_000,
+          tz: TZ,
+          surah: SURAH,
+          ayah: gatedAyah,
+          rung: "S3",
+          correct: false,
+          structured: true,
+        } as DrillEvent,
+        { now: T0 + day * 86_400_000, tz: TZ },
+      );
+    }
+
+    const seededAtom = rebuild(await getAllEvents()).get(atomKey(SURAH, "ayah", gatedAyah));
+    expect(seededAtom?.gateFails).toBe(DEMOTE_OFFER_AFTER_FAILS);
+
+    // The gate came due on day (DEMOTE_OFFER_AFTER_FAILS + 1); returning
+    // many learning-days later (not the very next one) is what ages it
+    // from "gate" into "makeup" — the precondition this test exists to
+    // exercise, asserted rather than assumed.
+    const churnedReturn = T0 + (DEMOTE_OFFER_AFTER_FAILS + 15) * 86_400_000;
+    const started = await startSession({ surah: SURAH, now: churnedReturn, tz: TZ }, c);
+    if (!started.ok) throw new Error("session must start");
+    expect(started.run.queue[0]?.kind).toBe("makeup");
+    expect(started.run.queue[0]?.ayah).toBe(gatedAyah);
+
+    const offer = await demoteOfferFor(started.run);
+    expect(offer).toEqual({ ayah: gatedAyah });
+
+    await acceptGateDemote(started.run, c, { now: churnedReturn + 500, tz: TZ });
+
+    const events = await getAllEvents();
+    expect(
+      events.some((e) => e.type === "gate_demote" && e.ayah === gatedAyah && e.ts === churnedReturn + 500),
+    ).toBe(true);
+
+    const atomAfterDemote = rebuild(events).get(atomKey(SURAH, "ayah", gatedAyah));
+    expect(atomAfterDemote?.encoded).toBe(false);
+    expect(atomAfterDemote?.gatePassed).toBe(false);
+    expect(atomAfterDemote?.gateFails).toBe(0);
+  });
+
   it("acceptGateDemote is a no-op when the current item is not a due gate", async () => {
     const c = corpus();
     const started = await startSession({ surah: SURAH, now: T0, tz: TZ }, c);

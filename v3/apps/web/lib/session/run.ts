@@ -1913,11 +1913,17 @@ export async function diminishingReturnsNudge(
  * reflects what was assembled at the START of the session, before any of
  * TODAY's own gate attempts could have changed `gateFails`) — same
  * discipline as `weakSpotOfferFor`/`extraLearnOfferFor` above.
+ *
+ * v3-D293 — uses `isGateKind()`, not a literal `"gate"` comparison: an
+ * overdue cold gate is reassembled as `kind: "makeup"` (`scheduler.ts`'s
+ * own step 1), the identical mastery-gate check one timing bucket later.
+ * This pair of functions was the one spot v3-D273's own `isGateKind()`
+ * sweep (five other call sites in this file) missed.
  */
 export async function demoteOfferFor(run: SessionRun): Promise<{ ayah: number } | null> {
   if (run.done) return null;
   const q = run.queue[run.cursor];
-  if (!q || q.kind !== "gate") return null;
+  if (!q || !isGateKind(q.kind)) return null;
   const prior = await getEventsForSurah(run.surah);
   const atom = rebuild(prior).get(atomKey(run.surah, "ayah", q.ayah));
   if (!atom) return null;
@@ -1932,9 +1938,9 @@ export async function demoteOfferFor(run: SessionRun): Promise<{ ayah: number } 
  * caller can only ever demote the gate it is actually looking at.
  *
  * A no-op (returns `run` unchanged, appends nothing) when the current item is
- * not a due gate — mirrors every other `start*`/`accept*` entry point's
- * "acts on exactly what it was shown" discipline rather than trusting a
- * stale caller.
+ * not a due (or overdue/"makeup", `isGateKind`) gate — mirrors every other
+ * `start*`/`accept*` entry point's "acts on exactly what it was shown"
+ * discipline rather than trusting a stale caller.
  */
 export async function acceptGateDemote(
   run: SessionRun,
@@ -1942,7 +1948,7 @@ export async function acceptGateDemote(
   ctx: AppendContext,
 ): Promise<SessionRun> {
   const q = run.queue[run.cursor];
-  if (!q || q.kind !== "gate") return run;
+  if (!q || !isGateKind(q.kind)) return run;
 
   const demoteEvent = {
     type: "gate_demote",

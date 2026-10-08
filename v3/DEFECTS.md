@@ -97,6 +97,15 @@ already gets).
 
 See DECISIONS.md v3-D273 for the full write-up.
 
+**v3-D293's own addendum:** the `isGateKind()` fix above enumerated five call
+sites and missed a sixth pair — `demoteOfferFor`/`acceptGateDemote`
+(v3-D107's own gate-forgiveness-ladder demote half) still checked `q.kind
+!== "gate"` literally, so a learner who had already earned the "send it back
+to Learn" demote offer and then churned out for more than one day before
+returning (the gate ages from `"gate"` into `"makeup"` the moment it is
+overdue) lost the offer entirely, stuck retaking the full cold check forever.
+Fixed the same way, at both sites. See DECISIONS.md v3-D293.
+
 ## B16 — the FR5 make-up cap never bounded the queue across sessions ✅ CLOSED (FR5 makeup, v3-D260)
 
 Two defects, each enough on its own to defeat v3-D256's `MAKEUP_CAP` for a

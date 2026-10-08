@@ -29243,3 +29243,155 @@ statistic (v3-D286); `concreteItems()`'s own decaying `reviews` count at
 day offsets +2/+3 (v3-D289) — all unchanged. `GrantAdminRoleCommand`'s
 own pending-deletion gap is now CLOSED — remove it from future "NOT
 addressed" lists.
+
+### v3-D293 — `demoteOfferFor`/`acceptGateDemote` never recognized a "makeup"-kind gate item (2026-10-08, nightly)
+
+v3-D273 (DEFECTS.md#B17) found that `lib/session/run.ts` decided "is the
+item I'm drilling a gate" by checking `q.kind === "gate"` literally at five
+call sites, never recognizing `kind === "makeup"` — an overdue cold gate,
+the identical mastery-gate check `scheduler.ts`'s own `overdueGates()`
+reassembles once a gate's `gateDueAt` ages past the start of today's
+learning-day. That fix introduced `isGateKind(kind) = kind === "gate" ||
+kind === "makeup"` and replaced the literal at `machineFor`'s `full`,
+`machineForItem`'s rescaffold-ladder eligibility, `answerAfterTap`'s
+`isGateItem`, `settleAnswer`'s `isColdGate`, and `replanQueue`'s
+`forceWarmup` — five sites, enumerated by name in both v3-D273's own
+write-up and DEFECTS.md#B17.
+
+That enumeration never named `demoteOfferFor`/`acceptGateDemote`
+(`lib/session/run.ts:1917-1962`, v3-D107's own gate-forgiveness-ladder
+"send this ayah back to Learn" demote half) — the one other pair in the
+file still comparing `q.kind` against the bare literal `"gate"`. Confirmed
+directly this run, re-reading the file's complete `"gate"`-comparison
+surface (`grep -n '"gate"' lib/session/run.ts`): every other hit is already
+inside `isGateKind` itself, inside a `gradeClassToWire("gate")`/
+`gradeClass: "gate"` wire-literal construction (unrelated to queue-item
+kind), or a stale comment — these two were the only live survivors.
+
+**Why this is real and reachable, not vacuous.** `gate.ts#gateForgiveness()`
+decides "demote" purely off `atom.gateFails >= DEMOTE_OFFER_AFTER_FAILS`
+(4) — it has no awareness of, and no dependency on, which `QueueItemKind`
+the learner happens to be looking at. A learner who fails a cold gate four
+consecutive days earns the demote offer the moment they next open a session
+and that gate is still the queue's leading item. If they return the VERY
+NEXT learning-day, the gate is still `kind: "gate"` (due today) and the
+offer appears correctly — this is exactly the scenario the pre-existing
+"offers to send the ayah back to Learn after DEMOTE_OFFER_AFTER_FAILS
+consecutive gate fails" test (`run.test.ts`, v3-D107) already covers. But a
+learner who churns out for more than one additional day before returning —
+not a rare case; it is the identical "churned learner returns" scenario
+v3-D256/D260/D273 each already built real machinery for — has that same
+gate reassembled as `kind: "makeup"` by the time they return, and
+`demoteOfferFor` returned `null` UNCONDITIONALLY for a makeup-kind item
+regardless of what `gateForgiveness(atom)` actually said; `acceptGateDemote`
+was an identical silent no-op, appending nothing. The one escape hatch from
+an endless, no-partial-credit cold-check retry loop — DEFECTS.md#B11/#B17's
+own failure shape, reborn a third time — was reachable only for the learner
+who happened to return promptly, never the genuinely churned one the ladder
+and the makeup mechanism both exist to serve.
+
+**Found by:** a dedicated fresh-sweep agent (Explore), directed at a
+repo-wide stale-docblock grep (`not yet|does not exist|out of scope|
+unwired|TODO|FIXME|deferred` across `apps/web`/`api`/`packages`/`worker` —
+~90 hits, every one already closed/excluded or a genuine non-stale
+comment), a line-by-line re-read of all five Playwright e2e specs (all
+current against real shipped behavior, no stale tripwire), the newest
+Laravel migrations/factories/seeders (already-closed `away`/`resume_massed`
+columns, stock scaffolding), and five never-before-named-in-DECISIONS
+components/libs (`PricingPanel.tsx`, `SequenceFillCard.tsx`,
+`GraphNodeMark.tsx`, `lib/i18n/dictionaries.ts`, `lib/account/api.ts` — all
+read field-by-field, all fully wired). This instance surfaced on a direct
+re-read of v3-D273's own `isGateKind()` enumeration against the file's real
+`"gate"`-comparison surface — independently re-verified by this run
+directly against `scheduler.ts#overdueGates()`, `gate.ts#gateForgiveness()`/
+`DEMOTE_OFFER_AFTER_FAILS`, and both functions' real current source before
+writing any test.
+
+**Fixed:** both literal comparisons (`lib/session/run.ts:1920,1945`) are now
+`!isGateKind(q.kind)` — the identical one-line substitution style v3-D273
+already applied at its own five sites. No new predicate, no behavior change
+at any of the five already-fixed call sites, `gate.ts` itself untouched —
+the ladder's own decision (`gateForgiveness()`) was already correct; only
+`run.ts`'s own "is this a gate" question at these two sites was wrong.
+
+**Verified:** RED confirmed directly against the real, unmodified source
+(no revert-and-restore needed — the bug was live on a cold checkout): a new
+`run.test.ts` case, added to the existing "v3-D107 — gate forgiveness
+ladder: demoteOfferFor / acceptGateDemote" describe block, reuses that
+block's own "offers to send the ayah back to Learn after
+DEMOTE_OFFER_AFTER_FAILS consecutive gate fails" scenario verbatim (the same
+`append()`-seeded four consecutive `gate_result:false` events, one per
+learning-day) but has the learner return 15 learning-days after the gate
+came due, rather than the very next one — asserting directly, not assuming,
+that the assembled queue's leading item is genuinely `kind: "makeup"`
+(`expect(started.run.queue[0]?.kind).toBe("makeup")`) before exercising
+`demoteOfferFor`/`acceptGateDemote`. Run against the unmodified source: the
+case failed exactly `expected null to deeply equal { ayah: 1 }` — the real
+bug reproduced on the first attempt, no mutation needed. Implemented, reran:
+`run.test.ts`'s own "v3-D107" describe block 7/7 green (was 6, +1); the full
+file 125/125 (was 124, +1); `test/session-island.test.tsx` 37/37, unaffected
+— no regression on the ordinary due-today demote path or either sibling FR6
+door CTA rendered on the same summary screen.
+
+`TZ=UTC make test`: 2991 passing (was 2990, +1 — exactly this run's one new
+test; apps/web 1620, was 1619; no other suite moved: 255 v2 vitest, 47
+v2/api, 412 v3/api, 120 corpus-compiler, 466 engine, 71 fold-runner).
+`check-test-floor.mjs`: OK, 2991 >= floor 1899 (+1092 margin, unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 30 routes,
+unchanged (a `lib/session/run.ts`-only fix plus one test file, no route or
+other production file touched; all three staged corpusHashes
+byte-identical to v3-D292's own — this diff carries no corpus data). `npm
+run gates`: all green — locked-css OK, 1 documented hunk, 294 v1 lines
+byte-identical; boundaries OK, 326 files, unchanged count — no new
+production file; fonts degraded-but-non-blocking, pre-existing, 2/6 UI
+fonts present; corpus-morphology OK, 362 words; corpus-glyphs OK, 206
+codepoints across 4 artifacts — all unchanged. `npx tsc --noEmit`, run
+separately across all four v3 node packages: clean in all four. No PHP
+file changed, so `pint` was not applicable. No `v1/**`/`v2/**` edit (a
+stray `v2/tsconfig.tsbuildinfo` build-cache diff produced by running the
+suite was reverted before committing, same discipline as every prior entry
+— `git status --porcelain -- v1 v2` empty immediately before committing).
+No Arabic codepoint (both changed files swept programmatically, in Python,
+over the Arabic, Arabic Supplement, Arabic Extended-A and both Presentation
+Forms Unicode blocks, plus a `fromCharCode`/`fromCodePoint` mention check:
+CLEAN — every new string is a TypeScript identifier, a wire-adjacent
+docblock sentence, or a synthetic fixture coordinate/timestamp, never
+corpus text). No oracle/golden-log/fixture/snapshot regenerated.
+
+Session start: fresh container, no `node_modules`/`vendor` anywhere; PHP
+defaulted to 8.3.6 (`v3/api` needs >=8.4.1); installed PHP 8.4 cleanly via
+the documented `packages.sury.org` apt mirror, no refusal. `HEAD` was found
+detached exactly at `origin/main`'s own tip (`ee54a34`, v3-D292), on a
+stale LOCAL `main` branch ref twelve commits behind (`977eae0`, v3-D281) —
+the recurring stale-local-`main` trap this file has recorded roughly fifty
+times since v3-D77 — caught before any exploration via `git fetch origin
+main` + `git checkout main && git merge --ff-only origin/main`, a clean
+fast-forward, no work lost or at risk. `make setup` ran clean end to end
+from a cold checkout — both Laravel `composer install`s completed via the
+documented git-mirror fallback for transient `api.github.com` dist
+timeouts; the four PHP-independent `npm install`s (`v2`, `packages/engine`,
+`packages/corpus-compiler`, `worker/fold-runner`, `apps/web`) were run
+directly and in parallel rather than waiting on the sequential `make setup`
+chain, the same recovery this file's history has recorded roughly a dozen
+times before.
+
+NOT addressed: every item on v3-D292's own "NOT addressed" list, unchanged
+— `acknowledgeReentry`'s own "makeup" branch still only logs and points the
+learner at `/home` (v3-D256's verdict unchanged); `DrillPicker.tsx`'s own
+unused `now` prop; the unused `atoms`/`corpus`/`sessions` IndexedDB object
+stores (v3-D232); `session_start`'s own latency metric (v0.8); the
+streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151, v3-D219); `App\Flags\FlagService::enabled()`
+(v3-D197); multi-surah enrollment; the operational mailer/7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `selection_determinism_check` still replaying a committed
+fixture; `QueueItem.score`'s own missing external reader (v3-D263);
+`worker/fold-runner/src/selectionCheck.ts`'s cosmetic `tracesCompared`
+statistic (v3-D286); `concreteItems()`'s own decaying `reviews` count at
+day offsets +2/+3 (v3-D289) — all unchanged. `demoteOfferFor`/
+`acceptGateDemote`'s own missed `isGateKind()` sites are now CLOSED —
+remove them from future "NOT addressed" lists and from any future
+`isGateKind()`-completeness sweep. See DEFECTS.md#B17's own addendum.
