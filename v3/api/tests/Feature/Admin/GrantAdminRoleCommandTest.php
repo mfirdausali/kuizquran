@@ -3,6 +3,7 @@
 namespace Tests\Feature\Admin;
 
 use App\Console\Commands\GrantAdminRoleCommand;
+use App\Models\AccountDeletionRequest;
 use App\Models\AdminRole;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -120,5 +121,55 @@ class GrantAdminRoleCommandTest extends TestCase
         $this->assertTrue($user->fresh()->hasAdminRole(AdminRole::QARI));
         $this->assertTrue($user->fresh()->hasAdminRole(AdminRole::MODERATOR));
         $this->assertFalse($user->fresh()->hasAdminRole(AdminRole::OPERATOR));
+    }
+
+    /**
+     * v3-D287's own named-but-not-fixed root cause: nothing stopped a role
+     * from being granted to a user who already has a PENDING PDPA deletion
+     * request. `AccountController::requestDeletion()` blocks the other
+     * direction (an admin cannot self-request deletion while holding a
+     * role, since `admin_audit.actor_admin_id` is `restrictOnDelete`), but
+     * granting a role to an already-pending account was never guarded —
+     * the exact collision `PurgeDueAccountsCommand`'s own `catch` block
+     * anticipates by name. Must refuse before any row is created.
+     */
+    public function test_it_refuses_to_grant_a_role_to_a_user_with_a_pending_deletion_request(): void
+    {
+        $user = User::factory()->create(['email' => 'admin@example.com']);
+        AccountDeletionRequest::create([
+            'user_id' => $user->id,
+            'token_hash' => hash('sha256', 'irrelevant'),
+            'requested_at_ms' => 1,
+            'purge_at_ms' => 2,
+        ]);
+
+        $this->artisan(GrantAdminRoleCommand::class, ['email' => 'admin@example.com', 'role' => 'qari'])
+            ->assertFailed();
+
+        $this->assertFalse($user->fresh()->hasAdminRole(AdminRole::QARI));
+        $this->assertSame(0, AdminRole::count());
+    }
+
+    /** Revoking an already-held role must stay available even with a
+     *  pending deletion — the guard protects against GRANTING a NEW
+     *  restrictOnDelete dependency, not against removing one. */
+    public function test_revoking_a_role_still_works_for_a_user_with_a_pending_deletion_request(): void
+    {
+        $user = User::factory()->create(['email' => 'admin@example.com']);
+        AdminRole::create([
+            'user_id' => $user->id, 'role' => AdminRole::QARI,
+            'granted_at' => 1, 'granted_by' => 'test-fixture',
+        ]);
+        AccountDeletionRequest::create([
+            'user_id' => $user->id,
+            'token_hash' => hash('sha256', 'irrelevant'),
+            'requested_at_ms' => 1,
+            'purge_at_ms' => 2,
+        ]);
+
+        $this->artisan(GrantAdminRoleCommand::class, ['email' => 'admin@example.com', 'role' => 'qari', '--revoke' => true])
+            ->assertSuccessful();
+
+        $this->assertFalse($user->fresh()->hasAdminRole(AdminRole::QARI));
     }
 }

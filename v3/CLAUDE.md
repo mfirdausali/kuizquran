@@ -53,10 +53,108 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2988 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 2990 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 410 v3/api + 120 corpus-compiler
-             # + 466 engine + 71 fold-runner + 1619 apps/web. (v3-D291, 2026-10-08)
+             # 255 v2 vitest + 47 v2/api + 412 v3/api + 120 corpus-compiler
+             # + 466 engine + 71 fold-runner + 1619 apps/web. (v3-D292, 2026-10-08)
+             # NOTE (v3-D292, 2026-10-08): `GrantAdminRoleCommand` — a
+             # separate, CLI-only, operator-triggered code path with no view
+             # of `AccountController::requestDeletion()`'s own 403 guard (an
+             # admin who already HOLDS a role cannot self-request deletion,
+             # since `admin_audit.actor_admin_id` is `restrictOnDelete`) —
+             # had no check for the OTHER direction of the same collision: a
+             # user requests deletion first, is LATER granted a role by an
+             # operator, performs one audited action, and collides with the
+             # identical `restrictOnDelete` violation when `pdpa:purge-due`
+             # runs — exactly the scenario `PurgeDueAccountsCommand`'s own
+             # `catch` block already anticipates by name. v3-D287 named this
+             # exactly as its own fix's root enabler and deliberately left
+             # it ("a weaker fix target than the exit-code masking itself");
+             # it then sat, named verbatim, on five further consecutive "NOT
+             # addressed" lists (v3-D287..D291) before this run re-read that
+             # note directly, confirmed the gap still real against the
+             # current source, and closed it. Fixed: one new check in the
+             # GRANT branch only — `AccountDeletionRequest::where('user_id',
+             # $user->id)->exists()` refuses before any `AdminRole` row is
+             # created, naming the real mechanism in the error
+             # (`admin_audit.actor_admin_id` / `restrictOnDelete` /
+             # `pdpa:purge-due`). The REVOKE branch is deliberately
+             # untouched — it only ever removes a `restrictOnDelete`
+             # dependency, never adds one, so it stays the correct tool to
+             # unwind the very mistake this guard now prevents. RED
+             # confirmed directly: `git stash` of the production file alone
+             # (both new test cases kept, 8 pre-existing cases untouched)
+             # failed exactly the load-bearing case — `Unexpected status
+             # code 0 was received` (the unmodified command still exited
+             # `SUCCESS` and still created the row) — while the
+             # revoke-still-works case passed vacuously, correctly, since it
+             # never depended on the fix; restored byte-identically, reran:
+             # `GrantAdminRoleCommandTest` 10/10 green (was 8, +2). `TZ=UTC
+             # make test`: 2990 passing (was 2988, +2 — exactly this run's
+             # two new tests; v3/api 412, was 410; no other suite moved:
+             # 255 v2 vitest, 47 v2/api, 120 corpus-compiler, 466 engine, 71
+             # fold-runner, 1619 apps/web). `check-test-floor.mjs`: OK, 2990
+             # >= floor 1899 (+1091 margin, unmoved, same discipline as
+             # every prior entry). `TZ=UTC make build`: exit 0, 30 routes,
+             # unchanged (a backend-only fix, no apps/web file touched; all
+             # three staged corpusHashes byte-identical to v3-D291's own —
+             # this diff carries no corpus data). `npm run gates`: all
+             # green — locked-css OK, 1 documented hunk, 294 v1 lines
+             # byte-identical; boundaries OK, 326 files, unchanged count —
+             # no apps/web file in this diff at all; fonts
+             # degraded-but-non-blocking, pre-existing, 2/6 UI fonts
+             # present; corpus-morphology OK, 362 words; corpus-glyphs OK,
+             # 206 codepoints across 4 artifacts — all unchanged.
+             # `./vendor/bin/pint --test` on both changed PHP files: passed.
+             # No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff produced by running the suite was reverted
+             # before committing, same discipline as every prior entry —
+             # `git status --porcelain -- v1 v2` empty immediately before
+             # committing). No Arabic codepoint (both changed files swept
+             # programmatically, in Python, over the Arabic, Arabic
+             # Supplement, Arabic Extended-A and both Presentation Forms
+             # Unicode blocks, plus a `fromCharCode`/`fromCodePoint`
+             # mention check: CLEAN — every new string is a PHP identifier,
+             # a wire-adjacent error message, or a synthetic test-fixture
+             # token hash, never corpus text). No oracle/golden-log/
+             # fixture/snapshot regenerated. Session start: fresh container,
+             # no `node_modules`/`vendor` anywhere; PHP defaulted to 8.3.6
+             # (`v3/api` needs >=8.4.1); installed PHP 8.4 cleanly via the
+             # documented `packages.sury.org` apt mirror, no refusal; `make
+             # setup` ran clean end to end from a cold checkout. `HEAD` was
+             # found detached exactly at `origin/main`'s own tip (`e70de16`,
+             # v3-D291), on a stale LOCAL `main` branch ref ten commits
+             # behind (`977eae0`, v3-D281) — the recurring stale-local-
+             # `main` trap this file has recorded roughly fifty times since
+             # v3-D77 — caught before any commit via `git fetch origin
+             # main` + `git checkout main && git merge --ff-only
+             # origin/main`, a clean fast-forward that carried this run's
+             # own uncommitted fix through untouched, no work lost or at
+             # risk. NOT addressed: every item on v3-D291's own "NOT
+             # addressed" list, unchanged — `acknowledgeReentry`'s own
+             # "makeup" branch still only logs and points the learner at
+             # `/home` (v3-D256's verdict unchanged); `DrillPicker.tsx`'s
+             # own unused `now` prop; the unused `atoms`/`corpus`/`sessions`
+             # IndexedDB object stores (v3-D232); `session_start`'s own
+             # latency metric (v0.8); the streak/away-day day-space
+             # mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()`; `App\Billing\TrialAttribution`
+             # (v3-D148); `lib/pricing.ts#regionFromCountry()` (v3-D163);
+             # `PaywallGate` as a whole class (v3-D88, v3-D151, v3-D219);
+             # `App\Flags\FlagService::enabled()` (v3-D197); multi-surah
+             # enrollment; the operational mailer/7-night launch window;
+             # PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel` (v3-D188);
+             # `selection_determinism_check` still replaying a committed
+             # fixture; `QueueItem.score`'s own missing external reader
+             # (v3-D263); `worker/fold-runner/src/selectionCheck.ts`'s
+             # cosmetic `tracesCompared` statistic (v3-D286);
+             # `concreteItems()`'s own decaying `reviews` count at day
+             # offsets +2/+3 (v3-D289) — all unchanged.
+             # `GrantAdminRoleCommand`'s own pending-deletion gap is now
+             # CLOSED — remove it from future "NOT addressed" lists. See
+             # DECISIONS.md v3-D292.
              # NOTE (v3-D291, 2026-10-08): `worker/fold-runner/src/severity.ts
              # #countsAsGreen()` ("Does this severity COUNT as one of the
              # seven green nights? Only a clean run, or a run whose sole

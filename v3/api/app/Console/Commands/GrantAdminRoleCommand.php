@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Models\AccountDeletionRequest;
 use App\Models\AdminRole;
 use App\Models\User;
 use Illuminate\Console\Command;
@@ -20,6 +21,18 @@ use Illuminate\Console\Command;
  * cannot admit anyone; the target email must already be in the
  * `ADMIN_EMAILS` outer-gate allowlist and must already have signed in at
  * least once (a real `users` row) before a role can attach to it.
+ *
+ * v3-D287 named the root enabler of its own exit-code-masking fix but left
+ * it unfixed: `AccountController::requestDeletion()` refuses (403) to let
+ * an admin SELF-request deletion while holding a role, precisely because
+ * `admin_audit.actor_admin_id` is `restrictOnDelete` — but nothing stopped
+ * the OTHER ordering: a user requests deletion first, then is later
+ * granted a role here, performs one audited action, and collides with the
+ * identical `restrictOnDelete` violation when `pdpa:purge-due` runs. A
+ * GRANT must therefore refuse while a deletion is pending — a REVOKE must
+ * not (it only ever removes a `restrictOnDelete` dependency, never adds
+ * one, so it stays available to unwind the very mistake this guard
+ * prevents going forward).
  */
 class GrantAdminRoleCommand extends Command
 {
@@ -61,6 +74,12 @@ class GrantAdminRoleCommand extends Command
             $this->line($deleted > 0 ? "revoked {$role} from {$email}" : "{$email} did not hold {$role} — nothing to revoke");
 
             return self::SUCCESS;
+        }
+
+        if (AccountDeletionRequest::where('user_id', $user->id)->exists()) {
+            $this->error("{$email} has a pending PDPA deletion request — granting a role would create a new admin_audit.actor_admin_id restrictOnDelete dependency that pdpa:purge-due cannot satisfy; revoke or wait for the deletion to resolve first");
+
+            return self::FAILURE;
         }
 
         $existing = AdminRole::where('user_id', $user->id)->where('role', $role)->first();
