@@ -55,6 +55,60 @@ describe("buildForecast — the first-week habit-protocol ramp (WIREFRAME §14)"
   });
 });
 
+describe("buildForecast — the estimated zone's load figures are derived, not decayed", () => {
+  // Before this fix, `estimatedItems`/`estimatedMinutes` (forecast.ts) were
+  // the header's own illustrative example ("~9 min, ~11 items") turned into
+  // a formula (`11 - offset`, `minutesPerDay + 1`) — identical for every
+  // learner regardless of pace, and decaying with distance for no reason
+  // anything actually knows less the farther out it is (the header's own
+  // point is that items/ayat cannot be named that far out, not that the
+  // ROUGH LOAD shrinks day by day).
+  it("scales the estimated ITEM count with the learner's real commitment", () => {
+    // The old formula (`11 - offset`) never read `minutesPerDay` at all — a
+    // Maintain-paced learner (barely any minutes) and a Sprint-paced one
+    // (many) saw the identical item estimate on the same day offset.
+    const low = buildForecast({
+      now: NOW,
+      tz: TZ,
+      minutesPerDay: 4,
+      enrolled: [{ surah: 112, remainingAyat: 10, avgWordsPerAyah: 5 }],
+      dueToday: { gates: [], reviews: 0, learn: [] },
+      awayDays: [],
+    });
+    const high = buildForecast({
+      now: NOW,
+      tz: TZ,
+      minutesPerDay: 40,
+      enrolled: [{ surah: 112, remainingAyat: 10, avgWordsPerAyah: 5 }],
+      dueToday: { gates: [], reviews: 0, learn: [] },
+      awayDays: [],
+    });
+    const lowDay = low.days.find((d) => d.offset === 7);
+    const highDay = high.days.find((d) => d.offset === 7);
+    const lowItems = Number(/~(\d+)\s*items/.exec(lowDay?.loadLabel ?? "")?.[1] ?? NaN);
+    const highItems = Number(/~(\d+)\s*items/.exec(highDay?.loadLabel ?? "")?.[1] ?? NaN);
+    expect(highItems).toBeGreaterThan(lowItems);
+  });
+
+  it("estimates minutes from the real commitment, not commitment-plus-one", () => {
+    // Old: `minutesPerDay + 1` — an unexplained fudge with no source. For
+    // minutesPerDay=12 that rounds to "~15"; the real commitment rounds to
+    // "~10". Picked so the two round to DIFFERENT nearest-5 buckets, so a
+    // regression to the old `+1` is caught rather than absorbed by rounding.
+    const f = buildForecast({
+      now: NOW,
+      tz: TZ,
+      minutesPerDay: 12,
+      enrolled: [{ surah: 112, remainingAyat: 10, avgWordsPerAyah: 5 }],
+      dueToday: { gates: [], reviews: 0, learn: [] },
+      awayDays: [],
+    });
+    const day = f.days.find((d) => d.offset === 7);
+    expect(day?.loadLabel).toMatch(/~10 min/);
+    expect(day?.loadLabel).not.toMatch(/~15 min/);
+  });
+});
+
 describe("buildForecast — the concrete zone may only name what is actually scheduled", () => {
   // `gate.ts#scheduleGate` arms a cold gate for the NEXT learning-day the
   // moment an ayah encodes — so "tomorrow's gate is today's learn item" is a

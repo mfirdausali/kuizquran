@@ -53,10 +53,107 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2984 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 2986 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 410 v3/api + 120 corpus-compiler
-             # + 466 engine + 69 fold-runner + 1617 apps/web. (v3-D289, 2026-10-07)
+             # + 466 engine + 69 fold-runner + 1619 apps/web. (v3-D290, 2026-10-08)
+             # NOTE (v3-D290, 2026-10-08): `lib/plan/forecast.ts#buildForecast`'s
+             # own ESTIMATED-zone (+4d..+14d) `loadLabel` figures
+             # (`estimatedItems`/`estimatedMinutes`) were the module's own
+             # header comment's illustrative example ("~9 min, ~11 items",
+             # quoting WIREFRAME §14) turned verbatim into a formula at the
+             # file's creation and never touched again: `Math.max(0, 11 -
+             # offset)` and `Math.max(0, minutesPerDay + 1)` have no
+             # relationship to the learner's real pace, enrollment or due
+             # work — every learner, Steady/Sprint/Maintain, saw the
+             # identical decaying item curve on the identical day, the exact
+             # anti-pattern this module's own header exists to forbid
+             # ("Populating every future day... would be a LIE"). Reachable
+             # on every one of the 11 estimated-zone day rows, every real
+             # `/plan` visit, for every learner; `test/plan-calendar.test.tsx`'s
+             # own header explicitly disclaims ever asserting the specific
+             # numbers in this zone (shape only), so nothing was positioned
+             # to catch it. Found by a dedicated fresh-sweep agent (Explore)
+             # directed at v3-D289's own named-but-not-yet-fixed sibling
+             # (the decaying `reviews` COUNT at offsets +2/+3, still open —
+             # see below), which instead found this sharper, previously-
+             # unnamed instance one function up in the same file —
+             # independently re-verified by this run directly against
+             # `forecast.ts`'s real source, `git log -p` (confirmed
+             # unchanged since the file's own creation, untouched even by
+             # v3-D221's later fix of the real `minutesPerDay` wiring one
+             # field over) and `capacity.ts`'s real exports before writing
+             # any test. Fixed: both figures now derive from data the caller
+             # actually supplied, and are CONSTANT across the zone (nothing
+             # legitimately differs from one estimated day to the next,
+             # matching `paceLabel`'s own stability) — `estimatedMinutes =
+             # minutesPerDay`; `estimatedItems = Math.max(1, Math.round
+             # (minutesPerDay / COST_PER_DUE_REVIEW))`, where
+             # `COST_PER_DUE_REVIEW` (`packages/engine/src/capacity.ts`,
+             # Appendix A, already exported, already the constant this
+             # file's own `planFor`/`etaDaysWithRamp` imports feed into) is
+             # the real per-item minute cost the engine's own daily-plan
+             # math charges a review against — an honest ESTIMATE of how
+             # many review-sized items fit, never a claim about which items.
+             # RED confirmed directly: 2 new `forecast.test.ts` cases run
+             # against the unmodified function — the first (a 4 min/day vs.
+             # a 40 min/day learner at the same offset) failed exactly
+             # `expected 5 to be greater than 5` (both collapsed to the
+             # identical `~5 items` under the old offset-only formula); the
+             # second (`minutesPerDay: 12`, chosen so the old `+1` fudge and
+             # the real commitment round to DIFFERENT nearest-5 buckets)
+             # failed exactly `expected '~15 min · ~5 items' to match /~10
+             # min/`. Implemented, reran: `forecast.test.ts` 8/8 green (was
+             # 6, +2); `test/plan-calendar.test.tsx` 25/25,
+             # `test/plan-island.test.tsx` 12/12,
+             # `test/plan-due-today.test.ts` 9/9,
+             # `test/session-island.test.tsx` 37/37 — all unaffected, no
+             # regression on any sibling `/plan`/`/session` consumer.
+             # `TZ=UTC make test`: 2986 passing (was 2984, +2 — exactly this
+             # run's two new tests; apps/web 1619, was 1617; no other suite
+             # moved: 255 v2 vitest, 47 v2/api, 410 v3/api, 120
+             # corpus-compiler, 466 engine, 69 fold-runner).
+             # `check-test-floor.mjs`: OK, 2986 >= floor 1899 (+1087 margin,
+             # unmoved). `TZ=UTC make build`: exit 0, 30 routes, unchanged (a
+             # `lib/plan/forecast.ts`-plus-one-test-file change, no route or
+             # other production file touched). `npm run gates`: all green —
+             # locked-css OK, 1 documented hunk, 294 v1 lines byte-identical;
+             # boundaries OK, 326 files, unchanged count; fonts
+             # degraded-but-non-blocking, pre-existing, 2/6 UI fonts
+             # present; corpus-morphology OK, 362 words; corpus-glyphs OK,
+             # 206 codepoints across 4 artifacts — all unchanged, this diff
+             # carries no corpus data. `npx tsc --noEmit` (apps/web): clean.
+             # No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff produced by running the suite was reverted
+             # before committing, same discipline as every prior entry). No
+             # Arabic codepoint (both changed files swept programmatically,
+             # in Python, over the Arabic, Arabic Supplement, Arabic
+             # Extended-A and both Presentation Forms Unicode blocks, plus a
+             # `fromCharCode`/`fromCodePoint` mention check: CLEAN — every
+             # new string is a TypeScript identifier, a minute/millisecond
+             # arithmetic result, or a fixed English docblock sentence,
+             # never corpus text). No oracle/golden-log/fixture/snapshot
+             # regenerated. Session start: fresh container, no
+             # `node_modules`/`vendor` anywhere; PHP defaulted to 8.3.6
+             # (`v3/api` needs >=8.4.1); installed PHP 8.4 cleanly via the
+             # documented `packages.sury.org` apt mirror, no refusal this
+             # run. `HEAD` was found detached exactly at `origin/main`'s own
+             # tip (`5ae7b30`, v3-D289), on a stale LOCAL `main` branch ref
+             # nine commits behind (`977eae0`, v3-D281) — the recurring
+             # stale-local-`main` trap this file has recorded roughly fifty
+             # times since v3-D77 — caught before any exploration via `git
+             # fetch origin main` + `git checkout main && git merge
+             # --ff-only origin/main`, a clean fast-forward, no work lost or
+             # at risk. NOT addressed: `concreteItems()`'s own decaying
+             # `reviews` count for day offsets +2/+3 (v3-D289's own named
+             # sibling, still open — a genuinely due-ish review projection
+             # needs the atoms array, which `BuildForecastInput` does not
+             # carry, a larger plumbing change than this run's one-function
+             # scope); `GrantAdminRoleCommand`'s own missing
+             # pending-deletion guard (v3-D287); every other item on
+             # v3-D289's own "NOT addressed" list — unchanged.
+             # `forecast.ts`'s ESTIMATED-zone load figures are now CLOSED —
+             # remove them from future sweeps. See DECISIONS.md v3-D290.
              # NOTE (v3-D289, 2026-10-07): `lib/plan/forecast.ts#concreteItems`
              # (the "/plan" calendar's honesty mechanic, WIREFRAME §14: "today
              # → +3d CONCRETE: exact items... populating every future day with

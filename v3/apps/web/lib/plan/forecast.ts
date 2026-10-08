@@ -48,7 +48,7 @@
 //
 // Pure. `now` and `tz` are passed in; no clock is read here.
 
-import { etaDaysWithRamp, planFor } from "@engine/capacity.ts";
+import { COST_PER_DUE_REVIEW, etaDaysWithRamp, planFor } from "@engine/capacity.ts";
 import { splitBudget } from "@engine/multiSurah.ts";
 
 /** The last day offset that gets exact, named items. */
@@ -212,8 +212,22 @@ export function buildForecast(input: BuildForecastInput): Forecast {
     const items: PlanItem[] =
       zone === "concrete" && !isAway ? concreteItems(dueToday, offset) : [];
 
-    const estimatedItems = Math.max(0, 11 - offset);
-    const estimatedMinutes = Math.max(0, minutesPerDay + 1);
+    // ESTIMATED ZONE's own load figures. Until this fix these two lines were
+    // the header's own illustrative example above ("~9 min, ~11 items")
+    // turned into a formula — `minutesPerDay + 1` and `11 - offset` have no
+    // relationship to the learner's actual pace, enrollment or due work:
+    // every learner, Steady or Sprint or Maintain, saw the identical
+    // decaying curve on the identical day. Nothing legitimately differs
+    // from one estimated day to the next either — there is no real input
+    // this module has that varies with distance inside this zone — so the
+    // figures are now CONSTANT across the zone, matching `paceLabel`'s own
+    // stability below, and derived from data the caller actually supplied:
+    // `COST_PER_DUE_REVIEW` (capacity.ts, Appendix A) is the per-item minute
+    // cost the real daily-plan math already charges a review against, so
+    // dividing the real commitment by it is an honest ESTIMATE of how many
+    // review-sized items fit — never a claim about which items.
+    const estimatedMinutes = minutesPerDay;
+    const estimatedItems = Math.max(1, Math.round(minutesPerDay / COST_PER_DUE_REVIEW));
 
     days.push({
       offset,
