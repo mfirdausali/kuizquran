@@ -53,10 +53,130 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2986 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 2988 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 410 v3/api + 120 corpus-compiler
-             # + 466 engine + 69 fold-runner + 1619 apps/web. (v3-D290, 2026-10-08)
+             # + 466 engine + 71 fold-runner + 1619 apps/web. (v3-D291, 2026-10-08)
+             # NOTE (v3-D291, 2026-10-08): `worker/fold-runner/src/severity.ts
+             # #countsAsGreen()` ("Does this severity COUNT as one of the
+             # seven green nights? Only a clean run, or a run whose sole
+             # finding was version skew") had zero production callers
+             # (`grep -rln "countsAsGreen"` outside this entry returns only
+             # `foldCheck.test.ts`, exercising it in isolation), while
+             # `App\Support\NightlyWindowLedger::nights()` — the one place
+             # BUILD-PLAN's 7-consecutive-green-nights launch gate decides
+             # whether a calendar night counts — re-derived the identical
+             # rule inline instead: `if ($sev !== 'green' && $sev !== 'warn')
+             # { $green = false; }`. Two independent declarations of one
+             # decision, in two languages, no shared source, no agreement
+             # test anywhere — the same shape `severity-exitcode-agreement
+             # .test.ts` (v3-D288, the commit immediately preceding this run)
+             # already closed for this file's sibling pair,
+             # `EXIT_CODE`/`SEVERITY_BY_EXIT`, on the identical Node/PHP
+             # boundary. Found by a dedicated fresh-sweep agent (Explore)
+             # directed at the newest Console Commands' own docblocks vs.
+             # reality, a field-by-field admin-panel-vs-controller re-audit,
+             # a zero-caller sweep of `apps/web/lib/plan`/`session`/`home`
+             # and `worker/fold-runner/src`, and a docblock-staleness re-read
+             # of the three most recently modified production files — the
+             # first three veins came back genuinely clean (recorded in
+             # DECISIONS.md v3-D291 so a future run does not re-walk them);
+             # this instance surfaced on the fourth — independently
+             # re-verified by this run directly against both real source
+             # files before writing any test. Both sides already agree
+             # today (verified directly) — a drift-risk fix matching
+             # v3-D150/D158/D261/D263/D264/D265/D266/D288's own precedent,
+             # not a live divergence: a future Severity-taxonomy edit landed
+             # on only one side would silently desync the night's own
+             # green/red verdict from what the fold-runner itself believes,
+             # the false-alarm/deafness risk BUILD-PLAN's own top risk #6
+             # names, on the one human-watched safety net for the gate that
+             # blocks public launch. Fixed: no runtime coupling invented
+             # (none is possible across the language boundary) — a new
+             # `worker/fold-runner/test/nightlyWindow-countsAsGreen
+             # -agreement.test.ts` reads `NightlyWindowLedger.php`'s raw
+             # source, parses the two string literals out of its own inline
+             # check (never hardcoding `'green'`/`'warn'` a third time), and
+             # asserts agreement with `countsAsGreen()` for every real
+             # `Severity` value, plus a second case asserting no stray/
+             # missing entry either way. RED confirmed by mutation (the same
+             # template v3-D266/D288 themselves used, since both sides
+             # already agreed): `NightlyWindowLedger.php`'s own `$sev !==
+             # 'warn'` was temporarily changed to `$sev !== 'skew'` and both
+             # new cases failed exactly as predicted (`expected false to be
+             # true`; `expected [ 'green', 'skew' ] to deeply equal [
+             # 'green', 'warn' ]`); reverted byte-identically, reran clean:
+             # 2/2 green. `npx vitest run test/foldCheck.test.ts`: 16/16
+             # green, unaffected. `TZ=UTC make test`: 2988 passing (was
+             # 2986, +2 — exactly this run's two new tests; fold-runner 71,
+             # was 69; no other suite moved: 255 v2 vitest, 47 v2/api, 410
+             # v3/api, 120 corpus-compiler, 466 engine, 1619 apps/web).
+             # `check-test-floor.mjs`: OK, 2988 >= floor 1899 (+1089 margin,
+             # unmoved). `TZ=UTC make build`: exit 0, 30 routes, unchanged (a
+             # fold-runner-test-only change, no apps/web or API file touched
+             # — the PHP mutation used to confirm RED was reverted before
+             # this build ran). `npm run gates`: all green — locked-css OK,
+             # 1 documented hunk, 294 v1 lines byte-identical; boundaries OK,
+             # 326 files, unchanged count; fonts degraded-but-non-blocking,
+             # pre-existing, 2/6 UI fonts present; corpus-morphology OK, 362
+             # words; corpus-glyphs OK, 206 codepoints across 4 artifacts —
+             # all unchanged, this diff carries no corpus data. `npx tsc
+             # --noEmit`, run separately across all four v3 node packages:
+             # clean in all four. No PHP file changed in the final diff, so
+             # `pint` was not applicable. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff produced by
+             # running the suite was reverted before committing, same
+             # discipline as every prior entry). No Arabic codepoint (the
+             # new file swept programmatically, in Python, over the Arabic,
+             # Arabic Supplement, Arabic Extended-A and both Presentation
+             # Forms Unicode blocks, plus a `fromCharCode`/`fromCodePoint`
+             # mention check: CLEAN — every new string is a TypeScript
+             # identifier, a file path, or a fixed English docblock
+             # sentence, never corpus text). No oracle/golden-log/fixture/
+             # snapshot regenerated. Session start: fresh container, no
+             # `node_modules`/`vendor` anywhere; PHP defaulted to 8.3.6
+             # (`v3/api` needs >=8.4.1); installed PHP 8.4 cleanly via the
+             # documented `packages.sury.org` apt mirror, no refusal. Both
+             # Laravel `composer install`s hit the documented transient
+             # proxy relay failures on `api.github.com` dist downloads for
+             # nearly every package, slower than usual (one `make setup`
+             # invocation was killed at the 30-minute background limit
+             # mid-`v2/api` install); recovered by running every
+             # PHP-independent `npm install` directly and in parallel, then
+             # re-running both composer installs individually with
+             # `COMPOSER_PROCESS_TIMEOUT=900` and a longer background
+             # budget, which completed cleanly on the warmed git-mirror
+             # cache. `HEAD`, local `main` and `origin/main` all already
+             # agreed at `85185db` (v3-D290) once a stale LOCAL `main`
+             # branch ref was fast-forwarded — the recurring
+             # stale-local-`main` trap this file has recorded roughly fifty
+             # times since v3-D77 — caught before any exploration, no work
+             # lost or at risk. NOT addressed: every item on v3-D290's own
+             # "NOT addressed" list, unchanged — `acknowledgeReentry`'s own
+             # "makeup" branch still only logs and points the learner at
+             # `/home` (v3-D256's verdict unchanged); `DrillPicker.tsx`'s
+             # own unused `now` prop; the unused `atoms`/`corpus`/`sessions`
+             # IndexedDB object stores (v3-D232); `session_start`'s own
+             # latency metric (v0.8); the streak/away-day day-space
+             # mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+             # `EntitlementMachine::merge()`; `App\Billing\TrialAttribution`
+             # (v3-D148); `lib/pricing.ts#regionFromCountry()` (v3-D163);
+             # `PaywallGate` as a whole class (v3-D88, v3-D151, v3-D219);
+             # `App\Flags\FlagService::enabled()` (v3-D197); multi-surah
+             # enrollment; the operational mailer/7-night launch window;
+             # PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel` (v3-D188);
+             # `selection_determinism_check` still replaying a committed
+             # fixture; `QueueItem.score`'s own missing external reader
+             # (v3-D263); `worker/fold-runner/src/selectionCheck.ts`'s
+             # cosmetic `tracesCompared` statistic (v3-D286);
+             # `GrantAdminRoleCommand`'s own missing pending-deletion guard
+             # (v3-D287); `concreteItems()`'s own decaying `reviews` count
+             # at day offsets +2/+3 (v3-D289) — all unchanged.
+             # `severity.ts#countsAsGreen()`'s own cross-runtime duplication
+             # is now mechanically guarded — remove it from future "NOT
+             # addressed" lists. See DECISIONS.md v3-D291.
              # NOTE (v3-D290, 2026-10-08): `lib/plan/forecast.ts#buildForecast`'s
              # own ESTIMATED-zone (+4d..+14d) `loadLabel` figures
              # (`estimatedItems`/`estimatedMinutes`) were the module's own
