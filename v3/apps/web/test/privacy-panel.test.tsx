@@ -74,6 +74,32 @@ describe("PrivacyPanel — reveal", () => {
     expect(text).toMatch(/Re-masks in/);
   });
 
+  it("v3-D297 — an expired reveal masks the identity itself, not just the caption", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse({
+        pseudonym: "u_abc123",
+        identity: { email: "learner@example.com", name: "Test Learner" },
+        revealToken: "tok_1",
+        // Already past its own TTL by the time the client reads it — the
+        // same state a real countdown reaches 15 minutes after a reveal,
+        // without needing fake timers to get there.
+        expiresAt: Date.now() - 1000,
+      }),
+    ) as unknown as typeof fetch;
+
+    render(<PrivacyPanel />);
+    fireEvent.change(screen.getByLabelText(/User id/i), { target: { value: "42" } });
+    fireEvent.change(screen.getByLabelText(/Details/i), { target: { value: "investigating ticket 4821" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reveal" }));
+
+    const resultView = await screen.findByTestId("reveal-result");
+    const text = resultView.textContent ?? "";
+    expect(text).toContain("u_abc123");
+    expect(text).not.toContain("learner@example.com");
+    expect(text).not.toContain("Test Learner");
+    expect(text).toMatch(/expired/i);
+  });
+
   it("edge case #148 — an anonymous subject renders a defined message, not identity", async () => {
     globalThis.fetch = vi.fn(async () =>
       jsonResponse({ pseudonym: "u_def456", identity: null, reason: "anonymous — no identity held" }),

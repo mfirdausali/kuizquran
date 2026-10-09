@@ -29813,3 +29813,108 @@ it tests, the same convention every other fixture in this tree already
 follows; guarding a test file against its own production target would be
 backwards. The launch surah set's cross-file agreement is now CLOSED for
 every production copy — remove it from future sweeps.
+
+## v3-D297 (2026-10-09) — the admin privacy panel's "auto-re-masking" caption lied; the identity stayed on screen forever
+
+`components/admin/PrivacyPanel.tsx#RevealResultView` — the client half of
+WIREFRAME §16's "Email and name sit behind a Reveal identity action
+requiring a typed reason, audit-logged, auto-re-masking after 15 minutes" —
+computed `expired = (result.expiresAt - now) <= 0` correctly (`now` ticking
+every second via a `setInterval`, since the panel shipped unwired at
+v3-D128), but used `expired` ONLY to swap the caption sentence. The actual
+PII, `result.email`/`result.name`, rendered unconditionally whenever
+`result.state === "revealed"` — nothing ever cleared or masked it once the
+TTL passed. So once the on-screen countdown reached zero, the caption read
+"This reveal has expired — it re-masks automatically" directly above an
+email and name that were still sitting in the DOM, unmasked, for as long as
+the admin left that tab open — the opposite of what the sentence claimed.
+The module's own header already asserted this exact behavior should exist
+("The countdown and the disabled state past `expiresAt` are a courtesy"),
+describing a masking mechanism that was never actually implemented — the
+"docblock says X, reality is Y" shape this build has repeatedly closed
+(v3-D90/D110/D123/D236/D244/D251/D258/D268/D269/D270/D281), here on a
+privacy-sensitive admin surface rather than a learner-facing one. Not
+gated behind the server's own TTL enforcement on `check()` (that refusal is
+real and unaffected) — this is about what the admin's own screen shows
+them, independent of whether a later `check` call would succeed.
+
+Found by a dedicated fresh-sweep agent (Explore) directed at `apps/web/lib`/
+`components` zero-caller exports, stale docblocks, and the newest admin
+panels' own field-by-field claims against what they render — it flagged
+this exact mismatch between the header's claim and `RevealResultView`'s
+real branch logic; independently re-verified by this run directly against
+the component's real source and `test/privacy-panel.test.tsx`'s real
+coverage (no existing case drives `now` past `expiresAt` at all) before
+writing any test.
+
+**Fixed, display-only, no server/wire change:** `RevealResultView`'s
+`"revealed"` branch now renders the email/name line only when `!expired`;
+once expired, it renders one caption — "This reveal has expired — masked."
+— and nothing else from the identity (the pseudonym itself stays visible,
+same as the sibling `"anonymous"` branch — a pseudonym is not the PII this
+feature masks). The module header is corrected to describe the real
+mechanism rather than restate the claim that was never implemented.
+
+**RED confirmed directly:** a new `test/privacy-panel.test.tsx` case seeds a
+`revealIdentity()` response whose own `expiresAt` is already 1 second in the
+past (the same `remainingMs <= 0` state a live 15-minute countdown reaches,
+reproduced without needing fake timers) and asserts the rendered result
+still names the pseudonym but no longer contains the email or name. Run
+against the unmodified component it failed exactly as predicted —
+`expected 'u_abc123learner@example.com — Test Le…' not to contain
+'learner@example.com'`; implemented, reran: `test/privacy-panel.test.tsx`
+10/10 green (was 9, +1). The nine pre-existing cases (incl. the live,
+not-yet-expired "renders the identity and a re-mask countdown" case) are
+unaffected — the fix only changes behavior once `expired` is true, which no
+prior case ever reached.
+
+`TZ=UTC make test`: 3009 passing (was 3008, +1 — exactly this run's one new
+test; apps/web 1632, was 1631; no other suite moved: 255 v2 vitest, 47
+v2/api, 416 v3/api, 120 corpus-compiler, 468 engine, 71 fold-runner).
+`check-test-floor.mjs`: OK, 3009 >= floor 1899 (+1110 margin, unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 30 routes,
+unchanged (one existing component edited plus its one existing test file,
+no new production file or route). `npm run gates`: all green — locked-css
+OK, 1 documented hunk, 294 v1 lines byte-identical; boundaries OK, 327
+files, unchanged count; fonts degraded-but-non-blocking, pre-existing, 2/6
+UI fonts present; corpus-morphology OK, 362 words; corpus-glyphs OK, 206
+codepoints across 4 artifacts — all unchanged, this diff carries no corpus
+data. `npx tsc --noEmit` (apps/web): clean. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite was
+reverted before committing, same discipline as every prior entry — `git
+status --porcelain -- v1 v2` empty immediately before committing). No
+Arabic codepoint (both changed files swept programmatically, in Python,
+over the Arabic, Arabic Supplement, Arabic Extended-A and both Presentation
+Forms Unicode blocks, plus a `fromCharCode`/`fromCodePoint` mention check:
+CLEAN — every new string is a fixed English caption or the pre-existing
+synthetic fixture email/name/pseudonym placeholders already used elsewhere
+in this test file, never corpus text). No oracle/golden-log/fixture/
+snapshot regenerated.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled corpus
+anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1); installed PHP 8.4
+cleanly via the documented `packages.sury.org` apt mirror, no refusal this
+run — the four npm-only installs (`v3/apps/web`, `packages/engine`,
+`packages/corpus-compiler`, `worker/fold-runner`) were run directly and in
+parallel rather than waiting on the sequential `make setup` chain after the
+background composer installs ran long, the same recovery this file's
+history has recorded roughly a dozen times before. `HEAD`, local `main` and
+`origin/main` all agreed at `7e66619` (v3-D296) once a stale LOCAL `main`
+branch ref sixteen commits behind (`977eae0`, v3-D281) was fast-forwarded —
+the recurring stale-local-`main` trap this file has recorded roughly fifty
+times since v3-D77 — caught before any exploration, no work lost or at
+risk.
+
+NOT addressed: every item on v3-D296's own "NOT addressed" list, unchanged
+— `acknowledgeReentry`'s "makeup" branch; `DrillPicker.tsx`'s `now` prop;
+the unused IDB stores (v3-D232); `session_start` latency; the streak/
+away-day day-space mismatch (v3-D209); `rhymeClassOf()`;
+`EntitlementMachine::merge()`; `TrialAttribution`; `regionFromCountry()`;
+`PaywallGate`; `FlagService::enabled()`; multi-surah enrollment; the mailer
+and 7-night window; PAY-1; surah 67's scene beats; `placement.ts`;
+`MacroFacts.litany.rhymeLabel`; `selection_determinism_check`'s fixture
+replay; `QueueItem.score`; `tracesCompared`; `PlanIsland.tsx#enrolmentOf`'s
+own clause-5-blind-spot carry compare (v3-D295, deliberately left); the two
+TS-side test-file copies of the launch surah set (deliberately left,
+v3-D296) — all unchanged. `PrivacyPanel.tsx`'s own auto-re-masking gap is
+now CLOSED — remove it from future sweeps.

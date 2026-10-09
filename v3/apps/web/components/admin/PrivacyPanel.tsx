@@ -17,13 +17,16 @@
 // only the identity-free bulk CSV; inventing a paginated user-listing route
 // to back a picker is real, separate backend scope this panel does not add.
 //
-// AUTO-RE-MASKING (§16) is client-side countdown UI only — the identity
-// this component holds in React state is not persisted, so a page reload or
-// navigating away already re-masks it by construction. The countdown and the
-// disabled state past `expiresAt` are a courtesy, not the enforcement: the
-// server independently refuses a `check` past its own TTL regardless of what
-// this component believes the time is (`lib/admin/reveal.ts`'s own header on
-// `CheckResult` — the refusal is server-decided, not re-derived here).
+// AUTO-RE-MASKING (§16): `RevealResultView` hides `result.email`/`.name`
+// itself the moment its own `now` prop passes `result.expiresAt` — not just
+// the caption, which is what shipped first (v3-D297) and silently left the
+// identity on screen, printed right beside a caption now falsely claiming
+// "it re-masks automatically". This masking is still a COURTESY, not the
+// enforcement: the server independently refuses a `check` past its own TTL
+// regardless of what this component believes the time is
+// (`lib/admin/reveal.ts`'s own header on `CheckResult` — the refusal is
+// server-decided, not re-derived here), and a page reload or navigating away
+// re-masks by construction too, since nothing here is persisted.
 
 import { useEffect, useState } from "react";
 import {
@@ -51,15 +54,21 @@ function RevealResultView({ result, now }: { result: RevealResult; now: number }
         <p>
           <strong>{result.pseudonym}</strong>
         </p>
-        <p>
-          {result.email}
-          {result.name ? ` — ${result.name}` : ""}
-        </p>
-        <p className="caption" role="status">
-          {expired
-            ? "This reveal has expired — it re-masks automatically."
-            : `Re-masks in ${Math.max(0, Math.ceil(remainingMs / 1000))}s.`}
-        </p>
+        {expired ? (
+          <p className="caption" role="status">
+            This reveal has expired — masked.
+          </p>
+        ) : (
+          <>
+            <p>
+              {result.email}
+              {result.name ? ` — ${result.name}` : ""}
+            </p>
+            <p className="caption" role="status">
+              {`Re-masks in ${Math.max(0, Math.ceil(remainingMs / 1000))}s.`}
+            </p>
+          </>
+        )}
       </div>
     );
   }
