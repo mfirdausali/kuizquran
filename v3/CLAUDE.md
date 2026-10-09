@@ -53,10 +53,124 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3004 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3008 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 412 v3/api + 120 corpus-compiler
-             # + 468 engine + 71 fold-runner + 1631 apps/web. (v3-D295, 2026-10-09)
+             # 255 v2 vitest + 47 v2/api + 416 v3/api + 120 corpus-compiler
+             # + 468 engine + 71 fold-runner + 1631 apps/web. (v3-D296, 2026-10-09)
+             # NOTE (v3-D296, 2026-10-09): the launch surah set `[12, 67, 103,
+             # 112]` (v3-D59) was hand-declared independently in FOUR
+             # production files with no shared source and no agreement test:
+             # `scripts/content-freeze.mjs#LAUNCH_SURAHS` (the canonical
+             # source, per every other copy's own comment),
+             # `ContentFreezeController::LAUNCH_SURAHS`, `apps/web/scripts/
+             # check-corpus-glyphs.mjs#LAUNCH_SURAHS`, and the root
+             # `Makefile`'s `compile-corpus` target (four `npm run compile --
+             # N` lines). Same "two (here, four) independent implementations
+             # of one decision, no shared source" shape this build has
+             # repeatedly closed (v3-D137, v3-D150/151/158, v3-D261,
+             # v3-D263..D266, v3-D288, v3-D291) — found by a dedicated
+             # fresh-sweep agent (Explore) directed at zero-caller exports,
+             # stale docblocks and cross-file decision duplication. Sharper
+             # than most: this exact pair already drifted for real —
+             # `ContentFreezeController::LAUNCH_SURAHS` sat at `[12, 103,
+             # 112]` (missing surah 67) for weeks while `content-freeze.mjs`
+             # was already correct, silently making the one admin screen
+             # built to answer "may I book the qari" never check surah 67's
+             # own criteria at all (v3-D224) — that run fixed the VALUE but
+             # added no guard, so the identical drift can recur silently on
+             # any future launch-set change. Not a live divergence today —
+             # all four copies already agree — a drift-risk fix, matching
+             # the cited precedents.
+             #
+             # Fixed: no runtime coupling invented (none is possible across
+             # two build scripts, a Makefile target and a PHP class) — a new
+             # `v3/api/tests/Feature/ContentFreeze/
+             # LaunchSurahsAgreementTest.php` reads each file's raw source
+             # via `file_get_contents()` (the same technique
+             # `StaleFrontendDocsTest`/`PricingConstantsTest` already use),
+             # regex-extracts each copy's own array literal (or, for the
+             # Makefile, each `npm run compile -- N` line inside the
+             # `compile-corpus:` block), and asserts every non-canonical
+             # copy equals `content-freeze.mjs`'s own value, read fresh each
+             # time rather than hardcoded a second time in the test.
+             # `ContentFreezeController::LAUNCH_SURAHS` is read via
+             # `ReflectionClass::getConstant()` (it is `private` by design;
+             # no production code changed to make it testable).
+             #
+             # RED confirmed four times, directly, one mutation per copy,
+             # each reverted byte-identically before the next: reverting
+             # `ContentFreezeController::LAUNCH_SURAHS` to `[12, 103, 112]`
+             # (the exact historic v3-D224 bug) failed exactly the matching
+             # assertion; the identical mutation on `check-corpus-glyphs
+             # .mjs`'s own copy failed its sibling assertion; deleting the
+             # Makefile's `compile -- 67` line failed the Makefile
+             # assertion. All three reverted (`git diff --stat` empty each
+             # time) before the next was tried; final rerun 4/4 green with
+             # all three production files untouched.
+             #
+             # `TZ=UTC make test`: 3008 passing (was 3004, +4 — exactly this
+             # run's four new PHPUnit cases; v3/api 416, was 412; no other
+             # suite moved: 255 v2 vitest, 47 v2/api, 120 corpus-compiler,
+             # 468 engine, 71 fold-runner, 1631 apps/web).
+             # `check-test-floor.mjs`: OK, 3008 >= floor 1899 (+1109 margin,
+             # unmoved, same discipline as every prior entry). `TZ=UTC make
+             # build`: exit 0, 30 routes, unchanged (a test-only addition, no
+             # production route or component touched). `npm run gates`: all
+             # green — locked-css OK, 1 documented hunk, 294 v1 lines
+             # byte-identical; boundaries OK, 328 files, unchanged count — no
+             # new apps/web production file, this diff is entirely under
+             # `v3/api/tests`; fonts degraded-but-non-blocking, pre-existing,
+             # 2/6 UI fonts present; corpus-morphology OK, 362 words; corpus-
+             # glyphs OK, 206 codepoints across 4 artifacts — all unchanged,
+             # this diff carries no corpus data. No `v1/**`/`v2/**` edit (a
+             # stray `v2/tsconfig.tsbuildinfo` build-cache diff produced by
+             # running the suite was reverted before committing, same
+             # discipline as every prior entry — `git status --porcelain --
+             # v1 v2` empty immediately before committing). No Arabic
+             # codepoint (the new file swept programmatically, in Python,
+             # over the Arabic, Arabic Supplement, Arabic Extended-A and
+             # both Presentation Forms Unicode blocks, plus a
+             # `fromCharCode`/`fromCodePoint` mention check: CLEAN — every
+             # new string is a PHP identifier, a regex literal, a file path,
+             # or a fixed English docblock/assertion sentence, never corpus
+             # text). No oracle/golden-log/fixture/snapshot regenerated.
+             #
+             # Session start: fresh container, no `node_modules`/`vendor`/
+             # compiled corpus anywhere; PHP defaulted to 8.3.6 (`v3/api`
+             # needs >=8.4.1); installed PHP 8.4 cleanly via the documented
+             # `packages.sury.org` apt mirror, no refusal this run. `make
+             # setup` ran clean end to end from a cold checkout. `HEAD` was
+             # found detached exactly at `origin/main`'s own tip (`1a71fdb`,
+             # v3-D295), on a stale LOCAL `main` branch ref fifteen commits
+             # behind (`977eae0`, v3-D281) — the recurring stale-local-`main`
+             # trap this file has recorded roughly fifty times since
+             # v3-D77 — caught before any commit via `git fetch origin
+             # main` + `git checkout main && git merge --ff-only
+             # origin/main`, a clean fast-forward, no work lost or at risk.
+             #
+             # NOT addressed: every item on v3-D295's own "NOT addressed"
+             # list, unchanged — `acknowledgeReentry`'s "makeup" branch;
+             # `DrillPicker.tsx`'s `now` prop; the unused IDB stores
+             # (v3-D232); `session_start` latency; the streak/away-day
+             # day-space mismatch (v3-D209); `rhymeClassOf()`;
+             # `EntitlementMachine::merge()`; `TrialAttribution`;
+             # `regionFromCountry()`; `PaywallGate`; `FlagService
+             # ::enabled()`; multi-surah enrollment; the mailer and 7-night
+             # window; PAY-1; surah 67's scene beats; `placement.ts`;
+             # `MacroFacts.litany.rhymeLabel`; `selection_determinism_check`'s
+             # fixture replay; `QueueItem.score`; `tracesCompared`;
+             # `PlanIsland.tsx#enrolmentOf`'s own clause-5-blind-spot carry
+             # compare (v3-D295, deliberately left) — all unchanged. The
+             # remaining two TS-side copies of the launch set
+             # (`apps/web/test/corpus-load.test.ts`, `apps/web/test/
+             # check-corpus-glyphs-gate.test.ts`) are test files, not
+             # production code, and were deliberately left unguarded — a
+             # test file's own fixture is expected to be updated alongside
+             # the production change it tests, the same convention every
+             # other fixture in this tree already follows. The launch surah
+             # set's cross-file agreement is now CLOSED for every production
+             # copy — remove it from future sweeps. See DECISIONS.md
+             # v3-D296.
              # NOTE (v3-D295, 2026-10-09): `/plan`'s TODAY row
              # (`PlanIsland.tsx#dueToday`) counted reviews as "encoded and
              # not carry band" and named Learns regardless of a due gate —
