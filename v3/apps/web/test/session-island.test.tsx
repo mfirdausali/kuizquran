@@ -1232,6 +1232,135 @@ describe("cold-success adoption — the offer appears on Door 3's summary screen
   });
 });
 
+// WIREFRAME.md's own learner-facing edge-case table: "Surah completed | Last
+// ayah passes its gate | Celebrate at the surah level. The app's biggest
+// emotional beat — needs a distinct completion state." Proven at the
+// `run.ts` level (a real fold, no DOM) in `lib/session/run.test.ts`; this
+// block proves the COMPONENT actually surfaces it, mirroring the
+// cold-success-adoption block above — it cannot use `completeSession()`'s
+// trial-and-error `driveOneBlank` for the drive itself, for the identical
+// reason that block gives: a coin-flip wrong tap before the right one would
+// be a genuine slip, which would fail the very gate this test needs to pass.
+describe("WIREFRAME's 'surah completed' edge case — the celebration on the real summary screen", () => {
+  it("celebrates once THIS session passes the surah's own last remaining ayah's gate", async () => {
+    installFetch();
+    const lastAyah = 4;
+
+    // Ayat 1-3 already fully mastered (encoded + gate passed) before this
+    // session even starts — committed through the same public `append()`
+    // every real tap uses, never a hand-built atom.
+    for (const ayah of [1, 2, 3]) {
+      await append(
+        { type: "ayah_produced", ts: SEED_T0, tz: "UTC", surah: SURAH, ayah, rung: "S3", structured: true } as DrillEvent,
+        { now: SEED_T0, tz: "UTC" },
+      );
+      await append(
+        { type: "gate_result", ts: SEED_T0 + DAY, tz: "UTC", surah: SURAH, ayah, rung: "S3", correct: true, structured: true } as DrillEvent,
+        { now: SEED_T0 + DAY, tz: "UTC" },
+      );
+    }
+    // Ayah 4 is encoded (so its gate is due) but NOT yet passed — the one
+    // thing this session's own real drill is about to resolve.
+    await append(
+      { type: "ayah_produced", ts: SEED_T0, tz: "UTC", surah: SURAH, ayah: lastAyah, rung: "S3", structured: true } as DrillEvent,
+      { now: SEED_T0, tz: "UTC" },
+    );
+
+    const initialMachine = initReconstruct(corpus, SURAH, lastAyah, 1, { full: true });
+    const { assemblePass } = await import("@/lib/onboarding/pass");
+    const indices: number[] = [];
+    let sim = initialMachine;
+    for (let guard = 0; guard < 50; guard++) {
+      const assembled = assemblePass(sim, corpus);
+      if (!assembled) break;
+      indices.push(assembled.item.correctIndex);
+      const choice = assembled.item.options[assembled.item.correctIndex]!.text;
+      const adv = advanceReconstruct(sim, corpus, choice);
+      sim = adv.state;
+      if (adv.ayahProduced) break;
+    }
+    expect(indices.length).toBeGreaterThan(0);
+
+    const now = SEED_T0 + 2 * DAY;
+    startSessionOverride = () =>
+      Promise.resolve({
+        ok: true,
+        run: {
+          surah: SURAH,
+          queue: [{ kind: "gate", atomKey: `112:ayah:${lastAyah}`, ayah: lastAyah, estMin: 1 }],
+          cursor: 0,
+          machine: initialMachine,
+          startedAt: now,
+          slips: 0,
+          lastTap: null,
+          done: false,
+          gateSlipped: false,
+          rescaffolding: false,
+          openPracticeDrill: null,
+          structured: true,
+          makeupDeferred: 0,
+          lastActivityAt: now,
+          siteVisit: null,
+          freshMachine: { machine: initialMachine, rescaffolding: false },
+        } as SessionRun,
+      });
+
+    render(<SessionIsland surah={SURAH} />);
+    await waitFor(() => expect(screen.getByTestId("session-drill")).toBeTruthy());
+
+    for (let i = 0; i < indices.length; i++) {
+      const bank = document.querySelector(".bank");
+      if (!bank) throw new Error("no bank to drive");
+      const tiles = within(bank as HTMLElement).getAllByRole("button");
+      const tile = tiles[indices[i]!];
+      if (!tile) throw new Error("computed correct tile index out of range");
+      fireEvent.click(tile);
+      const isLast = i === indices.length - 1;
+      if (isLast) {
+        await waitFor(() => expect(screen.getByTestId("session-summary")).toBeTruthy());
+      } else {
+        await waitFor(() => expect(screen.getByRole("status")).toBeTruthy());
+        fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+      }
+    }
+
+    const events = await getAllEvents();
+    const gateResults = events.filter((e) => e.type === "gate_result" && e.ayah === lastAyah);
+    expect(gateResults.length).toBeGreaterThan(0);
+    expect(gateResults.every((e) => e.correct === true)).toBe(true);
+
+    const celebration = await screen.findByTestId("surah-completed-celebration");
+    expect(celebration.textContent).toMatch(/al-ikhlas/i);
+    expect(celebration.textContent).toMatch(/complete/i);
+  });
+
+  it("never celebrates when a session passes a gate but another ayah of the surah is still unmastered", async () => {
+    installFetch();
+    const gatedAyah = 1;
+    // Only this one ayah is encoded; ayat 2-4 have no atom at all, so the
+    // surah can never be fully mastered by passing this gate alone.
+    await append(
+      { type: "ayah_produced", ts: SEED_T0, tz: "UTC", surah: SURAH, ayah: gatedAyah, rung: "S3", structured: true } as DrillEvent,
+      { now: SEED_T0, tz: "UTC" },
+    );
+    const now = SEED_T0 + DAY;
+    startSessionOverride = () => Promise.resolve({ ok: true, run: gateRunFor(corpus, now) });
+
+    render(<SessionIsland surah={SURAH} />);
+    await waitFor(() => expect(screen.getByTestId("session-drill")).toBeTruthy());
+    await completeSession();
+    await waitFor(() => expect(screen.getByTestId("session-summary")).toBeTruthy());
+
+    // Whether this particular attempt passed or slipped doesn't matter to
+    // what this test checks — only that a real gate was graded for real.
+    const events = await getAllEvents();
+    expect(events.some((e) => e.type === "gate_result")).toBe(true);
+
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByTestId("surah-completed-celebration")).toBeNull();
+  });
+});
+
 // `packages/engine/src/sessionSummary.ts`'s own header: "the facts the
 // completion screen shows: duration, recall (accuracy), ayat completed, and
 // a time-of-day greeting." `summarizeSession` computes all four — but the

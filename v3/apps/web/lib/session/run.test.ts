@@ -96,6 +96,7 @@ import {
   currentItem,
   answerCurrent,
   sessionSummaryOf,
+  surahCompletionFor,
   extraLearnOfferFor,
   startExtraLearn,
   weakSpotOfferFor,
@@ -317,6 +318,133 @@ describe("v3-D67 — a learner can complete a session, and the log proves it", (
     const summary = await sessionSummaryOf(run);
     expect(summary.ayatCompleted).toBe(produced.length);
     expect(summary.taps).toBeGreaterThan(0);
+  });
+});
+
+// WIREFRAME.md's own learner-facing edge-case table: "Surah completed | Last
+// ayah passes its gate | Celebrate at the surah level. The app's biggest
+// emotional beat — needs a distinct completion state." Nothing in this file —
+// or anywhere else in the product — ever asked this question:
+// `SessionIsland.tsx`'s summary screen renders the identical ordinary tally
+// (ayatCompleted/taps/recall) whether a session finished an ordinary review
+// or passed the surah's own LAST remaining ayah's cold gate for the first
+// time, mastering the whole surah.
+describe("surahCompletionFor — WIREFRAME's 'surah completed' edge case, the distinct completion state", () => {
+  it("reports true on the one session that passes the surah's own last remaining ayah's cold gate", async () => {
+    const c = corpus();
+    const ayahCount = c.meta.ayahCount;
+    expect(ayahCount).toBe(4); // surah 112, Al-Ikhlas — the precondition this test relies on
+
+    // Seed every ayah as encoded — a genuine S3 completion each, the SAME
+    // wire shape v3-D101's own block above uses, bypassing the real spacing
+    // algorithm but committing through the same public `append()` every
+    // real tap uses.
+    for (let ayah = 1; ayah <= ayahCount; ayah++) {
+      await append(
+        { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah, rung: "S3", structured: true } as DrillEvent,
+        { now: T0, tz: TZ },
+      );
+    }
+
+    // Confirms the precondition directly: not yet mastered before day 2.
+    expect(await surahCompletionFor({ surah: SURAH, startedAt: T0 } as SessionRun, c)).toBe(false);
+
+    const day2 = T0 + 86_400_000;
+    const started = await startSession({ surah: SURAH, now: day2, tz: TZ }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+
+    // Every ayah's gate is due today — confirms this ONE session's queue can
+    // finish the whole surah, the real precondition for "last ayah passes
+    // its gate" to even be possible in a single sitting.
+    const gateItems = started.run.queue.filter((q) => q.kind === "gate");
+    expect(gateItems.length).toBe(ayahCount);
+
+    // NOT this file's own shared `playThrough` — its taps are stamped at a
+    // fixed T0-anchored `now` (v3-D133's own documented quirk), which
+    // pre-dates this day-2 session and would corrupt the before/after
+    // `ts`-based comparison `surahCompletionFor` relies on; a local,
+    // correctly-ordered loop is used instead, the same precedent v3-D133
+    // itself set.
+    let run = started.run;
+    let cur = currentItem(run, c);
+    let taps = 0;
+    while (cur && taps < 500) {
+      run = await answerCurrent(run, c, correctIndexFor(run, c), { now: day2 + taps * 1000, tz: TZ });
+      taps++;
+      cur = currentItem(run, c);
+    }
+    expect(taps).toBeGreaterThan(0);
+    expect(run.done).toBe(true);
+
+    const atoms = rebuild(await getAllEvents());
+    for (let ayah = 1; ayah <= ayahCount; ayah++) {
+      expect(atoms.get(atomKey(SURAH, "ayah", ayah))?.gatePassed).toBe(true);
+    }
+
+    expect(await surahCompletionFor(started.run, c)).toBe(true);
+  });
+
+  it("never re-reports completion on a LATER session of an already-complete surah", async () => {
+    const c = corpus();
+    const ayahCount = c.meta.ayahCount;
+
+    for (let ayah = 1; ayah <= ayahCount; ayah++) {
+      await append(
+        { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah, rung: "S3", structured: true } as DrillEvent,
+        { now: T0, tz: TZ },
+      );
+    }
+    const day2 = T0 + 86_400_000;
+    const started = await startSession({ surah: SURAH, now: day2, tz: TZ }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+
+    let run = started.run;
+    let cur = currentItem(run, c);
+    let taps = 0;
+    while (cur && taps < 500) {
+      run = await answerCurrent(run, c, correctIndexFor(run, c), { now: day2 + taps * 1000, tz: TZ });
+      taps++;
+      cur = currentItem(run, c);
+    }
+    expect(await surahCompletionFor(started.run, c)).toBe(true);
+
+    // A later session, days after the surah was already fully mastered —
+    // never reports completion a second time.
+    const day5 = day2 + 3 * 86_400_000;
+    const laterRun = { ...run, startedAt: day5 } as SessionRun;
+    expect(await surahCompletionFor(laterRun, c)).toBe(false);
+  });
+
+  it("reports false when a session passes gates for every ayah but one", async () => {
+    const c = corpus();
+    const ayahCount = c.meta.ayahCount;
+
+    // Seed only the first ayahCount-1 ayat — the LAST ayah is deliberately
+    // left un-encoded, so the surah can never be fully mastered this run.
+    for (let ayah = 1; ayah < ayahCount; ayah++) {
+      await append(
+        { type: "ayah_produced", ts: T0, tz: TZ, surah: SURAH, ayah, rung: "S3", structured: true } as DrillEvent,
+        { now: T0, tz: TZ },
+      );
+    }
+    const day2 = T0 + 86_400_000;
+    const started = await startSession({ surah: SURAH, now: day2, tz: TZ }, c);
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+
+    let run = started.run;
+    let cur = currentItem(run, c);
+    let taps = 0;
+    while (cur && taps < 500) {
+      run = await answerCurrent(run, c, correctIndexFor(run, c), { now: day2 + taps * 1000, tz: TZ });
+      taps++;
+      cur = currentItem(run, c);
+    }
+    expect(taps).toBeGreaterThan(0);
+
+    expect(await surahCompletionFor(started.run, c)).toBe(false);
   });
 });
 

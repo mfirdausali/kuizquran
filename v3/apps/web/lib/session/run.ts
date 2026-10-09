@@ -1681,6 +1681,50 @@ export async function sessionSummaryOf(run: SessionRun): Promise<SessionSummary>
 }
 
 /**
+ * WIREFRAME.md's own learner-facing edge-case table: "Surah completed | Last
+ * ayah passes its gate | Celebrate at the surah level. The app's biggest
+ * emotional beat — needs a distinct completion state." Nothing in this
+ * product ever asked this question — `SessionIsland.tsx`'s summary screen
+ * rendered the identical ordinary tally (`ayatCompleted`/`taps`/`recall`)
+ * whether a session finished an ordinary review or passed the surah's own
+ * LAST remaining ayah's cold gate for the first time, mastering the whole
+ * surah.
+ *
+ * True only on the ONE session during which that happens: compares the fold
+ * immediately BEFORE this session's own `startedAt` against the fold NOW
+ * (which already includes this session's own just-landed commits — the same
+ * durable-IndexedDB-read-after-commit discipline `extraLearnOfferFor`/
+ * `weakSpotOfferFor` already rely on, above). A surah already fully mastered
+ * before this session started — including every later session of an
+ * already-complete surah — reports `false`, so the celebration can never
+ * repeat.
+ *
+ * "Mastered" = every ayah atom's `gatePassed`, not merely `encoded`: the
+ * WIREFRAME trigger is explicitly "passes its GATE", the day-1 cold check
+ * that actually certifies retention (B11/B12), not the S3 production that
+ * only arms it.
+ */
+export async function surahCompletionFor(run: SessionRun, c: Corpus): Promise<boolean> {
+  const all = await getEventsForSurah(run.surah);
+  const ayahCount = c.meta.ayahCount;
+  if (!isSurahFullyGated(rebuild(all), run.surah, ayahCount)) return false;
+  const before = all.filter((e) => e.ts < run.startedAt);
+  return !isSurahFullyGated(rebuild(before), run.surah, ayahCount);
+}
+
+/** Every "ayah"-kind atom 1..ayahCount has passed its cold gate. */
+function isSurahFullyGated(
+  atoms: ReturnType<typeof rebuild>,
+  surah: number,
+  ayahCount: number,
+): boolean {
+  for (let ayah = 1; ayah <= ayahCount; ayah++) {
+    if (!atoms.get(atomKey(surah, "ayah", ayah))?.gatePassed) return false;
+  }
+  return true;
+}
+
+/**
  * FR6 Door 1 — "extra Learn" (`packages/engine/src/freeplay.ts#extraLearnGrant`).
  *
  * `extraLearnGrant` was built and unit-tested three times over (v3-D97's own

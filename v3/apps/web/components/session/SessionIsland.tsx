@@ -57,6 +57,7 @@ import {
   startOpenPractice,
   startSession,
   startWeakSpotDrill,
+  surahCompletionFor,
   weakSpotOfferFor,
   SessionCommitFailure,
   type SessionMode,
@@ -71,6 +72,7 @@ import type { PracticeSpec } from "@/lib/practice/handoff";
 import { formatDuration, type Greeting, type SessionSummary } from "@engine/sessionSummary.ts";
 import type { AdoptionOffer, ExtraLearnGrant, WeakSpot } from "@engine/freeplay.ts";
 import { DEFAULT_PACE_MODE, type PaceMode } from "@engine/pace.ts";
+import { OFFERED_SURAHS, surahLabel } from "@/lib/onboarding/surahs";
 
 // `summarizeSession`'s own header names this as one of the four facts "the
 // completion screen shows" — the ENGINE decides which of the four buckets an
@@ -178,6 +180,15 @@ export function SessionIsland({
   // is needed here — the same "ask the engine, render what it says" shape
   // every other offer on this screen follows.
   const [adoptionOffer, setAdoptionOffer] = useState<AdoptionOffer | null>(null);
+  // WIREFRAME.md's own learner-facing edge-case table: "Surah completed |
+  // Last ayah passes its gate | Celebrate at the surah level. The app's
+  // biggest emotional beat — needs a distinct completion state." Computed
+  // only once the summary is reached (see the effect below) via
+  // `surahCompletionFor`, which re-derives the fold — this component never
+  // counts gates itself (clause 5). True only on the one session that
+  // actually completes the surah; `false` on every other, including every
+  // later session of an already-complete one.
+  const [surahJustCompleted, setSurahJustCompleted] = useState(false);
   // FR5 (v3-D217) — the honest one-line notice for a real re-entry gap
   // (`resumePolicy()`/`classifyReentry`, `lib/session/run.ts`). Set by the
   // `window` "focus" effect below, mirroring `SyncTrigger.tsx`'s own
@@ -566,6 +577,30 @@ export function SessionIsland({
     commit(() => acceptAdoption(run, { now: Date.now(), tz: currentTz() }));
   }, [run, adoptionOffer, commit]);
 
+  // WIREFRAME.md's "Surah completed" edge case — once the assembled queue is
+  // genuinely done, ask the engine (via `surahCompletionFor`, which
+  // re-derives the fold — never this component counting gates itself)
+  // whether THIS session just passed the surah's own last remaining ayah's
+  // cold gate. A fetch failure here must never block the ordinary summary,
+  // same never-blocks discipline as every other effect on this screen.
+  useEffect(() => {
+    if (phase.kind !== "summary" || !run || !corpus) {
+      setSurahJustCompleted(false);
+      return;
+    }
+    let alive = true;
+    void surahCompletionFor(run, corpus)
+      .then((completed) => {
+        if (alive) setSurahJustCompleted(completed);
+      })
+      .catch(() => {
+        if (alive) setSurahJustCompleted(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [phase, run, corpus]);
+
   // v3-D107 — ask the engine (via `demoteOfferFor`, which re-derives the
   // fold — never this component reading `gateFails` itself, which clause 5
   // would refuse to let it do) whether the CURRENT queue item is a due gate
@@ -666,6 +701,28 @@ export function SessionIsland({
     const { summary } = phase;
     return (
       <div className="stack" data-testid="session-summary">
+        {/* WIREFRAME.md's "Surah completed" edge case: the app's biggest
+            emotional beat, a distinct state from the ordinary tally below —
+            only ever rendered once the engine itself confirms THIS session
+            passed the surah's own last remaining ayah's cold gate. */}
+        {surahJustCompleted && run ? (
+          <div
+            className="banner banner--ok"
+            role="status"
+            data-testid="surah-completed-celebration"
+          >
+            <p>
+              <strong>
+                {(() => {
+                  const offered = OFFERED_SURAHS.find((s) => s.surah === run.surah);
+                  return offered ? surahLabel(offered) : `Surah ${run.surah}`;
+                })()}{" "}
+                complete.
+              </strong>{" "}
+              Every ayah is learned and has passed its gate.
+            </p>
+          </div>
+        ) : null}
         <p className="caption" data-testid="session-greeting">
           {GREETING_TEXT[summary.greeting]}
         </p>

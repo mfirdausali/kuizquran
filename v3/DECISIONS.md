@@ -29395,3 +29395,168 @@ day offsets +2/+3 (v3-D289) — all unchanged. `demoteOfferFor`/
 `acceptGateDemote`'s own missed `isGateKind()` sites are now CLOSED —
 remove them from future "NOT addressed" lists and from any future
 `isGateKind()`-completeness sweep. See DEFECTS.md#B17's own addendum.
+
+### v3-D294 — WIREFRAME's own "Surah completed" edge case had no distinct completion state anywhere (2026-10-09, nightly)
+
+`docs/WIREFRAME.md`'s learner-facing edge-case table (the "Edge cases"
+section) names this row verbatim: "Surah completed | Last ayah passes its
+gate | Celebrate at the **surah** level. The app's biggest emotional beat —
+§5 needs a distinct completion state." This is a ratified product
+requirement, not a candidate for the usual "needs a UI surface with no
+WIREFRAME mandate, left alone" deferral this file has applied to other
+zero-caller findings (`QueueItem.score`, v3-D263; `StreakState
+.makeupAvailable`, v3-D97/D202) — the mandate already exists, in the one
+document that is this build's own specification.
+
+Confirmed directly, not assumed: `lib/session/run.ts`'s session-summary path
+(`sessionSummaryOf`) and `SessionIsland.tsx`'s own summary render block
+rendered the identical ordinary tally (`ayatCompleted`/`taps`/`recall`/
+`ayatRefs`) whether a session finished an ordinary review or passed the
+surah's own LAST remaining ayah's cold gate for the first time, mastering
+the whole surah — `grep -n "surahComplet\|celebrat\|confetti" apps/web`
+(case-insensitive) returned nothing anywhere in the tree before this fix.
+Nothing in `lib/home/queue.ts`, `MySurahs.tsx` or `TodaySession.tsx` detects
+it either — the one check this build performs for "is this surah 100%
+mastered" (`isSurahFullyGated`, new, below) did not exist in any form.
+
+**Found by:** a dedicated fresh-sweep agent (Explore) came back with a
+genuine empty sweep this run (migrations vs. models, all five Playwright
+specs, all seven Console Command docblocks, TS/PHP constant pairs, ~15
+field-by-field render audits — recorded in full in the agent's own report,
+not repeated here since nothing in it needed fixing). Rather than stop at an
+empty sweep, this run tried a fresh vein the ~293 prior nights had not:
+cross-referencing every one of `docs/BUILD-PLAN.md`'s 197 numbered
+edge-case-register rows against `DECISIONS.md`/`CLAUDE.md`/`HANDOVER.md`/
+`DEFECTS.md` for a row never once cited by number — a noisy signal (most
+"misses" are data/ops/agent-layer rows baked into the compiler or process
+discipline with no reason to be cited by number), but the learner-facing
+`fe`-layer rows were worth reading by hand. "Surah completed" (WIREFRAME's
+own row, not a BUILD-PLAN edge-case-register number — found by reading
+WIREFRAME.md directly after `grep -n -i "celebrat" docs/WIREFRAME.md`
+surfaced the row) was the one genuine, previously-unbuilt instance;
+independently re-verified directly against `run.ts`'s real event-emission
+sites, `gate.ts#applyGateResult`'s real `gatePassed` semantics, and
+`sessionSummary.ts`'s real fields before writing any test.
+
+**Fixed, additive, no wire/schema change:** new `lib/session/run.ts
+#surahCompletionFor(run, c)` — re-derives the fold via `getEventsForSurah`/
+`rebuild` (never this component counting gates itself, clause 5's own
+discipline), and returns `true` only on the ONE session during which the
+fold goes from "not every ayah atom 1..`ayahCount` has `gatePassed`" to
+"every one does" — compares the state strictly BEFORE this session's own
+`startedAt` against the state now (which already includes this session's
+own just-landed commits, the same durable-IndexedDB-read-after-commit
+discipline `extraLearnOfferFor`/`weakSpotOfferFor` already rely on). A
+surah already fully mastered before this session started — including every
+later session of an already-complete one — reports `false`, so the
+celebration can never repeat. Deliberately checks `gatePassed`, not merely
+`encoded`: WIREFRAME's own trigger is "passes its GATE", the day-1 cold
+check that actually certifies retention (B11/B12), not the S3 production
+that only arms it. `SessionIsland.tsx` calls it in a new effect mirroring
+every other FR6 offer effect on this screen (never blocks the ordinary
+summary on a fetch failure) and renders a `banner banner--ok`
+`role="status"` block — the SAME locked CSS class this codebase already
+uses for a positive signal (`SystemHealthPanel.tsx` et al.), never a new
+class invented for this — labelled via the existing `surahLabel()`/
+`OFFERED_SURAHS` helper `OnboardingFlow.tsx` already uses, falling back to
+the bare surah number for the identical reason that file does.
+
+**Verified:** RED confirmed directly, twice. Engine level: 3 new
+`run.test.ts` cases (surah 112, 4 ayat — seeded via the same `append()`
+S3-then-`gate_result` technique v3-D101's own block uses) run against the
+tree before `surahCompletionFor` existed, all three failed on
+`surahCompletionFor is not a function`; implemented, reran: `run.test.ts`
+128/128 green (was 125, +3). The load-bearing case confirms the real
+precondition directly (`gateItems.length === ayahCount`, i.e. this one
+session's queue genuinely CAN finish the whole surah in one sitting) before
+driving a local, correctly-ordered tap loop (NOT this file's own shared
+`playThrough`, whose taps are stamped at a fixed `T0`-anchored `now` that
+would corrupt the before/after `ts` comparison — the same precedent
+v3-D133 itself set) to completion, then asserts all four atoms'
+`gatePassed` directly before asserting the function itself reports `true`.
+A second case proves no re-report on a later session of an already-complete
+surah; a third proves `false` when every ayah but one is gated. Component
+level: `git stash` of `SessionIsland.tsx` alone (both new
+`session-island.test.tsx` cases kept, 37 pre-existing cases in the file
+untouched) failed exactly the positive case on
+`screen.findByTestId("surah-completed-celebration")` timing out (the
+negative case passed vacuously, correctly — it never depended on the fix,
+since no celebration code existed at all either way); restored
+byte-identically, reran: `test/session-island.test.tsx` 39/39 green (was
+37, +2). The positive component case cannot use this file's own
+`completeSession()`/`driveOneBlank()` trial-and-error driver for the final
+gate (a coin-flip wrong tap would be a genuine slip, falsifying the pass) —
+mirrors the existing cold-success-adoption block's own technique instead:
+precomputes the exact correct DISPLAY index at each blank PURELY
+(`advanceReconstruct`, Absolute A — no DB write), then clicks exactly that
+tile on the real DOM.
+
+`TZ=UTC make test`: 2996 passing (was 2991, +5 — exactly this run's new
+tests: 3 engine-caller + 2 component; apps/web 1625, was 1620; no other
+suite moved: 255 v2 vitest, 47 v2/api, 412 v3/api, 120 corpus-compiler, 466
+engine, 71 fold-runner). `check-test-floor.mjs`: OK, 2996 >= floor 1899
+(+1097 margin, unmoved, same discipline as every prior entry). `TZ=UTC make
+build`: exit 0, 30 routes, unchanged (a `lib/session/run.ts`-plus-one-
+component change, no new route or production file). `npm run gates`: all
+green — locked-css OK, 1 documented hunk, 294 v1 lines byte-identical;
+boundaries OK, 327 files (the one-file fluctuation vs. this run's own
+earlier 326 is the same pre-existing gitignored `next-env.d.ts` Next.js
+bootstrap-artifact fluctuation this file has recorded roughly two dozen
+times before, confirmed via `git status --porcelain` showing no new
+production file in this diff); fonts degraded-but-non-blocking,
+pre-existing, 2/6 UI fonts present; corpus-morphology OK, 362 words;
+corpus-glyphs OK, 206 codepoints across 4 artifacts — all unchanged, this
+diff carries no corpus data. `npx tsc --noEmit`, run separately across all
+four v3 node packages: clean in all four. No PHP file changed, so `pint`
+was not applicable. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite
+was reverted before committing, same discipline as every prior entry —
+`git status --porcelain -- v1 v2` empty immediately before committing). No
+Arabic codepoint (all four changed files swept programmatically, in
+Python, over the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks, plus a `fromCharCode`/`fromCodePoint`
+mention check: CLEAN — every new string is a TypeScript identifier, a
+wire-adjacent docblock sentence, a fixed English caption, or a synthetic
+fixture coordinate/timestamp, never corpus text). No oracle/golden-log/
+fixture/snapshot regenerated.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled corpus
+anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1); installed PHP
+8.4 cleanly via the documented `packages.sury.org` apt mirror, no refusal
+this run. `HEAD` was found detached exactly at `origin/main`'s own tip
+(`cf27987`, v3-D293), on a stale LOCAL `main` branch ref thirteen commits
+behind — the recurring stale-local-`main` trap this file has recorded
+roughly fifty times since v3-D77 — caught before any exploration via `git
+fetch origin main` + `git checkout main && git merge --ff-only
+origin/main`, a clean fast-forward, no work lost or at risk. `make setup`
+ran clean end to end from a cold checkout (the `v3/api` composer install
+hit the documented transient proxy timeout on several `sebastian/*`
+packages' dist downloads and recovered automatically via the git-mirror
+fallback, no retry flag needed).
+
+NOT addressed: every item on v3-D293's own "NOT addressed" list, unchanged
+— `acknowledgeReentry`'s own "makeup" branch still only logs and points the
+learner at `/home` (v3-D256's verdict unchanged); `DrillPicker.tsx`'s own
+unused `now` prop; the unused `atoms`/`corpus`/`sessions` IndexedDB object
+stores (v3-D232); `session_start`'s own latency metric (v0.8); the
+streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate` as a whole
+class (v3-D88, v3-D151, v3-D219); `App\Flags\FlagService::enabled()`
+(v3-D197); multi-surah enrollment; the operational mailer/7-night launch
+window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`
+(v3-D188); `selection_determinism_check` still replaying a committed
+fixture; `QueueItem.score`'s own missing external reader (v3-D263);
+`worker/fold-runner/src/selectionCheck.ts`'s cosmetic `tracesCompared`
+statistic (v3-D286); `concreteItems()`'s own decaying `reviews` count at
+day offsets +2/+3 (v3-D289) — all unchanged. WIREFRAME's own "Surah
+completed" distinct-completion-state requirement is now CLOSED — remove it
+from future sweeps. Also noted but not pursued, named so a future run does
+not re-walk it: the celebration fires once per surah per device's own local
+log; a learner's SECOND device, syncing the same completing event later,
+would independently (and correctly, by this function's own "before vs.
+after this session's startedAt" logic) see `false` on its own next summary
+screen, since by the time it next asks, the surah was already complete
+before ITS OWN `startedAt` — the identical "no re-report" property, just
+from a second vantage point, not a gap.
