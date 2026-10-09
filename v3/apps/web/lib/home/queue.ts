@@ -21,10 +21,13 @@
 // WHY THE COUNT COMES FROM `assembleFor` AND NOT FROM A CHEAPER APPROXIMATION
 // ---------------------------------------------------------------------------
 // It would be easy — and wrong — to walk the atoms here and count the ones that
-// look due. `components/plan/PlanIsland.tsx#dueToday` does exactly that, and the
-// number it gets is an APPROXIMATION of the queue: it knows nothing about the
-// time budget, the make-up merge, the gate tolerance or the Learn interleave,
-// all of which change how many items a session actually serves.
+// look due. `/plan`'s "Today" row (`lib/plan/dueToday.ts`) walks the atoms, and
+// since v3-D295 it asks the scheduler's OWN predicates (`isReviewDue`,
+// `gateDue`, `unlockPermitted`) rather than a lookalike rule — but it still
+// reports what is DUE, before the time budget fits it and before the make-up
+// cap splits it, both of which change how many items a session actually
+// serves. That is the right number for a forecast row and the wrong one for a
+// "Start" button.
 //
 // A dashboard that says "5 items due" and then hands over a session of 3 has
 // broken the one promise this product makes about its numbers (§10: the numbers

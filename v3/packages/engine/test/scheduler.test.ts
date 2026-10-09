@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { initAtom, type AtomState } from "../src/atom.ts";
 import { scheduleGate } from "../src/gate.ts";
-import { assembleQueue, makeupDeferredCount, MAKEUP_CAP } from "../src/scheduler.ts";
+import { assembleQueue, isReviewDue, makeupDeferredCount, MAKEUP_CAP, REVIEW_RISK_THRESHOLD } from "../src/scheduler.ts";
 import { DEFAULT_DAY_CONFIG } from "../src/daybound.ts";
 
 const DAY = 86_400_000;
@@ -310,5 +310,59 @@ describe("v3-D260 — the make-up cap keeps biting across consecutive sessions, 
     });
     expect(third.filter((i) => i.kind === "makeup").map((i) => i.ayah)).toEqual([7, 8, 9]);
     expect(makeupDeferredCount(afterSecond, 12, thirdNow)).toBe(0);
+  });
+});
+
+// v3-D295 — `assembleQueue`'s step 3 ("which encoded atoms are due for review
+// today") was decided inline, with no exported predicate, so the one other
+// place that needs the same answer — `/plan`'s "Today" row
+// (`apps/web/lib/plan/dueToday.ts`) — re-derived it with a DIFFERENT rule
+// ("encoded and not yet in the carry band") that disagreed in both
+// directions. `isReviewDue` is now the one decision both read; these cases pin
+// that it IS the scheduler's own admission rule, not a lookalike.
+describe("isReviewDue — the scheduler's own review-admission predicate (v3-D295)", () => {
+  const now = atUtc(2026, 7, 14, 8);
+  const bigBudget = { day: DEFAULT_DAY_CONFIG, budgetMin: 10_000 };
+
+  function reviewKeys(atoms: AtomState[]): string[] {
+    return assembleQueue({ surah: 12, atoms, now, wordCounts, cfg: bigBudget })
+      .filter((q) => q.kind === "review")
+      .map((q) => q.atomKey)
+      .sort();
+  }
+
+  it("admits exactly the atoms assembleQueue queues as reviews, given an unbounded budget", () => {
+    const atoms: AtomState[] = [
+      // decayed, gate passed → due
+      encoded(1, { lastRetrieval: atUtc(2026, 7, 4, 8), stability: 3 }),
+      // retrieved today → risk 0, not due
+      encoded(2, { lastRetrieval: now }),
+      // encoded but its cold gate is still pending → never a review
+      { ...encoded(3, { lastRetrieval: atUtc(2026, 7, 1, 8) }), gatePassed: false, gateDueAt: now + DAY },
+      // not encoded at all → never a review
+      { ...initAtom(12, "ayah", 4), strength: 10, lastRetrieval: atUtc(2026, 7, 1, 8), stability: 1 },
+    ];
+    const viaPredicate = atoms
+      .filter((a) => isReviewDue(a, now, { day: DEFAULT_DAY_CONFIG }))
+      .map((a) => `${a.surah}:${a.kind}:${a.ref}`)
+      .sort();
+    expect(viaPredicate).toEqual(["12:ayah:1"]);
+    expect(viaPredicate).toEqual(reviewKeys(atoms));
+  });
+
+  it("weights a connection atom up exactly as assembleQueue does — same risk, different verdict", () => {
+    // One learning-day elapsed at stability 8: risk = 1 − e^(−1/8) ≈ 0.1175.
+    // Below REVIEW_RISK_THRESHOLD for an ayah; ×DEFAULT_CONN_WEIGHT (1.5)
+    // ≈ 0.176 crosses it for a connection.
+    const t = atUtc(2026, 7, 13, 8);
+    const ayah: AtomState = { ...encoded(5), lastRetrieval: t, stability: 8 };
+    const conn: AtomState = {
+      ...initAtom(12, "connection", 5), encoded: true, gatePassed: true,
+      strength: 60, stability: 8, lastRetrieval: t,
+    };
+    expect(isReviewDue(ayah, now, { day: DEFAULT_DAY_CONFIG })).toBe(false);
+    expect(isReviewDue(conn, now, { day: DEFAULT_DAY_CONFIG })).toBe(true);
+    expect(reviewKeys([ayah, conn])).toEqual(["12:connection:5"]);
+    expect(REVIEW_RISK_THRESHOLD).toBe(0.15);
   });
 });

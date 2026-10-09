@@ -29560,3 +29560,148 @@ after this session's startedAt" logic) see `false` on its own next summary
 screen, since by the time it next asks, the surah was already complete
 before ITS OWN `startedAt` — the identical "no re-report" property, just
 from a second vantage point, not a gap.
+
+### v3-D295 — `/plan`'s "Today" row counted reviews and named Learns by its own rules, not the scheduler's (2026-10-09, nightly)
+
+`components/plan/PlanIsland.tsx#dueToday()` produces `/plan`'s TODAY row,
+the one day WIREFRAME §14 says is "genuinely knowable" and therefore the only
+day that gets named items. Two earlier runs had already reconciled two of its
+three fields with the engine: `gates` (v3-D228, `gateDue()`) and the `learn`
+list's pace ceiling (v3-D238, `candidatesForPace()`). The other two decisions
+inside the same function were never touched. `lib/home/queue.ts`'s own header
+even named the function "an APPROXIMATION of the queue" and called that shape
+wrong, but nothing pinned or fixed it:
+
+- **reviews** were counted as "encoded and `currentBand !== "carry"`". The
+  scheduler (`assembleQueue` step 3) admits a review only when the atom is
+  encoded, its cold gate is **passed**, and `forgettingRisk × weight >
+  REVIEW_RISK_THRESHOLD`. The two rules disagree both ways. On the day a
+  learner first encodes an ayah, that ayah's gate is merely *armed*, yet it
+  read as "1 review". An ayah just reviewed today (risk 0, below carry) read
+  as due. A still-carry-band ayah already past the 0.15 threshold, which the
+  session *does* serve, was not counted at all.
+- **learn** named candidates even while a due cold gate held the scheduler's
+  own `unlockPermitted()` shut (Steady/Maintain tolerance 0; Sprint 1). So
+  `/plan` printed "Learn 112:2" today, and through `forecast.ts#concreteItems`
+  "Gate 112:2" tomorrow, for an unlock the session would never serve.
+
+Neither fix was possible inside the component. `unlockPermitted` is one of
+the three tokens check-boundaries.mjs clause 5 bans from `app/`/`components/`.
+The band comparison `currentBand(...) !== "carry"` had only escaped that same
+clause because its regex matches `band ===`, not `Band(...) !==`.
+
+**Fixed:**
+
+- **Engine** (`scheduler.ts`): step 3's admission rule is now one exported
+  predicate, `isReviewDue(atom, now, cfg)`, alongside its ranking score,
+  `reviewScore()` (connection weight included). `assembleQueue` calls both
+  instead of restating them, so its behavior is byte-identical (all 466
+  pre-existing engine tests, golden-log parity included, unchanged and green).
+- **apps/web**: `dueToday` moved to a new `lib/plan/dueToday.ts`, the same
+  `lib/`-not-view placement `lib/home/queue.ts` already uses. It counts
+  reviews via `isReviewDue` over every atom of the surah (ayah and connection,
+  exactly step 3's set) and gates `learn` on
+  `unlockPermitted(…, paceConfig(pace).gateTolerance)`. `PlanIsland.tsx`
+  re-exports it, so the existing test import is unchanged, and drops its now
+  unused engine imports.
+- **Docs**: `lib/home/queue.ts`'s header was corrected. Its real remaining
+  point still stands: the plan row reports what is DUE, before budget fitting
+  and the make-up cap, so it is right for a forecast and wrong for a "Start"
+  button.
+
+**Verified, RED before green:**
+
+- **Engine RED.** Two new `scheduler.test.ts` cases (`isReviewDue` admits
+  exactly what `assembleQueue` queues as reviews under an unbounded budget;
+  connection weighting flips the verdict at identical risk ≈0.1175) failed on
+  `isReviewDue is not a function`, 14 others passed. GREEN: 16/16, engine
+  468/468 (was 466).
+- **apps/web RED.** Six new `test/plan-due-today.test.ts` cases were run
+  against the completely unmodified source; only the two test files were
+  touched at the time (`git status`). All six failed as predicted:
+  - `expected 1 to be +0` (armed gate)
+  - `expected 1 to be +0` (just retrieved)
+  - `expected +0 to be 1` (carry but past the threshold)
+  - `expected [ { surah: 112, ayah: 2 } ] to deeply equal []` (Steady,
+    gate due)
+  - Sprint with two due gates still listed three Learns
+  - the mixed-log agreement case: `steady reviews: expected 3 to be 2`
+
+  The 9 pre-existing cases passed. Each case asserts its own precondition
+  first (`currentBand`, `forgettingRisk` vs `REVIEW_RISK_THRESHOLD`,
+  `gateDue`), so none can pass vacuously. The agreement case calls the real
+  `assembleQueue` for all three paces and also asserts that the mix genuinely
+  yields 2 reviews and Sprint learns `[5, 6, 7]`. GREEN: 15/15.
+- **No regressions.** `plan-island`, `plan-calendar`, `lib/plan/*`,
+  `home-today` and `session-island` stayed green. One `session-island` case
+  (v3-D217's `Date.now`-spied re-entry test) failed once while running
+  alongside six other files, then passed 39/39 in three isolated reruns and in
+  the full suite. That is load-sensitive timing in a path this diff never
+  touches, so it was recorded rather than "fixed".
+- **`TZ=UTC make test`: 3004 passing** (was 2996, +8, exactly this run's
+  tests). By suite: 255 v2 vitest, 47 v2/api, 412 v3/api (+2 incomplete,
+  6 skipped, unchanged), 120 corpus-compiler, 468 engine, 71 fold-runner,
+  1631 apps/web. `check-test-floor.mjs`: OK, 3004 ≥ 1899 (+1105, floor
+  unmoved).
+- **`TZ=UTC make build`: exit 0, 30 routes, unchanged.** Gates: locked-css OK
+  (294 v1 lines byte-identical); boundaries OK, 327 files; corpus-morphology
+  OK, 362 words; corpus-glyphs OK, 206 codepoints; fonts degraded but
+  non-blocking (pre-existing).
+- **Typecheck.** `npx tsc --noEmit` was clean in engine and apps/web, and
+  `typecheck-v3` ran inside `make test`.
+- **Hygiene.** No `v1/**`/`v2/**` edit (the stray `v2/tsconfig.tsbuildinfo`
+  was reverted). No Arabic codepoint: all six changed or new files were swept
+  in Python across U+0600–06FF, 0750–077F, 08A0–08FF, FB50–FDFF and
+  FE70–FEFF, plus `\u06..`–`\uFE..` escapes and `fromCharCode`/
+  `fromCodePoint`, with 0 hits. No oracle, golden log, fixture or snapshot was
+  regenerated.
+
+**Session start:** a fresh container with no `node_modules`/`vendor`.
+`HEAD`, local `main` and `origin/main` all agreed at `13843ae` after a
+`git fetch origin main`, so the stale-local-`main` trap did not occur this
+run. PHP defaulted to 8.3.6. PHP 8.4.26 was installed via the
+`packages.sury.org` apt mirror (key into `/usr/share/keyrings`, a `noble`
+`sources.list.d` entry), with no refusal. `make setup` completed with rc=0;
+both composer installs recovered from transient dist timeouts through the
+git-mirror fallback. The PHP-independent `npm install`s were run directly in
+parallel.
+
+**Found by:** reading the residue of v3-D228/D238 directly. Those runs fixed
+two fields of `dueToday` and the function still had two more decisions of
+its own. `lib/home/queue.ts`'s self-described "approximation" comment was the
+pointer.
+
+**NOT addressed:** `concreteItems()`'s `Math.max(1, due.reviews - offset)` at
+offsets +1..+3 (v3-D289) is still a guess. It now decays from an honest
+today count, but it still shows "1 review" on those days for a learner with
+nothing reviewable. Fixing it needs a real projection design (which
+not-yet-due atoms cross the threshold by day N), not a wiring fix.
+`PlanIsland.tsx#enrolmentOf` still compares `currentBand(...) !== "carry"`
+inside a component for the ETA's "remaining ayat". That is the same
+clause-5-regex blind spot, but it is a display definition ("not yet carried"),
+not a restatement of a scheduler rule. Widening clause 5's regex to catch
+`Band(...) !==` was considered and left for a deliberate future decision.
+Every other item on v3-D294's own "NOT addressed" list is unchanged:
+
+- `acknowledgeReentry`'s "makeup" branch
+- `DrillPicker.tsx`'s `now` prop
+- the unused IDB stores (v3-D232)
+- `session_start` latency
+- the streak/away-day day-space mismatch (v3-D209)
+- `rhymeClassOf()`
+- `EntitlementMachine::merge()`
+- `TrialAttribution`
+- `regionFromCountry()`
+- `PaywallGate`
+- `FlagService::enabled()`
+- multi-surah enrollment
+- the mailer and 7-night window
+- PAY-1
+- surah 67's scene beats
+- `placement.ts`
+- `MacroFacts.litany.rhymeLabel`
+- `selection_determinism_check`'s fixture replay
+- `QueueItem.score`
+- `tracesCompared`
+
+`dueToday`'s reviews/learn drift is now CLOSED. Remove it from future sweeps.

@@ -53,10 +53,46 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 2996 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3004 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 412 v3/api + 120 corpus-compiler
-             # + 466 engine + 71 fold-runner + 1625 apps/web. (v3-D294, 2026-10-09)
+             # + 468 engine + 71 fold-runner + 1631 apps/web. (v3-D295, 2026-10-09)
+             # NOTE (v3-D295, 2026-10-09): `/plan`'s TODAY row
+             # (`PlanIsland.tsx#dueToday`) counted reviews as "encoded and
+             # not carry band" and named Learns regardless of a due gate —
+             # two rules of its own for decisions `assembleQueue` already
+             # makes (gatePassed + forgettingRisk×weight >
+             # REVIEW_RISK_THRESHOLD; `unlockPermitted` under the pace's
+             # gateTolerance). Wrong both ways: a just-encoded ayah with an
+             # ARMED gate read as a review, a carry-band ayah past the
+             # threshold did not; Steady showed "Learn N" (and, via
+             # forecast.ts, "Gate N" tomorrow) on a day the session serves
+             # none. v3-D228/D238 had fixed this function's other two fields
+             # only; `lib/home/queue.ts`'s header already called it "an
+             # APPROXIMATION of the queue". Fixed: engine `scheduler.ts`
+             # exports `isReviewDue`/`reviewScore` and step 3 calls them
+             # (behavior byte-identical — 466 prior engine tests incl.
+             # golden-log parity unchanged); `dueToday` moved to
+             # `lib/plan/dueToday.ts` (clause 5 bans `unlockPermitted` in a
+             # view — the old band compare only slipped past its regex) and
+             # delegates to both; `PlanIsland.tsx` re-exports it. RED first:
+             # engine 2/16 failed (`isReviewDue is not a function`); apps/web
+             # 6/15 failed against the untouched source exactly as predicted
+             # (incl. a real-`assembleQueue` agreement case: "steady reviews:
+             # expected 3 to be 2"); GREEN 16/16 and 15/15. `TZ=UTC make
+             # test` 3004 (was 2996, +8: engine 468 +2, apps/web 1631 +6);
+             # floor OK +1105. `make build` exit 0, 30 routes; gates green
+             # (boundaries 327). v1/v2 clean (stray tsbuildinfo reverted);
+             # Arabic sweep 0 hits over 6 files; no oracle regenerated.
+             # Session: HEAD/main/origin agreed at 13843ae (no stale-main
+             # trap); PHP 8.4.26 via packages.sury.org. One session-island
+             # re-entry case flaked once under parallel load, 39/39 in three
+             # isolated reruns — untouched path, recorded not "fixed". NOT
+             # addressed: concreteItems' +1..+3 `Math.max(1, reviews-offset)`
+             # guess (v3-D289, needs a projection design); `enrolmentOf`'s
+             # in-component carry compare (display definition, not a
+             # scheduler restatement); every other v3-D294 item unchanged.
+             # See DECISIONS.md v3-D295.
              # NOTE (v3-D294, 2026-10-09): WIREFRAME.md's own learner-facing
              # edge-case table names this row verbatim: "Surah completed |
              # Last ayah passes its gate | Celebrate at the surah level. The

@@ -19,14 +19,14 @@ import type { AtomState } from "@engine/atom.ts";
 import { rebuild } from "@engine/rebuild.ts";
 import { atomKey } from "@engine/atom.ts";
 import { currentBand } from "@engine/strength.ts";
-import { gateDue } from "@engine/gate.ts";
 import { awayDayOffsets, dayIndexOf } from "@engine/awayDays.ts";
-import { candidatesForPace, DEFAULT_PACE_MODE, paceConfig, type PaceMode } from "@engine/pace.ts";
+import { DEFAULT_PACE_MODE, paceConfig, type PaceMode } from "@engine/pace.ts";
 import { currentTz, getEventsForSurah, useLogState, useWriterStatus } from "@/lib/idb";
 import type { LocalEventRow } from "@/lib/idb";
 import { readChoices } from "@/lib/onboarding/choices";
 import { setDayAway } from "@/lib/plan/awayDay";
 import { buildForecast, type EnrolledSurah } from "@/lib/plan/forecast";
+import { dueToday } from "@/lib/plan/dueToday";
 import { EmptyPlanAwayList } from "./EmptyPlanAwayList";
 import { PlanCalendar } from "./PlanCalendar";
 
@@ -188,49 +188,8 @@ function enrolmentOf(corpus: Corpus, atoms: Map<string, AtomState>, now: number)
   };
 }
 
-/** What is actually due right now — the only day genuinely knowable, which is
- *  precisely why it is the only day that gets named items.
- *
- *  Exported for `test/plan-due-today.test.ts` only, which pins two
- *  delegations: (1) `gate.ts#gateDue()` rather than re-deriving its own copy
- *  of the predicate, and (2) `pace.ts#candidatesForPace()` for how many new
- *  ayat the `learn` list may name — Steady's ceiling of 1 is NOT universal
- *  (Sprint=3, Maintain=0) — rather than a second, pace-blind cap. Both are
- *  the "tested resolver exists, the caller re-derives it inline" shape this
- *  build has repeatedly closed elsewhere (v3-D227, v3-D238). `pace` defaults
- *  to Steady so every pre-existing caller/test is unchanged. */
-export function dueToday(
-  corpus: Corpus,
-  atoms: Map<string, AtomState>,
-  now: number,
-  pace: PaceMode = DEFAULT_PACE_MODE,
-) {
-  const surah = corpus.meta.surah;
-  const gates: { surah: number; ayah: number }[] = [];
-  const learnCandidates: number[] = [];
-  let reviews = 0;
-
-  for (let ayah = 1; ayah <= corpus.meta.ayahCount; ayah++) {
-    const atom = atoms.get(atomKey(surah, "ayah", ayah));
-    // `gateDue` is asked FIRST, for any atom that exists, so the delegation
-    // `plan-due-today.test.ts` pins stays discriminating: an inline copy
-    // lacking `gateDue`'s own `encoded` term would still be caught listing a
-    // stray `gateDueAt` on an un-encoded atom.
-    if (atom && gateDue(atom, now)) {
-      gates.push({ surah, ayah });
-    } else if (!atom || !atom.encoded) {
-      // Every unencoded ayah is a real candidate — mirroring `run.ts
-      // #learnCandidatesFor`'s own shape — capped below to the mode's actual
-      // ceiling, never to a hardcoded 1. v3-D252: "unencoded" includes an
-      // atom row that EXISTS with `encoded: false` (a demoted ayah, or an
-      // abandoned Learn pass) — such an atom is never a gate (`gateDue`
-      // requires `encoded`) nor a review (below), so the old `!atom`-only
-      // test listed it nowhere at all.
-      learnCandidates.push(ayah);
-    } else if (currentBand(atom, now) !== "carry") {
-      reviews += 1;
-    }
-  }
-  const learn = candidatesForPace(learnCandidates, pace).map((ayah) => ({ surah, ayah }));
-  return { gates, reviews, learn };
-}
+/** v3-D295: `dueToday` moved to `lib/plan/dueToday.ts` — it asks the
+ *  scheduler's own `unlockPermitted()`/`isReviewDue()`, and a scheduling
+ *  decision may not live in a view (check-boundaries.mjs clause 5).
+ *  Re-exported so `test/plan-due-today.test.ts`'s import is unchanged. */
+export { dueToday } from "@/lib/plan/dueToday";

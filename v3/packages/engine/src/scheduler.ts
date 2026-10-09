@@ -54,6 +54,36 @@ export const DEFAULT_CONN_WEIGHT = 1.5;
  *  `DEFAULT_CONN_WEIGHT` above (v3-D263). */
 export const REVIEW_RISK_THRESHOLD = 0.15;
 
+/** Step 3's ranking score for one atom: forgetting-risk at `now`, weighted up
+ *  for a connection atom. Exported with `isReviewDue` so the scheduler and
+ *  every display that names "reviews due today" read ONE rule (v3-D295). */
+export function reviewScore(
+  atom: AtomState,
+  now: number,
+  cfg: { day?: DayConfig; connectionWeight?: number } = {},
+): number {
+  const weight = atom.kind === "connection" ? (cfg.connectionWeight ?? DEFAULT_CONN_WEIGHT) : 1;
+  return forgettingRisk(atom, now, cfg.day) * weight;
+}
+
+/**
+ * v3-D295 — step 3's own admission rule, as one exported predicate: an atom
+ * is a due review iff it is encoded, its day-1 cold gate has been PASSED (an
+ * armed or pending gate is a gate, never a review), and its weighted
+ * forgetting-risk exceeds `REVIEW_RISK_THRESHOLD`. `assembleQueue` calls this
+ * rather than re-stating it, so `/plan`'s "Today" row
+ * (`apps/web/lib/plan/dueToday.ts`) can never again count reviews by a
+ * different rule than the session serves them by — it previously used
+ * "encoded and not yet in the carry band", which disagreed both ways.
+ */
+export function isReviewDue(
+  atom: AtomState,
+  now: number,
+  cfg: { day?: DayConfig; connectionWeight?: number } = {},
+): boolean {
+  return atom.encoded && atom.gatePassed && reviewScore(atom, now, cfg) > REVIEW_RISK_THRESHOLD;
+}
+
 /**
  * v3-D256 — FR5 "makeup" / edge case #70 ("Churned learner returns after
  * months... queue explosion; makeup caps queue + says what deferred") and
@@ -215,15 +245,12 @@ export function assembleQueue(input: AssembleInput): QueueItem[] {
 
   // 3. DUE REVIEWS — encoded, gate-passed atoms, ranked by forgetting-risk ×
   //    weight (connection atoms weighted up).
+  //    v3-D295: admission is `isReviewDue` — the ONE exported rule — never a
+  //    restatement of it here.
+  const reviewCfg = { day: dayCfg, connectionWeight: connWeight };
   const reviews = atoms
-    .filter((a) => a.encoded && a.gatePassed && !alreadyQueued.has(atomKey(a.surah, a.kind, a.ref)))
-    .map((a) => {
-      const risk = forgettingRisk(a, now, dayCfg);
-      const weight = a.kind === "connection" ? connWeight : 1;
-      return { a, score: risk * weight };
-    })
-    // Only actually-due-ish items (some decay has happened).
-    .filter((r) => r.score > REVIEW_RISK_THRESHOLD)
+    .filter((a) => !alreadyQueued.has(atomKey(a.surah, a.kind, a.ref)) && isReviewDue(a, now, reviewCfg))
+    .map((a) => ({ a, score: reviewScore(a, now, reviewCfg) }))
     .sort((x, y) => y.score - x.score);
   for (const r of reviews) {
     queue.push({

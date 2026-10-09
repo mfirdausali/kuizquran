@@ -38,6 +38,9 @@ import { describe, expect, it } from "vitest";
 import type { AtomState } from "@engine/atom.ts";
 import { initAtom } from "@engine/atom.ts";
 import { gateDue } from "@engine/gate.ts";
+import { assembleQueue, REVIEW_RISK_THRESHOLD } from "@engine/scheduler.ts";
+import { currentBand, forgettingRisk } from "@engine/strength.ts";
+import { candidatesForPace, paceConfig } from "@engine/pace.ts";
 import type { Corpus } from "@engine/types.ts";
 import { dueToday } from "@/components/plan/PlanIsland";
 
@@ -158,5 +161,144 @@ describe("PlanIsland#dueToday lists an un-encoded ayah with an existing atom as 
     const atoms = new Map<string, AtomState>([[`${SURAH}:ayah:1`, encoded]]);
     const result = dueToday(stubCorpus(3), atoms, NOW);
     expect(result.learn).toEqual([{ surah: SURAH, ayah: 2 }]);
+  });
+});
+
+// v3-D295 — `dueToday`'s REVIEW count and its LEARN list were the two halves
+// v3-D228 (gates) and v3-D238 (pace ceiling) never reconciled with the engine.
+// `lib/home/queue.ts`'s own header already named this function "an
+// APPROXIMATION of the queue" and called that shape wrong; nothing pinned it.
+//
+//   reviews — counted "encoded and not yet in the carry band", while the
+//     scheduler (`assembleQueue` step 3) admits a review only when the gate is
+//     PASSED and forgetting-risk x weight exceeds REVIEW_RISK_THRESHOLD. The
+//     two disagree in BOTH directions: a just-encoded ayah whose cold gate is
+//     merely armed was a phantom review; a carry-band ayah past the threshold
+//     was a missed one.
+//   learn — listed Learn candidates even while a due gate holds the
+//     scheduler's own `unlockPermitted()` shut (Steady/Maintain tolerance 0),
+//     so `/plan` named a "Learn N" today — and, via `forecast.ts`, a "Gate N"
+//     tomorrow — that the session would never serve.
+//
+// The agreement cases below call the REAL `assembleQueue` with an unbounded
+// budget (the Today row lists what is DUE; fitting it to minutes is the
+// session's job), so they prove agreement with the scheduler, not with a copy.
+describe("PlanIsland#dueToday's reviews and learn are the scheduler's own decisions (v3-D295)", () => {
+  const DAY = 86_400_000;
+
+  function scheduledFor(atoms: Map<string, AtomState>, ayahCount: number, pace: "steady" | "sprint" | "maintain") {
+    const unencoded: number[] = [];
+    for (let ayah = 1; ayah <= ayahCount; ayah++) {
+      const a = atoms.get(`${SURAH}:ayah:${ayah}`);
+      if (!a || !a.encoded) unencoded.push(ayah);
+    }
+    const cfg = paceConfig(pace);
+    const q = assembleQueue({
+      surah: SURAH,
+      atoms: [...atoms.values()],
+      now: NOW,
+      wordCounts: new Map(),
+      cfg: { budgetMin: 10_000, gateTolerance: cfg.gateTolerance, learnCandidates: candidatesForPace(unencoded, pace) },
+    });
+    return {
+      reviews: q.filter((i) => i.kind === "review").length,
+      learn: q.filter((i) => i.kind === "learn").map((i) => i.ayah),
+    };
+  }
+
+  it("a just-encoded ayah whose cold gate is ARMED (not yet due) is not a review", () => {
+    const justEncoded: AtomState = {
+      ...initAtom(SURAH, "ayah", 1),
+      encoded: true,
+      gatePassed: false,
+      gateDueAt: NOW + DAY,
+      strength: 26,
+      stability: 1,
+      lastRetrieval: NOW - 3_600_000,
+    };
+    // Non-vacuous: the old "not carry" rule DID count this one.
+    expect(currentBand(justEncoded, NOW)).not.toBe("carry");
+    expect(gateDue(justEncoded, NOW)).toBe(false);
+    const atoms = new Map<string, AtomState>([[`${SURAH}:ayah:1`, justEncoded]]);
+    expect(dueToday(stubCorpus(4), atoms, NOW).reviews).toBe(0);
+  });
+
+  it("a gate-passed ayah retrieved moments ago is not yet due for review", () => {
+    const fresh: AtomState = {
+      ...initAtom(SURAH, "ayah", 1),
+      encoded: true,
+      gatePassed: true,
+      strength: 55,
+      stability: 5,
+      lastRetrieval: NOW,
+    };
+    expect(currentBand(fresh, NOW)).toBe("reinforce");
+    expect(forgettingRisk(fresh, NOW)).toBe(0);
+    const atoms = new Map<string, AtomState>([[`${SURAH}:ayah:1`, fresh]]);
+    expect(dueToday(stubCorpus(4), atoms, NOW).reviews).toBe(0);
+  });
+
+  it("a still-carry-band ayah already past the scheduler's risk threshold IS due", () => {
+    const decaying: AtomState = {
+      ...initAtom(SURAH, "ayah", 1),
+      encoded: true,
+      gatePassed: true,
+      strength: 100,
+      stability: 10,
+      lastRetrieval: NOW - 2 * DAY,
+    };
+    // Non-vacuous: the old rule saw "carry" and skipped it, while the
+    // scheduler's own threshold says it is due.
+    expect(currentBand(decaying, NOW)).toBe("carry");
+    expect(forgettingRisk(decaying, NOW)).toBeGreaterThan(REVIEW_RISK_THRESHOLD);
+    const atoms = new Map<string, AtomState>([[`${SURAH}:ayah:1`, decaying]]);
+    expect(dueToday(stubCorpus(4), atoms, NOW).reviews).toBe(1);
+  });
+
+  it("a due cold gate under Steady (tolerance 0) holds Learn shut — no Learn is named", () => {
+    const gated: AtomState = {
+      ...initAtom(SURAH, "ayah", 1),
+      encoded: true,
+      gatePassed: false,
+      gateDueAt: NOW - 1,
+    };
+    const atoms = new Map<string, AtomState>([[`${SURAH}:ayah:1`, gated]]);
+    const result = dueToday(stubCorpus(4), atoms, NOW, "steady");
+    expect(result.gates).toEqual([{ surah: SURAH, ayah: 1 }]);
+    expect(result.learn).toEqual([]);
+  });
+
+  it("Sprint's tolerance of 1 still unlocks past one due gate, but not past two", () => {
+    const gate = (ayah: number): AtomState => ({
+      ...initAtom(SURAH, "ayah", ayah),
+      encoded: true,
+      gatePassed: false,
+      gateDueAt: NOW - 1,
+    });
+    const one = new Map<string, AtomState>([[`${SURAH}:ayah:1`, gate(1)]]);
+    expect(dueToday(stubCorpus(6), one, NOW, "sprint").learn.map((l) => l.ayah)).toEqual([2, 3, 4]);
+    const two = new Map<string, AtomState>([
+      [`${SURAH}:ayah:1`, gate(1)],
+      [`${SURAH}:ayah:2`, gate(2)],
+    ]);
+    expect(dueToday(stubCorpus(6), two, NOW, "sprint").learn).toEqual([]);
+  });
+
+  it("agrees with the real assembleQueue on a mixed log, for every pace", () => {
+    const atoms = new Map<string, AtomState>([
+      [`${SURAH}:ayah:1`, { ...initAtom(SURAH, "ayah", 1), encoded: true, gatePassed: true, strength: 100, stability: 10, lastRetrieval: NOW - 2 * DAY }],
+      [`${SURAH}:ayah:2`, { ...initAtom(SURAH, "ayah", 2), encoded: true, gatePassed: true, strength: 55, stability: 5, lastRetrieval: NOW }],
+      [`${SURAH}:ayah:3`, { ...initAtom(SURAH, "ayah", 3), encoded: true, gatePassed: false, gateDueAt: NOW + DAY, strength: 26, stability: 1, lastRetrieval: NOW - 3_600_000 }],
+      [`${SURAH}:ayah:4`, { ...initAtom(SURAH, "ayah", 4), encoded: true, gatePassed: true, strength: 30, stability: 1, lastRetrieval: NOW - 5 * DAY }],
+    ]);
+    for (const pace of ["steady", "sprint", "maintain"] as const) {
+      const plan = dueToday(stubCorpus(8), atoms, NOW, pace);
+      const engine = scheduledFor(atoms, 8, pace);
+      expect(plan.reviews, `${pace} reviews`).toBe(engine.reviews);
+      expect(plan.learn.map((l) => l.ayah), `${pace} learn`).toEqual(engine.learn);
+    }
+    // Non-vacuous: the mix genuinely has due reviews and genuinely unlocks.
+    expect(scheduledFor(atoms, 8, "steady").reviews).toBe(2);
+    expect(scheduledFor(atoms, 8, "sprint").learn).toEqual([5, 6, 7]);
   });
 });
