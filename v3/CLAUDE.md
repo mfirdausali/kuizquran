@@ -53,10 +53,107 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3010 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3012 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 417 v3/api + 120 corpus-compiler
-             # + 468 engine + 71 fold-runner + 1632 apps/web. (v3-D298, 2026-10-10)
+             # + 468 engine + 73 fold-runner + 1632 apps/web. (v3-D299, 2026-10-10)
+             # NOTE (v3-D299, 2026-10-10): `worker/fold-runner/src/severity.ts
+             # #resetsWindow()` ("Does this severity reset the 7-consecutive-
+             # green-nights window? ... Only a P1 does", quoting BUILD-PLAN.md
+             # directly) had zero production callers anywhere — only
+             # `foldCheck.test.ts` exercises it, in isolation.
+             # `App\Support\NightlyWindowLedger::status()` independently
+             # re-derives the identical rule inline (`if ($sev === 'p1') {
+             # $lastP1 = ...}`, the literal deciding which check caused a
+             # confirmed-P1 window reset) — two implementations of one
+             # decision, in two languages, no shared source, no agreement
+             # test, the same shape this file's own sibling pairs already
+             # closed (`EXIT_CODE`/`SEVERITY_BY_EXIT` v3-D288;
+             # `countsAsGreen()`/the ledger's green-or-warn check v3-D291).
+             # Both sides already agree today — a drift-risk fix, not a live
+             # divergence: a future Severity-taxonomy edit landed in
+             # `severity.ts` alone would silently desync the window's own
+             # reset verdict from what the fold-runner believes.
+             #
+             # Found by a dedicated fresh-sweep agent (Explore) directed at
+             # `worker/fold-runner/src` re-read against its own docblocks and
+             # the TS/PHP boundary; independently re-verified by this run
+             # directly against `severity.ts` and `NightlyWindowLedger.php`'s
+             # real source before writing any test.
+             #
+             # Fixed: new `worker/fold-runner/test/nightlyWindow-
+             # resetsWindow-agreement.test.ts`, mirroring `nightlyWindow-
+             # countsAsGreen-agreement.test.ts`'s own technique — reads
+             # `NightlyWindowLedger.php`'s raw source, regex-parses its own
+             # literal, and asserts agreement with `resetsWindow()` for every
+             # real `Severity` value, plus a no-stray/no-missing case.
+             #
+             # RED confirmed by mutation (both sides already agreed):
+             # `NightlyWindowLedger.php`'s `$sev === 'p1'` check was
+             # temporarily changed to `$sev === 'error'` and both new
+             # assertions failed exactly as predicted, naming both real
+             # values; reverted byte-identically, reran clean: 2/2 green.
+             #
+             # `TZ=UTC make test`: 3012 passing (was 3010, +2 — exactly this
+             # run's two new tests; fold-runner 73, was 71; no other suite
+             # moved: 255 v2 vitest, 47 v2/api, 417 v3/api, 120
+             # corpus-compiler, 468 engine, 1632 apps/web). `check-test-
+             # floor.mjs`: OK, 3012 >= floor 1899 (+1113 margin, unmoved,
+             # same discipline as every prior entry). `TZ=UTC make build`:
+             # exit 0, 30 routes, unchanged (a fold-runner-test-only change,
+             # no apps/web or API file touched — all three staged
+             # corpusHashes byte-identical to v3-D298's own). `npm run
+             # gates`: all green — locked-css OK, 1 documented hunk, 294 v1
+             # lines byte-identical; boundaries OK, 327 files, unchanged
+             # count — no apps/web file in this diff at all; fonts
+             # degraded-but-non-blocking, pre-existing, 2/6 UI fonts
+             # present; corpus-morphology OK, 362 words; corpus-glyphs OK,
+             # 206 codepoints across 4 artifacts — all unchanged, this diff
+             # carries no corpus data. `./vendor/bin/pint --test` on
+             # `NightlyWindowLedger.php` (left untouched in the final diff):
+             # passed. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff produced by
+             # running the suite was reverted before committing, same
+             # discipline as every prior entry — `git status --porcelain --
+             # v1 v2` empty immediately before committing). No Arabic
+             # codepoint (the new file swept programmatically, in Python,
+             # over the Arabic, Arabic Supplement, Arabic Extended-A and
+             # both Presentation Forms Unicode blocks, plus a
+             # `fromCharCode`/`fromCodePoint` mention check: CLEAN — every
+             # new string is a TypeScript identifier, a closed-set severity
+             # literal, or a fixed English docblock sentence, never corpus
+             # text). No oracle/golden-log/fixture/snapshot regenerated.
+             #
+             # Session start: fresh container, no `node_modules`/`vendor`/
+             # compiled corpus anywhere; PHP defaulted to 8.3.6 (`v3/api`
+             # needs >=8.4.1); installed PHP 8.4 cleanly via the documented
+             # `packages.sury.org` apt mirror, no refusal this run — the
+             # four npm-only installs (`v3/apps/web`, `packages/engine`,
+             # `packages/corpus-compiler`, `worker/fold-runner`) were run
+             # directly and in parallel rather than waiting on the
+             # sequential `make setup` chain, the same recovery this file's
+             # history has recorded roughly a dozen times before. `HEAD`,
+             # local `main` and `origin/main` all agreed at `76a833b`
+             # (v3-D298) — no stale-local-`main` trap this run.
+             #
+             # NOT addressed: every item on v3-D298's own "NOT addressed"
+             # list, unchanged — `acknowledgeReentry`'s "makeup" branch;
+             # `DrillPicker.tsx`'s `now` prop; the unused IDB stores
+             # (v3-D232); `session_start` latency; the streak/away-day
+             # day-space mismatch (v3-D209); `rhymeClassOf()`;
+             # `EntitlementMachine::merge()`; `TrialAttribution`;
+             # `regionFromCountry()`; `PaywallGate`; `FlagService::enabled()`;
+             # multi-surah enrollment; the mailer and 7-night window; PAY-1;
+             # surah 67's scene beats; `placement.ts`;
+             # `MacroFacts.litany.rhymeLabel`;
+             # `selection_determinism_check`'s fixture replay;
+             # `QueueItem.score`; `tracesCompared`;
+             # `PlanIsland.tsx#enrolmentOf`'s own clause-5-blind-spot carry
+             # compare (v3-D295, deliberately left); the two TS-side
+             # test-file copies of the launch surah set (deliberately left,
+             # v3-D296) — all unchanged. `resetsWindow()`'s own cross-
+             # runtime duplication is now mechanically guarded — remove it
+             # from future sweeps. See DECISIONS.md v3-D299.
              # NOTE (v3-D298, 2026-10-10): `php artisan nightly:window`'s own
              # console table — the one command HANDOVER.md's C5 describes a
              # human actually running daily to watch the 7-consecutive-
