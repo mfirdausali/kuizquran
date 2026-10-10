@@ -53,10 +53,117 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3012 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3015 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 417 v3/api + 120 corpus-compiler
-             # + 468 engine + 73 fold-runner + 1632 apps/web. (v3-D300, 2026-10-10)
+             # + 468 engine + 73 fold-runner + 1635 apps/web. (v3-D301, 2026-10-10)
+             # NOTE (v3-D301, 2026-10-10): took v3-D300's own named fresh
+             # corner — a live browser driven against the real running
+             # `make dev`/`next start` servers, not the vitest/Playwright
+             # suites, which only ever run against code seconds old. Found a
+             # genuine production-only defect: `app/(app)/plan/page.tsx`
+             # resolves `Date.now()`/`tz` on the server but reads no
+             # request-time API (`params`/`searchParams`), unlike every
+             # sibling clock-reading page — so `next build` PRERENDERED
+             # `/plan` (`○ /plan`) and `next start` replayed the BUILD
+             # instant to every learner forever, confirmed live: two
+             # production requests 4s apart returned the identical `now`,
+             # `x-nextjs-cache: HIT`, `Cache-Control: s-maxage=31536000`.
+             # Consequence: the calendar's dates, "due today", decay, and
+             # the absolute day index `setDayAway` (v3-D207) writes into the
+             # append-only log would all freeze at the deploy instant,
+             # unrepairable once written. Invisible to every prior check:
+             # `next dev` renders per request (no prerendering at all);
+             # Playwright's suite builds seconds before running (a frozen
+             # `now` reads as merely seconds stale); every unit test hands
+             # `PlanIsland` its own `now` prop directly, never exercising
+             # the server page's own render path.
+             #
+             # Fixed with Next's own documented idiom: `await connection()`
+             # (next/server) before the first clock read — "prerendering
+             # stops here." One file, 13 lines (import + call + docblock).
+             #
+             # RED confirmed at two independent layers, both against the
+             # unmodified page: a new `test/request-time-clock.test.ts`
+             # walks every server `page.tsx`/`layout.tsx`, strips comments,
+             # and asserts any clock-reader either calls `await
+             # connection()` first, reads `searchParams`, or reads a
+             # non-prerendered `params` — `/plan` failed exactly this (a
+             # non-vacuity floor of >=6 clock-reading pages guards against a
+             # broken walker). A new `e2e/plan-request-time.test.ts`
+             # (Playwright `request` fixture, against a real `next start`)
+             # asserts two requests 1.1s apart return two DIFFERENT `now`
+             # values parsed from the RSC payload, and no
+             # `x-nextjs-prerender` header — both failed against the
+             # unmodified build exactly as predicted. Implemented, reran
+             # both green; `/plan` now reads `ƒ` (dynamic) in the route
+             # table, not `○`.
+             #
+             # `TZ=UTC make test`: 3015 passing (was 3012, +3 — exactly the
+             # three new cases in `request-time-clock.test.ts`; apps/web
+             # 1635, was 1632; no other suite moved). `check-test-floor.mjs`:
+             # OK, 3015 >= floor 1899 (+1116 margin, unmoved). `TZ=UTC make
+             # build`: exit 0, 30 routes, `/plan` now dynamic, every other
+             # route unchanged. `npm run gates`: all green — locked-css OK,
+             # 1 documented hunk, 294 v1 lines byte-identical; boundaries
+             # OK, 330 files, up from 328 — exactly the two new test files;
+             # fonts degraded-but-non-blocking, pre-existing, 2/6 UI fonts
+             # present; corpus-morphology OK, 362 words; corpus-glyphs OK,
+             # 206 codepoints across 4 artifacts — all unchanged, this diff
+             # carries no corpus data. The e2e file is not part of `make
+             # test` (its own `npm run e2e`, a separate slower runner by
+             # design); the repo's other five e2e specs could not be
+             # re-run this session (need Chromium build 1234, only 1194
+             # installed, `playwright install` correctly not run),
+             # unrelated to this fix. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted before
+             # committing, same discipline as every prior entry). No
+             # Arabic codepoint (both new files and the one changed file
+             # swept programmatically, in Python, over the Arabic, Arabic
+             # Supplement, Arabic Extended-A and both Presentation Forms
+             # Unicode blocks, plus a `fromCharCode`/`fromCodePoint`
+             # mention check: CLEAN — every new string is a TypeScript
+             # identifier, an import path, or a fixed English docblock
+             # sentence, never corpus text). No oracle/golden-log/fixture/
+             # snapshot regenerated.
+             #
+             # Also found on the same click-through, deliberately NOT
+             # fixed this run (one step per run) — the next run's own pick
+             # list, in priority order: D (most serious) — sync almost
+             # never pushes a real learner's events to the server
+             # (`pushOutbox()`'s `NotWriterError` is silently swallowed by
+             # `syncCycle` as `push: null`, and nothing ever retries it —
+             # proved live, a full click-through sent 43 `/api/events`
+             # requests and landed 0 events on the server); B — `/plan`
+             # and `/progress`/`/progress/list` hardcode surah 12 (Yusuf)
+             # regardless of which surah the learner actually enrolled in
+             # (traces to v3-D58); C — the away-day buttons (v3-D207) never
+             # render on a fresh `/plan` load, since `PlanIsland` gates
+             # them on a write lock only `/session`/`/test` ever acquire;
+             # A — ATOMIC surahs (103, 112) show zero joints on their own
+             # ayah-list page, because the macro panel they're deferred to
+             # renders nothing for ATOMIC. Full evidence for all four is in
+             # DECISIONS.md v3-D301. Minor, not pursued: the session
+             # summary reads "1 ayat" (should be singular) for a one-ayah
+             # session.
+             #
+             # NOT addressed: every item on v3-D300's own "NOT addressed"
+             # list, unchanged — `acknowledgeReentry`'s "makeup" branch;
+             # `DrillPicker.tsx`'s `now` prop; the unused IDB stores
+             # (v3-D232); `session_start` latency; the streak/away-day
+             # day-space mismatch (v3-D209); `rhymeClassOf()`;
+             # `EntitlementMachine::merge()`; `TrialAttribution`;
+             # `regionFromCountry()`; `PaywallGate`; `FlagService::enabled()`;
+             # multi-surah enrollment; the mailer and 7-night window;
+             # PAY-1; surah 67's scene beats; `placement.ts`;
+             # `MacroFacts.litany.rhymeLabel`; `selection_determinism_check`'s
+             # fixture replay; `QueueItem.score`; `tracesCompared`;
+             # `PlanIsland.tsx#enrolmentOf`'s own clause-5-blind-spot carry
+             # compare; the two TS-side test-file copies of the launch
+             # surah set; `lib/i18n/dictionaries.ts#isLocale()` — all
+             # unchanged. `/plan`'s build-time prerender freeze is now
+             # CLOSED — remove it from future sweeps. See DECISIONS.md
+             # v3-D301.
              # NOTE (v3-D300, 2026-10-10): tenth empty sweep for this build's
              # recurring "mechanism built and unit-tested, zero production
              # caller / stale docblock / drifted duplicate" bug class (after

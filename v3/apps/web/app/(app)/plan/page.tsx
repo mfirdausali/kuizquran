@@ -52,6 +52,7 @@
 // the finish clause entirely — shipping a date you know is wrong is the exact
 // failure §14 exists to prevent.
 
+import { connection } from "next/server";
 import { loadCorpus, AVAILABLE_SURAHS } from "@/lib/corpus/load";
 import { PlanIsland } from "@/components/plan/PlanIsland";
 
@@ -89,6 +90,18 @@ const FALLBACK_MINUTES_PER_DAY = 8;
 export default async function PlanPage() {
   const surah = AVAILABLE_SURAHS[0]!;
   const corpus = await loadCorpus(surah);
+
+  // REQUEST TIME, NOT BUILD TIME (v3-D301). Nothing else on this page reads a
+  // request-time API (no `params`, no `searchParams`), so without this call
+  // `next build` PRERENDERS /plan and the `Date.now()` below is evaluated once,
+  // at build — `next start` then replayed that one instant to every learner,
+  // cached for a year: the calendar's dates, "due today", decay, and the
+  // absolute day `setDayAway` writes (`dayIndexOf(now) + offset`) all froze at
+  // the deploy. `next dev` renders per request, so only a production render
+  // shows it. `await connection()` is Next's documented "prerendering stops
+  // here" — everything below runs per request. Guarded by
+  // `test/request-time-clock.test.ts` and `e2e/plan-request-time.test.ts`.
+  await connection();
 
   // Resolved once on the server so every zone in one render measures from the
   // same instant. `tz` is passed explicitly down the whole chain — the engine

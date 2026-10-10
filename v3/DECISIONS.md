@@ -30247,3 +30247,137 @@ looking for a rendering/hydration defect automated tests would not catch,
 which is a different verification method from every sweep this file has
 recorded so far) or a willingness to take on one of the larger,
 deliberately-deferred architectural items above.
+
+## v3-D301 (2026-10-10, nightly) — `/plan` prerendered at build time, serving every learner the build instant forever
+
+Took v3-D300's own named fresh corner: a live browser driven against the real
+running `make dev`/`next start` servers, not against the vitest/Playwright
+suites, which (by construction) only ever run against freshly-built code
+seconds old. `make setup` needed PHP 8.4 (default 8.3.6, `v3/api` needs
+>=8.4.1) via the documented `packages.sury.org` apt mirror, no refusal.
+Baseline confirmed exact: `TZ=UTC make test` 3012 passing across all seven
+suites, matching v3-D300's own recorded numbers precisely.
+
+Root cause: `app/(app)/plan/page.tsx` is a Server Component that resolves
+`now = Date.now()` and the server's `tz`, then hands both to `PlanIsland` as
+props — but it reads no request-time API (`params`/`searchParams`), unlike
+every other clock-reading server page in this tree (`/progress`,
+`/progress/list`, `/drill`, `/surah/[surah]`, `/surah/[surah]/[ayah]`, each
+scoped by a dynamic segment or query). Next.js therefore PRERENDERS `/plan`
+at `next build` (`○ /plan` in the route table) — `Date.now()` is evaluated
+exactly ONCE, at build, and `next start` replays that one instant to every
+learner forever, confirmed live: two production requests 4s apart both
+returned the identical `"now"` in the RSC payload, with
+`x-nextjs-cache: HIT` and `Cache-Control: s-maxage=31536000`. Consequence:
+days or weeks after a deploy, `/plan`'s calendar dates, "due today", decay
+and the absolute day index `setDayAway` writes (`dayIndexOf(now) + offset`,
+v3-D207) would all be computed from the BUILD day, not today — a wrong-day
+`day_marked_away` event committed into the append-only log is unrepairable
+after the fact, the same class of consequence E-01's own "afterwards it is
+an unrepairable migration" warning names for a different field. Invisible
+to every existing check: `next dev` renders per request (no prerendering at
+all, so the bug cannot occur there); the Playwright e2e suite builds
+seconds before it runs, so a frozen `now` reads as merely seconds stale; and
+every unit/component test hands `PlanIsland` its own `now` prop directly,
+never exercising the server page's own render path at all.
+
+Fixed with the documented Next idiom for exactly this — `await connection()`
+(from `next/server`) before the first clock read, which is Next's own
+"prerendering stops here, everything after runs per request" signal. One
+file, 13 lines (the import, the call, and a docblock naming the mechanism
+and pointing at both new guards). No other page needed the same fix — all
+five siblings already read a request-time API.
+
+RED confirmed directly, at two independent layers, both against the
+unmodified page before any fix: a new `test/request-time-clock.test.ts`
+walks every Server Component `page.tsx`/`layout.tsx` under `app/`, strips
+comments, and asserts any one that reads `Date.now()`/`new Date()` either
+calls `await connection()` first, reads `searchParams`, or reads a
+non-prerendered `params` — `/plan` failed exactly this, naming itself as
+the one clock-reading page nothing made request-time (a non-vacuity floor
+of >=6 clock-reading pages guards against a broken walker silently finding
+none). A new `e2e/plan-request-time.test.ts` (Playwright, `request` fixture
+only, run against a real `next start` production server) asserts two
+requests 1.1s apart return two DIFFERENT `now` values parsed out of the RSC
+payload, and that the response carries no `x-nextjs-prerender` header —
+both failed against the unmodified build exactly as predicted (`Received:
+<identical value twice>`; header present). Implemented, reran both green;
+a post-fix route-table check confirms `/plan` now reads `ƒ /plan`
+(dynamic), not `○`.
+
+`TZ=UTC make test`: 3015 passing (was 3012, +3 — exactly the three new
+cases in `request-time-clock.test.ts`; apps/web 1635, was 1632; no other
+suite moved: 255 v2 vitest, 47 v2/api, 417 v3/api, 120 corpus-compiler,
+468 engine, 73 fold-runner). `check-test-floor.mjs`: OK, 3015 >= floor
+1899 (+1116 margin, unmoved). `TZ=UTC make build`: exit 0, 30 routes,
+`/plan` now `ƒ` (dynamic), every other route unchanged. `npm run gates`:
+all green — locked-css OK, 1 documented hunk, 294 v1 lines byte-identical;
+boundaries OK, 330 files, up from 328 — exactly the two new test files;
+fonts degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints across 4
+artifacts — all unchanged, this diff carries no corpus data. The e2e file
+is not part of `make test` (its own `npm run e2e`, a separate, slower
+runner by design — see `playwright.config.ts`'s own header); the repo's
+other five e2e specs could not be re-run this session (they need Chromium
+build 1234, only 1194 is installed, and `playwright install` was correctly
+not run), unrelated to this fix. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite
+was reverted before committing, same discipline as every prior entry). No
+Arabic codepoint (both new files and the one changed file swept
+programmatically, in Python, over the Arabic, Arabic Supplement, Arabic
+Extended-A and both Presentation Forms Unicode blocks, plus a
+`fromCharCode`/`fromCodePoint` mention check: CLEAN — every new string is
+a TypeScript identifier, an import path, or a fixed English docblock
+sentence, never corpus text). No oracle/golden-log/fixture/snapshot
+regenerated.
+
+Also found on the same click-through, deliberately NOT fixed this run (one
+step per run) — named here, with the evidence already gathered, so a
+future run does not have to re-walk the same path:
+
+- **D (most serious) — sync almost never pushes a real learner's events to
+  the server.** `pushOutbox()`'s `assertWriter()` throws `NotWriterError`
+  whenever this tab does not hold the write lock; `syncCycle` swallows it as
+  `push: null`; `SyncTrigger`'s own `degraded` never reflects a skipped
+  push, so nothing ever retries it. Sync only fires on mount, `focus` and
+  `online` — proved live: a completed session produced 0 POSTs and 0 server
+  events until a synthetic `focus` event forced one; a full click-through
+  with the API reachable ended with 43 `/api/events` requests sent and 0
+  events landed on the server, while `/home` still read "6 waiting to
+  sync". Needs a real design decision (when to flush after an append; lock
+  scope), not a one-line fix.
+- **B — `/plan` and `/progress`/`/progress/list` hardcode `12` (Yusuf) as
+  the surah to show, regardless of which surah the learner actually
+  enrolled in** (onboarding only ever offers 112/103/67). A learner who
+  completed a real session in 103 saw both tabs say "Nothing recorded yet".
+  Traces to v3-D58's "12 kept first, unchanged" — fixing it needs routing
+  the client-only enrolled-surah choice through these server pages.
+- **C — the away-day buttons (v3-D207) never render on a fresh `/plan`
+  load**, because `PlanIsland` gates them on `useWriterStatus()`, and only
+  `/session`/`/test` ever call `writeLock.acquire()` — the lock stays
+  `pending` unless one of those ran earlier in the same tab. A trade-off
+  against a session open in another tab, not a quick fix.
+- **A — ATOMIC surahs (103, 112) show zero joints on their own ayah-list
+  page.** `SurahAyahListIsland` deliberately filters to ayah rows only ("the
+  macro panel above already renders the joints"), but the macro panel
+  renders nothing at all for ATOMIC — three files (`MacroPanel.tsx`,
+  `MacroPanelIsland.tsx`, the surah page's own comment) all assert the list
+  carries the seams; it measurably does not (67, ARC, shows 29 joints; 103
+  and 112 show 0). Edge case #90 names Al-Asr specifically.
+- Minor, not pursued: the session summary reads "1 ayat" (should be
+  singular "1 ayah") for a one-ayah session.
+
+NOT addressed: every item on v3-D300's own "NOT addressed" list, unchanged
+— `acknowledgeReentry`'s "makeup" branch; `DrillPicker.tsx`'s `now` prop;
+the unused IDB stores (v3-D232); `session_start` latency; the streak/
+away-day day-space mismatch (v3-D209); `rhymeClassOf()`;
+`EntitlementMachine::merge()`; `TrialAttribution`; `regionFromCountry()`;
+`PaywallGate`; `FlagService::enabled()`; multi-surah enrollment; the mailer
+and 7-night window; PAY-1; surah 67's scene beats; `placement.ts`;
+`MacroFacts.litany.rhymeLabel`; `selection_determinism_check`'s fixture
+replay; `QueueItem.score`; `tracesCompared`; `PlanIsland.tsx#enrolmentOf`'s
+own clause-5-blind-spot carry compare; the two TS-side test-file copies of
+the launch surah set; `lib/i18n/dictionaries.ts#isLocale()` — all
+unchanged. The four newly-found-and-left items (D, B, C, A above) are the
+next run's own pick list, in that priority order. `/plan`'s build-time
+prerender freeze is now CLOSED — remove it from future sweeps.
