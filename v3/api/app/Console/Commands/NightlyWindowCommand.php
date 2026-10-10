@@ -95,7 +95,9 @@ class NightlyWindowCommand extends Command
             foreach ($status['nights'] as $n) {
                 $detail = [];
                 foreach ($n['severities'] as $check => $sev) {
-                    $detail[] = str_replace('_determinism_check', '', $check).'='.$sev;
+                    $trigger = $n['triggers'][$check] ?? null;
+                    $detail[] = str_replace('_determinism_check', '', $check).'='.$sev
+                        .($trigger ? " ({$trigger})" : '');
                 }
                 foreach ($n['missing'] as $m) {
                     $detail[] = str_replace('_determinism_check', '', $m).'=MISSING';

@@ -6,6 +6,7 @@ use App\Models\NightlyCheckRun;
 use App\Models\NightlyWindow;
 use App\Support\NightlyWindowLedger;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
 use Tests\TestCase;
 
 /**
@@ -354,6 +355,38 @@ class WindowLedgerTest extends TestCase
 
         $this->night($this->week()[6], 'green');
         $this->artisan('nightly:window')->assertExitCode(0);
+    }
+
+    /**
+     * v3-D225 gave the admin panel and the P1 pager email each night's own
+     * `trigger` (schedule|manual|ci) so a human could tell the real
+     * unattended cron apart from someone quietly re-running the check by
+     * hand every night (HANDOVER.md C5: "the 7-night window needs a human
+     * checking `nightly:window` daily"). The CLI table this command prints
+     * — the one thing that human actually runs — never got it: the
+     * `severities` loop in `NightlyWindowCommand::handle()` formats
+     * `"{check}={severity}"` only. Two checks on the same night with
+     * DIFFERENT triggers prove the fix reads each check's own trigger,
+     * not a single value repeated.
+     */
+    public function test_the_window_command_table_names_each_checks_own_trigger(): void
+    {
+        $this->window();
+        $day = $this->week()[0];
+        $this->appendRun($day, 'fold_determinism_check', 'green', 'schedule');
+        $this->appendRun($day, 'selection_determinism_check', 'green', 'manual');
+
+        // `expectsOutputToContain` matches one Mockery expectation per
+        // `doWrite` CALL — both substrings land in the same table-row call,
+        // so asserting both via that helper only ever lets the first one
+        // fire. Capturing the real buffered output instead (the same
+        // technique `PerUserFoldLockWiringTest`/`OverrideHashRecomputeTest`
+        // already use for `Artisan::call`) checks the actual printed text.
+        Artisan::call('nightly:window');
+        $output = Artisan::output();
+
+        $this->assertStringContainsString('fold=green (schedule)', $output);
+        $this->assertStringContainsString('selection=green (manual)', $output);
     }
 
     public function test_window_start_requires_a_reason(): void

@@ -53,10 +53,104 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3009 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3010 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 416 v3/api + 120 corpus-compiler
-             # + 468 engine + 71 fold-runner + 1632 apps/web. (v3-D297, 2026-10-09)
+             # 255 v2 vitest + 47 v2/api + 417 v3/api + 120 corpus-compiler
+             # + 468 engine + 71 fold-runner + 1632 apps/web. (v3-D298, 2026-10-10)
+             # NOTE (v3-D298, 2026-10-10): `php artisan nightly:window`'s own
+             # console table — the one command HANDOVER.md's C5 describes a
+             # human actually running daily to watch the 7-consecutive-
+             # green-nights launch gate — never named each night's own
+             # `trigger` (schedule|manual|ci). v3-D225 computed it
+             # specifically so a human could tell the real unattended cron
+             # apart from someone quietly re-running `determinism:check
+             # both` by hand every night, and wired it into the admin panel;
+             # v3-D229 wired the identical fact into the P1 pager email.
+             # Neither run touched this command, whose own docblock promises
+             # the gate is "checkable by running one command and looking at
+             # seven dated rows" — `NightlyWindowCommand::handle()`'s
+             # `severities` loop formatted `"{check}={severity}"` only,
+             # dropping `NightlyWindowLedger::nights()`'s own `triggers`
+             # field entirely (only the separate `--json` branch exposed
+             # it). Found by a dedicated fresh-sweep agent (Explore)
+             # directed at Console Commands re-read against their own
+             # docblocks; independently re-verified by this run directly
+             # against `NightlyWindowCommand.php`/`NightlyWindowLedger.php`'s
+             # real source before writing any test.
+             #
+             # Fixed: the severities loop now appends `" ({$trigger})"` from
+             # each check's own `$n['triggers'][$check]` when present — the
+             # identical shape the admin panel already renders.
+             #
+             # RED confirmed directly: a new `WindowLedgerTest` case seeds
+             # one night with two checks carrying DIFFERENT triggers and
+             # asserts the real captured output (`Artisan::call()` +
+             # `Artisan::output()` — Laravel's own `expectsOutputToContain()`
+             # matches one Mockery expectation per `doWrite` call, and both
+             # substrings land in the SAME table-row call, so chaining two
+             # of them silently lets only the first fire, confirmed directly
+             # before switching technique) contains both `fold=green
+             # (schedule)` and `selection=green (manual)`. Run against the
+             # unmodified command it failed exactly as predicted (`Output
+             # does not contain "fold=green (schedule)"`), via `git stash`
+             # of the production file alone, test kept; restored byte-
+             # identically, reran: `WindowLedgerTest` 18/18 green (was 17,
+             # +1).
+             #
+             # `TZ=UTC make test`: 3010 passing (was 3009, +1 — exactly this
+             # run's one new test; v3/api 417, was 416; no other suite
+             # moved). `check-test-floor.mjs`: OK, 3010 >= floor 1899 (+1111
+             # margin, unmoved). `TZ=UTC make build`: exit 0, 30 routes,
+             # unchanged (a backend-only fix, no apps/web file touched).
+             # `npm run gates`: all green — locked-css OK, 1 documented
+             # hunk, 294 v1 lines byte-identical; boundaries OK, 327 files,
+             # unchanged count — no apps/web file in this diff at all;
+             # fonts degraded-but-non-blocking, pre-existing, 2/6 UI fonts
+             # present; corpus-morphology OK, 362 words; corpus-glyphs OK,
+             # 206 codepoints across 4 artifacts — all unchanged.
+             # `./vendor/bin/pint --test` on both changed PHP files: the
+             # production file passed; the test file reports the identical
+             # pre-existing `php_unit_method_casing` finding both before and
+             # after this diff, confirmed by stashing and re-running pint —
+             # pre-existing drift, left alone (this run's own
+             # `fully_qualified_strict_types`/`ordered_imports` findings on
+             # its own first draft were fixed before committing — a genuine
+             # new finding, not left). No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted before
+             # committing, same discipline as every prior entry). No Arabic
+             # codepoint (both changed files swept programmatically, in
+             # Python, over the Arabic, Arabic Supplement, Arabic
+             # Extended-A and both Presentation Forms Unicode blocks, plus a
+             # `fromCharCode`/`fromCodePoint` mention check: CLEAN — every
+             # new string is a PHP identifier, a closed-set trigger literal,
+             # or a fixed English docblock sentence, never corpus text). No
+             # oracle/golden-log/fixture/snapshot regenerated.
+             #
+             # Session start: fresh container, no `node_modules`/`vendor`/
+             # compiled corpus anywhere; PHP defaulted to 8.3.6 (`v3/api`
+             # needs >=8.4.1); installed PHP 8.4 cleanly via the documented
+             # `packages.sury.org` apt mirror, no refusal this run. `HEAD`,
+             # local `main` and `origin/main` all agreed at `312cdec`
+             # (v3-D297) — no stale-local-`main` trap this run.
+             #
+             # NOT addressed: every item on v3-D297's own "NOT addressed"
+             # list, unchanged — `acknowledgeReentry`'s "makeup" branch;
+             # `DrillPicker.tsx`'s `now` prop; the unused IDB stores
+             # (v3-D232); `session_start` latency; the streak/away-day
+             # day-space mismatch (v3-D209); `rhymeClassOf()`;
+             # `EntitlementMachine::merge()`; `TrialAttribution`;
+             # `regionFromCountry()`; `PaywallGate`; `FlagService
+             # ::enabled()`; multi-surah enrollment; the mailer and 7-night
+             # window; PAY-1; surah 67's scene beats; `placement.ts`;
+             # `MacroFacts.litany.rhymeLabel`;
+             # `selection_determinism_check`'s fixture replay;
+             # `QueueItem.score`; `tracesCompared`;
+             # `PlanIsland.tsx#enrolmentOf`'s own clause-5-blind-spot carry
+             # compare (v3-D295, deliberately left); the two TS-side
+             # test-file copies of the launch surah set (deliberately left,
+             # v3-D296) — all unchanged. `nightly:window`'s own missing
+             # trigger column is now CLOSED — remove it from future sweeps.
+             # See DECISIONS.md v3-D298.
              # NOTE (v3-D297, 2026-10-09): `components/admin/PrivacyPanel.tsx
              # #RevealResultView`'s "auto-re-masking" caption lied —
              # `expired` (computed correctly from `result.expiresAt - now`)
