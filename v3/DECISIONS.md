@@ -30120,3 +30120,130 @@ own clause-5-blind-spot carry compare (v3-D295, deliberately left); the two
 TS-side test-file copies of the launch surah set (deliberately left,
 v3-D296) — all unchanged. `resetsWindow()`'s own cross-runtime duplication
 is now mechanically guarded — remove it from future sweeps.
+
+## v3-D300 (2026-10-10, nightly) — tenth empty sweep
+
+Tenth documented empty sweep for this build's recurring "mechanism built
+and unit-tested, zero production caller / stale docblock / drifted
+duplicate" bug class (v3-D82 onward — after v3-D196, v3-D197, v3-D246,
+v3-D248, v3-D254, v3-D262, v3-D267, v3-D274, v3-D275's own nine prior
+empty sweeps). A dedicated fresh-sweep agent (Explore, high effort) was
+dispatched with the full exclusion list this file's own recent entries
+carry (every item still open on v3-D299's own "NOT addressed" list) and
+told not to re-report any of it; this run then independently re-verified
+its report and ran four further checks of its own before concluding the
+sweep was genuinely exhausted this night, rather than trusting the
+agent's own verdict alone.
+
+**Vein 1 (agent) — a full line-by-line re-read of all five Playwright e2e
+specs** (`first-session.test.ts`, `airplane-mode.test.ts`,
+`commit-before-paint.test.ts`, `a11y-geometry.test.ts`,
+`idb-helpers.test.ts`), last fully read at v3-D275, now checked fresh
+against the ~25 nights of session-loop and admin changes since. All five
+read current — no stale tripwire, no reference to a route or control that
+no longer exists.
+
+**Vein 2 (agent) — every custom key in `v3/api/config/*.php`
+cross-checked against its real reader.** `admin.php`, `corpus.php`,
+`events.php`, `nightly.php` (including `run_at_utc`, read by
+`routes/console.php`'s own `->dailyAt(config(...))` schedule),
+`pdpa.php`, `pricing.php` — every registered key has a real, live reader
+somewhere in `v3/api`. No registered-but-unread config key found.
+
+**Vein 3 (agent) — a zero-caller sweep of every Eloquent `BelongsTo`
+relation across all 19 models in `api/app/Models`.** `BillingEvent::user()`,
+`EntitlementTransition::user()` and `AccountDeletionRequest::user()` are
+each declared with zero callers — but every real site queries the raw
+`user_id` FK directly instead (e.g.
+`EntitlementTransition::where('user_id', ...)`), the identical
+already-excluded "raw FK pseudonymized/queried instead of the relation"
+shape this file already recorded by name for `AdminAudit::actor()`
+(v3-D146, re-confirmed non-gap at v3-D267). Not a new finding.
+
+**Vein 4 (this run, independent of the agent) — four further checks.**
+(a) A programmatic zero-external-reference scan over every production
+file under `apps/web/components/**` (every `.tsx`/`.ts` basename grepped
+against the rest of `app/`+`components/`+`lib/`): zero files came back
+with no reference anywhere outside their own file — no orphaned component.
+(b) A repo-wide `TODO`/`FIXME`/`XXX` grep across every production
+`.ts`/`.tsx`/`.php` file in `apps/web`, `api/app`,
+`packages/engine/src`, `packages/corpus-compiler/src` and
+`worker/fold-runner/src`: the only hits are `packages/corpus-compiler/src`'s
+own deliberate `TODO: author scene-beat label for act N` placeholder
+strings (`sceneBeats.ts`/`io.ts`/`report.ts`/`validate.ts`/`types.ts`) for
+surah 67's still-unauthored scene beats (H2, human-only) — `content-
+freeze.mjs` already fails the gate on any such label, so this is the
+mechanism working as designed, not an unaddressed TODO. (c) Re-checked
+`lib/i18n/dictionaries.ts#isLocale()` directly (named a non-gap at
+v3-D163/v3-D267, then quietly dropped from later "NOT addressed" lists
+without ever being fixed) — still has zero callers today, and still for
+the same reason: the file's own docblock states it exists for the
+still-unbuilt `[lang]` route param validator, which has no route to
+attach to yet (locale is single-valued, `DEFAULT_LOCALE` only, until a
+real Malay translation lands per v3-D15). Re-confirmed as the same
+deliberate forward-looking seam as `DrillPicker.tsx`'s own unused `now`
+prop — not a live gap, restored to this run's own "NOT addressed" list
+below so it stops silently vanishing from future ones. (d) `git log
+--diff-filter=A` over `apps/web/lib`, `apps/web/components` and `api/app`
+for the 20 most recently ADDED production files: the newest is
+`lib/plan/dueToday.ts` (v3-D295, already closed); every file added since
+is a test file, not a new production surface for a fresh sweep to find a
+gap in.
+
+No genuine new instance of this bug class was found in any of the four
+veins. `TZ=UTC make test`: 3012 passing, matching v3-D299's own recorded
+count exactly across every one of the seven suites (255 v2 vitest, 47
+v2/api, 417 v3/api, 120 corpus-compiler, 468 engine, 73 fold-runner, 1632
+apps/web) — no drift. `check-test-floor.mjs`: OK, 3012 >= floor 1899
+(+1113 margin, unmoved). `TZ=UTC make build`: exit 0, 30 routes,
+unchanged. `npm run gates`: all green — locked-css OK, 1 documented hunk,
+294 v1 lines byte-identical; boundaries OK, 328 files (up one from
+v3-D299's own 327 — the pre-existing gitignored `next-env.d.ts` Next.js
+bootstrap-artifact fluctuation this file has recorded roughly two dozen
+times before, confirmed via `git status --porcelain --ignored`, not a new
+production file — `git status --porcelain` shows no new tracked file
+anywhere in this diff); fonts degraded-but-non-blocking, pre-existing,
+2/6 UI fonts present; corpus-morphology OK, 362 words; corpus-glyphs OK,
+206 codepoints across 4 artifacts — all unchanged. No file touched
+(`git status --porcelain` empty throughout this run's own investigation,
+apart from this documentation commit — a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff produced by running the suite was reverted before
+committing, same discipline as every prior entry). No `v1/**`/`v2/**`
+edit. No Arabic codepoint (nothing written to any production or test
+file this run).
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1);
+installed PHP 8.4 cleanly via the documented `packages.sury.org` apt
+mirror, no refusal this run — the four npm-only installs
+(`v3/apps/web`, `packages/engine`, `packages/corpus-compiler`,
+`worker/fold-runner`) were run directly and in parallel rather than
+waiting on the sequential `make setup` chain, the same recovery this
+file's history has recorded roughly a dozen times before; both
+`composer install`s (`v2/api`, `v3/api`) completed clean on the first
+attempt, no transient-proxy retry needed. `HEAD`, local `main` and
+`origin/main` all agreed at `bac17b5` (v3-D299) — no stale-local-`main`
+trap this run, confirmed directly via `git fetch origin main` before any
+exploration.
+
+NOT addressed: every item on v3-D299's own "NOT addressed" list,
+unchanged — `acknowledgeReentry`'s "makeup" branch; `DrillPicker.tsx`'s
+`now` prop; the unused IDB stores (v3-D232); `session_start` latency;
+the streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()`;
+`EntitlementMachine::merge()`; `TrialAttribution`; `regionFromCountry()`;
+`PaywallGate`; `FlagService::enabled()`; multi-surah enrollment; the
+mailer and 7-night window; PAY-1; surah 67's scene beats; `placement.ts`;
+`MacroFacts.litany.rhymeLabel`; `selection_determinism_check`'s fixture
+replay; `QueueItem.score`; `tracesCompared`; `PlanIsland.tsx#enrolmentOf`'s
+own clause-5-blind-spot carry compare; the two TS-side test-file copies
+of the launch surah set — all unchanged. Newly re-named, not new:
+`lib/i18n/dictionaries.ts#isLocale()` (above) — a genuinely real,
+genuinely deliberate zero-caller seam, not a gap; keep it off future
+"zero-caller" candidate lists but do not let it silently vanish from this
+list again either. A future run should not spend a full night on an
+eleventh generic sweep of this exact shape without either a genuinely
+fresh corner (not yet tried: a live-browser click-through of `make dev`
+looking for a rendering/hydration defect automated tests would not catch,
+which is a different verification method from every sweep this file has
+recorded so far) or a willingness to take on one of the larger,
+deliberately-deferred architectural items above.

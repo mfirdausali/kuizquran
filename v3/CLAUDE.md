@@ -56,7 +56,110 @@ make dev     # SPA :5273, API :8000
 make test    # 3012 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 417 v3/api + 120 corpus-compiler
-             # + 468 engine + 73 fold-runner + 1632 apps/web. (v3-D299, 2026-10-10)
+             # + 468 engine + 73 fold-runner + 1632 apps/web. (v3-D300, 2026-10-10)
+             # NOTE (v3-D300, 2026-10-10): tenth empty sweep for this build's
+             # recurring "mechanism built and unit-tested, zero production
+             # caller / stale docblock / drifted duplicate" bug class (after
+             # v3-D196, v3-D197, v3-D246, v3-D248, v3-D254, v3-D262, v3-D267,
+             # v3-D274, v3-D275's own nine prior empty sweeps). A dedicated
+             # fresh-sweep agent (Explore, high effort) was handed the full
+             # exclusion list this file's own recent entries carry and told
+             # not to re-report any of it; this run independently
+             # re-verified its report and ran four further checks of its own:
+             #
+             # (1) agent — a full line-by-line re-read of all five Playwright
+             # e2e specs (last fully read at v3-D275), fresh against the ~25
+             # nights of session-loop/admin changes since: all five read
+             # current, no stale tripwire.
+             # (2) agent — every custom key in `v3/api/config/*.php`
+             # cross-checked against its real reader: all have one.
+             # (3) agent — a zero-caller sweep of every Eloquent `BelongsTo`
+             # relation across all 19 `api/app/Models`: the three zero-caller
+             # ones (`BillingEvent::user()`, `EntitlementTransition::user()`,
+             # `AccountDeletionRequest::user()`) are each the already-excluded
+             # "raw FK queried instead of the relation" shape (v3-D146/D267).
+             # (4) this run — a zero-external-reference scan over every
+             # `apps/web/components/**` file (none orphaned); a repo-wide
+             # TODO/FIXME/XXX grep (the only hits are
+             # `packages/corpus-compiler/src`'s own deliberate scene-beat
+             # placeholder strings for surah 67, H2, human-only — the gate
+             # already fails on them by design); a re-check of
+             # `lib/i18n/dictionaries.ts#isLocale()` (named a non-gap at
+             # v3-D163/D267, then silently dropped from later "NOT addressed"
+             # lists without being fixed — still zero callers, still the
+             # same deliberate `[lang]`-route seam with nothing to attach to
+             # yet, restored to this run's own list below so it stops
+             # vanishing); and a `git log --diff-filter=A` scan of the 20
+             # most recently added production files under `apps/web/lib`,
+             # `apps/web/components` and `api/app` (the newest,
+             # `lib/plan/dueToday.ts`, is already closed, v3-D295; everything
+             # since is test-only).
+             #
+             # No genuine new instance found in any of the four veins.
+             # `TZ=UTC make test`: 3012 passing, matching v3-D299's own
+             # recorded count exactly across all seven suites (255 v2
+             # vitest, 47 v2/api, 417 v3/api, 120 corpus-compiler, 468
+             # engine, 73 fold-runner, 1632 apps/web) — no drift.
+             # `check-test-floor.mjs`: OK, 3012 >= floor 1899 (+1113 margin,
+             # unmoved). `TZ=UTC make build`: exit 0, 30 routes, unchanged.
+             # `npm run gates`: all green — locked-css OK, 1 documented
+             # hunk, 294 v1 lines byte-identical; boundaries OK, 328 files,
+             # up one from v3-D299's own 327 — the pre-existing gitignored
+             # `next-env.d.ts` Next.js bootstrap-artifact fluctuation this
+             # file has recorded roughly two dozen times before, confirmed
+             # via `git status --porcelain --ignored`, not a new production
+             # file; fonts degraded-but-non-blocking, pre-existing, 2/6 UI
+             # fonts present; corpus-morphology OK, 362 words; corpus-glyphs
+             # OK, 206 codepoints across 4 artifacts — all unchanged. No
+             # file touched (`git status --porcelain` empty throughout this
+             # run's own investigation, apart from this documentation
+             # commit — a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+             # produced by running the suite was reverted before committing,
+             # same discipline as every prior entry). No `v1/**`/`v2/**`
+             # edit. No Arabic codepoint (nothing written to any production
+             # or test file this run).
+             #
+             # Session start: fresh container, no `node_modules`/`vendor`/
+             # compiled corpus anywhere; PHP defaulted to 8.3.6 (`v3/api`
+             # needs >=8.4.1); installed PHP 8.4 cleanly via the documented
+             # `packages.sury.org` apt mirror, no refusal this run — the
+             # four npm-only installs (`v3/apps/web`, `packages/engine`,
+             # `packages/corpus-compiler`, `worker/fold-runner`) were run
+             # directly and in parallel rather than waiting on the
+             # sequential `make setup` chain, the same recovery this file's
+             # history has recorded roughly a dozen times before; both
+             # `composer install`s (`v2/api`, `v3/api`) completed clean on
+             # the first attempt, no transient-proxy retry needed. `HEAD`,
+             # local `main` and `origin/main` all agreed at `bac17b5`
+             # (v3-D299) — no stale-local-`main` trap this run.
+             #
+             # NOT addressed: every item on v3-D299's own "NOT addressed"
+             # list, unchanged — `acknowledgeReentry`'s "makeup" branch;
+             # `DrillPicker.tsx`'s `now` prop; the unused IDB stores
+             # (v3-D232); `session_start` latency; the streak/away-day
+             # day-space mismatch (v3-D209); `rhymeClassOf()`;
+             # `EntitlementMachine::merge()`; `TrialAttribution`;
+             # `regionFromCountry()`; `PaywallGate`; `FlagService::enabled()`;
+             # multi-surah enrollment; the mailer and 7-night window; PAY-1;
+             # surah 67's scene beats; `placement.ts`;
+             # `MacroFacts.litany.rhymeLabel`;
+             # `selection_determinism_check`'s fixture replay;
+             # `QueueItem.score`; `tracesCompared`;
+             # `PlanIsland.tsx#enrolmentOf`'s own clause-5-blind-spot carry
+             # compare; the two TS-side test-file copies of the launch
+             # surah set — all unchanged. Newly re-named, not new:
+             # `lib/i18n/dictionaries.ts#isLocale()` — a genuinely real,
+             # genuinely deliberate zero-caller seam, not a gap; keep it off
+             # future "zero-caller" candidate lists but do not let it
+             # silently vanish from this list again either. A future run
+             # should not spend a full night on an eleventh generic sweep of
+             # this exact shape without either a genuinely fresh corner (not
+             # yet tried: a live-browser click-through of `make dev` looking
+             # for a rendering/hydration defect automated tests would not
+             # catch — a different verification method from every sweep
+             # this file has recorded so far) or a willingness to take on
+             # one of the larger, deliberately-deferred architectural items
+             # above. See DECISIONS.md v3-D300.
              # NOTE (v3-D299, 2026-10-10): `worker/fold-runner/src/severity.ts
              # #resetsWindow()` ("Does this severity reset the 7-consecutive-
              # green-nights window? ... Only a P1 does", quoting BUILD-PLAN.md
