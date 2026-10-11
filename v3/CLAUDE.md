@@ -53,10 +53,124 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3015 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3017 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 417 v3/api + 120 corpus-compiler
-             # + 468 engine + 73 fold-runner + 1635 apps/web. (v3-D301, 2026-10-10)
+             # + 468 engine + 73 fold-runner + 1637 apps/web. (v3-D302, 2026-10-11)
+             # NOTE (v3-D302, 2026-10-11): picked up v3-D301's own pick
+             # list, item D, named "most serious" there: a completed real
+             # session sent 0 POSTs and landed 0 events on the server,
+             # confirmed live, until an unrelated `focus` event forced one.
+             # Root cause, confirmed directly: `lib/sync/sync.ts
+             # #pushOutbox()`'s `assertWriter()` throws `NotWriterError`
+             # whenever this tab is not the write-lock writer;
+             # `syncCycle()` reports `push: null`.
+             # `components/shell/SyncTrigger.tsx` mounts exactly once, in
+             # the root layout, and `writeLock.acquire()` is called ONLY by
+             # `SessionIsland.tsx`/`TestIsland.tsx` on `/session`/`/test`
+             # mount — well after `SyncTrigger`'s own mount — so the first
+             # cycle's push always fails, and `degraded` never looked at
+             # `result.push === null` at all, so no backoff retry was ever
+             # scheduled either. The only path to a later push was an
+             # unrelated `online`/`focus` event happening to fire.
+             #
+             # Fixed, two changes: (1) `SyncTrigger` now subscribes to
+             # `writeLock` and fires an immediate retry the moment this
+             # tab's role transitions to `"writer"` — the first instant a
+             # push can possibly succeed, exactly the moment a real
+             # `/session`/`/test` mount reaches; (2) `degraded` now also
+             # treats `result.push === null && result.pending > 0` as a
+             # real, retryable failure — the safety net for a tab that
+             # NEVER becomes the writer at all (another tab holds it for
+             # the whole page life), where (1) alone could never help,
+             # relying instead on the existing capped backoff. Neither
+             # change touches when an append flushes or widens the
+             # write-lock's own scope — both real, larger design questions
+             # left for a future run, same as v3-D301 itself flagged.
+             #
+             # RED confirmed directly: both new cases, run against the
+             # unmodified `SyncTrigger.tsx`, failed exactly as predicted —
+             # the writer-transition case on `expected false to be true`
+             # (zero POSTs ever sent even after forcing the tab to writer);
+             # the backoff-safety-net case on a timeout (no retry ever
+             # scheduled with the tab staying a reader forever). Restored,
+             # reran: `test/sync-trigger.test.tsx` 16/16 green (was 14, +2).
+             # One authoring mistake caught before this note was written:
+             # the backoff case's first draft called `vi.useFakeTimers()`
+             # BEFORE `append()`, which hung indefinitely — fake-indexeddb
+             # schedules some of its own internal steps via real zero-delay
+             # timers, so faking the clock before a real IDB write leaves
+             # nothing to advance it in between; fixed by moving
+             # `vi.useFakeTimers()` to immediately after the seed
+             # `append()` resolves.
+             #
+             # `TZ=UTC make test`: 3017 passing (was 3015, +2 — exactly
+             # these two new cases; apps/web 1637, was 1635; no other suite
+             # moved: 255 v2 vitest, 47 v2/api, 417 v3/api, 120 corpus-
+             # compiler, 468 engine, 73 fold-runner). `check-test-floor.mjs`:
+             # OK, 3017 >= floor 1899 (+1118 margin, unmoved). `TZ=UTC make
+             # build`: exit 0, 30 routes, unchanged — no new route or
+             # production file, one existing component edited. `npm run
+             # gates`: all green — locked-css OK, 1 documented hunk, 294 v1
+             # lines byte-identical; boundaries OK, 330 files, unchanged
+             # count; fonts degraded-but-non-blocking, pre-existing, 2/6 UI
+             # fonts present; corpus-morphology OK, 362 words; corpus-glyphs
+             # OK, 206 codepoints across 4 artifacts — all unchanged, this
+             # diff carries no corpus data. `npx tsc --noEmit` (apps/web):
+             # clean. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted before
+             # committing, same discipline as every prior entry). No Arabic
+             # codepoint (both changed files swept programmatically, in
+             # Python, over the Arabic, Arabic Supplement, Arabic
+             # Extended-A and both Presentation Forms Unicode blocks, plus
+             # a `fromCharCode`/`fromCodePoint` mention check: CLEAN — every
+             # new string is a TypeScript identifier, a wire field name, or
+             # a fixed English docblock/test-fixture sentence, never corpus
+             # text). No oracle/golden-log/fixture/snapshot regenerated.
+             #
+             # Session start: fresh container, no `node_modules`/`vendor`/
+             # compiled corpus anywhere; PHP defaulted to 8.3.6 (`v3/api`
+             # needs >=8.4.1); installed PHP 8.4 cleanly via the documented
+             # `packages.sury.org` apt mirror, no refusal this run — both
+             # `composer install`s (`v2/api`, `v3/api`) hit the documented
+             # transient git-mirror-clone slowness and were run individually
+             # in the background with `COMPOSER_PROCESS_TIMEOUT=900` rather
+             # than waiting on the sequential `make setup` chain, after the
+             # four PHP-independent `npm install`s ran directly and quickly.
+             # `HEAD`, local `main` and `origin/main` did NOT already agree:
+             # a detached `HEAD` sat at `origin/main`'s own real tip
+             # (`5265aa6`, v3-D301), while local `main` was 22 commits
+             # behind (`977eae0`, v3-D281) — the recurring stale-local-
+             # `main` trap this file has recorded roughly fifty times since
+             # v3-D77 — caught before any exploration via `git fetch origin
+             # main` + `git checkout main && git merge --ff-only
+             # origin/main`, a clean fast-forward, no work lost or at risk.
+             #
+             # NOT addressed: v3-D301's own remaining three findings,
+             # unchanged — B (`/plan`/`/progress`/`/progress/list` hardcode
+             # surah 12 regardless of enrollment); C (the away-day buttons
+             # never render on a fresh `/plan` load — note this run's own
+             # writer-transition subscribe does NOT fix this, since
+             # `PlanIsland` reads `useWriterStatus()` passively and never
+             # itself triggers an acquire); A (ATOMIC surahs 103/112 show
+             # zero joints on their own ayah-list page). Also unchanged,
+             # every item on v3-D300's own "NOT addressed" list:
+             # `acknowledgeReentry`'s "makeup" branch; `DrillPicker.tsx`'s
+             # `now` prop; the unused IDB stores (v3-D232); `session_start`
+             # latency; the streak/away-day day-space mismatch (v3-D209);
+             # `rhymeClassOf()`; `EntitlementMachine::merge()`;
+             # `TrialAttribution`; `regionFromCountry()`; `PaywallGate`;
+             # `FlagService::enabled()`; multi-surah enrollment; the mailer
+             # and 7-night window; PAY-1; surah 67's scene beats;
+             # `placement.ts`; `MacroFacts.litany.rhymeLabel`;
+             # `selection_determinism_check`'s fixture replay;
+             # `QueueItem.score`; `tracesCompared`;
+             # `PlanIsland.tsx#enrolmentOf`'s own clause-5-blind-spot carry
+             # compare; the two TS-side test-file copies of the launch
+             # surah set; `lib/i18n/dictionaries.ts#isLocale()`. Finding D's
+             # own write-lock-scope/flush-timing design question is a real,
+             # separate, larger follow-up this fix deliberately did not
+             # take on. See DECISIONS.md v3-D302.
              # NOTE (v3-D301, 2026-10-10): took v3-D300's own named fresh
              # corner — a live browser driven against the real running
              # `make dev`/`next start` servers, not the vitest/Playwright

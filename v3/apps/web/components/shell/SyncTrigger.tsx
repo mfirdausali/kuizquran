@@ -10,10 +10,18 @@
 // it and flagged it for a future run rather than folding it into an already
 // revenue-boundary change; this is that run.
 //
-// WHEN IT FIRES: mount, plus window `online` and `focus`. Not invented — this
-// mirrors v2's own precedent for this exact question,
-// `v2/src/sync/useBackgroundSync.ts`, which this codebase's prior generation
-// already answered and nothing in v3 supersedes.
+// WHEN IT FIRES: mount, plus window `online` and `focus`, PLUS the moment
+// this tab becomes the write-lock WRITER (v3-D301 finding D). That last one
+// is load-bearing, not an extra: this component mounts once, in the root
+// layout, long before `/session`/`/test` ever call `writeLock.acquire()` —
+// so the mount cycle's own push always fails with `NotWriterError`
+// (`lib/idb/writeLock.ts`), and without a dedicated retry, nothing resends
+// it until an UNRELATED `online`/`focus` event happens to fire. Proved live:
+// a full click-through that completed a real session sent 0 POSTs and
+// landed 0 events on the server until a synthetic `focus` event forced one.
+// `online`/`focus`/mount are ported from v2's own precedent for this exact
+// question, `v2/src/sync/useBackgroundSync.ts`; the writer-transition
+// trigger has no v2 precedent, since v2 had no multi-tab writer lock at all.
 //
 // #103 GOVERNS THIS FILE: "quiet 'N pending' indicator; NEVER BLOCKS A
 // SESSION". This component:
@@ -56,6 +64,7 @@ import { useEffect, useRef } from "react";
 import { backoffMs, shouldAttemptSync, syncCycle } from "@/lib/sync/sync";
 import { syncSummary } from "@/lib/sync/summary";
 import { isTokenDead } from "@/lib/sync/token";
+import { writeLock } from "@/lib/idb/writeLock";
 
 export function SyncTrigger() {
   // Refs, not state: this component never re-renders itself (it always
@@ -92,7 +101,15 @@ export function SyncTrigger() {
       try {
         const result = await syncCycle({ now: Date.now() });
         syncSummary.report(result, isTokenDead());
-        degraded = Boolean(result.push?.degraded || result.pull?.degraded);
+        // `result.push` is `null` only when `pushOutbox` THREW — in practice
+        // always `NotWriterError`, since every other failure mode is caught
+        // inside `pushOutbox` and returned as an ordinary `.degraded` field
+        // (v3-D301 finding D). That is a real, retryable failure whenever
+        // something was actually left to send — never when the outbox was
+        // already empty, which would make an idle reader tab back off
+        // forever for no reason.
+        const pushBlocked = result.push === null && result.pending > 0;
+        degraded = Boolean(result.push?.degraded || result.pull?.degraded || pushBlocked);
       } catch {
         // syncCycle is documented to never throw into its caller. Caught
         // anyway: an effect boundary in this codebase does not trust that
@@ -118,6 +135,25 @@ export function SyncTrigger() {
 
     void runCycle();
 
+    // Becoming the writer is the FIRST moment a push can possibly succeed —
+    // SyncTrigger mounts once, in the root layout, long before `/session` or
+    // `/test` ever call `writeLock.acquire()`. Without this, the mount
+    // cycle's push fails with `NotWriterError` and nothing retries it until
+    // an unrelated `online`/`focus` event happens to fire — a completed
+    // session's events could sit unsent indefinitely (v3-D301 finding D).
+    // `wasWriter` is seeded from the CURRENT status so `subscribe`'s own
+    // synchronous initial callback (fired with today's status, below) is
+    // never itself mistaken for a transition.
+    let wasWriter = writeLock.current.role === "writer";
+    const unsubscribeWriter = writeLock.subscribe((status) => {
+      const isWriter = status.role === "writer";
+      if (!wasWriter && isWriter) {
+        clearRetry();
+        void runCycle();
+      }
+      wasWriter = isWriter;
+    });
+
     const onEvent = () => {
       // A fresh trigger supersedes any pending backoff — the network or the
       // tab is provably alive right now, so waiting out a stale jittered
@@ -132,6 +168,7 @@ export function SyncTrigger() {
     return () => {
       alive = false;
       clearRetry();
+      unsubscribeWriter();
       window.removeEventListener("online", onEvent);
       window.removeEventListener("focus", onEvent);
     };

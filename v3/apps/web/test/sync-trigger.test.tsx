@@ -479,3 +479,74 @@ describe("a degraded cycle schedules exactly one retry via backoffMs, not a spin
     expect(calls.length).toBe(afterRetry);
   });
 });
+
+describe("v3-D301 finding D — push must retry as soon as this tab becomes the writer", () => {
+  it("sends zero POSTs while not the writer, then pushes immediately once it becomes writer — without waiting for a focus/online event", async () => {
+    // Seed one real outbox row while this tab genuinely holds the lock —
+    // matching a real page load where IndexedDB already carries rows left
+    // over from an earlier writer session (events survive a reload; the
+    // module-level WriteLock does not).
+    writeLock.forceForTests({ role: "writer" });
+    await append(
+      { type: "tap", ts: 1_700_000_000_000, surah: 112, ayah: 1, rung: "S1", id: "d301-1" },
+      { now: 1_700_000_000_000, tz: "UTC" },
+    );
+
+    // A fresh page load starts the lock un-acquired — SyncTrigger (mounted
+    // in the root layout) is always first; `/session`/`/test` have not yet
+    // called `writeLock.acquire()`.
+    writeLock.forceForTests({ role: "pending" });
+
+    const calls = installFetch();
+    render(<SyncTrigger />);
+
+    // The mount cycle's pull can still succeed (it needs no lock); its push
+    // cannot — `assertWriter()` throws before any network call, so genuinely
+    // zero POSTs are sent while this tab is not the writer.
+    await waitFor(() =>
+      expect(calls.some((c) => c.url.startsWith("/api/events") && c.method === "GET")).toBe(true),
+    );
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+
+    // The tab becomes the writer later, exactly what a real `/session` mount
+    // does well after SyncTrigger's own mount — the moment a push can first
+    // possibly succeed.
+    await act(async () => {
+      writeLock.forceForTests({ role: "writer" });
+    });
+
+    await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
+  });
+
+  it("still backs off and retries a blocked push when no write-lock transition ever happens, as long as something is genuinely pending", async () => {
+    writeLock.forceForTests({ role: "writer" });
+    await append(
+      { type: "tap", ts: 1_700_000_000_000, surah: 112, ayah: 1, rung: "S1", id: "d301-2" },
+      { now: 1_700_000_000_000, tz: "UTC" },
+    );
+    // This tab never becomes the writer for the rest of the test — another
+    // tab holds it, forever, so the only path to a retry is the backoff
+    // loop reacting to a blocked push, not a writer-transition event.
+    writeLock.forceForTests({ role: "reader", reason: "another-tab" });
+
+    // Faked AFTER `append()` resolves: fake-indexeddb schedules some of its
+    // own internal steps via real zero-delay timers, so faking the clock
+    // before a real IDB write just hangs it forever with nothing to advance
+    // the fake clock in between.
+    vi.useFakeTimers();
+
+    const calls = installFetch();
+    render(<SyncTrigger />);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50);
+    });
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+    const afterMount = calls.length;
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5 * 60_000 + 1_000);
+    });
+    expect(calls.length).toBeGreaterThan(afterMount);
+  });
+});
