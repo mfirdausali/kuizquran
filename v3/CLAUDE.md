@@ -53,10 +53,147 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3017 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3040 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 417 v3/api + 120 corpus-compiler
-             # + 468 engine + 73 fold-runner + 1637 apps/web. (v3-D302, 2026-10-11)
+             # + 468 engine + 73 fold-runner + 1660 apps/web. (v3-D303, 2026-10-11)
+             # NOTE (v3-D303, 2026-10-11): picked up v3-D301's/v3-D302's own
+             # pick list, item B: `/plan` hardcoded `AVAILABLE_SURAHS[0]`
+             # (12/Yusuf) unconditionally, and `/progress`/`/progress/list`
+             # each defaulted to the identical literal whenever no
+             # `?surah=` query param was present — which is every real
+             # visit, since nothing anywhere links to any of the three with
+             # one. A learner enrolled in 103/67/112 saw an honest-LOOKING
+             # but wrong screen: the client island below read its OWN
+             # corpus's real log, against TEXT the server fetched for
+             # Yusuf. Root cause: the real enrollment
+             # (`OnboardingChoices.surah`) lives in IndexedDB; all three
+             # routes are Server Components (edge case #72) and cannot read
+             # it.
+             #
+             # Fixed on v3-D14's own template — "IndexedDB is truth, a
+             # cookie is only a 7-day-ITP-capped HINT" — moved one field
+             # over, onboarding-completion to enrollment. New
+             # `lib/enrollment/surahCookie.ts` names the cookie
+             # (`enrolledSurah`) and exports `resolveSurah(querySurah,
+             # cookieSurah, availableSurahs)`, the ONE place the priority
+             # order (query param, then cookie, then build default) is
+             # decided; new `lib/enrollment/writeSurahCookie.ts` ("use
+             # client") is the sole writer, called by `commitOnboarding`
+             # right after its own IDB `tx.done`, wrapped in try/catch
+             # (several `lib/`-level tests run in vitest's default `node`
+             # environment with no `document` global at all, and call
+             # `commitOnboarding` directly). `/plan`'s own hardcoded literal
+             # became `resolveSurah(undefined, cookie, ...)` (no
+             # query-param support added — nothing links to it with one);
+             # `/progress`'s and `/progress/list`'s own private, duplicated
+             # `parseSurah` helpers are DELETED, both replaced by the one
+             # shared import, closing the exact duplication their own
+             # docblocks already warned about.
+             #
+             # RED confirmed directly, mutation-verified: `git stash` of
+             # the four production files alone (every new test kept) failed
+             # exactly 10 of 23 — both `commitOnboarding` cases, and 8 of 9
+             # wiring-proof cases across all three pages — while the 13
+             # pure-logic cases were unaffected, proving the RED was
+             # carried by the wiring, not a broken fixture; restored
+             # byte-identically, reran: 23/23 green. The three Server
+             # Components' own wiring proof is a source-text scan (they are
+             # `async function`s whose `cookies()` call only resolves
+             # inside a real Next.js request, so `render()` cannot mount
+             # them), mirroring `test/request-time-clock.test.ts`'s own
+             # established technique, deliberately paired with a REAL
+             # behavioral test of `resolveSurah`/
+             # `writeEnrolledSurahCookie` underneath it.
+             #
+             # `TZ=UTC make test`: 3040 passing (was 3017, +23 — exactly
+             # this run's new tests: 8 + 3 + 2 + 10; apps/web 1660, was
+             # 1637; no other suite moved). `check-test-floor.mjs`: OK,
+             # 3040 >= floor 1899 (+1141 margin, unmoved). `TZ=UTC make
+             # build`: exit 0, 30 routes, unchanged — all three pages still
+             # read `ƒ` (dynamic), exactly as before; `/plan`'s own `await
+             # connection()` is kept regardless, since
+             # `test/request-time-clock.test.ts` names it specifically as
+             # that page's documented reason. `npm run gates`: all green —
+             # locked-css OK, 1 documented hunk, 294 v1 lines
+             # byte-identical; boundaries OK, 335 files, up from 330 — this
+             # diff adds 6 new tracked files, the one-file-short arithmetic
+             # being the same pre-existing gitignored `next-env.d.ts`
+             # bootstrap-artifact fluctuation this file has recorded
+             # roughly two dozen times before; fonts
+             # degraded-but-non-blocking, pre-existing, 2/6 UI fonts
+             # present; corpus-morphology OK, 362 words; corpus-glyphs OK,
+             # 206 codepoints across 4 artifacts — all unchanged, this diff
+             # carries no corpus data. `npx tsc --noEmit` (apps/web): clean
+             # (one real iteration caught before this note was written —
+             # the wiring test's first draft passed a second argument to
+             # `expect(...).toMatch()`, which that matcher does not accept;
+             # fixed by moving the explanation into a comment). No
+             # `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff produced by running the v2 build was
+             # reverted before committing, same discipline as every prior
+             # entry). No Arabic codepoint (every new/changed file swept
+             # programmatically, in Python, over the Arabic, Arabic
+             # Supplement, Arabic Extended-A and both Presentation Forms
+             # Unicode blocks, plus a `fromCharCode`/`fromCodePoint`
+             # mention check: CLEAN — every new string is a TypeScript
+             # identifier, a wire field name, a cookie attribute, or a
+             # fixed English docblock sentence, never corpus text). No
+             # oracle/golden-log/fixture/snapshot regenerated.
+             #
+             # Session start: fresh container, no `node_modules`/`vendor`/
+             # compiled corpus anywhere; PHP defaulted to 8.3.6 (`v3/api`
+             # needs >=8.4.1); installed PHP 8.4 cleanly via the documented
+             # `packages.sury.org` apt mirror, no refusal this run
+             # (`php8.4-pcntl` does not exist as a separate package on this
+             # mirror — omitted; pcntl-gated tests skip cleanly without
+             # it). Both Laravel `composer install`s hit the documented
+             # transient `api.github.com` dist-download auth failure and
+             # recovered via the git-mirror source fallback automatically;
+             # `v2/api`'s first attempt (run directly, ahead of `make
+             # setup`) failed on missing `bootstrap/cache`/
+             # `storage/framework` — recovered by running the real `make
+             # setup` afterward, which redid both composer installs quickly
+             # against the now-warm vendor/VCS cache and completed cleanly
+             # in one pass. `HEAD`, local `main` and `origin/main` did NOT
+             # already agree: a detached `HEAD` sat at `origin/main`'s own
+             # real tip (`ed96cd9`, v3-D302), while local `main` was 23
+             # commits behind (`977eae0`, v3-D281) — the recurring
+             # stale-local-`main` trap this file has recorded roughly fifty
+             # times since v3-D77 — caught before any exploration via `git
+             # fetch origin main` + `git checkout main && git merge
+             # --ff-only origin/main`, a clean fast-forward, no work lost
+             # or at risk.
+             #
+             # NOT addressed: v3-D301's/v3-D302's own remaining two
+             # findings, unchanged — C (the away-day buttons never render
+             # on a fresh `/plan` load); A (ATOMIC surahs 103/112 show zero
+             # joints on their own ayah-list page). Also unchanged, every
+             # item on v3-D302's own "NOT addressed" list:
+             # `acknowledgeReentry`'s "makeup" branch; `DrillPicker.tsx`'s
+             # `now` prop; the unused IDB stores (v3-D232); `session_start`
+             # latency; the streak/away-day day-space mismatch (v3-D209);
+             # `rhymeClassOf()`; `EntitlementMachine::merge()`;
+             # `TrialAttribution`; `regionFromCountry()`; `PaywallGate`;
+             # `FlagService::enabled()`; multi-surah enrollment proper
+             # (this fix picks the RIGHT single surah consistently; it does
+             # not add a second enrollment or a combined-load view); the
+             # mailer and 7-night window; PAY-1; surah 67's scene beats;
+             # `placement.ts`; `MacroFacts.litany.rhymeLabel`;
+             # `selection_determinism_check`'s fixture replay;
+             # `QueueItem.score`; `tracesCompared`;
+             # `PlanIsland.tsx#enrolmentOf`'s own clause-5-blind-spot carry
+             # compare; the two TS-side test-file copies of the launch
+             # surah set; `lib/i18n/dictionaries.ts#isLocale()` — all
+             # unchanged. Also NOT built, deliberately: a self-healing
+             # client component that re-syncs the cookie for a device that
+             # onboarded BEFORE this fix existed — new onboarding already
+             # writes it correctly, which is the only real traffic this
+             # pre-launch build has; retrofitting an already-onboarded
+             # device is real but lower-stakes, named here rather than
+             # silently dropped. Finding B is now CLOSED — remove it from
+             # future sweeps. The next run's own pick list, in priority
+             # order: C, then A. See DECISIONS.md v3-D303.
              # NOTE (v3-D302, 2026-10-11): picked up v3-D301's own pick
              # list, item D, named "most serious" there: a completed real
              # session sent 0 POSTs and landed 0 events on the server,

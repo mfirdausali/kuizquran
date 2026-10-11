@@ -42,6 +42,7 @@
 import { openDb } from "@/lib/idb";
 import type { GlossLang } from "@engine/types.ts";
 import type { PaceMode } from "@engine/pace.ts";
+import { writeEnrolledSurahCookie } from "@/lib/enrollment/writeSurahCookie.ts";
 
 /** Placement priors — screen 4's output, and the only optional member.
  *  `skipped` is a first-class answer, not an absence: §17 makes screen 4
@@ -82,6 +83,15 @@ export async function commitOnboarding(
   await tx.store.put({ key: CHOICES, value: choices });
   await tx.store.put({ key: ONBOARDED_AT, value: now });
   await tx.done;
+  // The IDB write above is truth; this is only the hint that lets
+  // `/plan`/`/progress`/`/progress/list` (Server Components) pick the SAME
+  // surah before their first client island ever mounts — see
+  // lib/enrollment/surahCookie.ts's own header (v3-D301/v3-D302 finding B).
+  // Deliberately AFTER `tx.done`, never before: a cookie write can't fail
+  // the way an IDB transaction can, so there is nothing to roll back, but
+  // ordering it after keeps "the IDB write is what makes this enrollment
+  // real" visibly true in the source, not just in practice.
+  writeEnrolledSurahCookie(choices.surah);
 }
 
 /** Read back the committed choices, or null on a device that never onboarded. */

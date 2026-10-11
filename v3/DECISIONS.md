@@ -30512,3 +30512,158 @@ the launch surah set; `lib/i18n/dictionaries.ts#isLocale()`. Finding D's
 own write-lock-scope/flush-timing design question (above) is a real,
 separate, larger follow-up this fix deliberately did not take on. `/plan`'s
 build-time prerender freeze (v3-D301) stays CLOSED.
+
+## v3-D303 (2026-10-11, nightly) — `/plan`, `/progress` and `/progress/list` hardcoded surah 12 regardless of enrollment
+
+Picked up v3-D301's own pick list (confirmed by v3-D302), item B, the second
+most serious of the four: `/plan` hardcoded `const surah =
+AVAILABLE_SURAHS[0]!` (12/Yusuf) unconditionally, and `/progress`/
+`/progress/list` each defaulted to the identical literal whenever no
+`?surah=` query param was present — which is every real visit, since nothing
+anywhere in the app links to any of the three with one. A learner who
+onboarded into 103, 67 or 112 and completed a real session there saw an
+honest-LOOKING but wrong screen: the client island below still read ITS OWN
+corpus's real log, but against TEXT the server had fetched for Yusuf, so
+`/plan`'s calendar and `/progress`'s retention/growth cards both read as
+"Nothing recorded yet" for a learner who had genuinely recorded plenty.
+
+Root cause: the learner's real enrollment (`OnboardingChoices.surah`,
+`lib/onboarding/choices.ts`) lives in IndexedDB, written once at
+`commitOnboarding` — but all three affected routes are Server Components
+(edge case #72's own discipline: a server render has no log, so it must not
+guess), and a Server Component cannot read IndexedDB at all. Nothing had
+ever given them a second way to know.
+
+Fixed on v3-D14's own already-established template — "IndexedDB is truth, a
+cookie is only a 7-day-ITP-capped HINT" — moved one field over from
+onboarding-completion to enrollment itself. New `lib/enrollment/
+surahCookie.ts` names the cookie (`enrolledSurah`) and exports
+`resolveSurah(querySurah, cookieSurah, availableSurahs)`, the ONE place the
+priority order is decided (explicit query param, then the cookie hint, then
+the pre-existing build default) — never re-derived per page, the same "two
+implementations of one decision" shape this build has repeatedly closed
+elsewhere. New `lib/enrollment/writeSurahCookie.ts` ("use client") is the
+sole writer, called once by `commitOnboarding` right after its own IDB
+`tx.done` (ordering kept deliberate in the source: the IDB write is what
+makes the enrollment real, the cookie only approximates it for a server that
+cannot see IDB at all) — wrapped in its own try/catch, since the common
+test environment for `lib/`-level tests (vitest's default `node`
+environment, no DOM) has no `document` global at all, and `commitOnboarding`
+is called from several such tests (`lib/session/run.test.ts` among them)
+that must keep passing with no cookie written. `/plan`'s own `const surah =
+AVAILABLE_SURAHS[0]!` became `resolveSurah(undefined, cookie, ...)`
+(no query-param support was added there — nothing has ever linked to it with
+one, and adding one would be scope beyond the named defect); `/progress`'s
+and `/progress/list`'s own private, duplicated `parseSurah` helpers are
+DELETED, both replaced by the one shared import, closing the exact
+duplication their own docblocks already warned about ("mirrors
+/progress/list's own parser so the two routes can never disagree").
+
+RED confirmed directly, mutation-verified: `git stash` of the four
+production files alone (all new test files kept) and rerunning
+`lib/enrollment/`, `lib/onboarding/choices.test.ts` and
+`test/enrolled-surah-wiring.test.ts` against the unmodified tree failed
+exactly 10 of 23 — both `commitOnboarding` cases (the cookie was never
+written) and 8 of the 9 wiring-proof cases across all three pages (no
+`cookies()` read, no `ENROLLED_SURAH_COOKIE`, no `resolveSurah` import,
+`/plan` still assigning `AVAILABLE_SURAHS[0]` directly) — while the 13
+pure-logic cases in `surahCookie.test.ts`/`writeSurahCookie.test.ts`
+(unaffected by the page/choices revert) passed throughout, proving the RED
+was carried by the wiring, not by a broken fixture. `git stash pop` restored
+the fix byte-identically (`git diff` empty before reapplying); reran: 23/23
+green. The wiring proof for the three Server Components is a source-text
+scan, not a render — they are `async function`s whose `cookies()` call only
+resolves inside a real Next.js request, so `render()` cannot mount them
+directly; this mirrors `test/request-time-clock.test.ts`'s own established
+technique for exactly this constraint, and is deliberately paired with a
+REAL behavioral test of the shared `resolveSurah`/`writeEnrolledSurahCookie`
+logic underneath it, so the source-scan only has to prove wiring, never
+correctness.
+
+`TZ=UTC make test`: 3040 passing (was 3017, +23 — exactly this run's new
+tests: 8 in `surahCookie.test.ts` + 3 in `writeSurahCookie.test.ts` + 2 in
+`choices.test.ts` + 10 in `enrolled-surah-wiring.test.ts`; apps/web 1660,
+was 1637; no other suite moved: 255 v2 vitest, 47 v2/api, 417 v3/api, 120
+corpus-compiler, 468 engine, 73 fold-runner). `check-test-floor.mjs`: OK,
+3040 >= floor 1899 (+1141 margin, unmoved, same discipline as every prior
+entry). `TZ=UTC make build`: exit 0, 30 routes, unchanged — `/plan`,
+`/progress` and `/progress/list` all still read `ƒ` (dynamic), exactly as
+before (the `cookies()` read is itself a second, independent reason each is
+dynamic; `/plan`'s own `await connection()` is kept regardless, since
+`test/request-time-clock.test.ts` names it specifically as that page's
+documented reason and a future removal of the cookie read must not silently
+reopen the v3-D301 prerender defect). `npm run gates`: all green — locked-css
+OK, 1 documented hunk, 294 v1 lines byte-identical; boundaries OK, 335 files
+(up from 330 — this diff adds 6 new tracked files; the one-file-short
+arithmetic is the same pre-existing gitignored `next-env.d.ts` Next.js
+bootstrap-artifact fluctuation this file has recorded roughly two dozen
+times before, confirmed present via `git status --porcelain --ignored`, not
+a new production file this diff is responsible for); fonts
+degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints across 4
+artifacts — all unchanged, this diff carries no corpus data. `npx tsc
+--noEmit` (apps/web): clean (one real iteration caught before this note was
+written — the wiring test's first draft passed a second argument to
+`expect(...).toMatch()`, which that matcher does not accept; fixed by moving
+the explanation into a comment, same as several of this file's own prior
+`toMatch`-based agreement tests already do). No `v1/**`/`v2/**` edit (a
+stray `v2/tsconfig.tsbuildinfo` build-cache diff produced by running the v2
+build was reverted before committing, same discipline as every prior
+entry). No Arabic codepoint (every new/changed file swept programmatically,
+in Python, over the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks, plus a `fromCharCode`/`fromCodePoint`
+mention check: CLEAN — every new string is a TypeScript identifier, a wire
+field name, a cookie attribute, or a fixed English docblock sentence, never
+corpus text). No oracle/golden-log/fixture/snapshot regenerated.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled corpus
+anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1); installed PHP 8.4
+cleanly via the documented `packages.sury.org` apt mirror, no refusal this
+run (`php8.4-pcntl` does not exist as a separate package on this mirror —
+omitted; pcntl-gated tests already skip cleanly without it, the same
+documented shape prior entries recorded). Both Laravel `composer install`s
+hit the documented transient `api.github.com` dist-download auth failure and
+recovered via the git-mirror source fallback automatically; `v2/api`'s first
+attempt failed on `bootstrap/cache`/`storage/framework` missing (run
+directly, ahead of `make setup`, which is what actually creates those
+directories first) — recovered by running the real `make setup` afterward,
+which redid both composer installs quickly against the now-warm vendor/VCS
+cache and completed every other step (migrations, `.env`/`APP_KEY`, the
+four remaining `npm install`s) cleanly in one pass. `HEAD`, local `main` and
+`origin/main` did NOT already agree: a detached `HEAD` sat at `origin/main`'s
+own real tip (`ed96cd9`, v3-D302), while local `main` was 23 commits behind
+(`977eae0`, v3-D281) — the recurring stale-local-`main` trap this file has
+recorded roughly fifty times since v3-D77 — caught before any exploration
+via `git fetch origin main` + `git checkout main && git merge --ff-only
+origin/main`, a clean fast-forward, no work lost or at risk.
+
+NOT addressed: v3-D301's/v3-D302's own remaining two findings, unchanged —
+C (the away-day buttons never render on a fresh `/plan` load, since
+`PlanIsland` gates them on `useWriterStatus()` and only `/session`/`/test`
+ever call `writeLock.acquire()`); A (ATOMIC surahs 103/112 show zero joints
+on their own ayah-list page, because the macro panel they're deferred to
+renders nothing for ATOMIC — `MacroPanel.tsx`/`MacroPanelIsland.tsx`/the
+surah page's own comment all assert otherwise). Also unchanged, every item
+on v3-D302's own "NOT addressed" list: `acknowledgeReentry`'s "makeup"
+branch; `DrillPicker.tsx`'s `now` prop; the unused IDB stores (v3-D232);
+`session_start` latency; the streak/away-day day-space mismatch (v3-D209);
+`rhymeClassOf()`; `EntitlementMachine::merge()`; `TrialAttribution`;
+`regionFromCountry()`; `PaywallGate`; `FlagService::enabled()`; multi-surah
+enrollment proper (this fix picks the RIGHT single surah consistently; it
+does not add a second enrollment or a combined-load view — `/progress`'s
+own "COMBINED LOAD" StubNote is untouched and still correctly waiting on
+that larger decision); the mailer and 7-night window; PAY-1; surah 67's
+scene beats; `placement.ts`; `MacroFacts.litany.rhymeLabel`;
+`selection_determinism_check`'s fixture replay; `QueueItem.score`;
+`tracesCompared`; `PlanIsland.tsx#enrolmentOf`'s own clause-5-blind-spot
+carry compare; the two TS-side test-file copies of the launch surah set;
+`lib/i18n/dictionaries.ts#isLocale()` — all unchanged. Also NOT built,
+deliberately: a self-healing client component that re-syncs the cookie for a
+device that onboarded BEFORE this fix existed (today, that is every device
+in this pre-launch build) — new onboarding already writes the cookie
+correctly at `commitOnboarding` time, before the learner ever reaches any of
+the three affected pages, which is the only real traffic this build has;
+retrofitting an already-onboarded device is real but lower-stakes work for
+a product with no live users yet, named here rather than silently dropped.
+Finding B is now CLOSED — remove it from future sweeps. The next run's own
+pick list, in priority order: C, then A.

@@ -58,16 +58,11 @@
 // with the truth — React keeps the server's number in production and the
 // learner is shown a zero for an ayah they are carrying.
 
+import { cookies } from "next/headers";
+
 import { loadCorpus, AVAILABLE_SURAHS } from "@/lib/corpus/load";
 import { ProgressListIsland } from "@/components/progress/ProgressListIsland";
-
-/** Which surah this page lists. A query param today; when a learner can enrol
- *  in several, this becomes the enrolment set and the table gains a surah
- *  column (the row builder is already surah-keyed for it — E-01). */
-function parseSurah(raw: string | undefined): number {
-  const n = Number(raw);
-  return Number.isInteger(n) && AVAILABLE_SURAHS.includes(n) ? n : AVAILABLE_SURAHS[0]!;
-}
+import { ENROLLED_SURAH_COOKIE, resolveSurah } from "@/lib/enrollment/surahCookie";
 
 export default async function ProgressListPage({
   searchParams,
@@ -75,7 +70,12 @@ export default async function ProgressListPage({
   searchParams: Promise<{ surah?: string }>;
 }) {
   const { surah: rawSurah } = await searchParams;
-  const surah = parseSurah(rawSurah);
+  // v3-D301/v3-D302 finding B — same fix, same shared resolver, as
+  // /progress's own page: an explicit `?surah=` still wins, then the
+  // enrolled-surah cookie hint, then the build default — never a silent
+  // default to 12/Yusuf for a learner enrolled elsewhere.
+  const cookieStore = await cookies();
+  const surah = resolveSurah(rawSurah, cookieStore.get(ENROLLED_SURAH_COOKIE)?.value, AVAILABLE_SURAHS);
   const corpus = await loadCorpus(surah);
 
   // `now` is resolved ONCE, on the server, and passed down — so every row in

@@ -53,8 +53,10 @@
 // failure §14 exists to prevent.
 
 import { connection } from "next/server";
+import { cookies } from "next/headers";
 import { loadCorpus, AVAILABLE_SURAHS } from "@/lib/corpus/load";
 import { PlanIsland } from "@/components/plan/PlanIsland";
+import { ENROLLED_SURAH_COOKIE, resolveSurah } from "@/lib/enrollment/surahCookie";
 
 /** The three fidelity zones, §14. Kept as the page's own legend — it names
  *  what the calendar below then DEMONSTRATES structurally. */
@@ -88,19 +90,32 @@ const ZONES = [
 const FALLBACK_MINUTES_PER_DAY = 8;
 
 export default async function PlanPage() {
-  const surah = AVAILABLE_SURAHS[0]!;
+  // WHICH SURAH (v3-D301/v3-D302 finding B). This page used to hardcode
+  // `AVAILABLE_SURAHS[0]` (12/Yusuf) unconditionally, so a learner enrolled
+  // in any other launch surah saw an honest-looking but WRONG calendar —
+  // the client island below would read ITS OWN surah's real log, but
+  // against text the server fetched for a different one. `/plan` has no
+  // enrollment of its own to read (onboarding's choice lives in IndexedDB,
+  // client-only); the cookie hint `lib/enrollment/surahCookie.ts` describes
+  // is the one way a Server Component can approximate it before any client
+  // island mounts.
+  const cookieStore = await cookies();
+  const surah = resolveSurah(undefined, cookieStore.get(ENROLLED_SURAH_COOKIE)?.value, AVAILABLE_SURAHS);
   const corpus = await loadCorpus(surah);
 
-  // REQUEST TIME, NOT BUILD TIME (v3-D301). Nothing else on this page reads a
-  // request-time API (no `params`, no `searchParams`), so without this call
-  // `next build` PRERENDERS /plan and the `Date.now()` below is evaluated once,
-  // at build — `next start` then replayed that one instant to every learner,
+  // REQUEST TIME, NOT BUILD TIME (v3-D301). The `cookies()` read above now
+  // makes this page dynamic on its own, but `await connection()` stays —
+  // `test/request-time-clock.test.ts` names it (not `cookies()`) as this
+  // page's own documented reason, and removing it would leave the page's
+  // clock-read protection resting on an API this file reads for an
+  // unrelated purpose. Without SOME request-time read, `next build` would
+  // PRERENDER /plan and the `Date.now()` below would be evaluated once, at
+  // build — `next start` then replays that one instant to every learner,
   // cached for a year: the calendar's dates, "due today", decay, and the
-  // absolute day `setDayAway` writes (`dayIndexOf(now) + offset`) all froze at
-  // the deploy. `next dev` renders per request, so only a production render
-  // shows it. `await connection()` is Next's documented "prerendering stops
-  // here" — everything below runs per request. Guarded by
-  // `test/request-time-clock.test.ts` and `e2e/plan-request-time.test.ts`.
+  // absolute day `setDayAway` writes (`dayIndexOf(now) + offset`) all froze
+  // at the deploy. `next dev` renders per request, so only a production
+  // render shows it. Guarded by `test/request-time-clock.test.ts` and
+  // `e2e/plan-request-time.test.ts`.
   await connection();
 
   // Resolved once on the server so every zone in one render measures from the

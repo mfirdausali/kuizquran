@@ -43,6 +43,7 @@
 // decision, not a wiring job." So the section says what it is waiting for.
 
 import Link from "next/link";
+import { cookies } from "next/headers";
 
 import { loadCorpus, AVAILABLE_SURAHS } from "@/lib/corpus/load";
 import { macroFactsFor } from "@/lib/macro/facts";
@@ -51,15 +52,7 @@ import { RetentionIsland } from "@/components/progress/RetentionIsland";
 import { GrowthIsland } from "@/components/progress/GrowthIsland";
 import { TestHistoryIsland } from "@/components/progress/TestHistoryIsland";
 import { StubNote } from "@/components/shell/StubNote";
-
-/** Which surah this page reports on. A query param today; when a learner can
- *  enrol in several this becomes the enrolment set — which is precisely what
- *  the combined-load section is waiting for. Mirrors /progress/list's own
- *  parser so the two routes can never disagree about what "this surah" means. */
-function parseSurah(raw: string | undefined): number {
-  const n = Number(raw);
-  return Number.isInteger(n) && AVAILABLE_SURAHS.includes(n) ? n : AVAILABLE_SURAHS[0]!;
-}
+import { ENROLLED_SURAH_COOKIE, resolveSurah } from "@/lib/enrollment/surahCookie";
 
 /** The window the "since" comparison looks back over — §10's "72% -> 64% since
  *  Thursday". One week: long enough that decay is legible, short enough that
@@ -72,7 +65,17 @@ export default async function ProgressPage({
   searchParams: Promise<{ surah?: string }>;
 }) {
   const { surah: rawSurah } = await searchParams;
-  const surah = parseSurah(rawSurah);
+  // v3-D301/v3-D302 finding B: this page used to default silently to
+  // `AVAILABLE_SURAHS[0]` (12/Yusuf) whenever no `?surah=` was given — which
+  // is every real visit, since nothing in the app ever links here with a
+  // query param. `resolveSurah` (lib/enrollment/surahCookie.ts) keeps the
+  // explicit-query-param behaviour unchanged and adds the enrolled-surah
+  // cookie hint as the fallback BEFORE the build default, so a learner
+  // enrolled in 103/67/112 sees their OWN surah's numbers rather than
+  // Yusuf's. Shared with /progress/list so the two routes can never
+  // disagree about what "this surah" means.
+  const cookieStore = await cookies();
+  const surah = resolveSurah(rawSurah, cookieStore.get(ENROLLED_SURAH_COOKIE)?.value, AVAILABLE_SURAHS);
   const corpus = await loadCorpus(surah);
 
   // `now` is resolved ONCE, on the server, and passed down — so the headline,
