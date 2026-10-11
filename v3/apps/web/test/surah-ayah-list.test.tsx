@@ -31,6 +31,7 @@ import type { AtomState } from "@engine/atom.ts";
 import { atomKey, initAtom } from "@engine/atom.ts";
 
 import { SurahAyahListView } from "@/components/surah/SurahAyahListIsland";
+import { macroFactsFor } from "@/lib/macro/facts.ts";
 import type { LogState } from "@/lib/idb";
 
 afterEach(cleanup);
@@ -56,6 +57,13 @@ function windowCorpus(n: number): Corpus {
 
 const NOW = Date.UTC(2026, 7, 26, 9, 0, 0);
 
+/** The real archetype a window of this corpus would classify as — never
+ *  hardcoded, so this file stays correct if `classify()`'s own thresholds
+ *  ever move. */
+function archetypeFor(n: number) {
+  return macroFactsFor(windowCorpus(n)).archetype;
+}
+
 function readyState(events: DrillEvent[]): LogState<DrillEvent[]> {
   return { status: "ready", data: events };
 }
@@ -71,14 +79,28 @@ function brokenState(reason: string): LogState<DrillEvent[]> {
 
 describe("the surah page lists every ayah, not a hardcoded one (§3)", () => {
   it.each([1, 4, 7, 10])("renders exactly N rows for N=%i ayat, never a fixed count", (n) => {
-    render(<SurahAyahListView state={emptyState()} corpus={windowCorpus(n)} now={NOW} />);
+    render(
+      <SurahAyahListView
+        state={emptyState()}
+        corpus={windowCorpus(n)}
+        now={NOW}
+        archetype={archetypeFor(n)}
+      />,
+    );
     const nav = screen.getByRole("navigation", { name: `Ayat of surah ${SURAH}` });
     const links = nav.querySelectorAll("a");
     expect(links.length).toBe(n);
   });
 
   it("links every row to its own ayah's detail route", () => {
-    render(<SurahAyahListView state={emptyState()} corpus={windowCorpus(5)} now={NOW} />);
+    render(
+      <SurahAyahListView
+        state={emptyState()}
+        corpus={windowCorpus(5)}
+        now={NOW}
+        archetype={archetypeFor(5)}
+      />,
+    );
     for (let ayah = 1; ayah <= 5; ayah++) {
       const link = screen.getByRole("link", { name: new RegExp(`Ayah ${ayah}\\b`) });
       expect(link.getAttribute("href")).toBe(`/surah/${SURAH}/${ayah}`);
@@ -105,7 +127,14 @@ describe("real per-ayah stage/strength, not a hardcoded 'Not started' (edge case
       correct: true,
     }));
 
-    render(<SurahAyahListView state={readyState(events)} corpus={windowCorpus(4)} now={NOW} />);
+    render(
+      <SurahAyahListView
+        state={readyState(events)}
+        corpus={windowCorpus(4)}
+        now={NOW}
+        archetype={archetypeFor(4)}
+      />,
+    );
 
     const link = screen.getByRole("link", { name: /Ayah 3\b/ });
     // Every stage cell carries a text label AND a number (#87) — never just a
@@ -117,7 +146,14 @@ describe("real per-ayah stage/strength, not a hardcoded 'Not started' (edge case
   });
 
   it("shows every untouched ayah as honestly 'Not started', not silently omitted", () => {
-    render(<SurahAyahListView state={emptyState()} corpus={windowCorpus(3)} now={NOW} />);
+    render(
+      <SurahAyahListView
+        state={emptyState()}
+        corpus={windowCorpus(3)}
+        now={NOW}
+        archetype={archetypeFor(3)}
+      />,
+    );
     const nav = screen.getByRole("navigation", { name: `Ayat of surah ${SURAH}` });
     expect(nav.querySelectorAll("a").length).toBe(3);
     for (const link of Array.from(nav.querySelectorAll("a"))) {
@@ -126,17 +162,92 @@ describe("real per-ayah stage/strength, not a hardcoded 'Not started' (edge case
   });
 });
 
+describe("ATOMIC surahs show their joints HERE, since the macro panel renders nothing for them (edge case #90, Finding A at v3-D301)", () => {
+  it("renders N-1 joint rows interleaved with the N ayah rows, for an ATOMIC surah", () => {
+    expect(archetypeFor(4)).toBe("ATOMIC");
+    render(
+      <SurahAyahListView
+        state={emptyState()}
+        corpus={windowCorpus(4)}
+        now={NOW}
+        archetype="ATOMIC"
+      />,
+    );
+    const nav = screen.getByRole("navigation", { name: `Ayat of surah ${SURAH}` });
+    // Still exactly 4 LINKS — a joint has no detail route of its own, so it
+    // must never become a fifth <a>.
+    expect(nav.querySelectorAll("a").length).toBe(4);
+    const joints = nav.querySelectorAll('[data-kind="seam"]');
+    expect(joints.length).toBe(3);
+    for (const joint of Array.from(joints)) {
+      expect(joint.tagName).not.toBe("A");
+    }
+    // Reading order: ayah 1, joint 1→2, ayah 2, joint 2→3, ayah 3, joint
+    // 3→4, ayah 4 — the SAME expand() order buildProgressRows already
+    // produces, so this is the complete memory graph MacroPanel.tsx's own
+    // comment promises ("3 ayah rows and 2 joint rows — 5 marks"), not a
+    // joints-dumped-at-the-end list.
+    const kinds = Array.from(nav.children).map((el) => el.getAttribute("data-kind"));
+    expect(kinds).toEqual(["ayah", "seam", "ayah", "seam", "ayah", "seam", "ayah"]);
+  });
+
+  it("names each joint by its own reference, with a real stage badge — never a bare divider", () => {
+    render(
+      <SurahAyahListView
+        state={emptyState()}
+        corpus={windowCorpus(3)}
+        now={NOW}
+        archetype="ATOMIC"
+      />,
+    );
+    const joint = screen.getByText(new RegExp(`${SURAH}:1→2`));
+    const row = joint.closest('[data-kind="seam"]');
+    expect(row).toBeTruthy();
+    expect(row!.textContent).toMatch(/Joint/);
+    // An untouched joint is unmeasured, the same honesty rule every ayah row
+    // already follows (#73) — never a fabricated "0%".
+    expect(row!.textContent).toMatch(/Not started/);
+  });
+
+  it("never duplicates the joints for a non-ATOMIC surah — the ring diagram already shows them", () => {
+    expect(archetypeFor(10)).not.toBe("ATOMIC");
+    render(
+      <SurahAyahListView
+        state={emptyState()}
+        corpus={windowCorpus(10)}
+        now={NOW}
+        archetype={archetypeFor(10)}
+      />,
+    );
+    const nav = screen.getByRole("navigation", { name: `Ayat of surah ${SURAH}` });
+    expect(nav.querySelectorAll("a").length).toBe(10);
+    expect(nav.querySelectorAll('[data-kind="seam"]').length).toBe(0);
+  });
+});
+
 describe("three states, exhaustively (#73)", () => {
   it("paints skeletons while pending — never a zero-ayah list", () => {
     const { container } = render(
-      <SurahAyahListView state={pendingState()} corpus={windowCorpus(4)} now={NOW} />,
+      <SurahAyahListView
+        state={pendingState()}
+        corpus={windowCorpus(4)}
+        now={NOW}
+        archetype={archetypeFor(4)}
+      />,
     );
     expect(container.querySelector('[aria-busy="true"]')).toBeTruthy();
     expect(screen.queryByRole("navigation")).toBeNull();
   });
 
   it("says so, and names the reason, when the log is broken — never a silent empty state", () => {
-    render(<SurahAyahListView state={brokenState("open-failed")} corpus={windowCorpus(4)} now={NOW} />);
+    render(
+      <SurahAyahListView
+        state={brokenState("open-failed")}
+        corpus={windowCorpus(4)}
+        now={NOW}
+        archetype={archetypeFor(4)}
+      />,
+    );
     expect(screen.getByRole("alert")).toBeTruthy();
     expect(screen.getByText("open-failed")).toBeTruthy();
     expect(screen.queryByRole("navigation")).toBeNull();

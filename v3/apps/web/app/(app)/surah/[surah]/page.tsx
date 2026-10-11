@@ -90,12 +90,12 @@ export default async function SurahPage({
               AYAT
             </h2>
           </div>
-          {corpus === null ? (
+          {corpus === null || facts === null ? (
             <p className="stub-note">
               No corpus is available for surah {surah} in this build.
             </p>
           ) : (
-            <SurahAyahListIsland corpus={corpus} now={now} />
+            <SurahAyahListIsland corpus={corpus} now={now} archetype={facts.archetype} />
           )}
         </section>
       </div>

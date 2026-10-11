@@ -30772,3 +30772,128 @@ surah 67's scene beats; `placement.ts`; `MacroFacts.litany.rhymeLabel`;
 carry compare; the two TS-side test-file copies of the launch surah set;
 `lib/i18n/dictionaries.ts#isLocale()` — all unchanged. Finding C is now
 CLOSED — remove it from future sweeps. The next run's own pick list: A.
+
+## v3-D305 (2026-10-11) — Finding A closed: ATOMIC surahs' joints
+
+Picked up v3-D301's own Finding A, carried unaddressed on v3-D303's and
+v3-D304's own "NOT addressed" lists: ATOMIC surahs (Al-Asr/103,
+Al-Ikhlas/112) showed zero joints on any screen a learner could reach.
+
+**Root cause.** `MacroPanel.tsx` returns `null` for ATOMIC
+(`facts.archetype === "ATOMIC"`), per v3-D21 ("at 3-8 ayat the list is
+already the macro view"). That file's own comment names the precondition
+required for the claim to be true rather than merely asserted:
+
+> "What makes that claim TRUE rather than merely asserted is that the ayah
+> list on this page renders the seams between its rows... A 3-ayah surah
+> then shows 3 ayah rows and 2 joint rows — 5 marks, the complete memory
+> graph, exactly what a ring would have shown. Without that, ATOMIC would
+> be the WORST case for edge case #90 rather than an exempt one: no panel
+> AND no seams is 40% of Al-Asr invisible."
+
+`SurahAyahListIsland.tsx` never built that half. Its own, separate
+docblock said the opposite: "The macro panel above already renders the
+ring/joints, so seam rows are deliberately left out of this list." That is
+correct for RING/LITANY/ARC — their `RingDiagram` already renders every
+seam as its own mark in the ring — and was simply wrong for the one
+archetype that renders no panel at all. Two files' own comments
+contradicted each other; neither matched the real, observable behaviour
+(zero joints for ATOMIC, confirmed by reading `buildProgressRows()`'s
+unconditional `.filter((r) => r.kind === "ayah")` before any test was
+written).
+
+**Fix.** `SurahAyahListIslandProps`/`SurahAyahListView`'s props gain a
+required `archetype: MacroArchetype`, resolved exactly once, server-side,
+by `/surah/[surah]/page.tsx`'s existing `macroFactsFor(corpus)` call (the
+same call that already feeds the macro panel above this list) and handed
+down as data — never recomputed, and never imported as a *value* inside
+this `"use client"` island, which would ship the compiler's classifier to
+the browser (`lib/macro/facts.ts`'s own header names exactly this risk,
+and is why `macroFactsFor` lives in a server-only module). The row builder
+(renamed `ayahRowsFor` → `rowsFor`) now keeps BOTH `buildProgressRows()`
+row kinds when `archetype === "ATOMIC"` — already in `expand()` reading
+order (ayah 1, seam 1→2, ayah 2, …), so no re-sorting was needed — and
+stays ayah-only for every other archetype, byte-identical to before. A
+seam row renders as a new `SeamRow` component: a plain, non-link
+`<div data-kind="seam">` (a joint has no detail route of its own, E-08)
+carrying the same `StageBadge` an ayah row does, never a bare divider, and
+never a fabricated "0%" for an untouched joint — the identical
+unmeasured-vs-zero honesty rule (#73) every ayah row already follows.
+
+**RED confirmed directly.** Two new load-bearing cases in a dedicated
+`test/surah-ayah-list.test.tsx` describe block, run against the unmodified
+component (every one of the file's 10 pre-existing cases was updated only
+to pass the newly-required `archetype` prop — computed via `macroFactsFor`
+for each windowed fixture, never hardcoded — with no change to their own
+assertions). Both new cases failed exactly as predicted: zero
+`[data-kind="seam"]` elements existed anywhere, so
+`screen.getByText(/12:1→2/)` found nothing and the reading-order assertion
+(`["ayah","seam","ayah","seam","ayah","seam","ayah"]`) read back as seven
+`"ayah"` entries instead. A third, negative case — a non-ATOMIC window of
+the same real engine fixture (`windowCorpus(10)`, which the real
+`classify()` fallback resolves to ARC, not ATOMIC, since it carries no
+ruku/rhyme data) — passed vacuously against the unfixed code too, proving
+in advance that the eventual fix must be scoped to ATOMIC alone and must
+not become a blanket "always show seams" change that would duplicate the
+ring diagram's own joints for RING/LITANY/ARC. Implemented, reran:
+`test/surah-ayah-list.test.tsx` 12/12 green (was 10, +2 net new — the
+third case already existed as a built-in negative control before the fix
+landed). `npx vitest run test/surah-ayah-list.test.tsx
+test/macro-ring.test.tsx test/macro-facts.test.ts test/workbench-ui.test.tsx
+test/progress-list.test.tsx test/ayah-detail.test.tsx`: 176/176 green — no
+regression on any sibling macro-panel, progress-table or ayah-detail
+consumer of `buildProgressRows`/`macroFactsFor`.
+
+**Verification.** `TZ=UTC make test`: 3046 passing (was 3043, +3 — exactly
+this run's three new tests; apps/web 1666, was 1663; no other suite
+moved: 255 v2 vitest, 47 v2/api, 417 v3/api, 120 corpus-compiler, 468
+engine, 73 fold-runner). `check-test-floor.mjs`: OK, 3046 >= floor 1899
+(+1147 margin, unmoved, same discipline as every prior entry). `TZ=UTC
+make build`: exit 0, 30 routes, unchanged — `/surah/[surah]` still reads
+`ƒ` (dynamic, unaffected by this diff); no new route or production file,
+two existing files edited (`SurahAyahListIsland.tsx`, the surah page) plus
+one existing test file. `npm run gates`: all green — locked-css OK, 1
+documented hunk, 294 v1 lines byte-identical; boundaries OK, 335 files,
+unchanged count; fonts degraded-but-non-blocking, pre-existing, 2/6 UI
+fonts present; corpus-morphology OK, 362 words; corpus-glyphs OK, 206
+codepoints across 4 artifacts — all unchanged, this diff carries no corpus
+data. `npx tsc --noEmit` (apps/web): clean. No `v1/**`/`v2/**` edit (a
+stray `v2/tsconfig.tsbuildinfo` build-cache diff produced by running the
+suite was reverted before committing, same discipline as every prior
+entry — `git status --porcelain -- v1 v2` empty immediately before
+committing). No Arabic codepoint (the full diff swept programmatically,
+in Python, over the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks, plus a `fromCharCode`/`fromCodePoint`
+mention check: CLEAN — every new string is a TypeScript identifier, a
+wire field name, a fixture coordinate already used elsewhere in this file
+(`12:1→2`, a reference, never a glyph), or a fixed English docblock/
+comment sentence, never corpus text). No oracle/golden-log/fixture/
+snapshot regenerated.
+
+**Session start.** Fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; `HEAD`, local `main` and `origin/main` all agreed at
+`56b58f3` (v3-D304) once a stale LOCAL `main` branch ref 24 commits behind
+(`977eae0`, v3-D281) was fast-forwarded — the recurring stale-local-`main`
+trap this file has recorded roughly fifty times since v3-D77 — caught
+before any exploration via `git fetch origin main` + `git checkout main
+&& git merge --ff-only origin/main`, a clean fast-forward, no work lost or
+at risk. PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1); installed PHP
+8.4 cleanly via the documented `packages.sury.org` apt mirror (fresh key +
+repo file; `update-alternatives --set php /usr/bin/php8.4`), no refusal
+this run; `make setup` then ran clean end to end from a cold checkout.
+
+**NOT addressed.** Finding A is now CLOSED — remove it from future
+sweeps. Every item on v3-D304's own "NOT addressed" list is otherwise
+unchanged: `acknowledgeReentry`'s "makeup" branch; `DrillPicker.tsx`'s
+`now` prop; the unused IDB stores (v3-D232); `session_start` latency; the
+streak/away-day day-space mismatch (v3-D209); `rhymeClassOf()`;
+`EntitlementMachine::merge()`; `TrialAttribution`; `regionFromCountry()`;
+`PaywallGate`; `FlagService::enabled()`; multi-surah enrollment proper;
+the mailer and 7-night window; PAY-1; surah 67's scene beats;
+`placement.ts`; `MacroFacts.litany.rhymeLabel`;
+`selection_determinism_check`'s fixture replay; `QueueItem.score`;
+`tracesCompared`; `PlanIsland.tsx#enrolmentOf`'s own clause-5-blind-spot
+carry compare; the two TS-side test-file copies of the launch surah set;
+`lib/i18n/dictionaries.ts#isLocale()` — all unchanged. No new pick-list
+item is named this run; the standing backlog above is what a future run
+should draw from.
