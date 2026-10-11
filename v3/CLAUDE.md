@@ -53,10 +53,111 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3040 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3043 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 417 v3/api + 120 corpus-compiler
-             # + 468 engine + 73 fold-runner + 1660 apps/web. (v3-D303, 2026-10-11)
+             # + 468 engine + 73 fold-runner + 1663 apps/web. (v3-D304, 2026-10-11)
+             # NOTE (v3-D304, 2026-10-11): picked up v3-D301's/v3-D303's own
+             # pick list, item C: `PlanIsland`'s away-day toggle (WIREFRAME
+             # §14) gated its own control on `useWriterStatus()`, which only
+             # ever SUBSCRIBES to `lib/idb/writeLock.ts` — it never calls
+             # `writeLock.acquire()`. Only `SessionIsland.tsx`/`TestIsland.tsx`
+             # ever called that, on `/session`/`/test` mount, so a tab that
+             # opened `/plan` FIRST (the ordinary case — nothing links to
+             # either of those before a learner has enrolled) left the lock
+             # sitting `pending` forever: the "Mark this day away" control
+             # never appeared, in either the ready calendar or the
+             # pre-first-session empty state, with no error and no
+             # explanation.
+             #
+             # Fixed with one `useEffect` on mount calling `writeLock
+             # .acquire()` fire-and-forget — idempotent, and already called
+             # redundantly by two other islands in the same tab, so this is
+             # a third instance of an established pattern, not a new one.
+             # The result reaches `writer` via the EXISTING
+             # `useWriterStatus()` subscription, never a local state set
+             # from the acquire() promise directly.
+             #
+             # RED confirmed directly: 3 new cases in `test/plan-
+             # island.test.tsx`, run against the unmodified component — this
+             # file's own `beforeEach` forces writer status via
+             # `forceForTests()`, which never runs `acquire()` and could not
+             # have caught this, so the new cases call `resetForTests()` and
+             # let the REAL fallback path run (this vitest/jsdom environment
+             # genuinely lacks `navigator.locks`, so `acquire()` takes the
+             # heartbeat branch for real). Two positive cases (ready
+             # calendar; pre-first-session empty state) timed out waiting
+             # for the control, since nothing ever moved the lock off
+             # `pending`; a negative case (a genuinely live heartbeat row
+             # from `"some-other-tab"` written directly into the `meta`
+             # store) proves the fix is a real acquisition, not a hardcoded
+             # "always writer" shortcut — it asserts `writeLock.current.role`
+             # resolves all the way to `"reader"` before asserting the
+             # control is absent. Restored, reimplemented, reran:
+             # `test/plan-island.test.tsx` 15/15 green (was 12, +3).
+             #
+             # `TZ=UTC make test`: 3043 passing (was 3040, +3 — exactly this
+             # run's three new tests; apps/web 1663, was 1660; no other suite
+             # moved). `check-test-floor.mjs`: OK, 3043 >= floor 1899 (+1144
+             # margin, unmoved). `TZ=UTC make build`: exit 0, 30 routes,
+             # unchanged — `/plan` still reads `ƒ` (dynamic, v3-D301's own
+             # fix unaffected), one existing component edited plus its one
+             # existing test file. `npm run gates`: all green — locked-css
+             # OK, 1 documented hunk, 294 v1 lines byte-identical; boundaries
+             # OK, 335 files, unchanged count; fonts degraded-but-non-
+             # blocking, pre-existing, 2/6 UI fonts present; corpus-
+             # morphology OK, 362 words; corpus-glyphs OK, 206 codepoints
+             # across 4 artifacts — all unchanged, this diff carries no
+             # corpus data. `npx tsc --noEmit` (apps/web): clean. No
+             # `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff produced by running the suite was reverted
+             # before committing, same discipline as every prior entry). No
+             # Arabic codepoint (both changed files swept programmatically,
+             # in Python, over the Arabic, Arabic Supplement, Arabic
+             # Extended-A and both Presentation Forms Unicode blocks, plus a
+             # `fromCharCode`/`fromCodePoint` mention check: CLEAN — every
+             # new string is a TypeScript identifier, a fixture value
+             # already used elsewhere in this file, or a fixed English
+             # docblock/comment sentence, never corpus text). No oracle/
+             # golden-log/fixture/snapshot regenerated.
+             #
+             # Session start: fresh container, no `node_modules`/`vendor`/
+             # compiled corpus anywhere; `HEAD`, local `main` and
+             # `origin/main` all agreed at `61e1dd8` (v3-D303) once a stale
+             # LOCAL `main` branch ref 24 commits behind (`977eae0`,
+             # v3-D281) was fast-forwarded — the recurring stale-local-
+             # `main` trap this file has recorded roughly fifty times since
+             # v3-D77 — caught before any exploration via `git fetch origin
+             # main` + `git checkout main && git merge --ff-only
+             # origin/main`, a clean fast-forward, no work lost or at risk.
+             # PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1); installed
+             # PHP 8.4 cleanly via the documented `packages.sury.org` apt
+             # mirror, no refusal this run; `make setup` then ran clean end
+             # to end from a cold checkout.
+             #
+             # NOT addressed: Finding A (ATOMIC surahs 103/112 show zero
+             # joints on their own ayah-list page, named at v3-D301 —
+             # `SurahAyahListIsland` deliberately defers seam rendering to
+             # the macro panel, which renders nothing for ATOMIC) is this
+             # run's own next pick, named explicitly rather than attempted
+             # in the same night (one step per run). Every item on
+             # v3-D303's own "NOT addressed" list is otherwise unchanged —
+             # `acknowledgeReentry`'s "makeup" branch; `DrillPicker.tsx`'s
+             # `now` prop; the unused IDB stores (v3-D232); `session_start`
+             # latency; the streak/away-day day-space mismatch (v3-D209);
+             # `rhymeClassOf()`; `EntitlementMachine::merge()`;
+             # `TrialAttribution`; `regionFromCountry()`; `PaywallGate`;
+             # `FlagService::enabled()`; multi-surah enrollment proper; the
+             # mailer and 7-night window; PAY-1; surah 67's scene beats;
+             # `placement.ts`; `MacroFacts.litany.rhymeLabel`;
+             # `selection_determinism_check`'s fixture replay;
+             # `QueueItem.score`; `tracesCompared`;
+             # `PlanIsland.tsx#enrolmentOf`'s own clause-5-blind-spot carry
+             # compare; the two TS-side test-file copies of the launch
+             # surah set; `lib/i18n/dictionaries.ts#isLocale()` — all
+             # unchanged. Finding C is now CLOSED — remove it from future
+             # sweeps. The next run's own pick list: A. See DECISIONS.md
+             # v3-D304.
              # NOTE (v3-D303, 2026-10-11): picked up v3-D301's/v3-D302's own
              # pick list, item B: `/plan` hardcoded `AVAILABLE_SURAHS[0]`
              # (12/Yusuf) unconditionally, and `/progress`/`/progress/list`

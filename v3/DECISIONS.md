@@ -30667,3 +30667,108 @@ retrofitting an already-onboarded device is real but lower-stakes work for
 a product with no live users yet, named here rather than silently dropped.
 Finding B is now CLOSED — remove it from future sweeps. The next run's own
 pick list, in priority order: C, then A.
+
+## v3-D304 (2026-10-11, nightly) — the away-day buttons never rendered on a fresh `/plan` load
+
+Picked up v3-D303's own pick list, item C (named first at v3-D301, repeated
+unchanged on v3-D302's own "NOT addressed" list): `PlanIsland`'s away-day
+toggle (WIREFRAME §14, v3-D207/D220/D226) gates both the "ready" calendar's
+and the pre-first-session empty-state's "Mark this day away" control on
+`useWriterStatus()` — but that hook only ever SUBSCRIBES to
+`lib/idb/writeLock.ts`'s module-level `writeLock` singleton; it never calls
+`writeLock.acquire()`. Only `SessionIsland.tsx`/`TestIsland.tsx` ever called
+that, on `/session`/`/test` mount. So a tab that opened `/plan` FIRST — the
+ordinary case, since nothing links to `/session` or `/test` before a
+learner has enrolled — left the lock sitting `pending` forever, and the
+control never appeared, with no error and no explanation.
+
+Root cause confirmed directly against the real source before writing any
+test, not assumed from the prior note: `writeLock.acquire()` is idempotent
+(`this.started` guards a second call from re-requesting) and is already
+called redundantly by two other islands in the same tab — adding a third
+caller is the established pattern this codebase already uses for exactly
+this problem, not a new one.
+
+Fixed: one `useEffect` on mount, `void writeLock.acquire();` — fire-and-
+forget, since the result reaches `writer` via the existing
+`useWriterStatus()` subscription, never a local state set from the
+promise directly (which would race the subscription and risk a stale
+render).
+
+RED confirmed directly, three new cases added to a dedicated describe
+block in `test/plan-island.test.tsx`, run against the unmodified component
+(this file's own `beforeEach` forces writer status via `forceForTests`,
+which never runs `acquire()` at all and could not have caught this — the
+same gap `writeLock.test.ts`'s own "acquire() against a real Web Locks
+implementation" block names for exactly this reason; these new cases call
+`resetForTests()` to undo it and let the REAL fallback path run — this
+vitest/jsdom environment genuinely lacks `navigator.locks`, confirmed by
+the pre-existing `writeLock.test.ts` assertion, so `acquire()` takes the
+heartbeat branch for real, not a simulation of it). Two positive cases
+(the ready calendar; the pre-first-session empty state) both timed out
+waiting for the control, since nothing ever moved the lock off `pending`;
+a third, negative case (a genuinely live heartbeat row from `"some-other-
+tab"` written directly into the `meta` store, mirroring `writeLock.test
+.ts`'s own "defers to a live heartbeat from another tab" case) proves the
+fix is a real acquisition rather than a hardcoded "always writer" shortcut
+— it asserts `writeLock.current.role` resolves all the way to `"reader"`
+before asserting the control is absent. Restored byte-identically after
+confirming RED, then implemented; reran: `test/plan-island.test.tsx` 15/15
+green (was 12, +3).
+
+`TZ=UTC make test`: 3043 passing (was 3040, +3 — exactly this run's three
+new tests; apps/web 1663, was 1660; no other suite moved: 255 v2 vitest,
+47 v2/api, 417 v3/api, 120 corpus-compiler, 468 engine, 73 fold-runner).
+`check-test-floor.mjs`: OK, 3043 >= floor 1899 (+1144 margin, unmoved,
+same discipline as every prior entry). `TZ=UTC make build`: exit 0, 30
+routes, unchanged — `/plan` still reads `ƒ` (dynamic, v3-D301's own fix
+unaffected), no new route or production file, one existing component
+edited plus its one existing test file. `npm run gates`: all green —
+locked-css OK, 1 documented hunk, 294 v1 lines byte-identical; boundaries
+OK, 335 files, unchanged count; fonts degraded-but-non-blocking,
+pre-existing, 2/6 UI fonts present; corpus-morphology OK, 362 words;
+corpus-glyphs OK, 206 codepoints across 4 artifacts — all unchanged, this
+diff carries no corpus data. `npx tsc --noEmit` (apps/web): clean. No
+`v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the suite was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2` empty
+immediately before committing). No Arabic codepoint (both changed files
+swept programmatically, in Python, over the Arabic, Arabic Supplement,
+Arabic Extended-A and both Presentation Forms Unicode blocks, plus a
+`fromCharCode`/`fromCodePoint` mention check: CLEAN — every new string is
+a TypeScript identifier, a wire/test fixture value already used elsewhere
+in this file ("some-other-tab", matching `writeLock.test.ts`'s own
+convention), or a fixed English docblock/comment sentence, never corpus
+text). No oracle/golden-log/fixture/snapshot regenerated.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled corpus
+anywhere; `HEAD`, local `main` and `origin/main` all agreed at `61e1dd8`
+(v3-D303) once a stale LOCAL `main` branch ref 24 commits behind
+(`977eae0`, v3-D281) was fast-forwarded — the recurring stale-local-`main`
+trap this file has recorded roughly fifty times since v3-D77 — caught
+before any exploration via `git fetch origin main` + `git checkout main
+&& git merge --ff-only origin/main`, a clean fast-forward, no work lost or
+at risk. PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1); installed PHP
+8.4 cleanly via the documented `packages.sury.org` apt mirror, no refusal
+this run; `make setup` then ran clean end to end from a cold checkout.
+
+NOT addressed: Finding A (ATOMIC surahs 103/112 show zero joints on their
+own ayah-list page, named at v3-D301 — `SurahAyahListIsland` deliberately
+defers seam rendering to the macro panel, which renders nothing for
+ATOMIC) is this run's own next pick, named explicitly rather than attempted
+in the same night (one step per run); Finding B (`/plan`/`/progress`/
+`/progress/list` hardcoded surah 12) is CLOSED, unchanged since v3-D303;
+Finding D (sync almost never pushed a learner's events) is CLOSED,
+unchanged since v3-D302. Every item on v3-D303's own "NOT addressed" list
+is otherwise unchanged — `acknowledgeReentry`'s "makeup" branch;
+`DrillPicker.tsx`'s `now` prop; the unused IDB stores (v3-D232);
+`session_start` latency; the streak/away-day day-space mismatch (v3-D209);
+`rhymeClassOf()`; `EntitlementMachine::merge()`; `TrialAttribution`;
+`regionFromCountry()`; `PaywallGate`; `FlagService::enabled()`;
+multi-surah enrollment proper; the mailer and 7-night window; PAY-1;
+surah 67's scene beats; `placement.ts`; `MacroFacts.litany.rhymeLabel`;
+`selection_determinism_check`'s fixture replay; `QueueItem.score`;
+`tracesCompared`; `PlanIsland.tsx#enrolmentOf`'s own clause-5-blind-spot
+carry compare; the two TS-side test-file copies of the launch surah set;
+`lib/i18n/dictionaries.ts#isLocale()` — all unchanged. Finding C is now
+CLOSED — remove it from future sweeps. The next run's own pick list: A.

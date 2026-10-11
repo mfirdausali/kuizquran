@@ -21,7 +21,7 @@ import { atomKey } from "@engine/atom.ts";
 import { currentBand } from "@engine/strength.ts";
 import { awayDayOffsets, dayIndexOf } from "@engine/awayDays.ts";
 import { DEFAULT_PACE_MODE, paceConfig, type PaceMode } from "@engine/pace.ts";
-import { currentTz, getEventsForSurah, useLogState, useWriterStatus } from "@/lib/idb";
+import { currentTz, getEventsForSurah, useLogState, useWriterStatus, writeLock } from "@/lib/idb";
 import type { LocalEventRow } from "@/lib/idb";
 import { readChoices } from "@/lib/onboarding/choices";
 import { setDayAway } from "@/lib/plan/awayDay";
@@ -77,6 +77,22 @@ export function PlanIsland({ corpus, now, tz, minutesPerDay: fallbackMinutesPerD
     return () => {
       alive = false;
     };
+  }, []);
+
+  // v3-D304 (DECISIONS.md v3-D301 Finding C): `useWriterStatus()` below only
+  // SUBSCRIBES to `writeLock` — it never calls `acquire()`. Only
+  // `SessionIsland.tsx`/`TestIsland.tsx` ever did that, on `/session`/
+  // `/test` mount, so a tab that opened `/plan` FIRST (the ordinary case —
+  // nothing links to either of those with no enrollment yet) found the
+  // lock sitting `pending` forever and the away-day control never
+  // appeared, with no error and no explanation. `acquire()` is idempotent
+  // (`this.started` guards it) and is already called redundantly by two
+  // other islands in the same tab, so calling it a third time here is the
+  // established pattern, not a new one. Fire-and-forget: the result reaches
+  // `writer` below via the existing subscription, never a local state set
+  // from this promise.
+  useEffect(() => {
+    void writeLock.acquire();
   }, []);
 
   // WIREFRAME §14 "Planned absences": commits through the SAME

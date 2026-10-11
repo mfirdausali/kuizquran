@@ -201,6 +201,79 @@ describe("PlanIsland — read-only when this tab is not the writer (v3-D226)", (
   });
 });
 
+describe("PlanIsland — acquires the write lock itself on a fresh load, never waits for /session or /test (v3-D304)", () => {
+  // DECISIONS.md v3-D301 Finding C: the away-day control is gated on
+  // `useWriterStatus()`, which only ever SUBSCRIBES — it never calls
+  // `writeLock.acquire()`. Only `SessionIsland.tsx`/`TestIsland.tsx` ever
+  // called that, on `/session`/`/test` mount. So a learner who opened
+  // `/plan` first in a tab (the ordinary case — nothing links to `/session`
+  // or `/test` with no enrollment yet) found the lock sitting `pending`
+  // FOREVER, and the "Mark this day away" control never appeared, with no
+  // error and no explanation.
+  //
+  // Every test above forces writer status directly (`forceForTests`), which
+  // never runs `acquire()` at all and could not have caught this — the same
+  // gap `writeLock.test.ts`'s own "acquire() against a real Web Locks
+  // implementation" block names for exactly this reason. These tests call
+  // `resetForTests()` (undoing this file's own `beforeEach` forced-writer
+  // shortcut) and let the REAL fallback path run — this environment
+  // genuinely lacks `navigator.locks`, so `acquire()` takes the heartbeat
+  // branch for real, not a simulation of it.
+
+  it("becomes the writer on its own and shows the control — the ready calendar, no /session or /test ever mounted", async () => {
+    // Seed the fixture as a momentarily forced writer — this test's own
+    // subject is whether RENDERING later acquires the lock for real, not
+    // whether seeding data needs one.
+    writeLock.forceForTests({ role: "writer" });
+    await setDayAway(SURAH, TODAY - 100, true, { now: NOW, tz: TZ });
+    writeLock.resetForTests();
+
+    await renderReady();
+
+    await waitFor(() => {
+      const row = document.querySelector('[data-day-row][data-offset="2"]') as HTMLElement;
+      expect(within(row).getByRole("button", { name: /mark.*away/i })).toBeTruthy();
+    });
+  });
+
+  it("becomes the writer on its own and shows the control — the pre-first-session empty state", async () => {
+    writeLock.resetForTests();
+    render(<PlanIsland corpus={corpus} now={NOW} tz={TZ} minutesPerDay={8} />);
+    await waitFor(() => expect(screen.queryByText(/working out your plan/i)).toBeNull());
+
+    await waitFor(() => {
+      const row = document.querySelector('[data-day-row][data-offset="5"]') as HTMLElement;
+      expect(within(row).getByRole("button", { name: /mark.*away/i })).toBeTruthy();
+    });
+  });
+
+  it("still defers honestly when a genuinely LIVE heartbeat from another tab already holds the lock", async () => {
+    // Seed the fixture event as a (momentarily forced) writer — this test's
+    // own subject is whether RENDERING later defers to a real contender,
+    // not whether seeding data needs a lock.
+    writeLock.forceForTests({ role: "writer" });
+    await setDayAway(SURAH, TODAY - 100, true, { now: NOW, tz: TZ });
+
+    // Back to pristine, then a real other tab — not a forced status: write
+    // the fallback's own holder row directly, exactly as `writeLock.test
+    // .ts`'s "defers to a live heartbeat from another tab" case does.
+    writeLock.resetForTests();
+    const db = await openDb();
+    await db.put("meta", { key: "writerId", value: "some-other-tab" });
+    await db.put("meta", { key: "writerHeartbeatAt", value: Date.now() });
+
+    await renderReady();
+
+    // Give the real acquire() a chance to settle before asserting the
+    // negative — this proves the control's absence is a genuine resolved
+    // "reader", not merely "still pending".
+    await waitFor(() => expect(writeLock.current.role).not.toBe("pending"));
+    expect(writeLock.current.role).toBe("reader");
+    const row = document.querySelector('[data-day-row][data-offset="2"]') as HTMLElement;
+    expect(within(row).queryByRole("button", { name: /mark.*away/i })).toBeNull();
+  });
+});
+
 describe("PlanIsland — the trajectory reflects the learner's REAL pace commitment (v3-D221)", () => {
   // `SessionGate.tsx`/`TodaySession.tsx` both read `choices.pace` (v3-D138) so
   // the session and the dashboard's due count agree with a Sprint/Maintain
