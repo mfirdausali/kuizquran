@@ -31268,3 +31268,195 @@ shape should not be attempted without either a third genuinely new
 verification method or a willingness to take on one of the larger,
 already-named architectural items above. See CLAUDE.md's own running NOTE
 for this run's summary.
+
+## v3-D309 (2026-10-12) — the thirteenth sweep's own fresh verification method: a real dependency-vulnerability audit
+
+v3-D308's own closing note named the choice explicitly: a third genuinely
+new verification method, or one of the larger architectural items. Checked
+this build's own history first (`grep -n "npm audit\|composer audit\|CVE\|
+vulnerabilit" DECISIONS.md CLAUDE.md DEFECTS.md`) — zero hits anywhere
+across 308 prior decisions. Every one of those nights has verified
+BEHAVIOR (wiring, docblocks, test coverage, live-browser runs); none has
+ever asked whether the dependencies this build actually ships are
+themselves safe to ship. That is this run's fresh method, and it found a
+real, live, actionable finding on the first try.
+
+**Finding, confirmed directly, not assumed from the advisory title alone:**
+`v3/apps/web`'s own `next` was pinned at the exact version `"16.3.0"`
+(`package.json`, no caret — this repo's own established exact-pin
+convention, matching `"react": "19.2.8"` on the very next line) — a real,
+shipped, PRODUCTION dependency (Next.js IS the server this app runs on,
+not a build-time tool). `npm audit` reported it **critical**, three
+separate CVEs inside the installed range (`>=16.0.0 <16.3.8`): an
+unauthenticated RCE on Windows-hosted servers (GHSA-p293-qw3h-jr36, CVSS
+9.0), an unauthenticated RCE in the Image Optimization API via AVIF files
+(GHSA-2xp9-vwfh-vxw4), and an RCE in `next/og`'s `ImageResponse`
+(GHSA-vcvr-r3jv-pc5j) — plus two moderate cache-poisoning/draft-mode-leak
+findings and one low information-disclosure finding, all patched only at
+`16.3.8`+. Its own transitive `sharp` (the real image-optimization
+library `next/image` calls, not a devDependency) was separately flagged
+**high** for two more CVEs (`GHSA-rgj7-g3m4-5g8c`, libheif; `GHSA-wq5f-
+xc86-pv6w`, librsvg), both fixed only at `sharp>=0.35.5` — the installed
+`0.35.3` was below that floor.
+
+**Fixed:** bumped `next` to the exact newer stable `"16.4.0"` (`npm view
+next dist-tags` confirmed this is the real current `latest`, not a
+cherry-picked minor — `npm audit`'s own `fixAvailable` already named it,
+`isSemVerMajor: false`), then `npm install` to re-resolve the lockfile.
+`sharp` moved from `0.35.3` to `0.35.5` as next's own transitive
+dependency, with no direct edit needed — `npm ls next sharp` confirmed
+both after. `npm audit` afterward: both `next` and `sharp` are gone from
+the vulnerability list entirely; `critical`/`high` dropped from `{critical:
+2, high: 3}` to `{critical: 2, high: 1}`, the remaining seven all inside
+one single dev-only chain (`vite`→`vitest`→`esbuild`/`tinypool`/`@vitest/
+mocker`), confirmed by `npm ls` to have zero production/runtime reachability
+(vitest is this repo's TEST RUNNER, never bundled or served; `next build`'s
+own dependency graph does not pull it in at all). A plain, non-forcing
+`npm audit fix` (no `--force`, so nothing semver-major) then cleared one
+more of those seven, `source-map-js` (a transitive dep of `next`'s own
+`postcss`, DoS-via-malicious-source-map, `GHSA-68fv-2mgg-jv7q`) by moving
+it `1.2.1` → `1.2.2` — confirmed via `git diff package.json` that this
+touched ONLY the lockfile's resolved version, no declared dependency.
+The identical safe, non-forcing `npm audit fix` was then run in
+`packages/corpus-compiler`, `packages/engine` and `worker/fold-runner` too
+(the same `vitest@^2.1.9` devDependency, hence the same `source-map-js`
+transitive pin, in all three) — each cleared the same one finding, each
+left `package.json` byte-identical (confirmed via `git diff --stat
+package.json` on all three, empty), only `package-lock.json` moved.
+
+**Deliberately NOT forced, named so a future run doesn't re-attempt it as
+a quick win:** the remaining six findings in all four v3 Node packages
+(`vite`/`vitest`/`esbuild`/`tinypool`/`@vitest/mocker`/`vite-node`) all
+share one `fixAvailable`: `vitest@5.0.4`, `isSemVerMajor: true` — a major
+version bump of the test runner across all four packages at once, which
+risks a config-format/API break (vitest 5 changed its own config and
+reporter shapes) this run had no budget to verify safe, and which a
+devDependency-only, build-time/test-time tool does not carry the same
+urgency as a production RCE to force through same-night. Real, not
+dismissed — named for a future run or a human call, the same "found,
+reasoned, deferred" treatment this build gives every genuinely
+larger-scoped item.
+
+**Also found and confirmed NOT fixable within this run's own scope:**
+`v3/api`'s `composer audit` reported 8 advisories across 3 packages.
+Two of those three — `league/commonmark` (3 advisories: raw-HTML-filter
+bypass, quadratic-time DoS in the GFM table extension, attribute-name DoS)
+and `league/flysystem`/`league/flysystem-local` (1 low advisory, a
+malformed-UTF-8 path-normalizer bypass) — are BOTH transitive pulls of
+`laravel/framework` itself (`composer why` confirmed: `laravel/framework
+v11.55.0 requires league/commonmark (^2.7)` and `(^3.25.1)` respectively),
+and both had a real patched version already inside laravel/framework's
+OWN existing constraint (`composer show -a` confirmed `2.10.3` and
+`3.36.0` exist, well inside `^2.7`/`^3.25.1`) — so `composer update
+league/commonmark league/flysystem league/flysystem-local
+--with-dependencies` (no `laravel/framework` edit, no composer.json edit
+at all) resolved all 4 of those advisories cleanly. The remaining 4 — all
+on `laravel/framework` itself (a low-severity debug-page XSS, a medium
+signed-URL path-confusion, and two overlapping high-severity CRLF-
+injection-in-the-default-email-rule advisories) — have NO fix inside the
+installed `^11.31` constraint at all: every advisory's own "Affected
+versions" range lists `>=11.0.0,<12.0.0` as fully vulnerable with no
+11.x patch release, the fix landing only at `12.60.0`/`13.10.0` — a
+MAJOR Laravel version bump (11→12 or 11→13), real, separate, and far too
+large to attempt same-night without a dedicated upgrade pass (Laravel
+major upgrades carry real breaking changes across the framework surface
+this app's ~20 controllers/commands/jobs touch). Left unfixed and named,
+not silently absorbed into "nothing else to do here."
+
+**Also found and confirmed genuinely out of reach, not a gap to fix:**
+`v2/api`'s own `composer audit` reports 19 advisories across 4 packages
+(`guzzlehttp/guzzle`, `laravel/framework`, `league/commonmark`,
+`league/flysystem`) — but `v1/**`/`v2/**` are FROZEN (CLAUDE.md's own
+"never edit" rule, parity oracle SHA `c34f5c3`), so this run touched
+NEITHER `v2/api/composer.json` NOR `v2/api/composer.lock` at all,
+confirmed by `git status --porcelain` showing zero `v2/**` changes
+throughout. Reported here as a finding a HUMAN must decide whether to
+accept (v2 is the frozen port source, not the shipping product — see
+BUILD-PLAN's own "v2 is drifting... parity oracle must be frozen" framing
+at step 2), never as something this run could or should act on.
+
+**RED/GREEN discipline note:** this is a pure dependency-version fix, not
+a behavior change — there is no new assertion to write RED-first for "a
+newer, patched library version is installed." Verification instead means
+re-running every existing gate unchanged and confirming the exact same
+green, which is the strongest possible proof that nothing this fix
+touched changed any observable behavior.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere. PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1); installed
+PHP 8.4 cleanly via the documented `packages.sury.org` apt mirror, no
+"Unauthorized Persistence" refusal on the `php8.4-*` package install
+itself (only the earlier `apt-cache policy` probe was refused — worked
+around by proceeding straight to `apt-get install`, which succeeded).
+`HEAD`, local `main` and `origin/main` all already agreed at `5aea47b`
+(v3-D308) — no stale-local-`main` trap this run, confirmed via `git fetch
+origin main` before any exploration. The sequential `make setup` stalled
+past its time budget mid-run (both Laravel `composer install`s had
+already finished; only the four PHP-independent `npm install`s for
+`packages/corpus-compiler`/`packages/engine`/`worker/fold-runner`/
+`apps/web` remained) — recovered by running those four directly and in
+parallel, the same recovery this file's history has recorded roughly a
+dozen times before. A SEPARATE, genuine gap surfaced independently of the
+dependency work: `v3/api`'s own `vendor/autoload.php` was missing despite
+`vendor/` existing (the earlier timeout had killed `composer install`
+mid-`dump-autoload`), and `v3/api/.env`/the sqlite database file had never
+been created at all (the same timeout killed the setup chain before
+reaching those steps) — both recovered with a fresh `composer install`,
+`cp .env.example .env`, `php artisan key:generate`, and `php artisan
+migrate:fresh --force`, all standard `make setup` steps that simply never
+ran to completion this session.
+
+`TZ=UTC make test`: **3050 passing**, matching v3-D308's own recorded
+count EXACTLY across all seven suites (255 v2 vitest, 47 v2/api, 417
+v3/api, 120 corpus-compiler, 468 engine, 73 fold-runner, 1670 apps/web) —
+zero suite moved, the expected result for a dependency-only fix.
+`check-test-floor.mjs`: OK, 3050 >= floor 1899 (+1151 margin, unmoved).
+`TZ=UTC make build`: exit 0, 30 routes, unchanged, now building on real
+Next.js 16.4.0 (confirmed in the build's own banner line). `npm run
+gates`: all green — locked-css OK, 1 documented hunk, 294 v1 lines
+byte-identical; boundaries OK, 335 files, unchanged; fonts degraded-but-
+non-blocking, pre-existing, 2/6 UI fonts present; corpus-morphology OK,
+362 words; corpus-glyphs OK, 206 codepoints across 4 artifacts — all
+unchanged. `npx tsc --noEmit` (apps/web, inside `typecheck-v3`): clean.
+Final `npm audit` tallies, this run's own close: `apps/web`/
+`corpus-compiler`/`engine`/`fold-runner` each `{critical: 2, high: 1,
+moderate: 3, total: 6}` (was `{critical: 2/3, high: 2/3, moderate: 3,
+total: 7/9}`), all seven remaining findings in the single deferred
+`vitest@5` dev-only chain; `v3/api` composer audit: 4 advisories on
+`laravel/framework` alone (was 8 across 3 packages); `v2/api` composer
+audit: 19 advisories across 4 packages, UNCHANGED, reported not fixed
+(frozen). No `v1/**`/`v2/**` edit (`git status --porcelain -- v1 v2`
+empty immediately before committing — a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff produced by running the v2 suite was reverted first,
+same discipline as every prior entry). No Arabic codepoint (this diff
+touches only `package.json`/`package-lock.json`/`composer.lock` files —
+swept anyway, programmatically, in Python, over the Arabic, Arabic
+Supplement, Arabic Extended-A and both Presentation Forms Unicode blocks:
+CLEAN, as expected for dependency-manifest files). No oracle/golden-log/
+fixture/snapshot regenerated — this run wrote zero test or fixture files.
+
+NOT addressed: the `vitest@5` major-version dev-tooling bump across all
+four v3 Node packages (named above, real, deliberately deferred); the
+`laravel/framework` CRLF-injection/XSS/path-confusion advisories (named
+above, needs a major 11→12/13 framework upgrade, real, deliberately
+deferred); `v2/api`'s own 19 advisories (frozen, reported not fixed, a
+human's call per BUILD-PLAN's own v2-is-source-not-product framing); every
+item on v3-D308's own condensed "NOT addressed" list, unchanged —
+`rhymeClassOf()`; `EntitlementMachine::merge()`;
+`App\Billing\TrialAttribution`/`lib/pricing.ts#regionFromCountry()`;
+`PaywallGate` as a whole class; multi-surah enrollment as a product
+decision; the operational mailer/7-night launch window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy naming; `packages/engine/src/placement.ts`;
+`MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero fold-side consumer;
+`selection_determinism_check` still replaying a committed fixture;
+`QueueItem.score`'s missing external reader; `acknowledgeReentry`'s
+"makeup" branch; `DrillPicker.tsx`'s unused `now` prop; the unused
+`atoms`/`corpus`/`sessions` IndexedDB object stores; `session_start`'s own
+latency metric; the streak/away-day day-space mismatch; `/workbench`'s
+own Pane 2 per-word inspector and Pane 3 spec editor — all unchanged. A
+real dependency-vulnerability audit is now CLOSED for its first pass —
+future runs should re-run `npm audit`/`composer audit` periodically
+(dependencies drift and new CVEs publish continuously; this is not a
+one-time check) rather than treating this entry as permanently
+exhaustive. See CLAUDE.md's own running NOTE for this run's summary.
