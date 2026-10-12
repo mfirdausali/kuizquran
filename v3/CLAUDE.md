@@ -56,7 +56,111 @@ make dev     # SPA :5273, API :8000
 make test    # 3050 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 417 v3/api + 120 corpus-compiler
-             # + 468 engine + 73 fold-runner + 1670 apps/web. (v3-D307, 2026-10-12)
+             # + 468 engine + 73 fold-runner + 1670 apps/web. (v3-D308, 2026-10-12)
+             # NOTE (v3-D308, 2026-10-12): twelfth sweep for this build's
+             # recurring "mechanism built/tested, zero caller" / "docblock
+             # says X, reality is Y" bug class — empty for a new finding, but
+             # the first run to actually execute the fresh verification
+             # method v3-D307's own closing note named and left untried: the
+             # REAL `npx playwright test` CLI runner, not a hand-rolled
+             # playwright-core script, against the real production build.
+             # Root cause of the long-standing gap confirmed directly:
+             # `@playwright/test@1.62.1`'s own `browsers.json` pins chromium
+             # at revision 1234; this sandbox's cache at `/opt/pw-browsers`
+             # carries only 1194 (this run found `chromium_headless_shell-
+             # 1194` now genuinely populated with real binaries, not merely
+             # a stub — still the wrong revision). No env var exists to
+             # redirect the CLI's revision lookup (`PLAYWRIGHT_CHROMIUM_
+             # EXECUTABLE_PATH` does not exist anywhere in playwright-core's
+             # bundled source, grepped directly). Worked around for THIS
+             # run's verification only, never committed: a scratch, un-
+             # tracked `playwright.config.local.ts` (the real config, one
+             # line added — `use.launchOptions.executablePath` pointed at
+             # the cached 1194 binary) proved the mechanism first on a bare
+             # scratch smoke spec, then ran the REAL five e2e spec files
+             # against a real `next build`+`next start` and a real `php
+             # artisan serve` API — all 42 tests, both the `chromium` and
+             # `mobile` projects, green, no retries. Both scratch files
+             # deleted before this commit; nothing committed changes how
+             # the CLI resolves a browser, since pinning this sandbox's own
+             # cache path into the tracked config would break every OTHER
+             # environment that actually has revision 1234. FR6 Door 2's
+             # own diminishing-returns nudge (v3-D307's second named idea)
+             # was deliberately NOT re-driven live this run: `test/session-
+             # island.test.tsx`'s own positive+negative cases already drive
+             # genuine taps through the real component against a real fold
+             # and both pass — re-proving the identical fact in a real
+             # browser, at the cost of several full onboarding+session
+             # cycles of browser automation, was judged lower value than the
+             # CLI-runner fix itself. A direct re-read of the newest-touched
+             # production files (`git log --name-only -30`:
+             # `lib/enrollment/surahCookie.ts`/`writeSurahCookie.ts`,
+             # `lib/onboarding/choices.ts`, `lib/plan/dueToday.ts`,
+             # `PlanIsland.tsx`, `SyncTrigger.tsx`, `SurahAyahListIsland.tsx`,
+             # `/workbench`'s `page.tsx`) found every one already wired,
+             # tested and consistent with its own docblock — no stale claim,
+             # no zero-caller export.
+             #
+             # `TZ=UTC make test`: 3050 passing (unchanged from v3-D307, this
+             # run's own starting count — no suite moved). `TZ=UTC make
+             # build`: exit 0, 30 routes, unchanged. `npm run gates`: all
+             # green (locked-css OK, 1 documented hunk, 294 v1 lines byte-
+             # identical; boundaries OK, 336 files, unchanged; fonts
+             # degraded-but-non-blocking, pre-existing, 2/6 UI fonts
+             # present; corpus-morphology OK, 362 words; corpus-glyphs OK,
+             # 206 codepoints across 4 artifacts — all unchanged). No
+             # production/test file touched this run (`git status
+             # --porcelain` empty throughout, apart from this documentation
+             # commit — the two scratch Playwright files were created and
+             # deleted entirely outside what was ever staged). No
+             # `v1/**`/`v2/**` edit. No Arabic codepoint (nothing written;
+             # the real e2e specs exercised are pre-existing, unmodified
+             # files; the scratch smoke test's only string was the English
+             # literal "hello world").
+             #
+             # Session start: fresh container, PHP defaulted to 8.3.6
+             # (`v3/api` needs >=8.4.1); installed PHP 8.4 cleanly via the
+             # documented `packages.sury.org` apt mirror, no refusal. `HEAD`,
+             # local `main` and `origin/main` all already agreed at
+             # `d36b104` (v3-D307) — no stale-local-`main` trap this run.
+             # The sequential `make setup` stalled on `v2/api`'s own
+             # `composer install` (repeated transient `api.github.com`
+             # proxy timeouts cloning `sebastianbergmann/*` packages one at
+             # a time via dist); killed it, ran the four PHP-independent
+             # `npm install`s directly and in parallel, then both
+             # `composer install`s individually with
+             # `COMPOSER_PROCESS_TIMEOUT=900` — both completed cleanly on
+             # the warmed git-mirror cache, the same recovery this file's
+             # history has recorded roughly a dozen times before.
+             #
+             # NOT addressed: every item on v3-D307's own condensed list,
+             # unchanged — `rhymeClassOf()`; `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution`/`lib/pricing.ts
+             # #regionFromCountry()`; `PaywallGate` as a whole class;
+             # multi-surah enrollment; the operational mailer/7-night
+             # window; PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy naming;
+             # `packages/engine/src/placement.ts`; `MacroFacts.litany
+             # .rhymeLabel`; `corpusHash`'s zero fold-side consumer;
+             # `selection_determinism_check`'s fixture replay;
+             # `QueueItem.score`'s missing external reader;
+             # `acknowledgeReentry`'s "makeup" branch; `DrillPicker.tsx`'s
+             # unused `now` prop; the unused `atoms`/`corpus`/`sessions`
+             # IndexedDB object stores; `session_start`'s own latency
+             # metric; the streak/away-day day-space mismatch;
+             # `/workbench`'s own Pane 2/Pane 3 gaps — all unchanged. The
+             # Playwright CLI's own revision-resolution gap is CLOSED as a
+             # verification blocker for a run willing to repeat the scratch-
+             # config workaround, but stays open as a real environment
+             # fact — nothing was committed to fix it in the tree. FR6 Door
+             # 2's nudge is CLOSED for live-browser verification purposes —
+             # its component-level coverage already exercises genuine taps;
+             # don't re-attempt the live version without new reason to
+             # distrust that test. A thirteenth sweep of this exact shape
+             # should not be attempted without a third genuinely new
+             # verification method or a willingness to take on one of the
+             # larger, already-named architectural items. See
+             # DECISIONS.md v3-D308.
              # NOTE (v3-D307, 2026-10-12): eleventh empty sweep for this
              # build's recurring "mechanism built/tested, zero caller" /
              # "docblock says X, reality is Y" bug class — but the first one
