@@ -31007,3 +31007,130 @@ prop; the unused `atoms`/`corpus`/`sessions` IndexedDB object stores;
 mismatch — all unchanged. `/workbench`'s own stale docblock is now CLOSED
 and permanently guarded — remove it from future "docblock says X, reality
 is Y" sweeps.
+
+## v3-D307 (2026-10-12, nightly): eleventh empty sweep — but the first one to
+## try a genuinely different verification method (a live production build,
+## clicked through by a real headless browser), not another static read
+
+Two independent efforts, run one after the other, both came back clean
+against this build's recurring "mechanism built/tested, zero caller" and
+"docblock says X, reality is Y" bug classes:
+
+**1. A dedicated fresh-sweep agent (Explore, high effort)**, handed the full
+exclusion list this file's own recent entries carry (every item in the
+condensed "NOT addressed" list above, plus the three surfaces v3-D306 just
+confirmed wired) and directed at the specific corners v3-D300's own closing
+note named as not-yet-tried: `worker/fold-runner/src` and
+`packages/corpus-compiler/src`'s own zero-caller exports (re-swept fresh —
+`severity.ts#severityFromExitCode()` is a genuine zero-caller function, but
+confirmed architecturally unreachable rather than unwired: both Node bin
+scripts only ever go severity→exit-code, never the reverse, and PHP already
+has its own `v3-D288`-guarded `SEVERITY_BY_EXIT` mirror — there is no
+direction anything needs this function for); every controller/frontend
+field-parity pair named in this run's own brief
+(`AccountController`/`SettingsController`/`EntitlementController`/
+`VerificationsController`/`OverridesController`,
+`Admin\AdminBillingController`/`Admin\FlagController`/`Admin\EventsController`)
+— all byte-for-byte rendered, `EventsController::NULLABLE_FIELDS`/
+`FIELD_MAP` confirmed symmetric with `DrillEvent`'s full field list
+including every field added since v3-D206 (`locale`, `gradeClass`,
+`siteKey`, `visitOrdinal`, `corpusHash`, `awayDayIndex`, `away`,
+`resumeMassed`); a full `packages/engine/src` zero-caller re-sweep (129
+exports), every apparent hit resolving to an already-excluded item or an
+internal-only caller its own first pass had missed; the six
+request-time-clock pages (`/plan`, `/progress`, `/progress/list`, `/drill`,
+`/surah/[surah]`, `/surah/[surah]/[ayah]`) re-confirmed as the complete set
+`request-time-clock.test.ts` already polices, no seventh instance; the
+newest workbench diagnostic panels re-checked for prop-wiring mistakes, all
+correct.
+
+**2. This run's own live click-through**, the fresh corner v3-D300 named
+explicitly and no prior night had actually performed: `NEXT_PUBLIC_API_BASE`
+pointed at a real `php artisan serve --port=8001`, a real `next build` +
+`next start -p 3311` (the production server, matching
+`playwright.config.ts`'s own "tests the production build, not the dev
+server" discipline, since this build's one genuine production-only defect
+to date, v3-D301's prerendered `/plan`, could only have been caught this
+way), driven by a real headless Chromium (`playwright-core`, the pinned
+`chromium-1194` binary this sandbox actually has — the CLI runner's own
+internal revision lookup, `chromium_headless_shell-1234`, does not exist
+here and was bypassed by launching with an explicit `executablePath`,
+mirroring the environment doc's own documented workaround).
+
+First pass: a bare GET over 27 routes (every top-level and `/settings/*`
+page, plus `/surah/12`, `/surah/12/1`) with console/pageerror/5xx
+listeners attached — zero genuine errors; every `console.error` was either
+the four pre-existing missing UI fonts (`FONTS.md`'s own documented,
+non-blocking gap) or an aborted Next.js RSC prefetch request from a `<Link>`
+hover, neither a defect.
+
+Second pass, the real test: a full learner walk — onboarding through
+`completeOnboarding`'s own seven screens, then driving the REAL `/session`
+loop (not the simpler onboarding "first recall" mini-drill — the two have
+genuinely different reveal mechanics: onboarding's own drill shows a "Try
+again" button per wrong tap, while `SessionIsland.tsx`'s real loop
+(`:895-900`) reveals immediately on every tap, right or wrong, behind one
+shared "Continue" button, with no "Try again" at all) to repeated genuine
+completion, through FR6 Door 1 ("Learn one more ayah") and Door 2
+("Practice your weakest spot") offers, onward to `/progress`, `/plan` and
+`/library`.
+
+Two things that LOOKED like defects while driving this, both run down to
+ground and found to be non-issues, recorded so a future run does not
+re-chase either:
+
+- Door 1 ("Learn one more ayah") kept re-offering the SAME not-yet-fully-
+  encoded ayah every round, each completion graded S2 (never advancing to
+  S3/full) across six consecutive same-day reps. Read against
+  `freeplay.ts#extraLearnGrant` and v3-D252's own closing note directly:
+  this is `extraLearnGrant`'s **documented** contract ("Door 1 ('extra
+  Learn') therefore may now offer another pass at the ayah the session
+  just partially learned: that is `extraLearnGrant`'s own documented
+  contract, not a new choice") — not a regression, and the S2-forever
+  plateau is `blankCountFor`'s own band arithmetic (a 4-word ayah needs
+  "carry" band, strength >= 80, to blank the whole thing; invariant #4's
+  massed-same-day damping is slow by design) doing exactly what it is
+  supposed to.
+- FR6 Door 2's own diminishing-returns nudge (v3-D111,
+  `diminishingReturnsNudge`) never appeared despite Door 1 being massed six
+  times — but Door 2 (the weak-spot gym) was never actually exercised at
+  all in this run: `.first()` on a locator matching both doors' button text
+  always resolved to Door 1, which rendered first in document order. Not a
+  bug in the nudge; a limitation of this run's own throwaway driver script,
+  caught by reading the committed event log directly
+  (`indexedDB.open("iq3")` → the `events` store) rather than trusting the
+  rendered summary text, and confirmed before writing this note — the
+  nudge's own wiring was never actually put to the test this run, so its
+  status is unchanged, not re-verified clean.
+
+Also exercised live, successfully, with no console error: the `/plan`
+away-day toggle (v3-D207/D304) on a tab that visits `/plan` as its very
+FIRST route — the exact precondition v3-D304's own fix addressed — clicked
+"Mark this day away" and confirmed the row flips to "Away — no review
+expected" / "I'm back — unmark this day" (the apparent absence of an "I'm
+back" button in one probe was this run's own regex using a straight ASCII
+apostrophe against the page's real `&rsquo;` curly one, not a missing
+control).
+
+No new instance of either bug class survived either effort. Documentation-
+only: no production file touched, `TZ=UTC make test` re-confirmed at 3050
+(unchanged from v3-D306, the count this run started from), `TZ=UTC make
+build` exit 0, 30 routes, unchanged, `npm run gates` all green. No
+`v1/**`/`v2/**` edit. No Arabic codepoint (nothing written to any
+production file this run; the throwaway driver scripts lived outside the
+tracked tree and read page text/DOM state only, never corpus content, and
+were deleted before this commit).
+
+NOT addressed, unchanged: every item on the condensed "NOT addressed" list
+above, plus the two still-genuinely-open `/workbench` items v3-D306 itself
+named (Pane 2's per-word inspector, the Pane 3 spec editor at
+`POST /api/specs`). A twelfth sweep of this exact shape, with no fresh
+corner, should not be attempted without either a genuinely new verification
+method (not yet tried: driving the Playwright CLI runner itself rather than
+a hand-rolled script, once the `chromium_headless_shell-1234` resolution gap
+is fixed properly — e.g. by vendoring the pinned revision or adjusting
+`@playwright/test`'s version) or a willingness to take on one of the larger,
+already-named architectural items (`PaywallGate`, `EntitlementMachine::merge()`,
+multi-surah enrollment, `rhymeClassOf()`, FR5's own "replan"/"makeup"
+queue-level behavior, or actually exercising FR6 Door 2's nudge live, which
+this run set up to do and then missed by its own driver's bug).

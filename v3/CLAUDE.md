@@ -53,10 +53,129 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3046 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3050 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 417 v3/api + 120 corpus-compiler
-             # + 468 engine + 73 fold-runner + 1666 apps/web. (v3-D305, 2026-10-11)
+             # + 468 engine + 73 fold-runner + 1670 apps/web. (v3-D307, 2026-10-12)
+             # NOTE (v3-D307, 2026-10-12): eleventh empty sweep for this
+             # build's recurring "mechanism built/tested, zero caller" /
+             # "docblock says X, reality is Y" bug class — but the first one
+             # to try a genuinely different verification method rather than
+             # another static read. A dedicated fresh-sweep agent (Explore,
+             # high effort) re-swept worker/fold-runner/src and packages/
+             # corpus-compiler/src's own zero-caller exports (the one real
+             # hit, severity.ts#severityFromExitCode(), is architecturally
+             # unreachable, not unwired — neither Node bin script nor PHP
+             # ever needs the reverse exit-code->severity direction),
+             # every controller/frontend field-parity pair named in its own
+             # brief (AccountController/SettingsController/
+             # EntitlementController/VerificationsController/
+             # OverridesController, Admin\AdminBillingController/
+             # Admin\FlagController/Admin\EventsController — all byte-for-
+             # byte rendered), a full packages/engine/src zero-caller
+             # re-sweep (129 exports, every apparent hit already excluded or
+             # an internal-only caller), and the six request-time-clock
+             # pages (confirmed the complete set request-time-clock.test.ts
+             # already polices).
+             #
+             # This run's OWN contribution was the fresh corner v3-D300
+             # named and no prior night had actually performed: a REAL
+             # production build + start (NEXT_PUBLIC_API_BASE pointed at a
+             # real `php artisan serve --port=8001`, `next build` + `next
+             # start -p 3311`, matching playwright.config.ts's own "tests
+             # the production build, not the dev server" discipline — the
+             # same build shape v3-D301's own prerendered-/plan defect could
+             # only ever have been caught in), driven by a real headless
+             # Chromium (playwright-core, launched with an explicit
+             # executablePath against this sandbox's pinned chromium-1194
+             # binary, since the official Playwright CLI runner's own
+             # internal revision lookup, chromium_headless_shell-1234, does
+             # not exist here).
+             #
+             # First pass: a bare GET over 27 routes with console/pageerror/
+             # 5xx listeners attached — zero genuine errors, only the four
+             # pre-existing missing UI fonts and harmless aborted Next.js
+             # RSC prefetches. Second, the real test: a full learner walk —
+             # onboarding's seven screens, then the REAL `/session` loop (not
+             # onboarding's simpler "first recall" drill — the two have
+             # genuinely different reveal mechanics, confirmed by reading
+             # SessionIsland.tsx:895-900 directly: every real tap reveals
+             # immediately behind one shared "Continue" button, no "Try
+             # again" at all) driven to repeated genuine completion through
+             # FR6 Door 1 ("Learn one more ayah") and Door 2 ("Practice your
+             # weakest spot") offers, onward to /progress, /plan and
+             # /library, plus a second pass exercising the /plan away-day
+             # toggle (v3-D207/D304) as the very FIRST route a tab visits —
+             # the exact precondition v3-D304's own fix addressed — which
+             # worked correctly (confirmed the row flips to "Away — no
+             # review expected" / "I'm back — unmark this day", with no
+             # console error).
+             #
+             # Two things that looked like defects while driving this, both
+             # run to ground and found to be non-issues: Door 1 re-offering
+             # the SAME not-yet-fully-encoded ayah every round, always
+             # graded S2 across six same-day reps, is `extraLearnGrant`'s
+             # own DOCUMENTED contract (v3-D252's own closing note, verbatim:
+             # "Door 1 ... may now offer another pass at the ayah the
+             # session just partially learned... not a new choice") and the
+             # S2-forever plateau is `blankCountFor`'s own band arithmetic
+             # (a 4-word ayah needs "carry" band to blank the whole thing;
+             # invariant #4's massed-same-day damping is slow by design)
+             # doing exactly what it should; Door 2's own diminishing-
+             # returns nudge (v3-D111) never appearing was this run's own
+             # driver script bug (a `.first()` locator always resolving to
+             # Door 1's button, which renders first in document order, so
+             # Door 2 was never actually exercised at all this run) — caught
+             # by reading the committed IndexedDB event log directly rather
+             # than trusting the rendered summary text; the nudge's own
+             # wiring is UNCHANGED, not re-verified clean, and still worth a
+             # future run's attention with a corrected driver.
+             #
+             # No new instance of either bug class survived. Documentation-
+             # only: no production file touched, `TZ=UTC make test` 3050
+             # (unchanged from v3-D306, this run's own starting count),
+             # `TZ=UTC make build` exit 0, 30 routes, unchanged, `npm run
+             # gates` all green. No `v1/**`/`v2/**` edit. No Arabic
+             # codepoint (nothing written to any production file this run;
+             # the throwaway driver scripts lived outside the tracked tree
+             # and read page text/DOM state only, never corpus content, and
+             # were deleted before this commit).
+             #
+             # Session start: fresh container, PHP defaulted to 8.3.6
+             # (`v3/api` needs >=8.4.1); installed PHP 8.4 cleanly via the
+             # documented `packages.sury.org` apt mirror, no refusal. `HEAD`
+             # was found on a stale LOCAL `main` branch ref 27 commits behind
+             # `origin/main`'s real tip (`7be9f7c`, v3-D306) — the recurring
+             # stale-local-`main` trap this file has recorded roughly fifty
+             # times since v3-D77 — caught before any exploration via `git
+             # fetch origin main` + `git checkout main && git merge
+             # --ff-only origin/main`, a clean fast-forward, no work lost or
+             # at risk. Also noted: v3-D306's own commit never prepended its
+             # own NOTE here either (the identical gap this file's own
+             # "v3-D141 — backfilled" precedent names) — its real write-up
+             # lives only in DECISIONS.md v3-D306 and is not re-derived here.
+             #
+             # NOT addressed: every item on v3-D306's own condensed "NOT
+             # addressed" list, unchanged — `rhymeClassOf()`;
+             # `EntitlementMachine::merge()`; `App\Billing\TrialAttribution`/
+             # `lib/pricing.ts#regionFromCountry()`; `PaywallGate` as a whole
+             # class; multi-surah enrollment as a product decision; the
+             # operational mailer / 7-night launch window; PAY-1's Stripe
+             # fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy naming;
+             # `packages/engine/src/placement.ts`; `MacroFacts.litany
+             # .rhymeLabel`; `corpusHash`'s zero fold-side consumer;
+             # `selection_determinism_check` still replaying a committed
+             # fixture; `QueueItem.score`'s missing external reader;
+             # `acknowledgeReentry`'s "makeup" branch; `DrillPicker.tsx`'s
+             # unused `now` prop; the unused `atoms`/`corpus`/`sessions`
+             # IndexedDB object stores; `session_start`'s own latency
+             # metric; the streak/away-day day-space mismatch; `/workbench`'s
+             # own Pane 2 per-word inspector and Pane 3 spec editor — all
+             # unchanged. FR6 Door 2's own diminishing-returns nudge is NOT
+             # re-verified live (see above) — a future run with a corrected
+             # driver script should actually exercise it rather than Door 1.
+             # See DECISIONS.md v3-D307.
              # NOTE (v3-D305, 2026-10-11): picked up v3-D301's/v3-D304's own
              # Finding A: ATOMIC surahs (Al-Asr/103, Al-Ikhlas/112) showed
              # zero joints anywhere a learner could see. `MacroPanel.tsx`
