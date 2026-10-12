@@ -30897,3 +30897,113 @@ carry compare; the two TS-side test-file copies of the launch surah set;
 `lib/i18n/dictionaries.ts#isLocale()` — all unchanged. No new pick-list
 item is named this run; the standing backlog above is what a future run
 should draw from.
+
+## v3-D306 (2026-10-12, nightly): `/workbench`'s own page docblock claimed the admin auth gate, QariMode's signing UI/role-check/rejected-state, and gloss/distractor/group/disable override editing were all still unbuilt — all three had been wired at earlier, unrelated commits
+
+`app/(admin)/workbench/page.tsx`'s own "AUTH" and "REMAINING" sections carried
+three stale claims, each falsified by a different, later commit that never
+circled back to correct this file's own prose — the same "docblock says X,
+reality is Y" shape this build has closed dozens of times (v3-D90/D110/D123/
+D236/D244/D251/D258/D268/D269/D270/D277/D281/D282/D283/D284, among others):
+
+1. "What is NOT built: a client-side admin auth gate that keeps this ROUTE
+   from rendering for a non-admin." False since v3-D127: `(admin)/layout.tsx`
+   wraps every route under the group, including this one, in `AdminGate`
+   (`GET /api/admin/whoami` + a real login form for a non-admin session).
+2. "QARI MODE: ... the signing UI, the role check and the red REJECTED state
+   are not built." False since v3-D92/D131: `QariMode.tsx` has a real
+   `canSignQariTier` role check (disabling the qari-tier radio for a
+   non-qari admin), a full signing form, and a `role="alert"` rejected
+   state.
+3. "Editing `gloss.en`/`gloss.ms`, replacing distractor sets, grouping
+   multi-word units, disabling a question type" listed as REMAINING. False
+   since v3-D126/D134/D135: `OverrideEditor.tsx` implements all four
+   (`glossOverride`/`distractorOverride`/`groupOverride`/`disableOverride`),
+   and is imported and rendered inside `WorkbenchIsland.tsx`.
+
+Not a live defect — every one of these surfaces genuinely works today — but
+a future run trusting this file's own "REMAINING (honestly, not silently)"
+list in isolation would be steered into re-implementing the admin gate,
+QariMode's signing flow, or override editing as if none of them existed,
+the same failure shape v3-D77 Finding 0 and v3-D167's own process note both
+already named for a stale signpost costing real time. The two genuinely
+still-open items — Pane 2's per-word inspector, and the Pane 3 spec editor
+(`POST /api/specs`, including tombstoning) — are confirmed still absent
+(`grep` for "per-word"/"inspector"/"api/specs" across `components/workbench/`
+and `lib/` turns up only this docblock's own description of the gap) and
+are kept in the corrected REMAINING list.
+
+**Fixed:** the stale "What is NOT built"/"REMAINING" paragraphs are
+rewritten to name the real wiring (which commit closed each, and where the
+real mechanism lives) and moved into the BUILT list; only Pane 2 and the
+spec editor stay under REMAINING.
+
+**Found by:** a dedicated fresh-sweep agent (Explore) directed at areas not
+recently mined for this bug class — `apps/web/components/**` subtrees
+outside the ones the last ~25 commits had already touched, plus a
+repo-wide grep for stale "not yet"/"still unwired"/"not built" phrasing
+cross-checked against whether the referenced thing has since shipped — independently re-verified by this run directly against `AdminGate.tsx`,
+`(admin)/layout.tsx`, `QariMode.tsx` and `OverrideEditor.tsx`'s real source
+before writing any test.
+
+**Verified:** a new describe block in `test/workbench-ui.test.tsx`
+("the workbench page's own docblock does not claim a wired surface is
+unwired", 4 cases) reads `page.tsx`'s own real source text and asserts it
+never matches the three stale phrases, with a biconditional half for each
+(the real mechanism — `AdminGate`/`(admin)/layout.tsx`'s `<AdminGate>`,
+`QariMode.tsx`'s `canSignQariTier`/`role="alert"`, `OverrideEditor.tsx`'s
+four override functions — must genuinely exist), plus a fourth case
+confirming the two real remaining gaps (`per-word inspector`, `/api/specs`)
+are still honestly named. RED confirmed directly: `git stash` of the one
+production file alone (the new test kept) reproduced the stale text and
+failed exactly 3 of the 4 new cases; restored, reran: `workbench-ui.test.tsx`
+57/57 green (was 53, +4).
+
+`TZ=UTC make test`: 3050 passing (was 3046, +4 — exactly this run's four
+new cases; apps/web 1670, was 1666; no other suite moved: 255 v2 vitest,
+47 v2/api, 417 v3/api, 120 corpus-compiler, 468 engine, 73 fold-runner).
+`check-test-floor.mjs`: OK, 3050 >= floor 1899 (+1151 margin, unmoved).
+`TZ=UTC make build`: exit 0, 30 routes, unchanged (a docblock-plus-one-test-
+file change, no production route or component behavior touched). `npm run
+gates`: all green — locked-css OK, 1 documented hunk, 294 v1 lines
+byte-identical; boundaries OK, 336 files, unchanged count; fonts
+degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints across 4
+artifacts — all unchanged, this diff carries no corpus data. `npx tsc
+--noEmit` (apps/web): clean. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite
+was reverted before committing, same discipline as every prior entry). No
+Arabic codepoint (both changed files swept programmatically, in Python,
+over the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks — zero matches; every new string is a
+TypeScript identifier, a docblock sentence, or a regex literal, never
+corpus text). No oracle/golden-log/fixture/snapshot regenerated.
+
+Session start: fresh container, PHP defaulted to 8.3.6 (`v3/api` needs
+>=8.4.1); installed PHP 8.4 cleanly via the documented `packages.sury.org`
+apt mirror, no refusal. `HEAD` was detached at `490b8e0`, exactly
+`origin/main`'s own tip (v3-D305), on a stale LOCAL `main` branch ref 26
+commits behind (`977eae0`, v3-D281) — the recurring stale-local-`main` trap
+this file has recorded roughly fifty times since v3-D77 — caught before
+any commit via `git fetch` + `git checkout main` (which, as on several
+prior nights, silently landed on the stale cached ref rather than
+fast-forwarding) + `git stash` + `git merge --ff-only origin/main` + `git
+stash pop` (auto-merged cleanly, no conflict since upstream's own
+`workbench-ui.test.tsx` changes landed in a different part of the file). No
+work at risk; this run's own in-progress fix was carried through untouched.
+
+NOT addressed (the long-standing deferred list, unchanged, condensed):
+`rhymeClassOf()`; `EntitlementMachine::merge()`; `App\Billing\TrialAttribution`/
+`lib/pricing.ts#regionFromCountry()`; `PaywallGate` as a whole class;
+multi-surah enrollment as a product decision; the operational mailer /
+7-night launch window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy naming; `packages/engine/src
+/placement.ts`; `MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero
+fold-side consumer; `selection_determinism_check` still replaying a
+committed fixture; `QueueItem.score`'s missing external reader;
+`acknowledgeReentry`'s "makeup" branch; `DrillPicker.tsx`'s unused `now`
+prop; the unused `atoms`/`corpus`/`sessions` IndexedDB object stores;
+`session_start`'s own latency metric; the streak/away-day day-space
+mismatch — all unchanged. `/workbench`'s own stale docblock is now CLOSED
+and permanently guarded — remove it from future "docblock says X, reality
+is Y" sweeps.

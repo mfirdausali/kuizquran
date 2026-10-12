@@ -18,7 +18,9 @@
 // mutating admin route in `api/routes/api.php` sits behind BOTH `auth:sanctum`
 // and the `admin` env-allowlist middleware, and `POST /api/verifications` and
 // `POST /api/specs` are among them. Nothing this page can do reaches a write
-// without passing those two gates.
+// without passing those two gates. The `tier: qari` write is further gated on
+// `AdminRole::QARI` (v3-D92) — any other admin's qari-tier submission is
+// refused server-side regardless of what this page renders.
 //
 // What this page reads — `GET /api/verifications` — is a deliberate PUBLIC
 // read, and the route says so at its own definition: "the admin console's
@@ -26,12 +28,11 @@
 // this un-gated." So there is no data on this screen that is not already
 // publicly readable, and no privileged read is being introduced here.
 //
-// What is NOT built: a client-side admin auth gate that keeps this ROUTE from
-// rendering for a non-admin. That belongs with the console's own session
-// surface (build-plan step 24's `POST /api/admin/login` + the admin token),
-// and shipping half of it — a redirect with no server enforcement behind it —
-// would be security theatre. It is named in the route's remaining-work list
-// rather than faked.
+// A client-side admin auth gate ALSO exists (v3-D127): `(admin)/layout.tsx`
+// wraps every route under this group, including this one, in `AdminGate`,
+// which calls `GET /api/admin/whoami` and renders a login form for anyone
+// who is not a real admin session. This route never had its own gate to
+// build — it inherits the shared one.
 //
 // ---------------------------------------------------------------------------
 // SERVER / CLIENT SPLIT
@@ -53,20 +54,23 @@
 //   - Pane 3's preview half: `explain()` — supply, the full fibre with
 //     admit()'s per-clause verdict, and a live preview at three strengths
 //     rendered by the LEARNER'S OWN components.
+//   - QARI MODE (`QariMode.tsx`, v3-D92/D131): sign-time hash recompute
+//     against `POST /api/verifications` — the server side is TOCTOU-proof,
+//     it reads its own ingested hash and ignores any client-submitted one —
+//     plus the signing UI, a `canSignQariTier` role check that disables the
+//     qari-tier radio for a non-qari admin, and a red `role="alert"`
+//     REJECTED state.
+//   - Editing `gloss.en`/`gloss.ms`, replacing distractor sets, grouping
+//     multi-word units, and disabling/re-enabling a question type
+//     (`OverrideEditor.tsx`, v3-D126/D134/D135).
+//   - The admin auth gate on this route (see above).
 //
 // REMAINING (honestly, not silently):
 //   - Pane 2, the AYAH WORKBENCH: the learner's exact word-by-word rendering
 //     with a per-word inspector.
 //   - Pane 3's EDITOR half: authoring a spec (shape, EN/MS prompt, answer BY
 //     TAPPING A WORD → a CorpusRef, foil kernels with bounded params,
-//     difficulty offset), and the POST to `/api/specs`.
-//   - Editing `gloss.en`/`gloss.ms`, replacing distractor sets, grouping
-//     multi-word units, disabling a question type, tombstoning.
-//   - QARI MODE: sign-time hash recompute against `POST /api/verifications`
-//     (the server side is TOCTOU-proof already — it reads its own ingested
-//     hash and ignores any client-submitted one — but the signing UI, the
-//     role check and the red REJECTED state are not built).
-//   - The admin auth gate on this route (see above).
+//     difficulty offset), the POST to `/api/specs`, and tombstoning a spec.
 
 import { notFound } from "next/navigation";
 import { loadEffectiveCorpus, AVAILABLE_SURAHS } from "@/lib/corpus/load.ts";

@@ -1252,3 +1252,56 @@ describe("the workbench route reads the corpus through loadEffectiveCorpus (SSR 
     expect(src).toMatch(/macro=\{[^}]*macro[^}]*\}/);
   });
 });
+
+describe("the workbench page's own docblock does not claim a wired surface is unwired", () => {
+  // This page's own "AUTH" and "REMAINING" sections went stale on THREE
+  // separate claims, each closed at a different, later, unrelated commit:
+  // the admin auth gate (v3-D127, (admin)/layout.tsx#AdminGate), QariMode's
+  // signing UI/role-check/rejected-state (v3-D92/D131), and gloss/distractor/
+  // group/disable override editing (v3-D126/D134/D135, OverrideEditor.tsx).
+  // Each case below pins the AGREEMENT — the docblock never restates the
+  // stale claim, AND the real mechanism it would contradict genuinely exists
+  // — never a wording, so neither half can be satisfied by deleting the
+  // other.
+  const pageSrc = () =>
+    readFileSync(resolve(HERE, "../app/(admin)/workbench/page.tsx"), "utf8");
+  const adminGateSrc = () => readFileSync(resolve(HERE, "../components/admin/AdminGate.tsx"), "utf8");
+  const adminLayoutSrc = () => readFileSync(resolve(HERE, "../app/(admin)/layout.tsx"), "utf8");
+  const qariModeSrc = () => readFileSync(resolve(HERE, "../components/workbench/QariMode.tsx"), "utf8");
+  const overrideEditorSrc = () => readFileSync(resolve(HERE, "../components/workbench/OverrideEditor.tsx"), "utf8");
+
+  it("never claims the admin auth gate is not built", () => {
+    expect(pageSrc()).not.toMatch(/what is not built[\s\S]{0,80}client-side admin auth gate/i);
+    // Biconditional: the gate this page would be contradicting must be real.
+    expect(adminLayoutSrc()).toMatch(/<AdminGate>/);
+    expect(adminGateSrc()).toMatch(/export function AdminGate/);
+  });
+
+  it("never claims QariMode's signing UI, role check or rejected state are not built", () => {
+    expect(pageSrc()).not.toMatch(
+      /the signing ui,\s*the\s*\n?\/\/\s*role check and the red rejected state are not built/i,
+    );
+    const qari = qariModeSrc();
+    expect(qari).toMatch(/canSignQariTier/);
+    expect(qari).toMatch(/role="alert"/);
+  });
+
+  it("never claims gloss/distractor/group/disable override editing is not built", () => {
+    expect(pageSrc()).not.toMatch(
+      /editing `gloss\.en`\/`gloss\.ms`, replacing distractor sets, grouping[\s\S]{0,60}disabling a question type/i,
+    );
+    const editor = overrideEditorSrc();
+    expect(editor).toMatch(/glossOverride/);
+    expect(editor).toMatch(/distractorOverride/);
+    expect(editor).toMatch(/groupOverride/);
+    expect(editor).toMatch(/disableOverride/);
+  });
+
+  it("still honestly names the two genuinely-unbuilt panes — the per-word inspector and the spec editor", () => {
+    // The fix to the three stale claims above must not also erase the two
+    // real gaps still open on this page.
+    const src = pageSrc();
+    expect(src).toMatch(/per-word inspector/i);
+    expect(src).toMatch(/\/api\/specs/);
+  });
+});
