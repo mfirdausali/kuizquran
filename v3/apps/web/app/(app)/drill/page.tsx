@@ -30,14 +30,19 @@
 // has not run it, `loadCorpus` returns null and this route degrades to an
 // explanation rather than a crash (edge case #63) — NO page map is ever
 // invented to fill the gap.
+//
+// WHICH SURAH (v3-D310). This route has no in-app link today — reachable
+// only by direct URL — but it shared the EXACT defect v3-D303 fixed for
+// `/plan`/`/progress`/`/progress/list`: a private `parseSurah` that fell
+// back unconditionally to `AVAILABLE_SURAHS[0]` whenever no `?surah=` query
+// param was present. `resolveSurah` (lib/enrollment/surahCookie.ts) is the
+// ONE place that decision is made, so this route now imports it instead of
+// re-deriving a second copy.
 
+import { cookies } from "next/headers";
 import { loadCorpus, AVAILABLE_SURAHS } from "@/lib/corpus/load";
 import { DrillPicker } from "@/components/drill/DrillPicker";
-
-function parseSurah(raw: string | undefined): number {
-  const n = Number(raw);
-  return Number.isInteger(n) && AVAILABLE_SURAHS.includes(n) ? n : AVAILABLE_SURAHS[0]!;
-}
+import { ENROLLED_SURAH_COOKIE, resolveSurah } from "@/lib/enrollment/surahCookie";
 
 export default async function DrillPage({
   searchParams,
@@ -45,7 +50,8 @@ export default async function DrillPage({
   searchParams: Promise<{ surah?: string }>;
 }) {
   const { surah: rawSurah } = await searchParams;
-  const surah = parseSurah(rawSurah);
+  const cookieStore = await cookies();
+  const surah = resolveSurah(rawSurah, cookieStore.get(ENROLLED_SURAH_COOKIE)?.value, AVAILABLE_SURAHS);
   const corpus = await loadCorpus(surah);
 
   // Resolved ONCE on the server and passed down, so every atom in one render

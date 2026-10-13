@@ -1,18 +1,24 @@
-// `/plan`, `/progress` and `/progress/list` are Server Components — none can
-// be mounted with `render()` (they are `async function`s reading
-// `cookies()`, which only resolves inside a real Next.js request), so this
-// mirrors `test/request-time-clock.test.ts`'s own established technique: a
-// source-text proof that the real wiring is in place, rather than a stub
-// that merely asserts the shared `resolveSurah` behaves correctly in
-// isolation (already covered, independently, by
+// `/plan`, `/progress`, `/progress/list`, `/drill` and `/practice` are
+// Server Components — none can be mounted with `render()` (they are
+// `async function`s reading `cookies()`, which only resolves inside a real
+// Next.js request), so this mirrors `test/request-time-clock.test.ts`'s own
+// established technique: a source-text proof that the real wiring is in
+// place, rather than a stub that merely asserts the shared `resolveSurah`
+// behaves correctly in isolation (already covered, independently, by
 // `lib/enrollment/surahCookie.test.ts`).
 //
-// THE DEFECT THIS GUARDS (v3-D301/v3-D302 finding B): all three pages
-// defaulted silently to `AVAILABLE_SURAHS[0]` (12/Yusuf) whenever no
-// `?surah=` query param was present — which was every real visit, since
-// nothing in the app links to any of them with one. A learner enrolled in
-// 103, 67 or 112 saw "Nothing recorded yet" on /plan and /progress even
-// after a real completed session.
+// THE DEFECT THIS GUARDS (v3-D301/v3-D302 finding B, fixed for the first
+// three pages at v3-D303): all five pages defaulted silently to
+// `AVAILABLE_SURAHS[0]` (12/Yusuf) whenever no `?surah=` query param was
+// present. For `/plan`/`/progress`/`/progress/list` that was every real
+// visit, since nothing links to any of them with one. `/drill`/`/practice`
+// carried the identical defect, missed by v3-D303's own sweep (v3-D310):
+// `/practice` is reachable from a real, live link —
+// `SessionIsland.tsx`'s own bare `href="/practice"` (FR6 Door 3, "Practice
+// any ayah freely") — so every learner enrolled in 67/103/112 who tapped it
+// after a real session landed on surah 12's own picker instead of theirs.
+// `/drill` has no in-app link today, but shared the identical private
+// `parseSurah` copy and is fixed alongside it on the same reasoning.
 
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
@@ -34,9 +40,11 @@ const PAGES = [
   join("app", "(app)", "plan", "page.tsx"),
   join("app", "(app)", "progress", "page.tsx"),
   join("app", "(app)", "progress", "list", "page.tsx"),
+  join("app", "(app)", "drill", "page.tsx"),
+  join("app", "(app)", "practice", "page.tsx"),
 ] as const;
 
-describe("/plan, /progress and /progress/list pick the learner's real enrolled surah", () => {
+describe("/plan, /progress, /progress/list, /drill and /practice pick the learner's real enrolled surah", () => {
   for (const page of PAGES) {
     describe(page, () => {
       const src = read(page);

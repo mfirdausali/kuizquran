@@ -31460,3 +31460,136 @@ future runs should re-run `npm audit`/`composer audit` periodically
 (dependencies drift and new CVEs publish continuously; this is not a
 one-time check) rather than treating this entry as permanently
 exhaustive. See CLAUDE.md's own running NOTE for this run's summary.
+
+## v3-D310 (2026-10-13) — `/drill` and `/practice` carried the exact surah-defaulting defect v3-D303 fixed three nights earlier, missed by that sweep
+
+v3-D303 fixed `/plan`/`/progress`/`/progress/list`'s own private `parseSurah`
+helpers, which defaulted silently to `AVAILABLE_SURAHS[0]` (12/Yusuf)
+whenever no `?surah=` query param was present, and deleted both duplicated
+copies in favor of one shared `resolveSurah()` (`lib/enrollment/
+surahCookie.ts`), fed by a cookie `commitOnboarding` writes at the end of
+onboarding. That sweep's own regression test
+(`test/enrolled-surah-wiring.test.ts`) enumerated exactly the three pages it
+touched and asserted each imports the shared resolver rather than
+re-deriving the decision — but it never swept the REST of `app/(app)/**`
+for the same private-`parseSurah` shape, so two more pages carrying the
+identical, byte-for-byte copy of the exact same three-line helper went
+unnoticed for three nights.
+
+**Found by a fresh sweep of `app/(app)/**/page.tsx`** for any Server
+Component resolving "which surah" on its own, outside the one shared
+resolver — `grep -rln "AVAILABLE_SURAHS\[0\]"` across `apps/web/app` and
+`apps/web/lib` turned up `app/(app)/drill/page.tsx` and
+`app/(app)/practice/page.tsx` alongside `lib/enrollment/surahCookie.ts`'s
+own legitimate fallback inside `resolveSurah` itself — the only place that
+literal is supposed to survive.
+
+**`/practice` is the live, reachable instance**, not merely a latent one:
+`components/session/SessionIsland.tsx`'s own FR6 Door 3 CTA — "Practice any
+ayah freely", wired at v3-D117, shown on every real post-session summary
+screen — is a bare `<Link href="/practice">`, carrying no `?surah=` param
+at all (confirmed directly, `grep -n 'href="/practice"' SessionIsland.tsx`:
+exactly one hit, no query string). So every real tap of that button, for
+every learner enrolled in 67, 103 or 112, landed on the open-practice
+picker defaulted to surah 12 (Yusuf) — a different surah's words, offered
+as "free practice" for an ayah the learner never enrolled in. `/drill` has
+no in-app link anywhere today (`grep -rn '"/drill'` across `app`/
+`components` returns only the page's own file), so its instance is
+currently reachable only by direct URL — real, but not yet live-traffic —
+fixed alongside `/practice` on identical reasoning, since both files share
+the literal same three-line `parseSurah` function and the fix is
+mechanical, not a new design choice.
+
+**Fixed:** both pages' own private `parseSurah` helpers are deleted; both
+now read `cookies()` and call the shared `resolveSurah(rawSurah,
+cookieStore.get(ENROLLED_SURAH_COOKIE)?.value, AVAILABLE_SURAHS)` —
+byte-identical to `/progress/page.tsx`'s own call shape, since both already
+support an explicit `?surah=` query param (unlike `/plan`, which supports
+none) and so need the full three-tier priority order, not the
+query-param-less shortcut `/plan/page.tsx` uses.
+
+**Verified, RED confirmed directly:** `test/enrolled-surah-wiring.test.ts`'s
+`PAGES` array was widened from the three v3-D303 pages to all five
+(`/plan`, `/progress`, `/progress/list`, `/drill`, `/practice`) — its
+existing, unmodified generic `describe`/`it` loop then automatically ran
+every one of its four checks (reads `cookies()`+`ENROLLED_SURAH_COOKIE`;
+calls `resolveSurah()` imported from the shared module; never hardcodes
+`= AVAILABLE_SURAHS[0]`; imports the one shared resolver) against the two
+new pages with no new test logic written. Run against the unmodified
+`/drill`/`/practice` source: exactly 5 of 16 cases failed (the file's own
+pre-existing 3-page coverage, now 11 of its own assertions, was
+untouched) — the real stale source text printed in each failure, naming
+the still-private `parseSurah` and the still-present `=
+AVAILABLE_SURAHS[0]` literal. Implemented the fix; reran: 16/16 green (was
+11, +5 — exactly the new page × check combinations).
+
+`npx vitest run test/drill-picker.test.tsx test/practice-picker.test.tsx
+test/drill-handoff.test.ts test/practice-handoff.test.ts
+test/enrolled-surah-wiring.test.ts test/request-time-clock.test.ts`: all
+green, no regression on either picker, either handoff contract, or the
+six-page clock-reading sweep (`/drill`'s own `Date.now()` read is untouched
+— this fix only changed WHICH surah's corpus is loaded, never the clock).
+
+`TZ=UTC make test` (fresh container this run — `make setup` run from
+scratch after installing PHP 8.4 via the documented `packages.sury.org`
+apt mirror, no refusal; the four PHP-independent `npm install`s —
+`v3/apps/web`, `packages/engine`, `packages/corpus-compiler`,
+`worker/fold-runner`, plus `v2`'s own — were run directly and in parallel
+rather than waiting on the sequential `make setup` chain once v2/api's own
+`composer install` fell into the documented transient `api.github.com`
+dist-download git-mirror fallback, the same recovery this file's history
+has recorded roughly a dozen times before; `make compile-corpus` run once
+before any apps/web test needing the real corpus): **3056 passing** (was
+3050, +6 — exactly this run's net new tests on `test/enrolled-surah-
+wiring.test.ts`, which gained 6 cases when its `PAGES` array widened from 3
+to 5 entries against its existing per-page loop; apps/web 1676, was 1670;
+no other suite moved: 255 v2 vitest, 47 v2/api, 417 v3/api, 120
+corpus-compiler, 468 engine, 73 fold-runner). `check-test-floor.mjs`: OK,
+3056 >= floor 1899 (+1157 margin, unmoved, same discipline as every prior
+entry). `TZ=UTC make build`: exit 0, 30 routes, unchanged count — `/drill`
+and `/practice` both now read `ƒ` (dynamic, since both now call
+`cookies()`), the identical, correct consequence `/plan`/`/progress`
+already have; no new route, no new production file, two existing pages
+edited plus their shared, existing test file. `npm run gates`: all
+green — locked-css OK, 1 documented hunk, 294 v1 lines byte-identical;
+boundaries OK, 335 files, unchanged count (no new file this run); fonts
+degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints across 4
+artifacts — all unchanged, this diff carries no corpus data. `npx tsc
+--noEmit` (inside `next build`'s own TypeScript pass): clean. No
+`v1/**`/`v2/**` edit (`git status --porcelain -- v1 v2` empty immediately
+before committing — a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the v2 suite was reverted first, same discipline as
+every prior entry). No Arabic codepoint (both changed pages and the test
+file swept programmatically, in Python, over the Arabic, Arabic
+Supplement, Arabic Extended-A and both Presentation Forms Unicode blocks,
+plus a `\uXXXX`-escape and `fromCharCode`/`fromCodePoint` mention check:
+CLEAN — every new string is an import path, a wire-adjacent identifier, or
+a fixed English docblock/comment sentence, never corpus text). No
+oracle/golden-log/fixture/snapshot regenerated — this diff touches two
+existing page files and one existing test file; the compiled corpus
+artifacts this run produced via `make compile-corpus` are gitignored and
+untracked (`git status --porcelain --ignored` confirms `public/corpus/`
+and `packages/corpus-compiler/output/` both read `!!`).
+
+**NOT addressed:** every item on v3-D309's own condensed "NOT addressed"
+list, unchanged — `rhymeClassOf()`; `EntitlementMachine::merge()`;
+`App\Billing\TrialAttribution`/`lib/pricing.ts#regionFromCountry()`;
+`PaywallGate` as a whole class; multi-surah enrollment as a product
+decision; the operational mailer/7-night launch window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy naming; `packages/engine/src/placement.ts`;
+`MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero fold-side consumer;
+`selection_determinism_check` still replaying a committed fixture;
+`QueueItem.score`'s missing external reader; `acknowledgeReentry`'s
+"makeup" branch; `DrillPicker.tsx`'s unused `now` prop; the unused
+`atoms`/`corpus`/`sessions` IndexedDB object stores; `session_start`'s own
+latency metric; the streak/away-day day-space mismatch; `/workbench`'s own
+Pane 2 per-word inspector and Pane 3 spec editor; the deferred `vitest@5`
+major-version bump; `laravel/framework`'s own remaining CRLF-injection/XSS/
+path-confusion advisories; `v2/api`'s own 19 frozen advisories — all
+unchanged. The learner-facing surah-defaulting bug class is now CLOSED
+across every route that resolves a surah on the server side (`/plan`,
+`/progress`, `/progress/list`, `/drill`, `/practice`) — a future run
+should not re-open it without a genuinely new route that reads
+`AVAILABLE_SURAHS[0]` directly rather than through `resolveSurah()`.
