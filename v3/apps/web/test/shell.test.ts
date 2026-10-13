@@ -230,6 +230,18 @@ describe("client-side steering (edge cases #92 / #71)", () => {
     expect(steer).not.toMatch(/document\.cookie/);
   });
 
+  it("reads the SAME meta key commitOnboarding stamps — imported, not a second hand-typed copy (v3-D312)", () => {
+    // choices.ts's own docblock names this exact risk: "Named here so no
+    // surface spells them inline — OnboardedSteer already reads
+    // `onboardedAt`, and a typo'd second spelling of that key would silently
+    // strand every returning learner." Pin the IMPORT, not merely the
+    // substring "onboardedAt" — the hand-typed literal satisfies that too.
+    expect(steer).toMatch(
+      /import\s*\{[^}]*\bONBOARDED_AT\b[^}]*\}\s*from\s*["']@\/lib\/onboarding\/choices\.ts["']/,
+    );
+    expect(steer).not.toMatch(/db\.get\(\s*"meta"\s*,\s*"onboardedAt"\s*\)/);
+  });
+
   it("replaces rather than pushes, so Back does not bounce off the landing page", () => {
     expect(steer).toMatch(/router\.replace/);
     expect(steer).not.toMatch(/router\.push/);

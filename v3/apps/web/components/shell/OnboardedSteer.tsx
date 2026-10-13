@@ -37,6 +37,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { openDb } from "@/lib/idb";
+import { ONBOARDED_AT } from "@/lib/onboarding/choices.ts";
 
 /** Where an onboarded learner belongs (v3-D14, and the PWA `start_url`). */
 const HOME = "/home";
@@ -51,7 +52,7 @@ const HOME = "/home";
  */
 async function readOnboardedAt(): Promise<number | null> {
   const db = await openDb();
-  const row = await db.get("meta", "onboardedAt");
+  const row = await db.get("meta", ONBOARDED_AT);
   return typeof row?.value === "number" ? row.value : null;
 }
 

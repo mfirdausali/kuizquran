@@ -53,10 +53,148 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3057 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3058 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 417 v3/api + 120 corpus-compiler
-             # + 468 engine + 73 fold-runner + 1677 apps/web. (v3-D311, 2026-10-13)
+             # + 468 engine + 73 fold-runner + 1678 apps/web. (v3-D312, 2026-10-13)
+             # NOTE (v3-D312, 2026-10-13): `OnboardedSteer.tsx`
+             # (`components/shell/OnboardedSteer.tsx`) hand-typed the literal
+             # string `"onboardedAt"` a second time in its own
+             # `db.get("meta", "onboardedAt")` call, instead of importing
+             # `ONBOARDED_AT` from `lib/onboarding/choices.ts` — the ONE
+             # module that owns this meta key and exports the constant
+             # *specifically so no other surface has to spell it inline*.
+             # That module's own docblock already named this exact risk,
+             # verbatim: "Named here so no surface spells them inline —
+             # `OnboardedSteer` already reads `onboardedAt`, and a typo'd
+             # second spelling of that key would silently strand every
+             # returning learner." The warning was accurate and nobody had
+             # acted on it — `grep -rn "ONBOARDED_AT"` outside
+             # `choices.ts` itself returned nothing before this fix. The
+             # exact "two independent implementations of one decision, no
+             # shared source" shape this build has closed roughly a dozen
+             # times before (`cache-config-agreement.test.ts` v3-D150,
+             # `pricing-config-agreement.test.ts` v3-D158,
+             # `canonicalOrder-agreement.test.ts` v3-D261,
+             # `reveal-reason-codes-agreement.test.ts` v3-D311, among
+             # others) — sharper than most of those, since this pair sits
+             # on the SAME side of the TS/PHP boundary, where no "agreement
+             # test" is needed at all: the two copies could simply be ONE
+             # copy, reached by import, the fix every cross-language pair
+             # in that list structurally cannot take. Found by a dedicated
+             # fresh-sweep agent (Explore, high effort) handed the full
+             # exclusion list this file's own recent entries carry and told
+             # not to re-report any of it — independently re-verified by
+             # this run directly against `choices.ts`'s and
+             # `OnboardedSteer.tsx`'s real source, and against
+             # `lib/idb/schema.ts`'s own `MetaKey` union (a weaker, type-
+             # only second copy of the same literal, considered and left —
+             # a mismatched call site there would fail `tsc --noEmit`
+             # outright, a categorically safer failure mode than this
+             # one's silent runtime string) before writing any test. Not a
+             # live divergence today — both copies already read
+             # `"onboardedAt"` byte-for-byte — a drift-risk fix: a future
+             # rename of the meta key in `choices.ts` (a plain string, not
+             # a frozen wire field, so nothing stops this) would silently
+             # strand every already-onboarded learner on the landing page
+             # forever, the precise failure `choices.ts`'s own comment
+             # warns about and that no test was positioned to catch — the
+             # file's one existing assertion
+             # (`expect(steer).toMatch(/onboardedAt/)`,
+             # `test/shell.test.ts`) is satisfied just as well by the
+             # hand-typed literal as by a real import.
+             #
+             # Fixed: `OnboardedSteer.tsx` now imports `ONBOARDED_AT` from
+             # `lib/onboarding/choices.ts` and passes it to `db.get`
+             # directly — no new constant invented, no behavior change
+             # (both sides already agreed), one import, one call-site edit.
+             #
+             # RED confirmed directly: a new assertion in
+             # `test/shell.test.ts`'s existing "client-side steering" describe
+             # block (10 pre-existing cases in that block untouched) pins the
+             # IMPORT itself (`/import\s*\{[^}]*\bONBOARDED_AT\b...\}\s*from
+             # ...\/lib\/onboarding\/choices\.ts/`) and separately asserts the
+             # hand-typed call shape (`db.get("meta", "onboardedAt")`) is
+             # ABSENT — neither of which the old literal-only assertion could
+             # ever catch. Run against the unmodified component it failed
+             # exactly as predicted (the import pattern not found); restored
+             # byte-identically, reran: `test/shell.test.ts` 45/45 green (was
+             # 44, +1).
+             #
+             # `TZ=UTC make test`: 3058 passing (was 3057, +1 — exactly this
+             # run's one new test; apps/web 1678, was 1677; no other suite
+             # moved: 255 v2 vitest, 47 v2/api, 417 v3/api, 120
+             # corpus-compiler, 468 engine, 73 fold-runner).
+             # `check-test-floor.mjs`: OK, 3058 >= floor 1899 (+1159 margin,
+             # unmoved, same discipline as every prior entry). `TZ=UTC make
+             # build`: exit 0, 30 routes, unchanged — one existing component
+             # edited plus its one existing test file, no new production
+             # file or route. `npm run gates`: all green — locked-css OK, 1
+             # documented hunk, 294 v1 lines byte-identical; boundaries OK,
+             # 336 files, unchanged count; fonts degraded-but-non-blocking,
+             # pre-existing, 2/6 UI fonts present; corpus-morphology OK, 362
+             # words; corpus-glyphs OK, 206 codepoints across 4 artifacts —
+             # all unchanged, this diff carries no corpus data. `npx tsc
+             # --noEmit` (apps/web): clean. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff produced by
+             # running the suite was reverted before committing, same
+             # discipline as every prior entry — `git status --porcelain --
+             # v1 v2` empty immediately before committing). No Arabic
+             # codepoint (both changed files swept programmatically, in
+             # Python, over the Arabic, Arabic Supplement, Arabic
+             # Extended-A and both Presentation Forms Unicode blocks, plus a
+             # `fromCharCode`/`fromCodePoint` mention check: CLEAN — every
+             # new string is a TypeScript identifier, an import path, or a
+             # fixed English docblock/comment sentence, never corpus text).
+             # No oracle/golden-log/fixture/snapshot regenerated.
+             #
+             # Session start: fresh container, no
+             # `node_modules`/`vendor`/compiled corpus anywhere; PHP
+             # defaulted to 8.3.6 (`v3/api` needs >=8.4.1); installed PHP
+             # 8.4 cleanly via the documented `packages.sury.org` apt
+             # mirror, no refusal this run. `HEAD`/local `main`/`origin/main`
+             # all already agreed at `7749d26` (v3-D311) — no stale-local-
+             # `main` trap this run, confirmed via `git fetch origin main`
+             # before any exploration. The five `npm install`s (`v2`,
+             # `v3/apps/web`, `packages/engine`, `packages/corpus-compiler`,
+             # `worker/fold-runner`) were first attempted together as
+             # background subshells and silently produced zero output and a
+             # bare exit 1 each (a sandboxing quirk of that specific
+             # parallel-background invocation, not a real npm/network
+             # failure — confirmed by immediately re-running each one in the
+             # foreground, where every one succeeded cleanly in seconds);
+             # recovered by re-running each directly. Both Laravel
+             # `composer install`s each hit the documented transient
+             # git-mirror-clone failure once (killed mid-`dump-autoload`,
+             # leaving `vendor/` populated but `vendor/autoload.php`
+             # missing) and completed cleanly on a retry with
+             # `COMPOSER_PROCESS_TIMEOUT=900`, the same recovery this file's
+             # history has recorded roughly a dozen times before.
+             #
+             # NOT addressed: every item on v3-D311's own condensed "NOT
+             # addressed" list, unchanged — `rhymeClassOf()`;
+             # `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution`/`lib/pricing.ts
+             # #regionFromCountry()`; `PaywallGate` as a whole class;
+             # multi-surah enrollment as a product decision; the
+             # operational mailer/7-night launch window; PAY-1's Stripe
+             # fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy naming;
+             # `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero
+             # fold-side consumer; `selection_determinism_check` still
+             # replaying a committed fixture; `QueueItem.score`'s missing
+             # external reader; `acknowledgeReentry`'s "makeup" branch;
+             # `DrillPicker.tsx`'s unused `now` prop; the unused
+             # `atoms`/`corpus`/`sessions` IndexedDB object stores;
+             # `session_start`'s own latency metric; the streak/away-day
+             # day-space mismatch; `/workbench`'s own Pane 2 per-word
+             # inspector and Pane 3 spec editor; the deferred `vitest@5`
+             # major-version bump; `laravel/framework`'s own remaining
+             # advisories; `v2/api`'s own 19 frozen advisories — all
+             # unchanged. `OnboardedSteer.tsx`'s own hand-duplicated meta
+             # key is now CLOSED — remove it from future sweeps. See
+             # DECISIONS.md v3-D312.
              # NOTE (v3-D311, 2026-10-13): `REVEAL_REASON_CODES`
              # (`lib/admin/reveal.ts`) and `AdminAudit::REASON_CODES`
              # (`v3/api/app/Models/AdminAudit.php`) were two independent,

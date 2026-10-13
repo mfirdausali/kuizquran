@@ -31720,3 +31720,95 @@ major-version bump; `laravel/framework`'s own remaining advisories; `v2/api`'s
 own 19 frozen advisories — all unchanged. `REVEAL_REASON_CODES`'s own
 cross-runtime duplication is now mechanically guarded — remove it from
 future sweeps.
+
+---
+
+## v3-D312 — `OnboardedSteer.tsx` hand-duplicated the `onboardedAt` meta key instead of importing `ONBOARDED_AT` (2026-10-13)
+
+`lib/onboarding/choices.ts` exports `ONBOARDED_AT = "onboardedAt"` with an
+explicit docblock naming the risk: "Named here so no surface spells them
+inline — `OnboardedSteer` already reads `onboardedAt`, and a typo'd second
+spelling of that key would silently strand every returning learner."
+`components/shell/OnboardedSteer.tsx` never imported it — it called
+`db.get("meta", "onboardedAt")` with the literal spelled a second time.
+`grep -rn "ONBOARDED_AT"` outside `choices.ts` itself returned nothing
+before this fix.
+
+Same "two independent implementations of one decision, no shared source"
+shape this build has closed roughly a dozen times (v3-D150, v3-D158,
+v3-D261, v3-D311, among others) — sharper here because both copies sit on
+the SAME side of the TS/PHP boundary, so no `*-agreement.test.ts` guard was
+needed at all: the fix is a plain import, the structurally simplest version
+of this bug class. Not a live divergence today (both read `"onboardedAt"`
+byte-for-byte) — a drift-risk fix: a future rename of the meta key in
+`choices.ts` would silently strand every already-onboarded learner on the
+landing page forever, exactly the failure the source comment warns about.
+The file's one pre-existing test (`test/shell.test.ts`,
+`expect(steer).toMatch(/onboardedAt/)`) could not catch this — a hand-typed
+literal satisfies that regex just as well as a real import.
+
+Also considered: `lib/idb/schema.ts`'s own `MetaKey` union also spells
+`"onboardedAt"` as a type-only literal rather than referencing
+`ONBOARDED_AT`. Left alone — a mismatched call site there fails `tsc
+--noEmit` outright (TypeScript's own literal-type checking), a categorically
+safer failure mode than `OnboardedSteer`'s untyped runtime string argument.
+
+**Fixed:** `OnboardedSteer.tsx` imports `ONBOARDED_AT` from
+`lib/onboarding/choices.ts` and passes it to `db.get` directly. One import,
+one call-site edit, no behavior change.
+
+**RED confirmed directly:** a new assertion in `test/shell.test.ts`'s
+"client-side steering" describe block pins the real IMPORT
+(`/import\s*\{[^}]*\bONBOARDED_AT\b[^}]*\}\s*from\s*["']@\/lib\/onboarding\/choices\.ts["']/`)
+and separately asserts the hand-typed call shape
+(`db.get("meta", "onboardedAt")`) is absent. Run against the unmodified
+component it failed exactly as predicted (the import pattern not found);
+restored byte-identically, reran: `test/shell.test.ts` 45/45 green (was 44,
++1).
+
+`TZ=UTC make test`: 3058 passing (was 3057, +1 — exactly this run's one new
+test; apps/web 1678, was 1677; no other suite moved: 255 v2 vitest, 47
+v2/api, 417 v3/api, 120 corpus-compiler, 468 engine, 73 fold-runner).
+`check-test-floor.mjs`: OK, 3058 >= floor 1899 (+1159 margin, unmoved).
+`TZ=UTC make build`: exit 0, 30 routes, unchanged — one existing component
+edited plus its one existing test file, no new production file or route.
+`npm run gates`: all green — locked-css OK, 1 documented hunk, 294 v1 lines
+byte-identical; boundaries OK, 336 files, unchanged count; fonts
+degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints across 4
+artifacts — all unchanged, this diff carries no corpus data. `npx tsc
+--noEmit` (apps/web): clean. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite was
+reverted before committing). No Arabic codepoint (both changed files swept
+programmatically, in Python, over the Arabic, Arabic Supplement, Arabic
+Extended-A and both Presentation Forms Unicode blocks, plus a
+`fromCharCode`/`fromCodePoint` mention check: CLEAN — every new string is a
+TypeScript identifier, an import path, or a fixed English docblock/comment
+sentence, never corpus text). No oracle/golden-log/fixture/snapshot
+regenerated.
+
+Found by a dedicated fresh-sweep agent (Explore, high effort) handed the
+full exclusion list this file's recent entries carry and told not to
+re-report any of it, independently re-verified by this run directly against
+`choices.ts`'s and `OnboardedSteer.tsx`'s real source before writing any
+test.
+
+NOT addressed: every item on v3-D311's own condensed "NOT addressed" list,
+unchanged — `rhymeClassOf()`; `EntitlementMachine::merge()`;
+`App\Billing\TrialAttribution`/`lib/pricing.ts#regionFromCountry()`;
+`PaywallGate` as a whole class; multi-surah enrollment as a product
+decision; the operational mailer/7-night launch window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy naming; `packages/engine/src/placement.ts`;
+`MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero fold-side consumer;
+`selection_determinism_check` still replaying a committed fixture;
+`QueueItem.score`'s missing external reader; `acknowledgeReentry`'s
+"makeup" branch; `DrillPicker.tsx`'s unused `now` prop; the unused
+`atoms`/`corpus`/`sessions` IndexedDB object stores; `session_start`'s own
+latency metric; the streak/away-day day-space mismatch; `/workbench`'s own
+Pane 2 per-word inspector and Pane 3 spec editor; the deferred `vitest@5`
+major-version bump; `laravel/framework`'s own remaining advisories;
+`v2/api`'s own 19 frozen advisories; `lib/idb/schema.ts`'s own type-only
+`MetaKey` literal duplication (above, deliberately left) — all unchanged.
+`OnboardedSteer.tsx`'s own hand-duplicated meta key is now CLOSED — remove
+it from future sweeps.
