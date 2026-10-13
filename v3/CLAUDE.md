@@ -53,10 +53,136 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3056 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3057 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 417 v3/api + 120 corpus-compiler
-             # + 468 engine + 73 fold-runner + 1676 apps/web. (v3-D310, 2026-10-13)
+             # + 468 engine + 73 fold-runner + 1677 apps/web. (v3-D311, 2026-10-13)
+             # NOTE (v3-D311, 2026-10-13): `REVEAL_REASON_CODES`
+             # (`lib/admin/reveal.ts`) and `AdminAudit::REASON_CODES`
+             # (`v3/api/app/Models/AdminAudit.php`) were two independent,
+             # hand-declared copies of the same five-member closed set for
+             # the Reveal-identity action's typed reason (edge case #149) —
+             # `reveal.ts`'s own docblock already claimed agreement
+             # ("Mirrors `AdminAudit::REASON_CODES`") but nothing
+             # mechanically checked it. The exact "two implementations of
+             # one decision, no shared source" shape this build has closed
+             # roughly a dozen times before (`cache-config-agreement
+             # .test.ts` v3-D150, `pricing-config-agreement.test.ts`
+             # v3-D158, `LaunchSurahsAgreementTest.php` v3-D296,
+             # `nightlyWindow-countsAsGreen-agreement.test.ts` v3-D291,
+             # among others) — found by a dedicated fresh-sweep agent
+             # (Explore) handed the full exclusion list this file's recent
+             # entries carry, independently re-verified by this run
+             # directly against both real source files before writing any
+             # test. Not a live divergence today — both copies already
+             # agree byte-for-byte — a drift-risk fix: a future edit adding
+             # or retiring a reason code on one side only would silently
+             # desync the picker's offered set from what the server
+             # actually accepts, with nothing to catch it
+             # (`reveal.test.ts` only ever asserts that `revealIdentity()`
+             # posts whatever `reasonCode` it is handed, never that the
+             # OFFERED set agrees with the server's closed set).
+             #
+             # Fixed: no runtime coupling invented (none is possible across
+             # the language boundary) — a new `lib/admin/reveal-reason-
+             # codes-agreement.test.ts` reads `AdminAudit.php`'s raw source
+             # text (the same `readFileSync` + regex-extract technique
+             # `pricing-config-agreement.test.ts` already uses), and
+             # asserts the parsed `REASON_CODES` array is the exact same
+             # SET as `REVEAL_REASON_CODES` — same members, no stray, none
+             # missing, either direction, plus a length check so a
+             # duplicate on either side (which a bare `Set` comparison
+             # would silently absorb) still fails.
+             #
+             # RED confirmed by mutation (both sides already agreed, so
+             # there was no live failure to reproduce): a sixth placeholder
+             # code was temporarily appended to `AdminAudit::REASON_CODES`
+             # alone and the new test failed exactly as predicted —
+             # `expected Set{4} to deeply equal Set{5}`, naming the real
+             # stray value; reverted byte-identically (`git diff --stat`
+             # empty before committing), rerun clean.
+             #
+             # `TZ=UTC make test`: 3057 passing (was 3056, +1 — exactly
+             # this run's one new test; apps/web 1677, was 1676; no other
+             # suite moved: 255 v2 vitest, 47 v2/api, 417 v3/api, 120
+             # corpus-compiler, 468 engine, 73 fold-runner). `check-test-
+             # floor.mjs`: OK, 3057 >= floor 1899 (+1158 margin, unmoved,
+             # same discipline as every prior entry). `TZ=UTC make build`:
+             # exit 0, 30 routes, unchanged — this diff adds one new test
+             # file only, no production file, no route. `npm run gates`:
+             # all green — locked-css OK, 1 documented hunk, 294 v1 lines
+             # byte-identical; boundaries OK, 336 files, up from 335 —
+             # exactly the one new test file; fonts
+             # degraded-but-non-blocking, pre-existing, 2/6 UI fonts
+             # present; corpus-morphology OK, 362 words; corpus-glyphs OK,
+             # 206 codepoints across 4 artifacts — all unchanged, this diff
+             # carries no corpus data. `npx tsc --noEmit`: one real
+             # iteration — the first draft's `matchAll` capture-group read
+             # tripped this package's own `noUncheckedIndexedAccess`
+             # setting (the same shape v3-D158's own first draft hit);
+             # fixed with an explicit `filter((c): c is string => typeof c
+             # === "string")`, never a non-null assertion — clean after.
+             # No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff produced by running the suite was reverted
+             # before committing, same discipline as every prior entry —
+             # `git status --porcelain -- v1 v2` empty immediately before
+             # committing). No Arabic codepoint (the new file swept
+             # programmatically, in Python, over the Arabic, Arabic
+             # Supplement, Arabic Extended-A and both Presentation Forms
+             # Unicode blocks, plus a `fromCharCode`/`fromCodePoint`
+             # mention check: CLEAN — every new string is a PHP-source
+             # regex literal, a file path, or a fixed English docblock/
+             # assertion sentence, never corpus text). No oracle/
+             # golden-log/fixture/snapshot regenerated.
+             #
+             # Session start: fresh container, no
+             # `node_modules`/`vendor`/compiled corpus anywhere; PHP
+             # defaulted to 8.3.6 (`v3/api` needs >=8.4.1); installed PHP
+             # 8.4 cleanly via the documented `packages.sury.org` apt
+             # mirror, no refusal this run. `HEAD` was found detached
+             # exactly at `origin/main`'s own tip (`7366e35`, v3-D310), on
+             # a stale LOCAL `main` branch ref one commit behind
+             # (`c3e42ab`, v3-D309) — the recurring stale-local-`main` trap
+             # this file has recorded roughly fifty times since v3-D77 —
+             # caught before any exploration via `git fetch origin main` +
+             # `git checkout main && git merge --ff-only origin/main`, a
+             # clean fast-forward, no work lost or at risk. The sequential
+             # `make setup` hit its own background time budget partway
+             # through `v3/api`'s own `composer install` (itself mid the
+             # documented transient git-mirror-clone fallback); resumed
+             # directly with `COMPOSER_PROCESS_TIMEOUT=900` and a longer
+             # background budget, which completed cleanly on the warmed
+             # vendor cache — the same recovery this file's history has
+             # recorded roughly a dozen times before. The four
+             # PHP-independent `npm install`s (`v2`, `v3/apps/web`,
+             # `packages/engine`, `packages/corpus-compiler`, `worker
+             # /fold-runner`) were run directly and in parallel rather than
+             # waiting on the sequential chain, the same precedent too.
+             #
+             # NOT addressed: every item on v3-D310's own condensed "NOT
+             # addressed" list, unchanged — `rhymeClassOf()`;
+             # `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution`/`lib/pricing.ts
+             # #regionFromCountry()`; `PaywallGate` as a whole class;
+             # multi-surah enrollment as a product decision; the
+             # operational mailer/7-night launch window; PAY-1's Stripe
+             # fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy naming;
+             # `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero
+             # fold-side consumer; `selection_determinism_check` still
+             # replaying a committed fixture; `QueueItem.score`'s missing
+             # external reader; `acknowledgeReentry`'s "makeup" branch;
+             # `DrillPicker.tsx`'s unused `now` prop; the unused
+             # `atoms`/`corpus`/`sessions` IndexedDB object stores;
+             # `session_start`'s own latency metric; the streak/away-day
+             # day-space mismatch; `/workbench`'s own Pane 2 per-word
+             # inspector and Pane 3 spec editor; the deferred `vitest@5`
+             # major-version bump; `laravel/framework`'s own remaining
+             # advisories; `v2/api`'s own 19 frozen advisories — all
+             # unchanged. `REVEAL_REASON_CODES`'s own cross-runtime
+             # duplication is now mechanically guarded — remove it from
+             # future sweeps. See DECISIONS.md v3-D311.
              # NOTE (v3-D310, 2026-10-13): a fresh sweep of `app/(app)/**`
              # for the exact surah-defaulting shape v3-D303 closed three
              # nights earlier found two more instances that sweep missed:
