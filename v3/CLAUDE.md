@@ -53,10 +53,139 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3058 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3061 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 417 v3/api + 120 corpus-compiler
-             # + 468 engine + 73 fold-runner + 1678 apps/web. (v3-D312, 2026-10-13)
+             # + 468 engine + 73 fold-runner + 1681 apps/web. (v3-D313, 2026-10-13)
+             # NOTE (v3-D313, 2026-10-13): `EnrollmentSteer.tsx`
+             # (`components/shell/EnrollmentSteer.tsx`) was promised by file
+             # path in two separate production docblocks
+             # (`lib/enrollment/writeSurahCookie.ts`,
+             # `lib/enrollment/surahCookie.ts`, both since v3-D303) as a real
+             # second caller of the enrolled-surah cookie writer — "self-
+             # healing a device that onboarded before this cookie existed" —
+             # but the file never existed anywhere in the tree
+             # (`find . -iname "*EnrollmentSteer*"` returned nothing before
+             # this fix). `grep -rn "writeEnrolledSurahCookie"` showed exactly
+             # ONE real caller anywhere: `lib/onboarding/choices.ts`'s own
+             # `commitOnboarding`, which writes the cookie once, at
+             # onboarding, and never again. Not cosmetic:
+             # `writeEnrolledSurahCookie`'s own 180-day `max-age` is
+             # aspirational — Safari's ITP caps a script-written cookie's
+             # REAL lifetime at 7 days — and a spaced-repetition app's whole
+             # premise is reviews spaced days-to-weeks apart, so a learner
+             # who does not open the app for a week is the ORDINARY case.
+             # Once the cookie expires, `/plan`, `/progress`,
+             # `/progress/list`, `/drill` and `/practice` (all Server
+             # Components) fall back to `AVAILABLE_SURAHS[0]` — exactly the
+             # "/plan shows the wrong surah" failure v3-D301/v3-D303/v3-D310
+             # each believed they had closed for good, reopened by nothing
+             # more than a week of ordinary use on the one platform this
+             # mechanism was built to accommodate. Found by a dedicated
+             # fresh-sweep agent (Explore, high effort) handed the full
+             # exclusion list this file's own recent entries carry and told
+             # not to re-report any of it — independently re-verified by
+             # this run directly against both docblocks' real source, every
+             # one of the five Server Component pages' own `resolveSurah`
+             # call sites, and `OnboardedSteer.tsx`'s established shape
+             # before writing any test.
+             #
+             # Fixed: new `components/shell/EnrollmentSteer.tsx`, modelled
+             # on `OnboardedSteer.tsx`'s own shape (mount effect, renders
+             # null, never gates paint, never throws) but reading
+             # `readChoices()` for the cookie's own VALUE rather than a bare
+             # meta key. Mounted in `app/(app)/layout.tsx` beside
+             # `<TabBar/>`/`<SyncTrigger/>`, refreshing the cookie's 7-day
+             # ITP clock on every real app visit, not only once at
+             # onboarding. No server/wire/schema change — the cookie
+             # mechanism itself was already correct; only the missing
+             # second caller was built.
+             #
+             # RED confirmed directly: the new component file moved aside
+             # (every new test in `test/enrollment-steer.test.tsx` kept)
+             # failed exactly on `Failed to resolve import
+             # "@/components/shell/EnrollmentSteer"` against the unmodified
+             # tree. Restored byte-identically, reran: 3/3 green. The
+             # load-bearing case commits a real enrollment via
+             # `commitOnboarding` (surah 67), clears the cookie that call
+             # already wrote, and proves `<EnrollmentSteer/>` alone puts it
+             # back — so it cannot pass on the write `commitOnboarding`
+             # itself performs. A negative case proves a never-onboarded
+             # device writes nothing and never throws; a structural case
+             # pins both the `"use client"` directive and the real mount
+             # site in `app/(app)/layout.tsx`'s own source text.
+             #
+             # `TZ=UTC make test`: 3061 passing (was 3058, +3 — exactly this
+             # run's three new tests; apps/web 1681, was 1678; no other
+             # suite moved: 255 v2 vitest, 47 v2/api, 417 v3/api, 120
+             # corpus-compiler, 468 engine, 73 fold-runner). `check-test-
+             # floor.mjs`: OK, 3061 >= floor 1899 (+1162 margin, unmoved).
+             # `TZ=UTC make build`: exit 0, 30 routes, unchanged — one
+             # existing layout edited plus one new client component, no new
+             # route. `npm run gates`: all green — locked-css OK, 1
+             # documented hunk, 294 v1 lines byte-identical; boundaries OK,
+             # 339 files, up from 336 — exactly the two new production/test
+             # files plus the same pre-existing gitignored `next-env.d.ts`
+             # Next.js bootstrap-artifact fluctuation this file has
+             # recorded roughly two dozen times before; fonts degraded-but-
+             # non-blocking, pre-existing, 2/6 UI fonts present; corpus-
+             # morphology OK, 362 words; corpus-glyphs OK, 206 codepoints
+             # across 4 artifacts — all unchanged, this diff carries no
+             # corpus data. `npx tsc --noEmit` (apps/web): clean. No
+             # `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff produced by running the suite was reverted
+             # before committing, same discipline as every prior entry —
+             # `git status --porcelain -- v1 v2` empty immediately before
+             # committing). No Arabic codepoint (all three changed/new files
+             # swept programmatically, in Python, over the Arabic, Arabic
+             # Supplement, Arabic Extended-A and both Presentation Forms
+             # Unicode blocks, plus a `fromCharCode`/`fromCodePoint` mention
+             # check: CLEAN — every new string is a TypeScript identifier,
+             # an import path, a surah-number integer, or a fixed English
+             # docblock/comment sentence, never corpus text). No oracle/
+             # golden-log/fixture/snapshot regenerated.
+             #
+             # Session start: fresh container, no `node_modules`/`vendor`/
+             # compiled corpus anywhere; PHP defaulted to 8.3.6 (`v3/api`
+             # needs >=8.4.1); installed PHP 8.4 cleanly via the documented
+             # `packages.sury.org` apt mirror, no refusal this run. `HEAD`
+             # was found detached exactly at `origin/main`'s own tip
+             # (`2cfc7e3`, v3-D312), on a stale LOCAL `main` branch ref
+             # three commits behind (`c3e42ab`, v3-D309) — the recurring
+             # stale-local-`main` trap this file has recorded roughly fifty
+             # times since v3-D77 — caught before any exploration via `git
+             # fetch origin main` + `git checkout main && git merge
+             # --ff-only origin/main`, a clean fast-forward, no work lost or
+             # at risk. `make setup` ran clean end to end from a cold
+             # checkout — all five npm installs run directly in parallel,
+             # both composer installs run sequentially with
+             # `COMPOSER_PROCESS_TIMEOUT=900`, neither needing a retry.
+             #
+             # NOT addressed: every item on v3-D312's own condensed "NOT
+             # addressed" list, unchanged — `rhymeClassOf()`;
+             # `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution`/`lib/pricing.ts
+             # #regionFromCountry()`; `PaywallGate` as a whole class;
+             # multi-surah enrollment as a product decision; the
+             # operational mailer/7-night launch window; PAY-1's Stripe
+             # fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy naming;
+             # `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero
+             # fold-side consumer; `selection_determinism_check` still
+             # replaying a committed fixture; `QueueItem.score`'s missing
+             # external reader; `acknowledgeReentry`'s "makeup" branch;
+             # `DrillPicker.tsx`'s unused `now` prop; the unused
+             # `atoms`/`corpus`/`sessions` IndexedDB object stores;
+             # `session_start`'s own latency metric; the streak/away-day
+             # day-space mismatch; `/workbench`'s own Pane 2 per-word
+             # inspector and Pane 3 spec editor; the deferred `vitest@5`
+             # major-version bump; `laravel/framework`'s own remaining
+             # advisories; `v2/api`'s own 19 frozen advisories;
+             # `lib/idb/schema.ts`'s own type-only `MetaKey` literal
+             # duplication — all unchanged. `EnrollmentSteer.tsx`'s own
+             # missing-second-caller gap is now CLOSED — remove it from
+             # future sweeps.
              # NOTE (v3-D312, 2026-10-13): `OnboardedSteer.tsx`
              # (`components/shell/OnboardedSteer.tsx`) hand-typed the literal
              # string `"onboardedAt"` a second time in its own

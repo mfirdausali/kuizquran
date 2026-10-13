@@ -6,14 +6,17 @@
 // outside it and shows no tab bar.
 //
 // This is a SERVER COMPONENT. The client things under it are <TabBar/>, which
-// needs `usePathname` to mark the current tab and nothing else, and
-// <SyncTrigger/>, a passive background island (renders null, no props, no
-// state anything else reads) that fires `lib/sync/sync.ts#syncCycle()` on
-// mount + `online` + `focus` — see that component's own header for why this
-// was the missing wire for build-plan step 21's B5 fix. Keeping the shell
-// ITSELF on the server means a page's own RSC data (corpus, static content)
-// still streams — these are islands, not a wrapper that forces the whole tree
-// client-side.
+// needs `usePathname` to mark the current tab and nothing else; <SyncTrigger/>,
+// a passive background island (renders null, no props, no state anything else
+// reads) that fires `lib/sync/sync.ts#syncCycle()` on mount + `online` +
+// `focus` — see that component's own header for why this was the missing wire
+// for build-plan step 21's B5 fix; and <EnrollmentSteer/>, another such
+// passive island that refreshes the `enrolledSurah` cookie hint on every real
+// app visit — see that component's own header for why `commitOnboarding`
+// writing it once, at onboarding, was never enough (Safari's ITP caps a
+// script-written cookie at 7 days). Keeping the shell ITSELF on the server
+// means a page's own RSC data (corpus, static content) still streams — these
+// are islands, not a wrapper that forces the whole tree client-side.
 //
 // The layout itself reads NO IndexedDB. A layout that read the log would put
 // every page under it at risk of edge case #72 (a server render has no log,
@@ -27,11 +30,12 @@
 //     skip link    first focusable element, invisible until focused (§15)
 //     <main>       id="main" — the skip link's target
 //     <TabBar/>    fixed bottom nav; Plan replaces "You" (§14 / v3-D05)
-//   <SyncTrigger/> outside .app-shell — it paints nothing, so it has no
-//                  layout position to get right; it only needs to be mounted
-//                  once per app-shell lifetime.
+//   <SyncTrigger/>      outside .app-shell — it paints nothing, so it has no
+//   <EnrollmentSteer/>  layout position to get right; each only needs to be
+//                       mounted once per app-shell lifetime.
 
 import type { ReactNode } from "react";
+import { EnrollmentSteer } from "@/components/shell/EnrollmentSteer";
 import { SyncTrigger } from "@/components/shell/SyncTrigger";
 import { TabBar } from "@/components/shell/TabBar";
 
@@ -51,6 +55,7 @@ export default function AppShellLayout({ children }: { children: ReactNode }) {
 
       <TabBar />
       <SyncTrigger />
+      <EnrollmentSteer />
     </div>
   );
 }
