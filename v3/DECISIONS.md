@@ -32258,3 +32258,132 @@ this package; reported for a human's awareness, not acted on, since
 empty throughout this run). `distractor-qa.mjs`'s own `--write`
 clobber-guard is now CLOSED and permanently guarded — remove it from
 future "gate/tooling script with no dedicated coverage" sweeps.
+
+## v3-D316 (2026-10-14) — the admin billing snapshot never surfaced `last_provider_event_at`, the one Stripe-reconciliation field `AdminBillingController::show()` otherwise exists to expose
+
+`entitlements.last_provider_event_at` is the anchor for
+`EntitlementMachine::apply()`'s own Guard 2 (edge case #118's out-of-order
+webhook ordering check) — stamped on every live, webhook-driven
+transition and compared against every new event's `providerCreatedAt`;
+a refused out-of-order event even embeds its value in the rejection
+message (`"...is older than the last applied at {$fresh
+->last_provider_event_at}"`). `AdminBillingController::show()`'s own
+docblock (v3-D279) exists specifically to give an admin everything
+`EntitlementController::show()` withholds from a learner —
+`provider`/`providerCustomerId`/`providerSubscriptionId`/`stateVersion`
+— "because an admin reconciling a billing complaint against Stripe's
+own dashboard has no other way to find them anywhere in this product."
+`last_provider_event_at` is the one sibling field on that same row,
+written by the same webhook path, that never reached either response
+branch. `grep -rn "last_provider_event_at\|lastProviderEventAt" v3/api
+v3/apps/web` returned zero hits outside the model/machine before this
+fix — no admin wire field, no panel row, and no test anywhere asserted
+this column by name (`EntitlementStateMachineTest`'s own Guard-2 test,
+`test_out_of_order_event_is_ignored_never_last_write_wins`, only checks
+the rejection MESSAGE, never the column). Not a hard dead end today — a
+motivated admin could cross-reference `BillingEventsController`'s
+sibling `/settings/billing` table, filter by `?userId=`, and find the
+max `providerCreatedAt` by hand — but it is the one fact missing from
+the one screen already built and already documented for exactly this
+reconciliation purpose.
+
+Found by a dedicated fresh-sweep agent (Explore, high effort) handed
+the full exclusion list this file's recent entries carry and told not
+to re-report any of it — independently re-verified by this run directly
+against `Entitlement.php`, `EntitlementMachine::apply()`,
+`AdminBillingController::show()`'s both response branches, and
+`lib/admin/billingAudit.ts`'s `BillingSnapshot`/`isBillingSnapshot`
+before writing any test.
+
+Fixed, read-only, no schema/migration change (the column already
+existed, written on every real transition): `show()`'s two branches
+each gain `'lastProviderEventAt' => ...` (the real column, or `null` for
+no row); `BillingSnapshot` gains a matching `lastProviderEventAt: number
+| null`, validated by `isBillingSnapshot` (never merely passed through);
+`BillingAuditPanel.tsx`'s snapshot `<dl>` gains a trailing "Last provider
+event" row, rendered as an ISO timestamp or the panel's own existing "—"
+fallback.
+
+RED confirmed at both layers, each via `git stash` of the one production
+file alone (every test kept), restored byte-identically after: backend,
+both existing `AdminBillingTest` `show()` cases were strengthened (the
+load-bearing case to assert a real seeded `last_provider_event_at` round
+-trips; the no-row case's own `assertExactJson` to expect the new key as
+`null`) and failed exactly as predicted — `-  'lastProviderEventAt' =>
+1700700000000` missing from the subset assertion, and the exact-JSON
+case failing on the new key's absence; 18/18 green after (unchanged
+count — two strengthened existing tests, no new test method). Frontend,
+`billingAudit.test.ts`'s two `loadBillingSnapshot` fixtures were
+strengthened the same way (16/16 green after, unchanged count); the
+load-bearing `BillingAuditPanel` case gained one new assertion and
+failed exactly as predicted (`getElementError` — no such text) against
+the unmodified component; 12/12 green after (unchanged count).
+
+`TZ=UTC make test`: 3064 passing, matching this file's own recorded
+count exactly — no suite moved, since every RED case strengthened an
+existing test rather than adding a new one. `check-test-floor.mjs`: OK,
+3064 >= floor 1899 (+1165 margin, unmoved). `TZ=UTC make build`: exit 0,
+30 routes, unchanged — a controller-plus-lib-plus-component change, no
+route or new production file; boundaries 339 files, the same
+pre-existing gitignored `next-env.d.ts` Next.js bootstrap-artifact
+fluctuation this file has recorded roughly two dozen times before,
+confirmed via `git status --porcelain --ignored`, not a new production
+file (this diff touches six existing files only). `npx tsc --noEmit`,
+run separately across all four v3 node packages: clean in all four.
+`./vendor/bin/pint --test` on both changed PHP files: the production
+file passed; the test file reports the identical pre-existing
+`fully_qualified_strict_types`/`ordered_imports` findings both BEFORE
+and AFTER this diff, confirmed directly by stashing the change and
+re-running pint — pre-existing drift this fix does not introduce, left
+alone, same discipline as `WebhookHandler.php`'s own precedent
+(v3-D203). No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff produced by running the suite was reverted twice before
+committing, same discipline as every prior entry — `git status
+--porcelain -- v1 v2` empty immediately before committing). No Arabic
+codepoint (all six changed files swept programmatically, in Python,
+over the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks, plus a `fromCharCode`/
+`fromCodePoint` mention check: CLEAN — every new string is a PHP/
+TypeScript identifier, a wire field name, a fixed English label, or a
+synthetic millisecond-timestamp test fixture value, never corpus text).
+No oracle/golden-log/fixture/snapshot regenerated — this diff touches
+six existing files only.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1);
+installed PHP 8.4.26 cleanly via the documented `packages.sury.org` apt
+mirror, no refusal this run. `HEAD` was found detached exactly at
+`origin/main`'s own tip (`7da2d41`, v3-D315) once fetched — no
+stale-local-`main` trap this run, confirmed directly via `git fetch
+origin main` before any exploration (the local `main` branch ref was
+also already at the real tip). `make setup` needed one real recovery:
+all five `npm install`s and both `composer install`s reported clean on
+the first attempt — `v2/api`'s and `v3/api`'s composer installs both
+completed via the documented git-mirror-clone-per-package fallback,
+slow (~10 min each) but with no retry needed.
+
+NOT addressed: every item on v3-D315's own condensed "NOT addressed"
+list, unchanged — `rhymeClassOf()`; `EntitlementMachine::merge()`;
+`App\Billing\TrialAttribution`/`lib/pricing.ts#regionFromCountry()`;
+`PaywallGate` as a whole class; multi-surah enrollment as a product
+decision; the operational mailer/7-night launch window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy naming; `packages/engine/src/placement.ts`; `MacroFacts.litany
+.rhymeLabel`; `corpusHash`'s zero fold-side consumer;
+`selection_determinism_check` still replaying a committed fixture;
+`QueueItem.score`'s missing external reader; `acknowledgeReentry`'s
+"makeup" branch; `DrillPicker.tsx`'s unused `now` prop; the unused
+`atoms`/`corpus`/`sessions` IndexedDB object stores; `session_start`'s
+own latency metric; the streak/away-day day-space mismatch;
+`/workbench`'s own Pane 2 per-word inspector and Pane 3 spec editor; the
+deferred `vitest@5` major-version bump; `laravel/framework`'s own
+remaining advisories; `v2/api`'s own 19 frozen advisories; `lib/idb/
+schema.ts`'s own type-only `MetaKey` literal duplication — all
+unchanged. Also newly confirmed non-gaps this run, not pursued further:
+`BillingEventsController`'s sibling `providerCreatedAt`-per-delivery
+table already lets a motivated admin reconstruct this same fact by hand
+today, which is why this finding was real but not urgent.
+`AdminBillingController::show()`'s own documented field list
+(`provider`/`providerCustomerId`/`providerSubscriptionId`/`stateVersion`
+/`lastProviderEventAt`) is now complete — remove it from future
+"admin panel field-by-field re-audit" sweeps.

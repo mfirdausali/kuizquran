@@ -56,7 +56,126 @@ make dev     # SPA :5273, API :8000
 make test    # 3064 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 417 v3/api + 120 corpus-compiler
-             # + 468 engine + 73 fold-runner + 1684 apps/web. (v3-D315, 2026-10-14)
+             # + 468 engine + 73 fold-runner + 1684 apps/web. (v3-D316, 2026-10-14)
+             # NOTE (v3-D316, 2026-10-14): `entitlements.last_provider_event_at`
+             # — the anchor `EntitlementMachine::apply()`'s own Guard 2 (edge
+             # case #118's out-of-order webhook check) stamps on every live
+             # webhook transition and compares every new event against — had
+             # no admin-facing reader. `AdminBillingController::show()`'s own
+             # docblock (v3-D279) exists specifically to surface exactly this
+             # class of Stripe-reconciliation fact
+             # (`provider`/`providerCustomerId`/`providerSubscriptionId`/
+             # `stateVersion`) "because an admin reconciling a billing
+             # complaint against Stripe's own dashboard has no other way to
+             # find them anywhere in this product" — this was the one sibling
+             # field on the same row, written by the same webhook path, never
+             # added to either response branch. Not a hard dead end (a
+             # motivated admin could cross-reference `BillingEventsController`'s
+             # sibling `/settings/billing` table and find the max
+             # `providerCreatedAt` by hand) but the one fact missing from the
+             # one screen already built for exactly this purpose. Found by a
+             # dedicated fresh-sweep agent (Explore, high effort) handed the
+             # full exclusion list this file's recent entries carry —
+             # independently re-verified directly against `Entitlement.php`,
+             # `EntitlementMachine::apply()`, both `show()` response branches,
+             # and `lib/admin/billingAudit.ts`'s `BillingSnapshot`/
+             # `isBillingSnapshot` before writing any test.
+             #
+             # Fixed, read-only, no schema change (the column already
+             # existed, written on every real transition): `show()`'s two
+             # branches gain `lastProviderEventAt`; `BillingSnapshot` gains a
+             # matching `number | null` field, validated by
+             # `isBillingSnapshot`, never merely passed through;
+             # `BillingAuditPanel.tsx`'s snapshot `<dl>` gains a trailing
+             # "Last provider event" row, ISO timestamp or "—".
+             #
+             # RED confirmed at both layers, each via `git stash` of the one
+             # production file alone (every test kept), restored byte-
+             # identically after: backend, both existing `AdminBillingTest`
+             # `show()` cases were strengthened (the load-bearing case to
+             # assert a real seeded value round-trips; the no-row case's own
+             # `assertExactJson` to expect the new key as `null`) and failed
+             # exactly as predicted; 18/18 green after (unchanged count — two
+             # strengthened existing tests, no new test method). Frontend,
+             # `billingAudit.test.ts`'s two `loadBillingSnapshot` fixtures
+             # strengthened the same way (16/16 green after, unchanged
+             # count); the load-bearing `BillingAuditPanel` case gained one
+             # new assertion and failed exactly as predicted
+             # (`getElementError` — no such text) against the unmodified
+             # component; 12/12 green after (unchanged count).
+             #
+             # `TZ=UTC make test`: 3064 passing, matching v3-D315's own
+             # recorded count exactly — no suite moved, since every RED case
+             # strengthened an existing test rather than adding a new one.
+             # `check-test-floor.mjs`: OK, 3064 >= floor 1899 (+1165 margin,
+             # unmoved, same discipline as every prior entry). `TZ=UTC make
+             # build`: exit 0, 30 routes, unchanged — a controller-plus-lib-
+             # plus-component change, no route or new production file;
+             # boundaries 339 files, the same pre-existing gitignored
+             # `next-env.d.ts` Next.js bootstrap-artifact fluctuation this
+             # file has recorded roughly two dozen times before, confirmed
+             # via `git status --porcelain --ignored`, not a new production
+             # file (this diff touches six existing files only). `npx tsc
+             # --noEmit`, run separately across all four v3 node packages:
+             # clean in all four. `./vendor/bin/pint --test` on both changed
+             # PHP files: the production file passed; the test file reports
+             # the identical pre-existing `fully_qualified_strict_types`/
+             # `ordered_imports` findings both BEFORE and AFTER this diff,
+             # confirmed directly by stashing the change and re-running
+             # pint — pre-existing drift this fix does not introduce, left
+             # alone, same discipline as `WebhookHandler.php`'s own
+             # precedent (v3-D203). No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff produced by
+             # running the suite was reverted twice before committing, same
+             # discipline as every prior entry — `git status --porcelain --
+             # v1 v2` empty immediately before committing). No Arabic
+             # codepoint (all six changed files swept programmatically, in
+             # Python, over the Arabic, Arabic Supplement, Arabic
+             # Extended-A and both Presentation Forms Unicode blocks, plus a
+             # `fromCharCode`/`fromCodePoint` mention check: CLEAN — every
+             # new string is a PHP/TypeScript identifier, a wire field name,
+             # a fixed English label, or a synthetic millisecond-timestamp
+             # test fixture value, never corpus text). No oracle/golden-log/
+             # fixture/snapshot regenerated — this diff touches six existing
+             # files only.
+             #
+             # Session start: fresh container, no `node_modules`/`vendor`/
+             # compiled corpus anywhere; PHP defaulted to 8.3.6 (`v3/api`
+             # needs >=8.4.1); installed PHP 8.4.26 cleanly via the
+             # documented `packages.sury.org` apt mirror, no refusal this
+             # run. `HEAD` and local `main` were found already at
+             # `origin/main`'s own real tip (`7da2d41`, v3-D315) once
+             # fetched — no stale-local-`main` trap this run. `make setup`
+             # needed one real recovery: both Laravel `composer install`s
+             # completed via the documented git-mirror-clone-per-package
+             # fallback, slow (~10 min each) but with no retry needed; every
+             # `npm install` succeeded on the first attempt.
+             #
+             # NOT addressed: every item on v3-D315's own condensed "NOT
+             # addressed" list, unchanged — `rhymeClassOf()`;
+             # `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution`/`lib/pricing.ts
+             # #regionFromCountry()`; `PaywallGate` as a whole class;
+             # multi-surah enrollment as a product decision; the
+             # operational mailer/7-night launch window; PAY-1's Stripe
+             # fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy naming;
+             # `packages/engine/src/placement.ts`; `MacroFacts.litany
+             # .rhymeLabel`; `corpusHash`'s zero fold-side consumer;
+             # `selection_determinism_check` still replaying a committed
+             # fixture; `QueueItem.score`'s missing external reader;
+             # `acknowledgeReentry`'s "makeup" branch; `DrillPicker.tsx`'s
+             # unused `now` prop; the unused `atoms`/`corpus`/`sessions`
+             # IndexedDB object stores; `session_start`'s own latency
+             # metric; the streak/away-day day-space mismatch;
+             # `/workbench`'s own Pane 2 per-word inspector and Pane 3 spec
+             # editor; the deferred `vitest@5` major-version bump;
+             # `laravel/framework`'s own remaining advisories; `v2/api`'s
+             # own 19 frozen advisories; `lib/idb/schema.ts`'s own type-only
+             # `MetaKey` literal duplication — all unchanged.
+             # `AdminBillingController::show()`'s own documented field list
+             # is now complete — remove it from future "admin panel
+             # field-by-field re-audit" sweeps.
              # NOTE (v3-D315, 2026-10-14): `scripts/distractor-qa.mjs`'s own
              # `--write` path — the ONE mechanism in the M9 content-ops
              # tooling whose entire job is protecting a human reviewer's
