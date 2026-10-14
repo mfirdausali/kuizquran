@@ -22,7 +22,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { PRICING } from "./pricing";
+import { DEFAULT_REGION, PRICING } from "./pricing";
 
 const PRICING_CONFIG_PATH = path.resolve(__dirname, "../../../api/config/pricing.php");
 
@@ -115,5 +115,57 @@ describe("price amounts — PHP config and TS PRICING agree", () => {
     expect([...PRICING.MY.lifetimeRails]).toEqual(rails.MY.lifetime);
     expect([...PRICING.INTL.monthlyRails]).toEqual(rails.INTL.monthly);
     expect([...PRICING.INTL.lifetimeRails]).toEqual(rails.INTL.lifetime);
+  });
+});
+
+/**
+ * THE REGION-SET / DEFAULT-REGION MIRROR-AGREEMENT GUARD.
+ *
+ * `config/pricing.php`'s own `regions`/`default_region` keys are a second,
+ * INDEPENDENT decision in this exact same file — edge case #119's own "IP
+ * sets the default region" rule — that the price-amount guard above never
+ * covered. `lib/pricing.ts`'s `PRICING` object (whose own key set IS the
+ * TS-side region set, by construction of `Record<Region, RegionPricing>`)
+ * and its own `DEFAULT_REGION` constant are the TS mirror, declared with no
+ * import path to the PHP file at all — the identical "two implementations
+ * of one decision, no shared source" shape the test above already guards
+ * for `currency`/`monthly`/`lifetime`/`rails`, one field over, on the SAME
+ * config block. `PricingConstantsTest.php` pins `default_region` against its
+ * own hardcoded `'INTL'` literal and `test/pricing.test.ts` pins
+ * `DEFAULT_REGION` against its own; neither reads the other file, so a
+ * future region-default change landed on only one side would silently
+ * desync which region a fresh, no-IP-signal learner is priced in from which
+ * region `regionFromCountry()`'s own fallback actually returns — not a live
+ * divergence today (both sides already agree), a drift-risk fix matching
+ * every prior instance of this shape (v3-D150, v3-D158, v3-D296, v3-D311).
+ */
+function parseRegionsList(source: string): string[] {
+  const list = source.match(/'regions'\s*=>\s*\[([^\]]*)\]/)?.[1];
+  if (list === undefined) {
+    throw new Error("Could not find the 'regions' key in config/pricing.php.");
+  }
+  return Array.from(list.matchAll(/'([A-Z]+)'/g))
+    .map((m) => m[1])
+    .filter((region): region is string => region !== undefined);
+}
+
+function parseDefaultRegion(source: string): string {
+  const value = source.match(/'default_region'\s*=>\s*'([A-Z]+)'/)?.[1];
+  if (value === undefined) {
+    throw new Error("Could not find the 'default_region' key in config/pricing.php.");
+  }
+  return value;
+}
+
+describe("region set and default region — PHP config and TS PRICING agree", () => {
+  const source = readFileSync(PRICING_CONFIG_PATH, "utf8");
+
+  it("the TS PRICING key set matches config/pricing.php's 'regions' list exactly", () => {
+    const regions = parseRegionsList(source);
+    expect(Object.keys(PRICING).sort()).toEqual([...regions].sort());
+  });
+
+  it("DEFAULT_REGION matches config/pricing.php's 'default_region'", () => {
+    expect(DEFAULT_REGION).toBe(parseDefaultRegion(source));
   });
 });
