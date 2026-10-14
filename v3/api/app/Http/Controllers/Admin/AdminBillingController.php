@@ -177,6 +177,11 @@ class AdminBillingController extends Controller
      * omits them — a learner does not need their own Stripe ids surfaced)
      * because an admin reconciling a billing complaint against Stripe's own
      * dashboard has no other way to find them anywhere in this product.
+     * `lastProviderEventAt` is the same reconciliation fact one field over —
+     * `EntitlementMachine::apply()`'s own Guard 2 (edge case #118) stamps it
+     * on every live webhook-driven transition, and it is what that guard's
+     * own ordering check compares a new event's `providerCreatedAt` against
+     * — but until now it never reached this snapshot either.
      */
     public function show(int $userId): JsonResponse
     {
@@ -196,6 +201,7 @@ class AdminBillingController extends Controller
                 'providerCustomerId' => null,
                 'providerSubscriptionId' => null,
                 'stateVersion' => null,
+                'lastProviderEventAt' => null,
             ]);
         }
 
@@ -212,6 +218,7 @@ class AdminBillingController extends Controller
             'providerCustomerId' => $entitlement->provider_customer_id,
             'providerSubscriptionId' => $entitlement->provider_subscription_id,
             'stateVersion' => $entitlement->state_version,
+            'lastProviderEventAt' => $entitlement->last_provider_event_at,
         ]);
     }
 

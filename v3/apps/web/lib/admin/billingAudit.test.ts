@@ -223,6 +223,7 @@ describe("loadBillingSnapshot — makes override()'s 409 performable", () => {
           providerCustomerId: "cus_abc123",
           providerSubscriptionId: "sub_def456",
           stateVersion: 3,
+          lastProviderEventAt: 1_700_700_000_000,
         }),
         { status: 200 },
       );
@@ -246,6 +247,7 @@ describe("loadBillingSnapshot — makes override()'s 409 performable", () => {
         providerCustomerId: "cus_abc123",
         providerSubscriptionId: "sub_def456",
         stateVersion: 3,
+        lastProviderEventAt: 1_700_700_000_000,
       },
     });
   });
@@ -267,6 +269,7 @@ describe("loadBillingSnapshot — makes override()'s 409 performable", () => {
             providerCustomerId: null,
             providerSubscriptionId: null,
             stateVersion: null,
+            lastProviderEventAt: null,
           }),
           { status: 200 },
         ),
@@ -277,6 +280,7 @@ describe("loadBillingSnapshot — makes override()'s 409 performable", () => {
     if (result.state === "ready") {
       expect(result.snapshot.exists).toBe(false);
       expect(result.snapshot.providerCustomerId).toBeNull();
+      expect(result.snapshot.lastProviderEventAt).toBeNull();
     }
   });
 

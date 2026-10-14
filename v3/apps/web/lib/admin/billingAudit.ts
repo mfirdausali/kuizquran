@@ -151,6 +151,11 @@ export interface BillingSnapshot {
   providerCustomerId: string | null;
   providerSubscriptionId: string | null;
   stateVersion: number | null;
+  /** `EntitlementMachine::apply()`'s own Guard 2 (edge case #118) ordering
+   *  anchor — the provider-side timestamp of the most recent event this row
+   *  accepted. Reconciliation-relevant the same way `provider`/
+   *  `providerCustomerId`/`providerSubscriptionId` already are. */
+  lastProviderEventAt: number | null;
 }
 
 export type BillingSnapshotLoad =
@@ -176,7 +181,8 @@ function isBillingSnapshot(v: unknown): v is BillingSnapshot {
     (typeof s.provider === "string" || s.provider === null) &&
     (typeof s.providerCustomerId === "string" || s.providerCustomerId === null) &&
     (typeof s.providerSubscriptionId === "string" || s.providerSubscriptionId === null) &&
-    (typeof s.stateVersion === "number" || s.stateVersion === null)
+    (typeof s.stateVersion === "number" || s.stateVersion === null) &&
+    (typeof s.lastProviderEventAt === "number" || s.lastProviderEventAt === null)
   );
 }
 

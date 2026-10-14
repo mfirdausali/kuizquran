@@ -385,6 +385,7 @@ class AdminBillingTest extends TestCase
             'provider_customer_id' => 'cus_abc123',
             'provider_subscription_id' => 'sub_def456',
             'state_version' => 3,
+            'last_provider_event_at' => 1_700_700_000_000,
         ]);
 
         $response = $this->getJson("/api/admin/billing/{$learner->id}")->assertOk();
@@ -402,6 +403,7 @@ class AdminBillingTest extends TestCase
             'providerCustomerId' => 'cus_abc123',
             'providerSubscriptionId' => 'sub_def456',
             'stateVersion' => 3,
+            'lastProviderEventAt' => 1_700_700_000_000,
         ]);
     }
 
@@ -433,6 +435,7 @@ class AdminBillingTest extends TestCase
             'providerCustomerId' => null,
             'providerSubscriptionId' => null,
             'stateVersion' => null,
+            'lastProviderEventAt' => null,
         ]);
     }
 }

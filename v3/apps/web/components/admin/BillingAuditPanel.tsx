@@ -267,6 +267,14 @@ export function BillingAuditPanel() {
                 <dt>State version</dt>
                 <dd>{snapshot.snapshot.stateVersion ?? "—"}</dd>
               </div>
+              <div>
+                <dt>Last provider event</dt>
+                <dd>
+                  {snapshot.snapshot.lastProviderEventAt !== null
+                    ? new Date(snapshot.snapshot.lastProviderEventAt).toISOString()
+                    : "—"}
+                </dd>
+              </div>
             </dl>
           ) : (
             <p className="caption" role="status">

@@ -271,6 +271,7 @@ describe("BillingAuditPanel — looking up the current snapshot", () => {
           providerCustomerId: "cus_abc123",
           providerSubscriptionId: "sub_def456",
           stateVersion: 3,
+          lastProviderEventAt: 1_700_700_000_000,
         });
       }
       return jsonResponse({ entries: [], limit: 200 });
@@ -288,6 +289,7 @@ describe("BillingAuditPanel — looking up the current snapshot", () => {
     expect(screen.getByText("cus_abc123")).toBeTruthy();
     expect(screen.getByText("sub_def456")).toBeTruthy();
     expect(screen.getByText(new Date(1_700_000_000_000).toISOString())).toBeTruthy();
+    expect(screen.getByText(new Date(1_700_700_000_000).toISOString())).toBeTruthy();
   });
 
   it("looking up a learner with no row says so honestly instead of a fabricated snapshot", async () => {
@@ -307,6 +309,7 @@ describe("BillingAuditPanel — looking up the current snapshot", () => {
           providerCustomerId: null,
           providerSubscriptionId: null,
           stateVersion: null,
+          lastProviderEventAt: null,
         });
       }
       return jsonResponse({ entries: [], limit: 200 });
@@ -344,6 +347,7 @@ describe("BillingAuditPanel — looking up the current snapshot", () => {
           providerCustomerId: "cus_abc123",
           providerSubscriptionId: "sub_def456",
           stateVersion: overrideCalls,
+          lastProviderEventAt: null,
         });
       }
       return jsonResponse({ entries: [], limit: 200 });
