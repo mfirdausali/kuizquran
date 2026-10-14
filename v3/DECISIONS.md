@@ -32096,3 +32096,165 @@ this run); `v2/api`'s own 19 frozen advisories; `lib/idb/schema.ts`'s own
 type-only `MetaKey` literal duplication — all unchanged. The pricing
 config's own region-set/default-region drift risk is now CLOSED — remove
 it from future sweeps.
+
+## v3-D315 (2026-10-14) — `distractor-qa.mjs`'s own clobber-guard, the one M9 safety mechanism protecting a human reviewer's sign-off, had zero test coverage
+
+`scripts/distractor-qa.mjs`'s own `--write` path is the ONE place this
+script touches disk, and it carries the ONE safety mechanism the script's
+own header names explicitly: "NEVER clobber a signed record. Overwriting
+one would silently discard a human's sign-off... or worse, keep the
+signature over a different sample." `test/content-freeze-gate.test.ts`'s
+own pre-existing `distractor-qa.mjs` describe block (6 cases) exercises
+only `--json`/stdout — the deterministic-sampling, option-set-not-row,
+empty-verdict, corpus-hash, grade-equal-collision and near-degenerate
+checks — and never once calls `--write` or reads anything off disk. The
+mechanism that exists specifically to stop a future careless edit from
+silently discarding a qari's or a reviewer's sign-off — exactly the "a
+sign-off collected before the freeze gate WILL be invalidated and re-paid
+in scholar hours" risk BUILD-PLAN's own top risk #2 names, M9's own hard
+gate — had nothing checking it still works.
+
+Found by widening the gate-script coverage audit this build has already
+applied to `check-boundaries.mjs` (v3-D276's "read every gate script line
+by line" sweep, v3-D278's own fix) and `check-test-floor.mjs` (v3-D95,
+built with its own dedicated test from day one) to the one remaining M9
+tooling script with no coverage of its own disk-writing branch.
+Independently re-verified before writing any test, not merely read: ran
+the real, unmodified script by hand against a synthetic corpus fixture in
+a scratch directory outside the tracked repo — a first `--write` on an
+unsigned sample succeeded; hand-editing the output to carry a `signedBy`
+and re-running `--write` correctly refused with exit code 2 and left the
+file on disk byte-identical. The mechanism was already correct — this is
+a coverage fix, not a live-bug fix, the same shape as `lib/sync/
+digest.ts`'s own "no test file of its own" gap (v3-D159) and the several
+mirror-agreement tests this build has written for an already-agreeing
+pair (v3-D137/D150/D158/D296/D311/D314): the risk guarded against is a
+FUTURE regression going undetected, not a present divergence.
+
+**Fixed:** one new test added to the existing `distractor-qa.mjs`
+describe block in `test/content-freeze-gate.test.ts`, reusing that
+block's own established pattern (a synthetic corpus fixture seeded in a
+fresh `mkdtempSync` directory, `seedRepoFiles(dir)` copying both scripts
+and their own dependencies in, exactly as the sibling "grade-equal" and
+"near-degenerate" cases already do for fake surahs 903/904 — this one
+uses fake surah 905). The test drives `--write` three times: once with no
+prior record (must succeed, `signedBy: null`); once more over the
+still-unsigned record (must ALSO succeed — proving the refusal is keyed
+on `signedBy`, not on "a file already exists," so the test cannot pass by
+merely rejecting every second write); then, after the test itself
+hand-edits the written JSON to carry a `signedBy` and a `verdict` per item
+(simulating the one write `distractor-qa.mjs` itself is built to never
+perform), a third `--write` must refuse with exit code 2, name the
+signer's email in its own stderr, and leave the file on disk
+byte-identical to what was signed.
+
+**RED confirmed by mutation**, not by a live failure (both the script and
+its new test already agreed, so there was no existing failure to
+reproduce): `scripts/distractor-qa.mjs`'s own `if (prior.signedBy) {`
+guard was temporarily changed to `if (false && prior.signedBy) {` and the
+new test failed exactly as predicted — `expected +0 to be 2` on the
+refusal's own exit-code assertion, the mutated script silently clobbering
+the signed record on its third write instead of refusing. Reverted
+byte-identically (`git diff --stat scripts/distractor-qa.mjs` empty
+before committing), reran clean: `content-freeze-gate.test.ts` 14/14
+green (was 13, +1).
+
+`TZ=UTC make test`: 3064 passing (was 3063, +1 — exactly this run's one
+new test; apps/web 1684, was 1683; no other suite moved: 255 v2 vitest,
+47 v2/api, 417 v3/api, 120 corpus-compiler, 468 engine, 73 fold-runner).
+`check-test-floor.mjs`: OK, 3064 >= floor 1899 (+1165 margin, unmoved,
+same discipline as every prior entry). `TZ=UTC make build`: exit 0, 30
+routes, unchanged — this diff touches one existing test file only, no
+production file, no route; the three client-staged corpora (112/103/67)
+reproduced byte-identical corpusHashes, and surah 12's own deliberate
+absence from client staging (`lib/corpus/staged.ts`'s own documented
+decision, re-verified directly this run — see below) is unchanged. `npm
+run gates`: all green — locked-css OK, 1 documented hunk, 294 v1 lines
+byte-identical; boundaries OK, 338 files, unchanged count — no new file
+this run; fonts degraded-but-non-blocking, pre-existing, 2/6 UI fonts
+present; corpus-morphology OK, 362 words; corpus-glyphs OK, 206
+codepoints across 4 artifacts — all unchanged, this diff carries no
+corpus data. `npx tsc --noEmit`, run separately across all four v3 node
+packages: clean in all four. No `v1/**`/`v2/**` edit (`git status
+--porcelain -- v1 v2` empty immediately before committing — a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite
+was reverted first, same discipline as every prior entry). No Arabic
+codepoint (the diff swept programmatically, in Python, over the Arabic,
+Arabic Supplement, Arabic Extended-A and both Presentation Forms Unicode
+blocks, plus a `fromCharCode`/`fromCodePoint`/`\u`-escape check: CLEAN —
+every new string is a TypeScript identifier, a surah/ayah/rank integer, a
+synthetic placeholder word ("target"/"other1"/"other2"/"other3"), or a
+fixed English docblock/assertion sentence, never corpus text). No
+oracle/golden-log/fixture/snapshot regenerated — the synthetic surah-905
+fixture this test writes lives entirely under a scratch tmpdir, never the
+tracked repo.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1);
+installed PHP 8.4.26 cleanly via the documented `packages.sury.org` apt
+mirror, no refusal this run. `HEAD` was found detached exactly at
+`origin/main`'s own tip (`160df5c`, v3-D314), on a stale LOCAL `main`
+branch ref six commits behind (`c3e42ab`, v3-D309) — the recurring
+stale-local-`main` trap this file has recorded roughly fifty times since
+v3-D77 — caught before any exploration via `git fetch origin main` + `git
+checkout main && git merge --ff-only origin/main`, a clean fast-forward,
+no work lost or at risk. `make setup` needed one genuine recovery beyond
+the documented ones: the five parallel `npm install`s all reported clean
+exit codes, but `apps/web`'s own copy of `next@16.4.0` extracted
+corrupted (the install log itself warned `TAR_ENTRY_ERROR ENOENT` on
+three font assets mid-install, and `node_modules/next` landed at 4.8MB
+instead of its real ~200MB+) — caught not by the install's own exit code
+but by `typecheck-v3` failing with `next/navigation`/`next/headers`
+reporting none of their real exports, traced to `node_modules/next/dist/
+client/components/` being entirely absent from disk; fixed with a
+targeted `rm -rf node_modules/next && npm install`, which re-extracted
+cleanly at the real size and made `tsc --noEmit` clean again — a new
+failure mode for this file's own "transient install flakiness" record,
+distinct from every previously-documented composer-cache or git-mirror
+recovery. Both Laravel `composer install`s (`v2/api`, `v3/api`) completed
+via the documented git-mirror-clone-per-package fallback, slow (~10 min
+each) but needing no retry.
+
+A candidate investigated and confirmed NOT a bug, so a future run does
+not re-chase it: `scripts/stage-corpus.mjs`'s own `CLIENT_SURAHS = [112,
+103, 67]` omits surah 12 (Yusuf) while `output/manifest.json`/corpus-
+glyphs/corpus-morphology all report FOUR compiled surahs including 12 —
+looked, at first glance, like v3-D296's own "four independent copies of
+the launch surah set" shape recurring on a fifth file. It is not:
+`lib/corpus/staged.ts`'s own header states the real, deliberate reason
+explicitly — "Surah 12 is deliberately absent and must stay absent: it is
+3.4 MB compiled and is served from disk by `lib/corpus/load.ts` instead
+of being shipped to a browser" — a DIFFERENT decision (which surahs are
+staged for CLIENT drilling) from the launch/hash-table surah set v3-D296
+already guards, and already covered by its own existing agreement test
+(`test/onboarding.test.tsx`'s `CLIENT_SURAHS`-vs-`stage-corpus.mjs`
+check) — re-confirmed directly against both real files before concluding
+this, not merely assumed from the comment.
+
+NOT addressed: every item on v3-D314's own condensed "NOT addressed"
+list, unchanged — `rhymeClassOf()`; `EntitlementMachine::merge()`;
+`App\Billing\TrialAttribution`/`lib/pricing.ts#regionFromCountry()`;
+`PaywallGate` as a whole class; multi-surah enrollment as a product
+decision; the operational mailer/7-night launch window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy naming; `packages/engine/src/placement.ts`; `MacroFacts.litany
+.rhymeLabel`; `corpusHash`'s zero fold-side consumer;
+`selection_determinism_check` still replaying a committed fixture;
+`QueueItem.score`'s missing external reader; `acknowledgeReentry`'s
+"makeup" branch; `DrillPicker.tsx`'s unused `now` prop; the unused
+`atoms`/`corpus`/`sessions` IndexedDB object stores; `session_start`'s
+own latency metric; the streak/away-day day-space mismatch; `/workbench`'s
+own Pane 2 per-word inspector and Pane 3 spec editor; the deferred
+`vitest@5` major-version bump; `laravel/framework`'s own remaining
+advisories; `v2/api`'s own 19 frozen advisories; `lib/idb/schema.ts`'s
+own type-only `MetaKey` literal duplication — all unchanged, each
+re-confirmed still open for the same stated reasons rather than
+re-litigated. Also noted, not fixed (both v1/v2, frozen, informational
+only): a fresh `npm audit` on `v2`'s own frontend package reports 13
+advisories (5 moderate, 6 high, 2 critical) — distinct from `v2/api`'s
+own already-recorded 19 composer advisories — never previously run on
+this package; reported for a human's awareness, not acted on, since
+`v1/**`/`v2/**` are frozen (`git status --porcelain -- v1 v2` confirmed
+empty throughout this run). `distractor-qa.mjs`'s own `--write`
+clobber-guard is now CLOSED and permanently guarded — remove it from
+future "gate/tooling script with no dedicated coverage" sweeps.

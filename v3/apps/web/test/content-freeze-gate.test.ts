@@ -19,7 +19,7 @@
 // fixture without the script growing a test-only code path.
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, cpSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -301,6 +301,82 @@ describe("distractor-qa.mjs — the 10% sample", () => {
       dir,
     );
     expect(stdout).toContain("near-degenerate");
+  });
+
+  // ---------------------------------------------------------------------
+  // `--write` ITSELF HAD NO TEST AT ALL — the one mechanism in this script
+  // whose whole job is protecting a human's sign-off, untested anywhere in
+  // the suite above. The script's own comment states exactly why this
+  // matters: "NEVER clobber a signed record. Overwriting one would silently
+  // discard a human's sign-off... or worse, keep the signature over a
+  // different sample." A QA sample is the one artifact `content-freeze.mjs`
+  // treats as EVIDENCE a qari session may be booked against — silently
+  // losing a reviewer's `verdict`/`signedBy` here is exactly the
+  // content-after-hash sequencing risk BUILD-PLAN's own top-risk #2 names,
+  // one script over from the gate it feeds.
+  //
+  // Every other test above reads `--json`/stdout only and never calls
+  // `--write` at all, so this branch — the one that touches disk — had zero
+  // coverage in either direction: nothing proved an unsigned sample may be
+  // regenerated, and nothing proved a signed one is protected.
+  it("`--write` regenerates an UNSIGNED sample, but refuses to clobber a SIGNED one", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "qa-write-"));
+    temps.push(dir);
+    const out = path.join(dir, "packages/corpus-compiler/output/905");
+    mkdirSync(out, { recursive: true });
+    writeFileSync(
+      path.join(out, "corpus.json"),
+      JSON.stringify({
+        meta: { surah: 905, ayahCount: 1, hashSpecVersion: 1 },
+        words: [{ ayah: 1, position: 1, text_uthmani: "target", gloss: { en: "x", ms: null, ja: null } }],
+        distractors: [
+          { ayah: 1, position: 1, rank: 1, text: "other1", origin: "kernel", src_type: "visual", prd_rank: "look-alike-verse", why: "" },
+          { ayah: 1, position: 1, rank: 2, text: "other2", origin: "kernel", src_type: "phonetic", prd_rank: "synonym", why: "" },
+          { ayah: 1, position: 1, rank: 3, text: "other3", origin: "kernel", src_type: "semantic", prd_rank: "same-root", why: "" },
+        ],
+        sceneBeats: [],
+      }),
+    );
+    writeFileSync(
+      path.join(dir, "packages/corpus-compiler/output/manifest.json"),
+      JSON.stringify({ surahs: { "905": { corpusHash: "deadfeed", ayahCount: 1 } } }),
+    );
+    seedRepoFiles(dir);
+    const script = path.join(dir, "scripts/distractor-qa.mjs");
+    const samplePath = path.join(dir, "docs/qa-samples/905.json");
+
+    // First write: no prior record. Must succeed and leave `signedBy: null`.
+    const first = run(script, ["--surah", "905", "--write"], dir);
+    expect(first.code, "a first write with no prior record must succeed").toBe(0);
+    const firstRecord = JSON.parse(readFileSync(samplePath, "utf8"));
+    expect(firstRecord.signedBy).toBeNull();
+
+    // A SECOND write over the same still-unsigned record must also succeed
+    // (there is nothing to protect yet) — proves the refusal below is keyed
+    // on `signedBy`, not on "a file already exists".
+    const second = run(script, ["--surah", "905", "--write"], dir);
+    expect(second.code, "a write over an UNSIGNED record must succeed").toBe(0);
+
+    // Simulate a human reviewer's sign-off — the one write this script
+    // itself never performs (`signedBy` stays null by construction).
+    const signed = { ...JSON.parse(readFileSync(samplePath, "utf8")), signedBy: "scholar@example.com", signedAt: 1_700_000_000_000 };
+    signed.items = signed.items.map((item: Record<string, unknown>) => ({ ...item, verdict: "ok" }));
+    writeFileSync(samplePath, JSON.stringify(signed, null, 2) + "\n");
+    const signedBytes = readFileSync(samplePath, "utf8");
+
+    // THE LOAD-BEARING CASE: a write against a SIGNED record must refuse.
+    const third = run(script, ["--surah", "905", "--write"], dir);
+    expect(third.code, "a write over a SIGNED record must refuse, not succeed").toBe(2);
+    expect(third.out, "the refusal names the signer").toContain("scholar@example.com");
+    expect(third.out, "the refusal names itself as a refusal").toContain("refusing to overwrite");
+
+    // And the file on disk — the sign-off itself — must be byte-identical to
+    // before the refused attempt. Not merely "non-zero exit": the record a
+    // human signed must still be exactly what they signed.
+    expect(
+      readFileSync(samplePath, "utf8"),
+      "the signed record on disk is untouched by the refused write",
+    ).toBe(signedBytes);
   });
 });
 
