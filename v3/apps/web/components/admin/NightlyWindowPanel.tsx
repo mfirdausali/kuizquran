@@ -41,6 +41,11 @@
 // rendered alongside its severity — the one fact that lets an operator tell
 // "the real unattended cron ran" apart from "a human quietly kept the
 // streak alive with a manual re-run after the cron died".
+//
+// v3-D317: `windowUpdatedAtMs` (when the current `windowStartedAt`/
+// `windowReason` pair was stamped) is rendered beside them — those two
+// answer WHAT was declared and WHY, never WHEN, so an operator had no way
+// to tell a fresh declaration from one weeks stale.
 
 import { useCallback, useEffect, useState } from "react";
 import { loadNightlyWindow, type NightlyWindowLoad } from "@/lib/admin/nightlyWindow";
@@ -85,6 +90,9 @@ export function NightlyWindowPanel() {
             window started:{" "}
             {load.status.windowStartedAt ?? "NOT DECLARED"}
             {load.status.windowReason ? ` — ${load.status.windowReason}` : ""}
+            {load.status.windowUpdatedAtMs !== null
+              ? ` (declared ${new Date(load.status.windowUpdatedAtMs).toISOString()})`
+              : ""}
           </p>
           {load.status.blockedBy ? (
             <p className="caption" role="status">

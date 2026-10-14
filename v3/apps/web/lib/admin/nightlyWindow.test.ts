@@ -13,6 +13,7 @@ const readyStatus = {
   satisfied: false,
   windowStartedAt: "2026-09-01",
   windowReason: "engine merge abc1234",
+  windowUpdatedAtMs: 1_756_000_000_000,
   nights: [
     { night: "2026-09-01", green: true, severities: { fold_determinism_check: "green" }, missing: [] },
   ],
@@ -53,9 +54,40 @@ describe("loadNightlyWindow — failure is a STATE, never an exception", () => {
       expect(load.status.required).toBe(7);
       expect(load.status.satisfied).toBe(false);
       expect(load.status.windowStartedAt).toBe("2026-09-01");
+      expect(load.status.windowUpdatedAtMs).toBe(1_756_000_000_000);
       expect(load.status.nights).toHaveLength(1);
       expect(load.status.lastP1).toBeNull();
     }
+  });
+
+  /**
+   * v3-D317: `nightly_window.updated_at_ms` is stamped on every window
+   * declaration (`nightly:window --start`) but was never surfaced by this
+   * module — `windowStartedAt`/`windowReason` answer WHAT was declared and
+   * WHY, never WHEN, so an operator could not tell whether the current
+   * declaration is fresh or weeks stale.
+   */
+  it("a window with no declaration timestamp reads ready, with it null", async () => {
+    const status = { ...readyStatus, windowUpdatedAtMs: null };
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify(status), { status: 200 })) as unknown as typeof fetch;
+
+    const load = await loadNightlyWindow();
+    expect(load.state).toBe("ready");
+    if (load.state === "ready") {
+      expect(load.status.windowUpdatedAtMs).toBeNull();
+    }
+  });
+
+  /** A malformed `windowUpdatedAtMs` (neither a number nor null) must
+   *  reject the WHOLE payload as unavailable — the same discipline every
+   *  other required top-level field on this status already follows —
+   *  never silently coerced or dropped. */
+  it("a malformed windowUpdatedAtMs rejects the whole payload as unavailable", async () => {
+    const status = { ...readyStatus, windowUpdatedAtMs: "not-a-number" };
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify(status), { status: 200 })) as unknown as typeof fetch;
+
+    const load = await loadNightlyWindow();
+    expect(load.state).toBe("unavailable");
   });
 
   /** v3-D225: each night's own per-check `triggers` (schedule|manual|ci)

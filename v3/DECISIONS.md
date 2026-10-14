@@ -32387,3 +32387,157 @@ today, which is why this finding was real but not urgent.
 (`provider`/`providerCustomerId`/`providerSubscriptionId`/`stateVersion`
 /`lastProviderEventAt`) is now complete — remove it from future
 "admin panel field-by-field re-audit" sweeps.
+
+## v3-D317 (2026-10-14) — the 7-night window's own declaration timestamp was stamped and never read: an operator could see WHAT was declared and WHY, never WHEN
+
+`nightly_window.updated_at_ms` is stamped on every (re)declaration of the
+7-consecutive-green-nights window by `NightlyWindowCommand::handle()`'s
+`--start` branch — the ONLY writer anywhere in the tree. A repo-wide grep
+for `updated_at_ms`/`updatedAtMs` found only the migration, the model's
+`$fillable`/default, that one write, and two PHPUnit fixtures that merely
+seed it to `0` as filler. `NightlyWindowLedger::status()` — the single
+place this screen's wire shape is assembled — returned `windowStartedAt`
+and `windowReason` (what was declared and why) but never this sibling
+column (when), so the gap propagated unchanged through
+`Admin\NightlyWindowController::index()`'s thin pass-through,
+`lib/admin/nightlyWindow.ts`'s `NightlyWindowStatus` interface and its
+`isStatus()` validator, and `NightlyWindowPanel.tsx`'s render — none of
+them ever named the field.
+
+Not cosmetic: `NightlyWindowController`'s own docblock quotes HANDOVER.md
+C5 directly — "a human watching this number by hand is the ENTIRE safety
+net for the gate that blocks public launch." An operator reading this
+screen could tell WHAT the current `windowStartedAt`/`windowReason` pair
+claims and WHY, but had no way to tell whether that declaration was
+stamped right after today's engine/selection merge or three weeks ago,
+silently stale because a LATER merge should have triggered a fresh
+`nightly:window --start` and never got one — exactly the failure mode
+`NightlyWindowLedger`'s own header already names for the night-level
+case ("an unobserved night must never read as a green one"), one level
+up, for the window declaration itself.
+
+Found by a dedicated fresh-sweep agent (Explore, high effort) handed the
+full exclusion list this file's recent entries carry and told not to
+re-report any of it — independently re-verified by this run directly
+against `NightlyWindowCommand.php`, `NightlyWindowLedger.php`,
+`NightlyWindowController.php`, `nightlyWindow.ts` and
+`NightlyWindowPanel.tsx`'s real source before writing any test.
+
+Fixed, read-only, no schema/migration change (the column already existed,
+stamped on every real declaration): `NightlyWindowLedger::status()` gains
+`'windowUpdatedAtMs' => $window->updated_at_ms` (reads the `$window`
+object already in hand, no second query); `NightlyWindowStatus` gains a
+matching required `windowUpdatedAtMs: number | null`, validated by
+`isStatus()` — a malformed value rejects the whole payload, the same
+discipline its siblings `windowStartedAt`/`windowReason` already follow,
+never an individually-degraded field like `lastP1Findings`;
+`NightlyWindowPanel.tsx`'s "window started" caption gains a trailing
+`(declared {ISO timestamp})` clause, present only when non-null.
+
+RED confirmed at both layers, each via `git stash` of the one production
+file alone (every test kept), restored byte-identically after. Backend: a
+new `WindowLedgerTest` case stamps a real declaration through the real
+`nightly:window --start` command, reads the row's own genuinely-stamped
+`updated_at_ms` back, and asserts `status()` returns that exact value —
+failed exactly `Undefined array key "windowUpdatedAtMs"` against the
+unmodified ledger; a second case (no window ever declared) failed
+identically. Restored, reran: `WindowLedgerTest` 20/20 green (was 18, +2).
+Frontend: both new `nightlyWindow.test.ts` cases (the real value
+round-trips; a malformed value rejects the whole payload as
+`unavailable`) and both new `nightly-window-panel.test.tsx` cases (the
+declared-at timestamp renders; no declaration renders no fabricated date)
+all failed against the unmodified `nightlyWindow.ts`/
+`NightlyWindowPanel.tsx` — the malformed-payload case failed on `expected
+'ready' to be 'unavailable'` (the unfixed `isStatus()` never validated
+the field at all, so a garbage value passed straight through). One
+authoring mistake caught before this note was written: both new panel
+cases' first drafts collided with the pre-existing "blocked by: N of 7
+..." / "no window start DECLARED — run `nightly:window --start`..."
+captions, which already contain the substrings "of 7" and "declared",
+making both assertions pass or fail for the wrong reason; fixed by
+asserting on the real rendered ISO timestamp and the distinguishing
+`"(declared "` prefix instead. Reran: `nightlyWindow.test.ts` 19/19 green
+(was 17, +2); `nightly-window-panel.test.tsx` 15/15 green (was 13, +2).
+Making the field REQUIRED (not individually optional) meant every one of
+that file's own 11 bare-literal status fixtures needed
+`windowUpdatedAtMs` added — a genuine, deliberate widening (matching
+`SessionRun.siteVisit`'s own precedent, v3-D227), not a workaround.
+
+`TZ=UTC make test`: 3070 passing (was 3064, +6 — exactly this run's six
+new tests: 2 PHPUnit + 2 + 2 vitest; v3/api 419, was 417; apps/web 1688,
+was 1684; no other suite moved: 255 v2 vitest, 47 v2/api, 120
+corpus-compiler, 468 engine, 73 fold-runner). One unrelated flake
+surfaced and was run to ground, not fixed: `test/session-island.test.tsx`'s
+own re-entry-notice case (v3-D217, a real-timer/focus-event test,
+untouched by this diff) timed out once under full-suite parallel load
+and passed cleanly on three separate isolated reruns, both with and
+without this diff applied — the same "flaked once under parallel load,
+stable in isolation" shape this file has already recorded for this exact
+test. `check-test-floor.mjs`: OK, 3070 >= floor 1899 (+1171 margin,
+unmoved, same discipline as every prior entry). `TZ=UTC make build`: exit
+0, 30 routes, unchanged — a ledger-plus-lib-plus-component change, no
+route or new production file; boundaries 339 files, the same
+pre-existing gitignored `next-env.d.ts` Next.js bootstrap-artifact
+fluctuation this file has recorded roughly two dozen times before,
+confirmed via `git status --porcelain --ignored`, not a new production
+file (this diff touches six existing files only); corpus-morphology 3
+staged artifacts / 362 words, corpus-glyphs 4 compiled artifacts / 206
+codepoints, both unchanged — this diff carries no corpus data. `npx tsc
+--noEmit`, run separately across all four v3 node packages: clean in all
+four. `./vendor/bin/pint --test` on both changed PHP files: the
+production file passed; the test file reports the identical pre-existing
+`php_unit_method_casing` finding both BEFORE and AFTER this diff,
+confirmed directly by stashing the change and re-running pint —
+pre-existing drift this fix does not introduce, left alone, same
+discipline as `WebhookHandler.php`'s own precedent (v3-D203). No
+`v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the suite was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2`
+empty immediately before committing). No Arabic codepoint (all six
+changed files swept programmatically, in Python, over the Arabic, Arabic
+Supplement, Arabic Extended-A and both Presentation Forms Unicode
+blocks, plus a `fromCharCode`/`fromCodePoint` mention check: CLEAN —
+every new string is a PHP/TypeScript identifier, a wire field name, a
+fixed English caption, or a synthetic millisecond-timestamp test fixture
+value, never corpus text). No oracle/golden-log/fixture/snapshot
+regenerated — this diff touches six existing files only.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1);
+installed PHP 8.4.26 cleanly via the documented `packages.sury.org` apt
+mirror, no refusal this run. `HEAD` and local `main` were both already at
+`origin/main`'s own real tip (`164fbf7`, v3-D316) — no stale-local-`main`
+trap this run. `make setup`'s own sequential chain was running `v2/api`'s
+`composer install` (git-mirror fallback, slow) while this run started
+every PHP-independent `npm install` directly and in parallel instead of
+waiting — the same recovery this file's history has recorded roughly a
+dozen times before. One genuine new recovery: starting `v3/api`'s own
+`composer install` by hand IN PARALLEL with `make setup`'s own sequential
+run of the same command, on the same `vendor/` directory, corrupted the
+install (a `git repack` race — "cannot stat .../tmp_pack_*: No such file
+or directory") and left `vendor/autoload.php` missing; recovered with a
+single subsequent `composer install`, which completed clean against the
+now-warm caches — recorded so a future run does not repeat the same
+collision: a package's own `vendor/` directory is not safe to install
+into from two processes at once, even when one of them is `make setup`'s
+own.
+
+NOT addressed: every item on v3-D316's own condensed "NOT addressed"
+list, unchanged — `rhymeClassOf()`; `EntitlementMachine::merge()`;
+`App\Billing\TrialAttribution`/`lib/pricing.ts#regionFromCountry()`;
+`PaywallGate` as a whole class; multi-surah enrollment as a product
+decision; the operational mailer/7-night launch window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy naming; `packages/engine/src/placement.ts`; `MacroFacts.litany
+.rhymeLabel`; `corpusHash`'s zero fold-side consumer;
+`selection_determinism_check` still replaying a committed fixture;
+`QueueItem.score`'s missing external reader; `acknowledgeReentry`'s
+"makeup" branch; `DrillPicker.tsx`'s unused `now` prop; the unused
+`atoms`/`corpus`/`sessions` IndexedDB object stores; `session_start`'s
+own latency metric; the streak/away-day day-space mismatch;
+`/workbench`'s own Pane 2 per-word inspector and Pane 3 spec editor; the
+deferred `vitest@5` major-version bump; `laravel/framework`'s own
+remaining advisories; `v2/api`'s own 19 frozen advisories; `lib/idb
+/schema.ts`'s own type-only `MetaKey` literal duplication — all
+unchanged. `nightly_window.updated_at_ms` is now CLOSED — remove it from
+future "written, never read" sweeps.

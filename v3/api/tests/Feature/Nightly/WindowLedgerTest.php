@@ -398,4 +398,35 @@ class WindowLedgerTest extends TestCase
             ->assertExitCode(1); // still not satisfied — 0 nights
         $this->assertSame('2026-09-01', NightlyWindow::current()->fresh()->window_started_at);
     }
+
+    /**
+     * v3-D317: `nightly_window.updated_at_ms` is stamped by `nightly:window
+     * --start` on every declaration (`NightlyWindowCommand::handle()`) but
+     * `NightlyWindowLedger::status()` never surfaced it.
+     * `windowStartedAt`/`windowReason` answer WHAT was declared and WHY,
+     * never WHEN — so an operator reading this screen could not tell
+     * whether the current declaration is fresh (right after today's merge)
+     * or weeks stale (nobody re-declared after a LATER merge that should
+     * have reset it).
+     */
+    public function test_the_windows_own_declaration_timestamp_reaches_status(): void
+    {
+        $this->artisan('nightly:window', ['--start' => '2026-09-01', '--reason' => 'engine merge abc1234'])
+            ->assertExitCode(1);
+
+        $stamped = NightlyWindow::current()->fresh()->updated_at_ms;
+        $this->assertNotNull($stamped);
+        $this->assertGreaterThan(0, $stamped);
+
+        $status = NightlyWindowLedger::status();
+        $this->assertSame($stamped, $status['windowUpdatedAtMs']);
+    }
+
+    /** No window has ever been declared — there is nothing honest to report
+     *  for "when", so it must read `null`, never a fabricated zero. */
+    public function test_no_declared_window_reports_a_null_declaration_timestamp(): void
+    {
+        $status = NightlyWindowLedger::status();
+        $this->assertNull($status['windowUpdatedAtMs']);
+    }
 }

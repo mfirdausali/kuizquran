@@ -47,6 +47,7 @@ describe("NightlyWindowPanel — three states, never two", () => {
         satisfied: false,
         windowStartedAt: null,
         windowReason: null,
+        windowUpdatedAtMs: null,
         nights: [],
         lastP1: null,
         blockedBy: "no window start declared — run `nightly:window --start` after the last engine/selection merge",
@@ -67,6 +68,7 @@ describe("NightlyWindowPanel — three states, never two", () => {
         satisfied: true,
         windowStartedAt: "2026-09-01",
         windowReason: "engine merge abc1234",
+        windowUpdatedAtMs: null,
         nights: [
           {
             night: "2026-09-07",
@@ -88,6 +90,56 @@ describe("NightlyWindowPanel — three states, never two", () => {
   });
 
   /**
+   * v3-D317: `nightly_window.updated_at_ms` is stamped by `nightly:window
+   * --start` on every declaration but was never rendered — `windowStartedAt`/
+   * `windowReason` answer WHAT was declared and WHY, never WHEN, so an
+   * operator could not tell a fresh declaration from one weeks stale.
+   */
+  it("a declared window renders when it was last declared (v3-D317)", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse({
+        streak: 3,
+        required: 7,
+        satisfied: false,
+        windowStartedAt: "2026-09-01",
+        windowReason: "engine merge abc1234",
+        windowUpdatedAtMs: 1_756_000_000_000,
+        nights: [],
+        lastP1: null,
+        blockedBy: "3 of 7 consecutive green nights",
+      }),
+    ) as unknown as typeof fetch;
+    render(<NightlyWindowPanel />);
+
+    await waitFor(() =>
+      expect(screen.getByText(new Date(1_756_000_000_000).toISOString(), { exact: false })).toBeTruthy(),
+    );
+    expect(screen.getByText(/\(declared /)).toBeTruthy();
+  });
+
+  /** Its negative sibling: no declaration has ever been stamped, so there is
+   *  nothing honest to render for "when" — never a fabricated date. */
+  it("no declaration timestamp renders no fabricated date (v3-D317)", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse({
+        streak: 0,
+        required: 7,
+        satisfied: false,
+        windowStartedAt: null,
+        windowReason: null,
+        windowUpdatedAtMs: null,
+        nights: [],
+        lastP1: null,
+        blockedBy: "no window start declared — run `nightly:window --start` after the last engine/selection merge",
+      }),
+    ) as unknown as typeof fetch;
+    render(<NightlyWindowPanel />);
+
+    await waitFor(() => expect(screen.getByText(/NOT DECLARED/)).toBeTruthy());
+    expect(screen.queryByText(/\(declared /)).toBeNull();
+  });
+
+  /**
    * v3-D225: `nights[].triggers` (schedule|manual|ci, per check) is fetched
    * by `lib/admin/nightlyWindow.ts` but was never rendered — an operator
    * had no way to see whether a night's own green verdict came from the
@@ -104,6 +156,7 @@ describe("NightlyWindowPanel — three states, never two", () => {
         satisfied: true,
         windowStartedAt: "2026-09-01",
         windowReason: "engine merge abc1234",
+        windowUpdatedAtMs: null,
         nights: [
           {
             night: "2026-09-07",
@@ -133,6 +186,7 @@ describe("NightlyWindowPanel — three states, never two", () => {
         satisfied: true,
         windowStartedAt: "2026-09-01",
         windowReason: "engine merge abc1234",
+        windowUpdatedAtMs: null,
         nights: [
           {
             night: "2026-09-07",
@@ -160,6 +214,7 @@ describe("NightlyWindowPanel — three states, never two", () => {
         satisfied: false,
         windowStartedAt: "2026-09-01",
         windowReason: "engine merge abc1234",
+        windowUpdatedAtMs: null,
         nights: [
           { night: "2026-09-04", green: true, severities: { fold_determinism_check: "green" }, missing: [] },
         ],
@@ -187,6 +242,7 @@ describe("NightlyWindowPanel — three states, never two", () => {
         satisfied: false,
         windowStartedAt: "2026-09-01",
         windowReason: "engine merge abc1234",
+        windowUpdatedAtMs: null,
         nights: [
           { night: "2026-09-04", green: true, severities: { fold_determinism_check: "green" }, missing: [] },
         ],
@@ -220,6 +276,7 @@ describe("NightlyWindowPanel — three states, never two", () => {
         satisfied: false,
         windowStartedAt: "2026-09-01",
         windowReason: "engine merge abc1234",
+        windowUpdatedAtMs: null,
         nights: [
           { night: "2026-09-04", green: true, severities: { selection_determinism_check: "green" }, missing: [] },
         ],
@@ -251,6 +308,7 @@ describe("NightlyWindowPanel — three states, never two", () => {
         satisfied: true,
         windowStartedAt: "2026-09-01",
         windowReason: "engine merge abc1234",
+        windowUpdatedAtMs: null,
         nights: [],
         lastP1: null,
         lastP1Findings: null,
@@ -280,6 +338,7 @@ describe("NightlyWindowPanel — three states, never two", () => {
         satisfied: false,
         windowStartedAt: "2026-09-01",
         windowReason: "test",
+        windowUpdatedAtMs: null,
         nights: [
           {
             night: "2026-09-02",
@@ -325,6 +384,7 @@ describe("NightlyWindowPanel — three states, never two", () => {
         satisfied: true,
         windowStartedAt: "2026-09-01",
         windowReason: "test",
+        windowUpdatedAtMs: null,
         nights: [],
         lastP1: null,
         lastP1Findings: null,
@@ -346,6 +406,7 @@ describe("NightlyWindowPanel — three states, never two", () => {
         satisfied: false,
         windowStartedAt: "2026-09-01",
         windowReason: "test",
+        windowUpdatedAtMs: null,
         nights: [
           {
             night: "2026-09-02",

@@ -97,6 +97,12 @@ export interface NightlyWindowStatus {
   satisfied: boolean;
   windowStartedAt: string | null;
   windowReason: string | null;
+  /** v3-D317: epoch ms the current `windowStartedAt`/`windowReason` pair was
+   *  (re)declared (`nightly:window --start`, `nightly_window.updated_at_ms`).
+   *  `null` only when no window has ever been declared — `windowStartedAt`/
+   *  `windowReason` answer WHAT and WHY, this answers WHEN, so an operator
+   *  can tell a fresh declaration from one weeks stale. */
+  windowUpdatedAtMs: number | null;
   nights: NightlyWindowNight[];
   lastP1: { night: string; check: string } | null;
   /** v3-D178: null when there is no confirmed P1 in the window's history;
@@ -179,6 +185,7 @@ function isStatus(v: unknown): v is Omit<NightlyWindowStatus, "lastP1Findings" |
     typeof s.satisfied === "boolean" &&
     (typeof s.windowStartedAt === "string" || s.windowStartedAt === null) &&
     (typeof s.windowReason === "string" || s.windowReason === null) &&
+    (typeof s.windowUpdatedAtMs === "number" || s.windowUpdatedAtMs === null) &&
     Array.isArray(s.nights) &&
     s.nights.every(isNight) &&
     (s.lastP1 === null ||

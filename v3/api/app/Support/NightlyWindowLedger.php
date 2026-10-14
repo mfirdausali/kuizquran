@@ -64,7 +64,7 @@ class NightlyWindowLedger
      *
      * @return array{
      *   streak:int, required:int, satisfied:bool,
-     *   windowStartedAt:?string, windowReason:?string,
+     *   windowStartedAt:?string, windowReason:?string, windowUpdatedAtMs:?int,
      *   nights:list<array{night:string,green:bool,severities:array<string,string>,triggers:array<string,string>,missing:list<string>}>,
      *   lastP1:?array{night:string,check:string},
      *   blockedBy:?string
@@ -118,6 +118,7 @@ class NightlyWindowLedger
             'satisfied' => $start !== null && $streak >= self::REQUIRED_NIGHTS,
             'windowStartedAt' => $start,
             'windowReason' => $window->reason,
+            'windowUpdatedAtMs' => $window->updated_at_ms,
             'nights' => $nights,
             'lastP1' => $lastP1,
             'blockedBy' => $blockedBy,
