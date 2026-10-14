@@ -53,10 +53,142 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3061 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3063 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 417 v3/api + 120 corpus-compiler
-             # + 468 engine + 73 fold-runner + 1681 apps/web. (v3-D313, 2026-10-13)
+             # + 468 engine + 73 fold-runner + 1683 apps/web. (v3-D314, 2026-10-14)
+             # NOTE (v3-D314, 2026-10-14): `config/pricing.php`'s own
+             # `regions`/`default_region` keys (edge case #119: "IP sets the
+             # default region") are a second, independent decision in the
+             # same file that `pricing-config-agreement.test.ts` (the
+             # existing price-amount mirror-agreement guard between this
+             # file and `lib/pricing.ts`) never covered — it checks
+             # currency/monthly/lifetime/rails for both regions but not the
+             # region set itself or which one is the default. `PRICING`'s
+             # own key set (the TS-side region set, by construction of
+             # `Record<Region, RegionPricing>`) and `DEFAULT_REGION` are the
+             # TS mirror, declared with no import path to the PHP file at
+             # all — the same "two implementations of one decision, no
+             # shared source" shape this build has repeatedly closed
+             # elsewhere (`offline_ttl_days`/`OFFLINE_TTL_MS` v3-D150,
+             # `trial.days`/`TRIAL_DAYS_MS`, the launch surah set v3-D296,
+             # `REVEAL_REASON_CODES` v3-D311), here one field over in the
+             # SAME file the price-amount guard already covers most of.
+             # `PricingConstantsTest.php` pins `default_region` against its
+             # own hardcoded `'INTL'` literal and `test/pricing.test.ts`
+             # pins `DEFAULT_REGION` against its own; neither reads the
+             # other file. Found by a targeted sweep of custom `v3/api`
+             # config keys for a zero-Laravel-reader or
+             # zero-cross-file-agreement shape (the same vein that produced
+             # v3-D149/D150), independently re-verified directly against
+             # `config/pricing.php`, `lib/pricing.ts` and the existing
+             # agreement test's own coverage before writing any test. Not a
+             # live divergence today (both sides already agree: regions
+             # `['MY','INTL']`, default `'INTL'`) — a drift-risk fix: a
+             # future region-default change landed on only one side would
+             # silently desync which region a fresh, no-IP-signal learner is
+             # priced in from what `regionFromCountry()`'s own fallback
+             # actually returns, with nothing to catch it.
+             #
+             # Fixed: no runtime coupling invented (none is possible across
+             # the language boundary) — two new cases in
+             # `pricing-config-agreement.test.ts`, mirroring its own
+             # existing `parseRegionBlock`/`parseRails` raw-PHP-source-scan
+             # technique: `parseRegionsList`/`parseDefaultRegion` extract
+             # both values from `config/pricing.php`'s real text, and the
+             # new assertions check `Object.keys(PRICING)` against the
+             # parsed `regions` array (sorted, so declaration order cannot
+             # cause a false failure) and `DEFAULT_REGION` against the
+             # parsed `default_region` string.
+             #
+             # RED confirmed by mutation (both sides already agreed, so
+             # there was no live failure to reproduce): `config/pricing.php`'s
+             # `default_region` was temporarily changed to `'MY'` and the
+             # new test failed exactly as predicted (`expected 'INTL' to be
+             # 'MY'`); separately, `'regions'` was temporarily narrowed to
+             # `['MY']` and the sibling test failed exactly as predicted
+             # (`expected ['INTL','MY'] to deeply equal ['MY']`). Both
+             # reverted byte-identically (`git diff --stat
+             # config/pricing.php` empty before committing), reran clean:
+             # `pricing-config-agreement.test.ts` 5/5 green (was 3, +2).
+             #
+             # `TZ=UTC make test`: 3063 passing (was 3061, +2 — exactly this
+             # run's two new tests; apps/web 1683, was 1681; no other suite
+             # moved: 255 v2 vitest, 47 v2/api, 417 v3/api, 120
+             # corpus-compiler, 468 engine, 73 fold-runner). `check-test-
+             # floor.mjs`: OK, 3063 >= floor 1899 (+1164 margin, unmoved,
+             # same discipline as every prior entry). `TZ=UTC make build`:
+             # exit 0, 30 routes, unchanged — this diff touches one existing
+             # test file only, no production file, no route. `npm run
+             # gates`: all green — locked-css OK, 1 documented hunk, 294 v1
+             # lines byte-identical; boundaries OK, 339 files, unchanged
+             # count — no new file this run; fonts degraded-but-non-blocking,
+             # pre-existing, 2/6 UI fonts present; corpus-morphology OK, 362
+             # words; corpus-glyphs OK, 206 codepoints across 4 artifacts —
+             # all unchanged, this diff carries no corpus data. `npx tsc
+             # --noEmit` (apps/web): clean. No `v1/**`/`v2/**` edit (a stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff produced by
+             # running the suite was reverted before committing, same
+             # discipline as every prior entry — `git status --porcelain --
+             # v1 v2` empty immediately before committing). No Arabic
+             # codepoint (the diff swept programmatically, in Python, over
+             # the Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms Unicode blocks, plus a
+             # `fromCharCode`/`fromCodePoint`/`\u`-escape check: CLEAN —
+             # every new string is a TypeScript identifier, a regex literal,
+             # or a fixed English docblock sentence, never corpus text). No
+             # oracle/golden-log/fixture/snapshot regenerated — this diff
+             # touches one existing test file only.
+             #
+             # Session start: fresh container, no
+             # `node_modules`/`vendor`/compiled corpus anywhere; PHP
+             # defaulted to 8.3.6 (`v3/api` needs >=8.4.1); installed PHP
+             # 8.4 cleanly via the documented `packages.sury.org` apt
+             # mirror, no refusal this run. `HEAD` was found detached
+             # exactly at `origin/main`'s own tip (`b0fa7ec`, v3-D313), on a
+             # stale LOCAL `main` branch ref four commits behind (`c3e42ab`,
+             # v3-D309) — the recurring stale-local-`main` trap this file
+             # has recorded roughly fifty times since v3-D77 — caught before
+             # any exploration via `git fetch origin main` + `git checkout
+             # main && git merge --ff-only origin/main`, a clean
+             # fast-forward, no work lost or at risk. `make setup` ran clean
+             # end to end from a cold checkout — all five npm installs run
+             # directly in parallel, both composer installs needed one
+             # sequential retry each (a parallel first attempt corrupted the
+             # shared git-mirror VCS cache — both processes cloning
+             # `symfony/string` into the same cache directory at once — the
+             # fix was simply re-running each sequentially, not a code or
+             # config change).
+             #
+             # NOT addressed: every item on v3-D313's own condensed "NOT
+             # addressed" list, unchanged — `rhymeClassOf()`;
+             # `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution`/`lib/pricing.ts
+             # #regionFromCountry()` (the FUNCTION itself stays deferred —
+             # this fix only guards the CONSTANT it falls back to);
+             # `PaywallGate` as a whole class; multi-surah enrollment as a
+             # product decision; the operational mailer/7-night launch
+             # window; PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy naming;
+             # `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero
+             # fold-side consumer; `selection_determinism_check` still
+             # replaying a committed fixture; `QueueItem.score`'s missing
+             # external reader; `acknowledgeReentry`'s "makeup" branch;
+             # `DrillPicker.tsx`'s unused `now` prop; the unused
+             # `atoms`/`corpus`/`sessions` IndexedDB object stores;
+             # `session_start`'s own latency metric; the streak/away-day
+             # day-space mismatch; `/workbench`'s own Pane 2 per-word
+             # inspector and Pane 3 spec editor; the deferred `vitest@5`
+             # major-version bump; `laravel/framework`'s own remaining
+             # advisories (re-confirmed this run via `composer audit
+             # --locked`: the identical 4 advisories on `laravel/framework`
+             # alone, same versions, same "needs a major 11->12/13 bump"
+             # verdict — no drift); `v2/api`'s own 19 frozen advisories;
+             # `lib/idb/schema.ts`'s own type-only `MetaKey` literal
+             # duplication — all unchanged. The pricing config's own
+             # region-set/default-region drift risk is now CLOSED — remove
+             # it from future sweeps.
              # NOTE (v3-D313, 2026-10-13): `EnrollmentSteer.tsx`
              # (`components/shell/EnrollmentSteer.tsx`) was promised by file
              # path in two separate production docblocks
