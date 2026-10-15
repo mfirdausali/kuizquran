@@ -32694,3 +32694,144 @@ scope as `TrialAttribution` itself, re-confirmed this run, not an
 independent gap) — all unchanged. `nightly:window`'s own CLI-table
 declaration-timestamp gap is now CLOSED — remove it from future "field
 added to a shared status struct, not every reader updated" sweeps.
+
+## v3-D319 (2026-10-15) — periodic dependency-audit re-run (v3-D309's own named follow-up): two new, independently-published CVEs on `symfony/http-foundation`/`symfony/yaml`, both fixable within the already-declared constraint
+
+**What happened:** v3-D309's own closing note named a real, standing task:
+"future runs should re-run `npm audit`/`composer audit` PERIODICALLY (dependencies
+drift and new CVEs publish continuously; this is not a one-time check) rather than
+treating this entry as permanently exhaustive." No run since v3-D309 (three nights
+ago, 2026-10-12) had actually re-run it. This run did, after a fresh zero-caller/
+stale-docblock sweep (dispatched to a sub-agent, Explore, handed the full exclusion
+list this file's recent entries carry) came back genuinely empty — every area it
+checked (Console Commands, Eloquent relations, `AdminBillingController` vs
+`BillingAuditPanel.tsx`, `lib/library/rows.ts`, `lib/settings/planSummary.ts`,
+`FlagController`/`FlagsPanel.tsx`, several gate scripts, config files,
+`PlanIsland.tsx#enrolmentOf`) already had a real reader or matched an
+already-excluded item — so this run picked up the standing dependency-audit task
+instead of attempting an eleventh generic field-by-field sweep with no fresh lead.
+
+`composer audit` on `v3/api` (first run with a working network path to
+`packages.sury.org`'s advisory feed this session) reported **6** advisories across
+**3** packages — up from v3-D309's own recorded 4 advisories on `laravel/framework`
+alone. The two new ones:
+
+- `symfony/http-foundation` `CVE-2026-108082` — ReDoS in `HeaderUtils::split()`
+  reachable through the `Cache-Control` request header. Installed `v7.4.16`;
+  affected range `>=7.4.0,<7.4.19`. Reported 2026-09-15.
+- `symfony/yaml` `CVE-2026-109413` — unbounded recursion in the YAML inline lexer
+  lets a single document crash the process. Installed `v8.1.2`; affected range
+  `>=8.1.0,<8.1.6`. Reported 2026-08-30.
+
+Both advisories were published BEFORE v3-D309's own run (2026-10-12) — confirmed
+directly these are not newly-disclosed since then, simply never caught, since
+v3-D309's own audit ran once and this is the first re-run. Unlike
+`laravel/framework`'s own 4 advisories (re-confirmed unchanged: the XSS debug-page
+low, the signed-URL path-confusion medium, and the CRLF-injection high listed
+twice under two advisory ids for the same finding — all four still genuinely
+needing the documented major 11→12.69+/13.10+ bump, no fix inside the installed
+`^11.31` constraint, left alone exactly as v3-D309 decided), BOTH new findings had
+a real patched version already inside the EXISTING constraint `laravel/framework
+v11.55.0` declares (`symfony/http-foundation ^7.2.0`, satisfied by `7.4.21`;
+`symfony/yaml` pulled in transitively via `laravel/sail`'s `^6.0|^7.0|^8.0` and
+`symfony/routing`'s `conflicts <6.4`, both satisfied by `8.1.9`) — the same
+"transitive dependency, fix already inside the declared range" shape v3-D309
+itself closed for `league/commonmark`/`league/flysystem`.
+
+**Fixed:** `composer update symfony/http-foundation symfony/yaml --with-dependencies`
+inside `v3/api` only — `v7.4.16` → `v7.4.21`, `v8.1.2` → `v8.1.9` (plus two
+transitive polyfill packages bumped along with them). `composer.json` is
+byte-identical before and after (`git diff --stat v3/api/composer.json` empty);
+only `composer.lock`'s resolved versions moved. `composer audit` afterward: `4`
+advisories across `1` package (`laravel/framework` alone) — both new findings
+gone, the four already-deferred ones unchanged, matching v3-D309's own tally
+exactly.
+
+`npm audit fix` (no `--force`) was re-run across all four v3 Node packages
+(`apps/web`, `corpus-compiler`, `engine`, `fold-runner`) to check for drift on
+that side too — each reported the IDENTICAL state v3-D309 already recorded (`6
+vulnerabilities: 3 moderate, 1 high, 2 critical`, every one inside the single
+deferred `vite`→`vitest`→`tinypool`/`esbuild`/`@vitest/mocker` dev-only chain,
+fixable only via the major `vitest@5` bump already named and deliberately
+deferred) — no drift, no file changed, confirmed via `git status --porcelain`
+showing zero touched files under any of the four `package.json`/
+`package-lock.json` pairs.
+
+`v2/api`'s own frozen `composer audit` was also re-run, read-only, for a human's
+awareness only (v1/v2 are frozen — `git status --porcelain -- v1 v2` confirmed
+empty throughout this run): it now reports **20** advisories across **5**
+packages, up from v3-D309's own recorded 19 across 4 — one new `guzzlehttp/guzzle`
+finding (`CVE-2026-69246`, a noncanonical-host check bypass, reported
+2026-08-03) joining the pre-existing `guzzlehttp/guzzle`/`laravel/framework`/
+`league/commonmark`/`league/flysystem` set. Reported, not acted on, same
+discipline as every prior entry — `v1/**`/`v2/**` stays untouched.
+
+**This is a pure dependency-version fix, not a behavior change** — the same "no
+RED-first assertion applies" discipline v3-D309 itself established (a newer,
+patched library version has no new test to write; verification instead means
+re-running every existing gate unchanged and confirming the EXACT same green).
+
+`TZ=UTC make test`: **3072 passing**, matching this file's own recorded count
+EXACTLY across all seven suites (255 v2 vitest, 47 v2/api, 421 v3/api, 120
+corpus-compiler, 468 engine, 73 fold-runner, 1688 apps/web) — zero suite moved,
+since this diff touches no test file and no production TypeScript/PHP file at
+all. `check-test-floor.mjs`: OK, 3072 >= floor 1899 (+1173 margin, unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 30 routes,
+unchanged — this diff is a lockfile-only change, no route or component touched;
+all three staged corpus hashes byte-identical to v3-D318's own (`908ca9edbd2ab2e4`/
+`123c6212cc1d074d`/`77722a2b8b1b6aae`). `npm run gates`: all green — locked-css
+OK, 1 documented hunk, 294 v1 lines byte-identical; boundaries OK, 338 files,
+unchanged count; fonts degraded-but-non-blocking, pre-existing, 2/6 UI fonts
+present; corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints
+across 4 artifacts — all unchanged, this diff carries no corpus data. No
+`v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff produced
+by running the suite was reverted before committing, same discipline as every
+prior entry — `git status --porcelain -- v1 v2` empty immediately before
+committing). No Arabic codepoint (the one-file diff, `v3/api/composer.lock`,
+swept programmatically, in Python, over the Arabic, Arabic Supplement, Arabic
+Extended-A and both Presentation Forms Unicode blocks: CLEAN — every changed
+line is a package name, a semver string, or a commit-hash reference, never
+corpus text). No oracle/golden-log/fixture/snapshot regenerated — this diff
+touches one lockfile only.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled corpus
+anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1); installed PHP 8.4.26
+cleanly via the documented `packages.sury.org` apt mirror, no refusal this run.
+`HEAD` was already at `origin/main`'s own real tip (`9382a13`, v3-D318), but the
+LOCAL `main` branch ref sat eleven commits behind (`c3e42ab`, v3-D309) — the
+recurring stale-local-`main` trap this file has recorded roughly fifty times
+since v3-D77 — caught before any exploration via `git fetch origin main` + `git
+checkout main && git merge --ff-only origin/main`, a clean fast-forward, no work
+lost or at risk. `make setup`'s own sequential `v2/api`/`v3/api` `composer
+install`s both hit the documented transient git-mirror-clone fallback (slow);
+every PHP-independent `npm install` (`v2`, `v3/packages/corpus-compiler`,
+`v3/packages/engine`, `v3/worker/fold-runner`, `v3/apps/web`) was run directly
+and in parallel rather than waiting on the sequential chain, the same recovery
+this file's history has recorded roughly a dozen times before; the original
+`timeout 580 make setup` invocation itself was killed by its own wrapper once
+the slow git-mirror clone outran the timeout, but the underlying `composer
+install` subprocess was unaffected and finished on its own — a plain re-run of
+`make setup` afterward completed the remaining steps (env/key/migrate, the
+already-finished npm installs as fast no-ops) cleanly in one pass.
+
+NOT addressed: every item on v3-D318's own condensed "NOT addressed" list,
+unchanged — `rhymeClassOf()`; `EntitlementMachine::merge()`;
+`App\Billing\TrialAttribution`/`lib/pricing.ts#regionFromCountry()`;
+`PaywallGate` as a whole class; multi-surah enrollment as a product decision;
+the operational mailer/7-night launch window; PAY-1's Stripe fixtures; surah
+67's scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy naming;
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`;
+`corpusHash`'s zero fold-side consumer; `selection_determinism_check` still
+replaying a committed fixture; `QueueItem.score`'s missing external reader;
+`acknowledgeReentry`'s "makeup" branch; `DrillPicker.tsx`'s unused `now` prop;
+the unused `atoms`/`corpus`/`sessions` IndexedDB object stores; `session_start`'s
+own latency metric; the streak/away-day day-space mismatch; `/workbench`'s own
+Pane 2 per-word inspector and Pane 3 spec editor; the deferred `vitest@5`
+major-version bump; `laravel/framework`'s own remaining 4 advisories (still
+genuinely needing the major bump); `v2/api`'s own now-20 frozen advisories;
+`lib/idb/schema.ts`'s own type-only `MetaKey` literal duplication; the
+`trial_surah_source` column on `entitlements` — all unchanged.
+`symfony/http-foundation`'s and `symfony/yaml`'s own newly-published CVEs are now
+CLOSED — remove them from future dependency-audit sweeps. A future run should
+re-run `npm audit`/`composer audit` again periodically, per v3-D309's own
+standing instruction — this is not a one-time check either.
