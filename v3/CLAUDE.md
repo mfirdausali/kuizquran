@@ -53,10 +53,103 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3072 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3073 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 421 v3/api + 120 corpus-compiler
-             # + 468 engine + 73 fold-runner + 1688 apps/web. (v3-D319, 2026-10-15)
+             # 255 v2 vitest + 47 v2/api + 422 v3/api + 120 corpus-compiler
+             # + 468 engine + 73 fold-runner + 1688 apps/web. (v3-D320, 2026-10-16)
+             # NOTE (v3-D320, 2026-10-16): `AccountController::requestDeletion()`'s
+             # own admin self-delete guard checked `$user->adminRoles() !== []`
+             # (AdminRole pivot membership) instead of the real precondition its
+             # own docblock already names: whether the caller has ever written an
+             # `admin_audit` row, since `admin_audit.actor_admin_id` is
+             # `restrictOnDelete`. `EnsureIsAdmin` (the ONLY gate on every
+             # `/api/admin/*` route, incl. all four real `AdminAudit::create()`
+             # writers) checks only the `ADMIN_EMAILS` allowlist + a verified
+             # email — never `AdminRole` — so a role-less allowlisted admin who
+             # had already acted (a reveal, a CSV export, a cache rebuild, a
+             # Stripe probe) could still `POST /api/account/deletion` (201, not
+             # 403) and later crash `pdpa:purge-due` on the real FK, exactly the
+             # bare failure the guard's own docblock says it exists to prevent up
+             # front. Distinct from v3-D287/v3-D292, which both closed the
+             # OPPOSITE ordering (a role granted AFTER a pending deletion request
+             # already existed) — never a role-less `admin_audit` actor.
+             #
+             # Found by a dedicated fresh-sweep agent (Explore, high effort)
+             # handed the full exclusion list this file's recent entries carry —
+             # independently re-verified directly against `AccountController.php`,
+             # `EnsureIsAdmin.php`, the `admin_roles`/`admin_audit` migration, and
+             # all four real `AdminAudit::create()` call sites before writing any
+             # test.
+             #
+             # Fixed: the guard now also refuses when `AdminAudit::where
+             # ('actor_admin_id', $user->id)->exists()` — the condition that
+             # actually matches the `restrictOnDelete` FK; `adminRoles() !== []`
+             # is kept alongside it (harmless, still stops a future role-only
+             # attempt before any FK-relevant action).
+             #
+             # RED confirmed directly: a new `AccountDeletionTest` case seeds a
+             # user with zero `AdminRole` rows but one real `AdminAudit::create()`
+             # row and asserts `POST /api/account/deletion` returns 403 with zero
+             # `AccountDeletionRequest` rows created. Run against the unmodified
+             # controller it failed exactly as predicted — `Expected response
+             # status code [403] but received 201`. Implemented, reran:
+             # `AccountDeletionTest` 18/18 green (was 17, +1).
+             #
+             # `TZ=UTC make test`: 3073 passing (was 3072, +1 — exactly this run's
+             # one new test; v3/api 422, was 421; no other suite moved: 255 v2
+             # vitest, 47 v2/api, 120 corpus-compiler, 468 engine, 73 fold-runner,
+             # 1688 apps/web). `check-test-floor.mjs`: OK, 3073 >= floor 1899
+             # (+1174 margin, unmoved, same discipline as every prior entry).
+             # `TZ=UTC make build`: exit 0, 30 routes, unchanged — a backend-only
+             # fix, no apps/web file touched; this diff carries no corpus data.
+             # `npm run gates`: all green — locked-css OK, 1 documented hunk, 294
+             # v1 lines byte-identical; boundaries OK, 339 files, unchanged count;
+             # fonts degraded-but-non-blocking, pre-existing, 2/6 UI fonts
+             # present; corpus-morphology OK, 362 words; corpus-glyphs OK, 206
+             # codepoints across 4 artifacts — all unchanged. No `v1/**`/`v2/**`
+             # edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff produced
+             # by running the suite was reverted before committing, same
+             # discipline as every prior entry — `git status --porcelain -- v1
+             # v2` empty immediately before committing). No Arabic codepoint
+             # (both changed files swept programmatically, in Python, over the
+             # Arabic, Arabic Supplement, Arabic Extended-A and both Presentation
+             # Forms Unicode blocks: CLEAN — every new string is a PHP
+             # identifier, a fixed English error/docblock sentence, or a
+             # synthetic test-fixture action/timestamp, never corpus text). No
+             # oracle/golden-log/fixture/snapshot regenerated — this diff touches
+             # one production file and one existing test file.
+             #
+             # Session start: fresh container, no `node_modules`/`vendor`/
+             # compiled corpus anywhere; PHP defaulted to 8.3.6 (`v3/api` needs
+             # >=8.4.1); installed PHP 8.4.26 cleanly via the documented
+             # `packages.sury.org` apt mirror, no refusal this run. `HEAD`, local
+             # `main` and `origin/main` all agreed at `b14174d` (v3-D319) — no
+             # stale-local-`main` trap this run.
+             #
+             # NOT addressed: every item on v3-D319's own condensed "NOT
+             # addressed" list, unchanged — `rhymeClassOf()`;
+             # `EntitlementMachine::merge()`; `App\Billing\TrialAttribution`/
+             # `lib/pricing.ts#regionFromCountry()`; `PaywallGate` as a whole
+             # class; multi-surah enrollment as a product decision; the
+             # operational mailer/7-night launch window; PAY-1's Stripe
+             # fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy naming;
+             # `packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`;
+             # `corpusHash`'s zero fold-side consumer; `selection_determinism_check`
+             # still replaying a committed fixture; `QueueItem.score`'s missing
+             # external reader; `acknowledgeReentry`'s "makeup" branch;
+             # `DrillPicker.tsx`'s unused `now` prop; the unused
+             # `atoms`/`corpus`/`sessions` IndexedDB object stores; `session_start`'s
+             # own latency metric; the streak/away-day day-space mismatch;
+             # `/workbench`'s own Pane 2 per-word inspector and Pane 3 spec
+             # editor; the deferred `vitest@5` major-version bump;
+             # `laravel/framework`'s own remaining 4 advisories; `v2/api`'s own
+             # frozen advisories; `lib/idb/schema.ts`'s own type-only `MetaKey`
+             # literal duplication; the `trial_surah_source` column on
+             # `entitlements` — all unchanged.
+             # `AccountController::requestDeletion()`'s own role-only guard is now
+             # CLOSED against a role-less `admin_audit` actor — remove it from
+             # future "docblock says X, reality is Y" sweeps.
              # NOTE (v3-D319, 2026-10-15): v3-D309's own closing note named a
              # standing task nobody had picked up since: re-run `npm audit`/
              # `composer audit` periodically, not as a one-time check. A fresh

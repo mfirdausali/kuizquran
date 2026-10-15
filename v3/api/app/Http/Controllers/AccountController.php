@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\AccountDeletionRequest;
+use App\Models\AdminAudit;
 use App\Models\BillingEvent;
 use App\Models\Entitlement;
 use App\Models\EntitlementTransition;
@@ -127,18 +128,28 @@ class AccountController extends Controller
      * on every call would let a caller silently push the purge date forward
      * or backward on each request.
      *
-     * Refuses (403) if the caller holds any admin role: `admin_audit.
-     * actor_admin_id` is `restrictOnDelete` (see the M8 migration) precisely
-     * because an audit trail must survive the actor who wrote it — an admin
-     * self-deleting would either corrupt that guarantee or fail the purge
-     * job with a raw FK error later. Refusing up front, with a clear reason,
-     * is strictly better than either.
+     * Refuses (403) if the caller holds any admin role, OR has ever written
+     * an `admin_audit` row: `admin_audit.actor_admin_id` is `restrictOnDelete`
+     * (see the M8 migration) precisely because an audit trail must survive
+     * the actor who wrote it — an admin self-deleting would either corrupt
+     * that guarantee or fail the purge job with a raw FK error later.
+     * Refusing up front, with a clear reason, is strictly better than
+     * either.
+     *
+     * `adminRoles() !== []` alone is NOT the real precondition — every
+     * `/api/admin/*` write is gated by the `admin` middleware's env
+     * allowlist (`EnsureIsAdmin`) alone, with no `AdminRole` requirement at
+     * all, so a role-less allowlisted admin can already have written a real
+     * `admin_audit` row (a reveal, a CSV export, a cache rebuild, a Stripe
+     * probe) with no role to catch here. Checking `admin_audit` directly is
+     * the one condition that actually matches the FK this guard exists to
+     * protect.
      */
     public function requestDeletion(Request $request): JsonResponse
     {
         $user = $request->user();
 
-        if ($user->adminRoles() !== []) {
+        if ($user->adminRoles() !== [] || AdminAudit::where('actor_admin_id', $user->id)->exists()) {
             return response()->json([
                 'error' => 'admin accounts cannot self-delete while they hold an audit trail (admin_audit.actor_admin_id) — revoke the admin role first',
             ], 403);

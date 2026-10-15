@@ -251,6 +251,34 @@ class AccountDeletionTest extends TestCase
         $this->assertSame(0, AccountDeletionRequest::count());
     }
 
+    /**
+     * The guard above only checks `adminRoles() !== []` — AdminRole pivot
+     * membership — but `admin_audit.actor_admin_id`'s real FK dependency is
+     * created by WRITING an audit row, which every `/api/admin/*` action does
+     * under the `admin` middleware's env-allowlist gate alone, with no
+     * AdminRole requirement at all (confirmed: `EnsureIsAdmin` checks only
+     * `config('admin.emails')` + a verified email). A user who is on the
+     * allowlist and has acted (e.g. a reveal, a CSV export, a cache rebuild)
+     * but was never granted a role still has a real, un-deletable
+     * dependency the role check cannot see.
+     */
+    public function test_a_role_less_admin_who_has_written_an_audit_row_cannot_request_self_deletion(): void
+    {
+        $operator = User::factory()->create();
+        // Deliberately no AdminRole row — this user acted through the
+        // ADMIN_EMAILS allowlist alone, the real precondition for every
+        // admin_audit write, never through the separate role grant.
+        AdminAudit::create([
+            'actor_admin_id' => $operator->id,
+            'action' => 'test.action',
+            'at' => 1_700_000_000_000,
+        ]);
+        Sanctum::actingAs($operator);
+
+        $this->postJson('/api/account/deletion')->assertStatus(403);
+        $this->assertSame(0, AccountDeletionRequest::count());
+    }
+
     // ─────────────────────────────── restore ────────────────────────────────
 
     public function test_restoring_with_the_correct_token_cancels_the_pending_deletion(): void
