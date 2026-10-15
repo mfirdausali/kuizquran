@@ -71,7 +71,8 @@ class NightlyWindowCommand extends Command
         $this->newLine();
         $this->line('7-consecutive-green-nights window');
         $this->line(str_repeat('─', 60));
-        $this->line('  window started : '.($status['windowStartedAt'] ?? 'NOT DECLARED'));
+        $this->line('  window started : '.($status['windowStartedAt'] ?? 'NOT DECLARED')
+            .($status['windowUpdatedAtMs'] !== null ? ' (declared '.$this->isoMs($status['windowUpdatedAtMs']).')' : ''));
         if ($status['windowReason']) {
             $this->line('  reason         : '.$status['windowReason']);
         }
@@ -110,5 +111,16 @@ class NightlyWindowCommand extends Command
         $this->newLine();
 
         return $status['satisfied'] ? self::SUCCESS : self::FAILURE;
+    }
+
+    /**
+     * Epoch milliseconds -> the same `YYYY-MM-DDTHH:mm:ss.sssZ` shape
+     * `NightlyWindowPanel.tsx`'s own `new Date(ms).toISOString()` renders —
+     * so the CLI table and the web panel name the same declaration moment
+     * in the same format, never two notations for one fact.
+     */
+    private function isoMs(int $ms): string
+    {
+        return gmdate('Y-m-d\TH:i:s', intdiv($ms, 1000)).sprintf('.%03dZ', $ms % 1000);
     }
 }

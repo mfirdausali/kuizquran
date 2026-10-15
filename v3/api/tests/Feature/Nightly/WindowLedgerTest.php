@@ -429,4 +429,45 @@ class WindowLedgerTest extends TestCase
         $status = NightlyWindowLedger::status();
         $this->assertNull($status['windowUpdatedAtMs']);
     }
+
+    /**
+     * v3-D317 added `windowUpdatedAtMs` to `NightlyWindowLedger::status()`
+     * and to the WEB panel (`NightlyWindowPanel.tsx`'s own "(declared
+     * {ISO timestamp})" clause) — but never to THIS command's own
+     * human-readable table, the exact "one command and seven dated rows"
+     * surface HANDOVER.md C5 names as the human's daily check. The CLI
+     * table's "window started" line still prints only
+     * `windowStartedAt`/`windowReason` — WHAT and WHY, never WHEN — so an
+     * operator running `nightly:window` by hand (not reading the web
+     * panel) still cannot tell a declaration stamped minutes ago from one
+     * three weeks stale. Mirrors v3-D298's own "nightly:window table never
+     * named each night's own trigger" shape, one field later.
+     */
+    public function test_the_window_command_table_names_the_declaration_timestamp(): void
+    {
+        NightlyWindow::current()->fill([
+            'window_started_at' => '2026-09-01',
+            'reason' => 'engine merge abc1234',
+            'updated_at_ms' => 1_757_000_123_456,
+        ])->save();
+
+        Artisan::call('nightly:window');
+        $output = Artisan::output();
+
+        $this->assertStringContainsString('declared 2025-09-04T15:35:23.456Z', $output);
+    }
+
+    /** No window declared at all — the table must not fabricate a
+     *  declaration timestamp alongside its own "NOT DECLARED" line. The
+     *  command's own pre-existing `blockedBy` text already contains the
+     *  substring "declared" ("no window start declared — run..."), so this
+     *  checks for the distinguishing `"(declared "` clause specifically —
+     *  the same collision v3-D317's own panel tests caught and avoided. */
+    public function test_the_window_command_table_names_no_declaration_timestamp_when_none_exists(): void
+    {
+        Artisan::call('nightly:window');
+        $output = Artisan::output();
+
+        $this->assertStringNotContainsString('(declared ', $output);
+    }
 }
