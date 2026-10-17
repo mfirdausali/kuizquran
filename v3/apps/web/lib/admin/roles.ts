@@ -43,10 +43,19 @@ export type AdminRolesLoad =
    *  observed reading, when in fact nothing was read at all. */
   | { state: "unavailable"; reason: string };
 
-const ROLE_VALUES: readonly AdminRoleValue[] = ["operator", "qari", "moderator"];
+/**
+ * The ONE runtime declaration of the closed admin-role set — mirrors
+ * `App\Models\AdminRole::ALL` (the server's own closed set,
+ * `self::OPERATOR`/`self::QARI`/`self::MODERATOR`), guarded against drift by
+ * `admin-role-values-agreement.test.ts`. Exported so a second TS-side copy
+ * is never needed — `components/admin/AdminRolesPanel.tsx`'s own role-filter
+ * dropdown imports this instead of re-declaring it, the same move this build
+ * made for `engine/overrides.ts#OVERRIDE_FIELDS` (v3-D323).
+ */
+export const ADMIN_ROLE_VALUES: readonly AdminRoleValue[] = ["operator", "qari", "moderator"];
 
 function isAdminRoleValue(v: unknown): v is AdminRoleValue {
-  return typeof v === "string" && (ROLE_VALUES as readonly string[]).includes(v);
+  return typeof v === "string" && (ADMIN_ROLE_VALUES as readonly string[]).includes(v);
 }
 
 function isAdminRoleEntry(v: unknown): v is AdminRoleEntry {

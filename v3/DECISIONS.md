@@ -33338,3 +33338,141 @@ advisories; the `trial_surah_source` column on `entitlements` — all
 unchanged. The override-field closed-set's own cross-file duplication is
 now CLOSED (both TS copies, plus a mechanical guard on the PHP mirror) —
 remove it from future sweeps.
+
+## v3-D324 (2026-10-17, nightly) — `AdminRolesPanel.tsx` hand-declared its own copy of the closed admin-role set, and neither TS copy had an agreement test against `AdminRole::ALL`
+
+**Found by:** a direct, manual zero-caller/duplicated-closed-set sweep this
+run (a systematic export-vs-caller scan across `apps/web/lib`,
+`packages/engine/src`, `packages/corpus-compiler/src`, `worker/fold-runner/src`,
+and every PHP public method, all of which came back exhausted — every
+candidate either had a real same-file-only caller or matched an
+already-excluded item from this file's own recent entries — followed by a
+grep for duplicated closed-set array literals across `apps/web`/`api/app`).
+Independently re-verified directly against `AdminRole.php`,
+`GrantAdminRoleCommand.php`, `lib/admin/roles.ts` and
+`AdminRolesPanel.tsx`'s real source before writing any test.
+
+`App\Models\AdminRole::ALL` (`[self::OPERATOR, self::QARI,
+self::MODERATOR]`, the server's own closed role set — the INNER gate
+`admin:grant-role` enforces, v3-D92) was independently re-declared on the
+TypeScript side TWICE, with no shared source: `lib/admin/roles.ts`'s own
+module-private `ROLE_VALUES` (used only to validate a fetched role string
+at the client's read boundary) and `components/admin/AdminRolesPanel.tsx`'s
+own, byte-identical `ROLE_OPTIONS` (the role-filter dropdown's option
+list). The two TypeScript copies could simply be ONE copy reached by
+import — `AdminRolesPanel.tsx` already imports from `lib/admin/roles.ts`
+for everything else it needs — the same move this build made for
+`OnboardedSteer.tsx`'s `ONBOARDED_AT` (v3-D312) and, the night before this
+one, for `engine/overrides.ts#OVERRIDE_FIELDS` (v3-D323). The remaining
+half — the TS side's own set vs. `AdminRole::ALL` — crosses the
+TS/PHP language boundary no import can reach, the identical "two
+implementations of one decision, no shared source" shape this build has
+repeatedly closed with a mirror-agreement test
+(`cache-config-agreement.test.ts` v3-D150, `pricing-config-agreement
+.test.ts` v3-D158, `reveal-reason-codes-agreement.test.ts` v3-D311,
+`LaunchSurahsAgreementTest.php` v3-D296, `override-fields-agreement
+.test.ts` v3-D323) — and had no such guard here either: `grep -rln
+"AdminRole::ALL\|ROLE_VALUES\|ROLE_OPTIONS"` across every test file in the
+tree returned nothing before this run.
+
+Not a live divergence today — all three declarations already agreed
+byte-for-byte (`operator`/`qari`/`moderator`) — a drift-risk fix: a future
+role added to or retired from `AdminRole::ALL` alone (the server's own
+closed set `admin:grant-role` actually enforces) would silently desync
+what the admin console's role-filter dropdown offers, and what the
+client's own read-side validator (`isAdminRoleValue`) treats as
+well-formed, from what the server can actually grant — with nothing to
+catch it.
+
+**Fixed:** `lib/admin/roles.ts`'s `ROLE_VALUES` is now exported as
+`ADMIN_ROLE_VALUES` — the one runtime declaration of this set on the
+TS side — and `AdminRolesPanel.tsx` imports it instead of re-declaring
+its own `ROLE_OPTIONS`. A new `lib/admin/admin-role-values-agreement
+.test.ts` closes the remaining PHP-boundary half: it reads
+`AdminRole.php`'s raw source text (the same `readFileSync` +
+regex-extract technique `reveal-reason-codes-agreement.test.ts`/
+`override-fields-agreement.test.ts` already use) and asserts the set of
+role VALUES parsed off the `OPERATOR`/`QARI`/`MODERATOR` class constants
+themselves — since `ALL` references them as `self::OPERATOR` etc. rather
+than repeating their string values a second time — is exactly the same
+SET as `ADMIN_ROLE_VALUES`, with a length check too so a duplicate on
+either side (which a bare `Set` comparison would silently absorb) still
+fails.
+
+**RED confirmed directly:** the new test was written first and run
+against the UNMODIFIED tree via `git stash` of the two production files
+alone (the new test file, untracked, kept) — failed exactly as predicted,
+`expected Set{} to deeply equal Set{ 'operator', 'qari', 'moderator' }`
+(the import resolved to `undefined` before `ADMIN_ROLE_VALUES` existed).
+Restored byte-identically (`git diff --stat` empty before re-running),
+reran clean: `admin-role-values-agreement.test.ts` 1/1, `lib/admin/roles
+.test.ts` 9/9 (unchanged), `test/admin-roles-panel.test.tsx` 7/7
+(unchanged) — no regression on either file's own pre-existing coverage.
+
+`TZ=UTC make test`: 3077 passing (was 3076, +1 — exactly this run's one
+new test; apps/web 1692, was 1691; no other suite moved: 255 v2 vitest,
+47 v2/api, 422 v3/api, 120 corpus-compiler, 468 engine, 73 fold-runner).
+`check-test-floor.mjs`: OK, 3077 >= floor 1899 (+1178 margin, unmoved,
+same discipline as every prior entry). `TZ=UTC make build`: exit 0, 30
+routes, unchanged — this diff touches two existing files and one new test
+file, no route or new production component. `npm run gates`: all
+green — locked-css OK, 1 documented hunk, 294 v1 lines byte-identical;
+boundaries OK, 342 files, up from 341 — exactly the one new test file;
+fonts degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints across 4
+artifacts — all unchanged, this diff carries no corpus data. `npx tsc
+--noEmit`, run separately across all four v3 node packages: clean in all
+four. No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff produced by running the suite was reverted twice before
+committing, same discipline as every prior entry — `git status
+--porcelain -- v1 v2` empty immediately before committing). No Arabic
+codepoint (all three changed/new files swept programmatically, in Python,
+over the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks, plus a `fromCharCode`/`fromCodePoint`
+mention check: CLEAN — every new string is a TypeScript identifier, a
+closed-set role literal, a file path, or a fixed English docblock
+sentence, never corpus text). No oracle/golden-log/fixture/snapshot
+regenerated.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1); installed
+PHP 8.4.26 cleanly via the documented `packages.sury.org` apt mirror, no
+refusal this run. `HEAD`, local `main` and `origin/main` all already
+agreed at `a8aff9c` (v3-D323) — no stale-local-`main` trap this run,
+confirmed directly via `git fetch origin main` before any exploration.
+The five npm installs (`v2`, `packages/engine`, `packages/corpus-compiler`,
+`worker/fold-runner`, `apps/web`) were run directly and in parallel ahead
+of the two composer installs (`v2/api`, `v3/api`), which themselves ran in
+parallel with `COMPOSER_PROCESS_TIMEOUT=900` and both completed cleanly on
+the first attempt, no retry needed this run. A periodic dependency-audit
+re-check (`npm audit` across all four v3 Node packages; `composer audit`
+for `v3/api`) was also run and found nothing new since v3-D319's own
+re-check two days earlier: identical `{critical: 2, high: 1, moderate: 3,
+total: 6}` on every Node package (the single deferred `vitest@5` chain)
+and the identical 4 `laravel/framework`-only advisories on `v3/api` — no
+new CVE published in the interim, nothing acted on.
+
+NOT addressed: every item on v3-D323's own condensed "NOT addressed" list,
+unchanged — `rhymeClassOf()`; `EntitlementMachine::merge()`;
+`App\Billing\TrialAttribution`/`lib/pricing.ts#regionFromCountry()`;
+`PaywallGate` as a whole class; multi-surah enrollment as a product
+decision; the operational mailer/7-night launch window; PAY-1's Stripe
+fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy naming;
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`;
+`corpusHash`'s zero fold-side consumer; `selection_determinism_check`
+still replaying a committed fixture; `QueueItem.score`'s missing external
+reader; `acknowledgeReentry`'s "makeup" branch; `DrillPicker.tsx`'s unused
+`now` prop; the unused `atoms`/`corpus`/`sessions` IndexedDB object
+stores; `session_start`'s own latency metric; the streak/away-day
+day-space mismatch; `/workbench`'s own Pane 2 per-word inspector and Pane
+3 spec editor; the deferred `vitest@5` major-version bump;
+`laravel/framework`'s own remaining advisories (re-confirmed unchanged
+this run); `v2/api`'s own frozen advisories; the `trial_surah_source`
+column on `entitlements` — all unchanged. The admin-role closed set's own
+cross-file duplication (both the TS-side copy and the PHP-boundary
+mirror) is now CLOSED — remove it from future sweeps. A future run should
+not expect another same-shaped finding from a sixteenth or so zero-caller/
+duplicated-closed-set sweep without either a genuinely fresh verification
+method or a willingness to take on one of the larger, already-named
+architectural items above.

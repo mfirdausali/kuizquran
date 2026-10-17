@@ -20,9 +20,12 @@
 // `apiFetch` only (check-boundaries.mjs clause 6).
 
 import { useCallback, useEffect, useState } from "react";
-import { loadAdminRoles, type AdminRoleValue, type AdminRolesLoad } from "@/lib/admin/roles";
-
-const ROLE_OPTIONS: readonly AdminRoleValue[] = ["operator", "qari", "moderator"];
+import {
+  ADMIN_ROLE_VALUES,
+  loadAdminRoles,
+  type AdminRoleValue,
+  type AdminRolesLoad,
+} from "@/lib/admin/roles";
 
 export function AdminRolesPanel() {
   const [roleFilter, setRoleFilter] = useState<AdminRoleValue | "">("");
@@ -73,7 +76,7 @@ export function AdminRolesPanel() {
           Role
           <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value as AdminRoleValue | "")}>
             <option value="">All roles</option>
-            {ROLE_OPTIONS.map((r) => (
+            {ADMIN_ROLE_VALUES.map((r) => (
               <option key={r} value={r}>
                 {r}
               </option>

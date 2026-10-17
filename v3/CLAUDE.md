@@ -53,10 +53,86 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3075 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3077 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 422 v3/api + 120 corpus-compiler
-             # + 468 engine + 73 fold-runner + 1690 apps/web. (v3-D322, 2026-10-17)
+             # + 468 engine + 73 fold-runner + 1692 apps/web. (v3-D324, 2026-10-17)
+             # NOTE (v3-D324, 2026-10-17): `components/admin/AdminRolesPanel.tsx`
+             # hand-declared its own `ROLE_OPTIONS` copy of the closed admin-role
+             # set (`operator`/`qari`/`moderator`) instead of importing
+             # `lib/admin/roles.ts`'s own module-private `ROLE_VALUES` — the exact
+             # "two implementations of one decision, no shared source" shape this
+             # build has repeatedly closed (`OnboardedSteer.tsx`'s `ONBOARDED_AT`,
+             # v3-D312; `engine/overrides.ts#OVERRIDE_FIELDS`, v3-D323, the night
+             # before this one) — and neither TS copy had an agreement test
+             # against the server's own `App\Models\AdminRole::ALL`. Not a live
+             # divergence today — all three already agreed byte-for-byte — a
+             # drift-risk fix.
+             #
+             # Fixed: `roles.ts`'s set is now exported as `ADMIN_ROLE_VALUES`, the
+             # one runtime declaration on the TS side; `AdminRolesPanel.tsx`
+             # imports it instead of re-declaring it. A new `lib/admin/admin-
+             # role-values-agreement.test.ts` closes the PHP-boundary half,
+             # reading `AdminRole.php`'s raw source (the same `readFileSync` +
+             # regex-extract technique `reveal-reason-codes-agreement.test.ts`/
+             # `override-fields-agreement.test.ts` already use) and asserting the
+             # set of role values parsed off its `OPERATOR`/`QARI`/`MODERATOR`
+             # class constants is exactly the same SET as `ADMIN_ROLE_VALUES`.
+             #
+             # RED confirmed directly: the new test was written first and run
+             # against the UNMODIFIED tree via `git stash` of the two production
+             # files alone (test kept) — failed exactly `expected Set{} to deeply
+             # equal Set{ 'operator', 'qari', 'moderator' }`. Restored byte-
+             # identically, reran: `admin-role-values-agreement.test.ts` 1/1,
+             # `lib/admin/roles.test.ts` 9/9 and `test/admin-roles-panel
+             # .test.tsx` 7/7 both unchanged — no regression.
+             #
+             # `TZ=UTC make test`: 3077 passing (was 3076, +1 — exactly this
+             # run's one new test; apps/web 1692, was 1691; no other suite
+             # moved). `check-test-floor.mjs`: OK, 3077 >= floor 1899 (+1178
+             # margin, unmoved). `TZ=UTC make build`: exit 0, 30 routes,
+             # unchanged. `npm run gates`: all green — locked-css OK, 294 v1
+             # lines byte-identical; boundaries OK, 342 files, up from 341 —
+             # exactly the one new test file; fonts degraded-but-non-blocking,
+             # pre-existing; corpus-morphology/corpus-glyphs unchanged. `npx tsc
+             # --noEmit` clean across all four v3 node packages. No
+             # `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-
+             # cache diff reverted twice before committing). No Arabic codepoint
+             # (all three changed/new files swept programmatically over every
+             # Arabic-adjacent Unicode block: CLEAN). No oracle/golden-log/
+             # fixture/snapshot regenerated.
+             #
+             # Session start: fresh container, PHP 8.4.26 installed via the
+             # documented `packages.sury.org` apt mirror, no refusal. `HEAD`,
+             # local `main` and `origin/main` all already agreed at `a8aff9c`
+             # (v3-D323) — no stale-local-`main` trap this run. A periodic
+             # dependency-audit re-check (`npm audit` x4 Node packages,
+             # `composer audit` on `v3/api`) found nothing new since v3-D319's
+             # own re-check two days earlier — identical tallies on every
+             # package, no new CVE.
+             #
+             # NOT addressed: every item on v3-D323's own condensed "NOT
+             # addressed" list, unchanged — `rhymeClassOf()`;
+             # `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution`/`lib/pricing.ts#regionFromCountry()`;
+             # `PaywallGate` as a whole class; multi-surah enrollment as a
+             # product decision; the operational mailer/7-night launch window;
+             # PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy naming;
+             # `packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`;
+             # `corpusHash`'s zero fold-side consumer; `selection_determinism_check`
+             # still replaying a committed fixture; `QueueItem.score`'s missing
+             # external reader; `acknowledgeReentry`'s "makeup" branch;
+             # `DrillPicker.tsx`'s unused `now` prop; the unused
+             # `atoms`/`corpus`/`sessions` IndexedDB object stores;
+             # `session_start`'s own latency metric; the streak/away-day
+             # day-space mismatch; `/workbench`'s own Pane 2 per-word inspector
+             # and Pane 3 spec editor; the deferred `vitest@5` major-version
+             # bump; `laravel/framework`'s own remaining advisories; `v2/api`'s
+             # own frozen advisories; the `trial_surah_source` column on
+             # `entitlements` — all unchanged. The admin-role closed set's own
+             # cross-file duplication is now CLOSED — remove it from future
+             # sweeps. See DECISIONS.md v3-D324.
              # NOTE (v3-D322, 2026-10-17): `Iq3Schema`'s own `meta` object
              # store declared its lookup KEY as plain `string` —
              # `meta: { key: string; value: MetaRow }` — even though
