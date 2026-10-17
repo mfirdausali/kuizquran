@@ -33223,3 +33223,118 @@ day-space mismatch; `/workbench`'s own Pane 2 per-word inspector and Pane
 `laravel/framework`'s own remaining advisories; `v2/api`'s own frozen
 advisories; the `trial_surah_source` column on `entitlements` — all
 unchanged.
+
+## v3-D323 (2026-10-17, nightly) — `apps/web`'s `fetch.ts`/`fetchServer.ts` each hand-declared their own copy of the override field closed set
+
+**Found by:** a dedicated fresh-sweep agent handed the full exclusion list
+carried through v3-D322, directed at the "two independent implementations
+of one decision, no shared source" shape across `apps/web/lib/**`;
+independently re-verified directly against `overrides.ts`,
+`lib/overrides/fetch.ts`/`fetchServer.ts`, and
+`OverridesController.php`'s real source before writing any test.
+
+The override layer's closed `field` set (`"gloss" | "distractor" |
+"group" | "disable"`) was hand-declared FOUR separate times with no
+shared source: the TS type `OverrideField`
+(`packages/engine/src/overrides.ts`, type-only, erased at compile time —
+no runtime array to import), `apps/web/lib/overrides/fetch.ts`'s own
+runtime `CLOSED_FIELDS` array, `.../fetchServer.ts`'s byte-identical copy
+of that same array, and `OverridesController::CLOSED_FIELDS` in Laravel —
+whose own comment already named the risk ("kept in sync by hand"). The
+two TypeScript copies could simply be ONE copy, reached by import (the
+same move this build made for `OnboardedSteer.tsx`'s `ONBOARDED_AT`,
+v3-D312), since neither `fetch.ts` nor `fetchServer.ts` is barred from
+importing a plain data constant off `engine/overrides.ts` — both already
+import the TYPE from it.
+
+Fixed: `packages/engine/src/overrides.ts` gains a new exported
+`OVERRIDE_FIELDS: readonly OverrideField[]` runtime constant, the ONE
+place this closed set's array literal is written; both `fetch.ts` and
+`fetchServer.ts` import it instead of re-declaring it. The remaining half
+— the engine's `OVERRIDE_FIELDS` vs. the Laravel
+`OverridesController::CLOSED_FIELDS` — crosses a language boundary no
+import can reach, the identical "two implementations of one decision, no
+shared source" shape this build has repeatedly closed elsewhere
+(`cache-config-agreement.test.ts` v3-D150, `pricing-config-agreement
+.test.ts` v3-D158, `reveal-reason-codes-agreement.test.ts` v3-D311,
+`LaunchSurahsAgreementTest.php` v3-D296). A new
+`lib/overrides/override-fields-agreement.test.ts` closes that half the
+same way: it reads `OverridesController.php`'s raw source text (the same
+`readFileSync` + regex-extract technique those precedents already use)
+and asserts the parsed `CLOSED_FIELDS` array is exactly the same SET as
+`OVERRIDE_FIELDS` — same members, no stray, none missing, either
+direction, plus a length check so a duplicate on either side (which a
+bare `Set` comparison would silently absorb) still fails.
+
+Not a live divergence today — all four declarations already agreed byte-
+for-byte — a drift-risk fix: a future field added to (or retired from)
+one side alone would silently desync what the client is willing to send
+from what the server actually accepts, with nothing to catch it.
+
+RED confirmed directly: the new test was written first and ran against
+the UNMODIFIED tree — `OVERRIDE_FIELDS` did not yet exist on the engine's
+exports, so the import resolved to `undefined` and the assertion failed
+exactly as predicted (`expected Set{} to deeply equal Set{4}`). Restored
+after implementing, reran clean.
+
+`TZ=UTC make test`: 3076 passing (was 3075, +1 — exactly this run's one
+new test; apps/web 1691, was 1690; v3/api 422 unchanged, engine 468
+unchanged — no other suite moved, this diff touches no PHP/engine-test
+file). `check-test-floor.mjs`: OK, 3076 >= floor 1899 (+1177 margin,
+unmoved, same discipline as every prior entry). `TZ=UTC make build`: exit
+0, 29 routes, unchanged — this diff touches two existing `lib/` files and
+one engine file, no route or component. `npx tsc --noEmit`: clean across
+all four v3 node packages. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite
+was reverted before committing, same discipline as every prior entry —
+`git status --porcelain -- v1 v2` empty immediately before committing).
+No Arabic codepoint (every changed/new file swept programmatically, in
+Python, over the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks, plus a `fromCharCode`/`fromCodePoint`
+mention check: CLEAN — every new string is a TypeScript identifier, a
+closed-set field literal, a file path, or a fixed English docblock
+sentence, never corpus text). No oracle/golden-log/fixture/snapshot
+regenerated.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1); installed
+PHP 8.4.26 cleanly via the documented `packages.sury.org` apt mirror, no
+refusal this run. `HEAD` was found on a stale LOCAL `main` branch ref
+thirteen commits behind `origin/main`'s real tip (`f35c82a`, v3-D322) —
+the recurring stale-local-`main` trap this file has recorded roughly fifty
+times since v3-D77 — caught before any exploration via `git fetch origin
+main` + `git checkout main && git merge --ff-only origin/main`, a clean
+fast-forward, no work lost or at risk. A dispatched fresh-sweep fork kept
+running `make test` in the background after reporting its candidate,
+racing a second `php artisan test` invocation against the same file-based
+sqlite DB used by `v3/api`'s test suite — the resulting cross-process
+contention (`database is locked`, transient `no such table` mid-run from
+an overlapping `migrate:fresh`) looked at first like a real flake and
+produced a plausible-looking `busy_timeout` config fix; verified directly
+that three clean repeated runs with NO competing process and the
+ORIGINAL, untouched `busy_timeout: null` config all passed cleanly,
+confirming the contention was caused entirely by the stray background
+process, not a real defect — the speculative config change was discarded
+rather than committed. The background fork was stopped via `TaskStop`
+before it could race another verification pass.
+
+NOT addressed: every item on v3-D322's own condensed "NOT addressed" list,
+unchanged — `rhymeClassOf()`; `EntitlementMachine::merge()`;
+`App\Billing\TrialAttribution`/`lib/pricing.ts#regionFromCountry()`;
+`PaywallGate` as a whole class; multi-surah enrollment as a product
+decision; the operational mailer/7-night launch window; PAY-1's Stripe
+fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy naming;
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`;
+`corpusHash`'s zero fold-side consumer; `selection_determinism_check`
+still replaying a committed fixture; `QueueItem.score`'s missing external
+reader; `acknowledgeReentry`'s "makeup" branch; `DrillPicker.tsx`'s unused
+`now` prop; the unused `atoms`/`corpus`/`sessions` IndexedDB object
+stores; `session_start`'s own latency metric; the streak/away-day
+day-space mismatch; `/workbench`'s own Pane 2 per-word inspector and Pane
+3 spec editor; the deferred `vitest@5` major-version bump;
+`laravel/framework`'s own remaining advisories; `v2/api`'s own frozen
+advisories; the `trial_surah_source` column on `entitlements` — all
+unchanged. The override-field closed-set's own cross-file duplication is
+now CLOSED (both TS copies, plus a mechanical guard on the PHP mirror) —
+remove it from future sweeps.
