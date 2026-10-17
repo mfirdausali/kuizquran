@@ -35,9 +35,7 @@
 // background fetch in this codebase (#103): a network failure or a malformed
 // body degrades to `[]` — no overrides applied, the raw corpus stands.
 
-import type { QuestionOverride, OverrideField } from "@engine/overrides.ts";
-
-const CLOSED_FIELDS: readonly OverrideField[] = ["gloss", "distractor", "group", "disable"];
+import { OVERRIDE_FIELDS, type QuestionOverride } from "@engine/overrides.ts";
 
 function isOverride(v: unknown): v is QuestionOverride {
   if (typeof v !== "object" || v === null) return false;
@@ -48,7 +46,7 @@ function isOverride(v: unknown): v is QuestionOverride {
     (o.position === null || typeof o.position === "number") &&
     typeof o.questionType === "string" &&
     typeof o.field === "string" &&
-    (CLOSED_FIELDS as readonly string[]).includes(o.field) &&
+    (OVERRIDE_FIELDS as readonly string[]).includes(o.field) &&
     "payload" in o &&
     typeof o.createdAt === "number"
   );

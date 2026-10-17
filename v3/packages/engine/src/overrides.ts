@@ -31,6 +31,18 @@ import type { Corpus, CorpusDistractor, CorpusWord, GlossLang } from "./types.ts
 
 export type OverrideField = "gloss" | "distractor" | "group" | "disable";
 
+/** Runtime mirror of `OverrideField`, named here so no other TypeScript
+ *  caller has to hand-declare the same closed set a second time — a type
+ *  union is erased at compile time and has no runtime array to import, so
+ *  this is the ONE place a `OverrideField[]` literal is written. Both
+ *  `apps/web/lib/overrides/fetch.ts` and `.../fetchServer.ts` previously
+ *  each declared their own identical copy of this array; closed by import
+ *  rather than left as two hand-synced literals. The Laravel mirror
+ *  (`OverridesController::CLOSED_FIELDS`) is a separate language and so
+ *  cannot import this — that side is held in agreement by a dedicated
+ *  mirror-agreement test instead. */
+export const OVERRIDE_FIELDS: readonly OverrideField[] = ["gloss", "distractor", "group", "disable"];
+
 /** Mirrors the Laravel `overrides` row. Append-only: a correction is a NEW
  *  row with a later `createdAt`, never an edit in place. */
 export interface QuestionOverride {
