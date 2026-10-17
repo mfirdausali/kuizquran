@@ -32936,3 +32936,159 @@ duplication; the `trial_surah_source` column on `entitlements` — all
 unchanged. `AccountController::requestDeletion()`'s own role-only guard is
 now CLOSED against a role-less `admin_audit` actor — remove it from future
 "docblock says X, reality is Y" sweeps.
+
+## v3-D321 (2026-10-17, nightly) — `lib/pricing.ts`'s `TRIAL.surahs` was a third, unguarded copy of v3-D07's trial-surah count, and `PricingPanel.tsx`'s own comment falsely claimed `gate.ts` reads it
+
+**Found by:** a direct, manual re-read of `config/pricing.php`'s full
+contents against every TS-side consumer of its fields, after confirming the
+existing `pricing-config-agreement.test.ts`/`trial-config-agreement.test.ts`
+guards (v3-D150/D151/D158/D314) each cover a *different* field of the same
+config file. `config/pricing.php`'s `trial` block has two keys, `days` and
+`surahs`; `trial-config-agreement.test.ts` guarded only `days` (against
+`gate.ts#TRIAL_DAYS_MS`) — `surahs` had no agreement test anywhere, the
+identical "two implementations of one decision, no shared source" shape
+this build has closed roughly a dozen times (`offline_ttl_days`/
+`OFFLINE_TTL_MS` v3-D150, `trial.days`/`TRIAL_DAYS_MS` v3-D151, the price
+amounts v3-D158, the region set/default region v3-D314), on the one sibling
+field none of those runs touched.
+
+Confirmed directly: `config('pricing.trial.surahs')` (`=> 1`) has **zero**
+Laravel-side readers anywhere in `v3/api` (`grep -rn "trial.*surahs\|'surahs'"
+app/ config/` returns only the config declaration itself, a `$surahs`
+variable in the unrelated `ContentFreezeController`, and a comment) —
+`PaywallGate::permitsIssuance()`'s own trial branch gates on
+`EntitlementState`/`trialSurah` (the server-assigned single trial surah,
+`Entitlement.trial_surah`), never on a *count* read from config at all.
+`lib/pricing.ts` independently declares `export const TRIAL = { surahs: 1,
+days: 14 } as const` — a THIRD copy of the same v3-D07 number, read by
+exactly one caller: `components/landing/PricingPanel.tsx`'s own trial-line
+copy, interpolating `TRIAL.surahs`/`TRIAL.days` into the real landing page's
+pricing section. `PricingConstantsTest.php` pins `trial.surahs` against its
+own hardcoded `1`; `test/pricing.test.ts` pins `TRIAL.surahs` against its
+own hardcoded `1`; neither reads the other file.
+
+Sharper than the usual drift-risk instance: `PricingPanel.tsx`'s own
+in-component comment made a **false claim**, the "docblock says X, reality
+is Y" shape this build has repeatedly closed elsewhere — "`TRIAL` is the
+same constant the entitlement gate reads, so the offer on the page and the
+offer in the code are one fact." `gate.ts` never imports `TRIAL` from
+`lib/pricing.ts` at all; it declares its own, completely independent
+`TRIAL_DAYS_MS` constant, whose own docblock is honest about this
+("Declared independently... `trial-config-agreement.test.ts` is what
+actually proves the two agree, not this comment") — the landing component's
+comment asserted the opposite of what its own sibling file already
+documents correctly. Not a live divergence today (`config/pricing.php`'s
+`trial.surahs`, `lib/pricing.ts`'s `TRIAL.surahs`, and the two isolated test
+pins all already agree at `1`) — a drift-risk fix: a future change to the
+trial-surah count landed on only the server side (or only the landing
+page's own constant) would silently desync the landing page's "one surah"
+promise from what `PaywallGate` actually enforces, with the false comment
+actively steering a future reader away from noticing.
+
+**Fixed:** `lib/entitlement/trial-config-agreement.test.ts` widened with a
+second describe block (`"trial surah count — PHP config and TS constant
+agree"`) that reads `config/pricing.php`'s raw text (reusing a generalized
+`parseTrialField(source, field)` helper in place of the old single-purpose
+`parseTrialDays`) and asserts `TRIAL.surahs` (imported from `../pricing`)
+matches the parsed `trial.surahs` value exactly — the same mechanical-link
+technique the file's own pre-existing `days` case already uses.
+`PricingPanel.tsx`'s false comment is corrected to name the real mechanism
+(three independent declarations, kept honest by this test, not by one
+being literally imported into the other) rather than restating the false
+"same constant" claim.
+
+RED confirmed by mutation (both sides already agreed, so there was no live
+failure to reproduce — the same template v3-D150/D158/D266/D288/D314 each
+already used): `config/pricing.php`'s `trial.surahs` was temporarily
+changed from `1` to `2` and the new case failed exactly as predicted —
+`expected 1 to be 2`, naming the real TS-side value against the mutated
+PHP-side one. Reverted byte-identically (`git diff --stat
+v3/api/config/pricing.php` empty before committing), reran clean:
+`trial-config-agreement.test.ts` 2/2 green (was 1, +1);
+`pricing-config-agreement.test.ts` 5/5 and `test/pricing.test.ts` 9/9 both
+unaffected, confirming the fix added a guard without touching either
+pre-existing isolated pin.
+
+`TZ=UTC make test`: **3074 passing** (was 3073, +1 — exactly this run's one
+new test; apps/web 1689, was 1688; no other suite moved: 255 v2 vitest, 47
+v2/api, 422 v3/api [2 incomplete + 6 skipped, both environment-dependent and
+pre-existing], 120 corpus-compiler, 468 engine, 73 fold-runner).
+`check-test-floor.mjs`: OK, 3074 >= floor 1899 (+1175 margin, unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 30 routes,
+unchanged — a `lib/`-plus-one-component change, no route or new production
+file; all three staged corpus hashes byte-identical to v3-D320's own
+(908ca9edbd2ab2e4/123c6212cc1d074d/77722a2b8b1b6aae) — this diff carries no
+corpus data. `npm run gates`: all green — locked-css OK, 1 documented hunk,
+294 v1 lines byte-identical; boundaries OK, 338 files, unchanged count;
+fonts degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints across 4
+artifacts — all unchanged. `npx tsc --noEmit` across all four v3 node
+packages (run as part of `make test`'s own `typecheck-v3` prerequisite):
+clean. No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache
+diff produced by running the suite was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2` empty
+immediately before committing). No Arabic codepoint (both changed files
+swept programmatically, in Python, over the Arabic, Arabic Supplement,
+Arabic Extended-A and both Presentation Forms Unicode blocks, plus a
+`fromCharCode`/`fromCodePoint` mention check: CLEAN — every new string is a
+TypeScript identifier, a regex literal, or a fixed English docblock/comment
+sentence, never corpus text). No oracle/golden-log/fixture/snapshot
+regenerated — this diff touches two existing files only.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled corpus
+anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1); installed PHP
+8.4.26 cleanly via the documented `packages.sury.org` apt mirror, no refusal
+this run. `HEAD` was found detached exactly at `origin/main`'s own real tip
+(`8ec6e5c`, v3-D320), on a stale LOCAL `main` branch ref 13 commits behind
+(`c3e42ab`, v3-D309) — the recurring stale-local-`main` trap this file has
+recorded roughly fifty times since v3-D77 — caught before any exploration
+via `git fetch origin main` + `git checkout main && git merge --ff-only
+origin/main`, a clean fast-forward, no work lost or at risk. `make setup`
+ran clean end to end on a fresh checkout — both Laravel `composer install`s
+(`v2/api`, `v3/api`) hit the documented transient `api.github.com`
+dist-download proxy-timeout for nearly every package and recovered
+automatically via the git-mirror source fallback, slow (~10-15 min each)
+but with no retry flag needed; the four PHP-independent `npm install`s
+(`v2`, `packages/engine`, `packages/corpus-compiler`, `worker/fold-runner`,
+plus `apps/web`'s own) were run directly and in parallel ahead of the
+sequential composer installs finishing, the same recovery this file's
+history has recorded roughly a dozen times before.
+
+A dependency-audit re-run was also tried this run per v3-D309's/D319's own
+"periodic, not one-time" instruction, and came back with nothing new to act
+on across all six targets: `npm audit` on `apps/web`/`packages/engine`/
+`packages/corpus-compiler`/`worker/fold-runner` each reported the identical
+`{critical: 2, high: 1, moderate: 3, total: 6}` already recorded as the
+single deferred `vitest@5` dev-only chain; `v2`'s own frontend reported the
+identical 13 advisories (5 moderate, 6 high, 2 critical) v3-D314 already
+recorded, frozen, informational only; `composer audit` on `v3/api` reported
+the identical 4 advisories on `laravel/framework` alone v3-D309 already
+recorded (still needing the deferred major 12.61+/13.12+ bump); `composer
+audit` on `v2/api` reported the identical 20 advisories across 5 packages
+v3-D320's own running comment already recorded, frozen, informational only.
+No action taken on any of the six — all are the same already-triaged,
+deliberately-deferred findings, not fresh.
+
+NOT addressed: every item on v3-D320's own condensed "NOT addressed" list,
+unchanged — `rhymeClassOf()`; `EntitlementMachine::merge()`;
+`App\Billing\TrialAttribution`/`lib/pricing.ts#regionFromCountry()`;
+`PaywallGate` as a whole class; multi-surah enrollment as a product
+decision; the operational mailer/7-night launch window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy naming; `packages/engine/src/placement.ts`;
+`MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero fold-side consumer;
+`selection_determinism_check` still replaying a committed fixture;
+`QueueItem.score`'s missing external reader; `acknowledgeReentry`'s
+"makeup" branch; `DrillPicker.tsx`'s unused `now` prop; the unused
+`atoms`/`corpus`/`sessions` IndexedDB object stores; `session_start`'s own
+latency metric; the streak/away-day day-space mismatch; `/workbench`'s own
+Pane 2 per-word inspector and Pane 3 spec editor; the deferred `vitest@5`
+major-version bump; `laravel/framework`'s own remaining 4 advisories;
+`v2/api`'s own frozen advisories; `lib/idb/schema.ts`'s own type-only
+`MetaKey` literal duplication; the `trial_surah_source` column on
+`entitlements` — all unchanged. The periodic dependency-audit task from
+v3-D309/D319 was re-run this night across all six `npm audit`/`composer
+audit` targets and found nothing new (see above) — a future run should
+still re-run it periodically, this is not a one-time check either.
+`trial.surahs`'s own cross-runtime duplication is now CLOSED and
+permanently guarded — remove it from future sweeps.

@@ -51,9 +51,14 @@ function rails(list: readonly string[]): string {
 export function PricingPanel() {
   return (
     <div className="stack">
-      {/* The trial line. `TRIAL` is the same constant the entitlement gate
-          reads, so the offer on the page and the offer in the code are one
-          fact. The numerals are interpolated, never typed. */}
+      {/* The trial line. `TRIAL` (lib/pricing.ts) is its own independent
+          declaration of v3-D07's "one surah, or 14 days" — `gate.ts`'s
+          `TRIAL_DAYS_MS` and the server's `config('pricing.trial')` are
+          separate copies, not this same constant imported elsewhere. What
+          keeps the three honest is `trial-config-agreement.test.ts`, which
+          reads config/pricing.php's raw text and asserts both fields agree
+          with this file's own numbers (v3-D321). The numerals here are
+          interpolated, never typed. */}
       <p className="landing-lead">
         {PRICING_COPY.trial.replace("one surah", `${TRIAL.surahs} surah`).replace(
           "fourteen days",
