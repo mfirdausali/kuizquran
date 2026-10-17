@@ -205,7 +205,7 @@ export interface Iq3Schema extends DBSchema {
       by_deviceSeq: [string, number];
     };
   };
-  meta: { key: string; value: MetaRow };
+  meta: { key: MetaKey; value: MetaRow };
   atoms: { key: string; value: AtomRow; indexes: { by_surah: number } };
   corpus: { key: string; value: CorpusRow; indexes: { by_surah: number } };
   sessions: { key: string; value: SessionRow };

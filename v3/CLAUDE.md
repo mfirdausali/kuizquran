@@ -53,10 +53,127 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3074 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3075 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 422 v3/api + 120 corpus-compiler
-             # + 468 engine + 73 fold-runner + 1689 apps/web. (v3-D321, 2026-10-17)
+             # + 468 engine + 73 fold-runner + 1690 apps/web. (v3-D322, 2026-10-17)
+             # NOTE (v3-D322, 2026-10-17): `Iq3Schema`'s own `meta` object
+             # store declared its lookup KEY as plain `string` —
+             # `meta: { key: string; value: MetaRow }` — even though
+             # `MetaRow.key` itself is the carefully-documented, eleven-
+             # member closed union `MetaKey`. That only protects a
+             # `db.put("meta", { key: "…", value: … })` call's object
+             # literal, checked structurally; `idb`'s typed `get`/`delete`
+             # derive the key parameter's type from the STORE's own
+             # declared key (`StoreKey<Iq3Schema, "meta">`), which resolved
+             # to plain `string`. So the ELEVEN real `db.get("meta", …)`
+             # call sites across `writeLock.ts`/`append.ts`/`read.ts`/
+             # `cursor.ts`/`choices.ts`/`entitlement/sync.ts`/
+             # `OnboardedSteer.tsx` — the READ side — accepted ANY string;
+             # a typo'd key would compile cleanly and silently return
+             # `undefined` forever, the exact risk `MetaKey`'s own docblock
+             # already names in prose for ONE field (v3-D312) but never
+             # closed at the one choke point that would guard every field
+             # at once. Not a live divergence today — every real call site
+             # already passes a genuine `MetaKey` member — a drift-risk
+             # fix, picked up by name from v3-D321's own condensed "NOT
+             # addressed" list ("`lib/idb/schema.ts`'s own type-only
+             # `MetaKey` literal duplication").
+             #
+             # Fixed: `Iq3Schema["meta"]["key"]` is now `MetaKey`, not
+             # `string` — one line, no other file touched.
+             #
+             # RED confirmed directly: a new
+             # `lib/idb/schema-meta-store-key-typed.test.ts`, mirroring
+             # `lib/idb/schema-billing-agreement.test.ts`'s own `Equal<A,B>`
+             # strict type-identity trick (v3-D264), asserts
+             # `Equal<StoreKey<Iq3Schema, "meta">, MetaKey>` is `true`. Run
+             # against the unmodified schema it failed exactly as
+             # predicted — `tsc --noEmit` reported `error TS2344: Type
+             # 'false' does not satisfy the constraint 'true'.` on the
+             # assertion's own line. Narrowing the one field made it
+             # compile clean; reran the full `apps/web` typecheck and
+             # vitest suite afterward, both clean.
+             #
+             # `TZ=UTC make test`: 3075 passing (was 3074, +1 — exactly
+             # this run's one new test; apps/web 1690, was 1689; no other
+             # suite moved: 255 v2 vitest, 47 v2/api, 422 v3/api, 120
+             # corpus-compiler, 468 engine, 73 fold-runner). `check-test-
+             # floor.mjs`: OK, 3075 >= floor 1899 (+1176 margin, unmoved,
+             # same discipline as every prior entry). `TZ=UTC make build`:
+             # exit 0, 30 routes, unchanged — a `lib/idb/schema.ts`-only
+             # type narrowing plus one new test file, no route or other
+             # production file touched; all three staged corpus hashes
+             # byte-identical to v3-D321's own
+             # (908ca9edbd2ab2e4/123c6212cc1d074d/77722a2b8b1b6aae) — this
+             # diff carries no corpus data. `npm run gates`: all green —
+             # locked-css OK, 1 documented hunk, 294 v1 lines byte-
+             # identical; boundaries OK, 339 files, unchanged count; fonts
+             # degraded-but-non-blocking, pre-existing, 2/6 UI fonts
+             # present; corpus-morphology OK, 362 words; corpus-glyphs OK,
+             # 206 codepoints across 4 artifacts — all unchanged. `npx tsc
+             # --noEmit` across all four v3 node packages (via `make
+             # test`'s own `typecheck-v3` prerequisite): clean. No
+             # `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff produced by running the v2 suite was
+             # reverted before committing, same discipline as every prior
+             # entry — `git status --porcelain -- v1 v2` empty immediately
+             # before committing). No Arabic codepoint (both changed files
+             # swept programmatically, in Python, over the Arabic, Arabic
+             # Supplement, Arabic Extended-A and both Presentation Forms
+             # Unicode blocks, plus a `fromCharCode`/`fromCodePoint`
+             # mention check: CLEAN — every new string is a TypeScript
+             # identifier or a fixed English docblock/comment sentence,
+             # never corpus text). No oracle/golden-log/fixture/snapshot
+             # regenerated — this diff touches one existing production
+             # file and one new test file only.
+             #
+             # Session start: fresh container, no `node_modules`/`vendor`/
+             # compiled corpus anywhere; PHP defaulted to 8.3.6 (`v3/api`
+             # needs >=8.4.1); installed PHP 8.4.26 cleanly via the
+             # documented `packages.sury.org` apt mirror, no refusal this
+             # run. `HEAD`, local `main` and `origin/main` all already
+             # agreed at `b747fda` (v3-D321) — no stale-local-`main` trap
+             # this run, confirmed directly via `git fetch origin main`
+             # before any exploration. Both Laravel `composer install`s
+             # (`v2/api`, `v3/api`) hit the documented transient
+             # `api.github.com` dist-download proxy timeout for most of
+             # the `sebastian/*`/`phpunit/*` dependency tree; `v3/api`'s
+             # own first attempt recovered automatically via the
+             # git-mirror source fallback, while `v2/api`'s needed one
+             # explicit retry with `COMPOSER_PROCESS_TIMEOUT=900` after
+             # its first attempt left `vendor/` populated but incomplete —
+             # the same recovery this file's history has recorded roughly
+             # a dozen times before. The five Node installs (`v2`,
+             # `packages/engine`, `packages/corpus-compiler`,
+             # `worker/fold-runner`, `apps/web`) were run directly and in
+             # parallel ahead of the sequential composer installs
+             # finishing, the same precedent too.
+             #
+             # NOT addressed: `lib/idb/schema.ts`'s own type-only
+             # `MetaKey` literal duplication is now CLOSED — remove it
+             # from future sweeps. Every other item on v3-D321's own
+             # condensed "NOT addressed" list, unchanged — `rhymeClassOf()`;
+             # `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution`/`lib/pricing.ts#regionFromCountry()`;
+             # `PaywallGate` as a whole class; multi-surah enrollment as a
+             # product decision; the operational mailer/7-night launch
+             # window; PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy naming;
+             # `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero
+             # fold-side consumer; `selection_determinism_check` still
+             # replaying a committed fixture; `QueueItem.score`'s missing
+             # external reader; `acknowledgeReentry`'s "makeup" branch;
+             # `DrillPicker.tsx`'s unused `now` prop; the unused
+             # `atoms`/`corpus`/`sessions` IndexedDB object stores;
+             # `session_start`'s own latency metric; the streak/away-day
+             # day-space mismatch; `/workbench`'s own Pane 2 per-word
+             # inspector and Pane 3 spec editor; the deferred `vitest@5`
+             # major-version bump; `laravel/framework`'s own remaining
+             # advisories; `v2/api`'s own frozen advisories; the
+             # `trial_surah_source` column on `entitlements` — all
+             # unchanged.
              # NOTE (v3-D321, 2026-10-17): `lib/pricing.ts`'s `TRIAL.surahs`
              # (`export const TRIAL = { surahs: 1, days: 14 }`) was a THIRD
              # independent declaration of v3-D07's "one surah, or 14 days" —

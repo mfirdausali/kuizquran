@@ -33092,3 +33092,134 @@ audit` targets and found nothing new (see above) — a future run should
 still re-run it periodically, this is not a one-time check either.
 `trial.surahs`'s own cross-runtime duplication is now CLOSED and
 permanently guarded — remove it from future sweeps.
+
+## v3-D322 (2026-10-17, nightly) — `Iq3Schema`'s own `meta` object store declared its lookup KEY as plain `string`, so none of the eleven real call sites that pass a bare key into `db.get("meta", ...)` were ever checked against `MetaKey`
+
+**Found by:** picking up v3-D321's own condensed "NOT addressed" item by
+name — "`lib/idb/schema.ts`'s own type-only `MetaKey` literal
+duplication" — and reading `lib/idb/schema.ts`/`lib/idb/db.ts` directly
+against every real caller of `db.get("meta", …)`/`db.put("meta", …)` in
+`apps/web`, rather than dispatching a fresh sweep for a different instance
+of the same bug class.
+
+`MetaKey` (`lib/idb/schema.ts`) is a closed, eleven-member, heavily
+documented union — `onboardedAt`, `deviceId`, `pullCursor`,
+`billingSnapshot` and the rest, each with its own paragraph. `MetaRow.key`
+is typed `MetaKey`, so a `db.put("meta", { key: "…", value: … })` call's
+object literal IS checked structurally against it — a typo there is a
+compile error. But `Iq3Schema`'s own declaration of the **store itself**
+was:
+
+    meta: { key: string; value: MetaRow };
+
+`idb`'s typed `get`/`delete`/`getKey` (and every other lookup form) derive
+the key parameter's type from `StoreKey<DBTypes, "meta">`, which resolves
+to the schema's own declared store key — `string`, never `MetaRow["key"]`.
+So the ELEVEN real `db.get("meta", …)` call sites across
+`writeLock.ts`/`append.ts`/`read.ts`/`cursor.ts`/`choices.ts`/
+`entitlement/sync.ts`/`OnboardedSteer.tsx` — the READ side, not the write
+side — accepted ANY string. A typo'd key (`db.get("meta", "deviecId")`,
+say) would compile cleanly and silently return `undefined` forever at
+runtime, with no error anywhere — the exact risk `MetaKey`'s own docblock
+on `onboardedAt` already names in prose ("a typo'd second spelling of that
+key would silently strand every returning learner") but, unlike that
+field's own fix (v3-D312, importing the one constant instead of
+hand-typing it a second time), nothing had ever closed the GENERAL version
+of the same risk at the one choke point — the store's own declared key
+type — that would catch it for every meta key at once, present and future,
+not merely the one field v3-D312 happened to fix by hand.
+
+Not a live divergence today — every one of the eleven call sites already
+passes a literal string or an untyped `const` whose inferred literal type
+already happens to be a genuine `MetaKey` member (`ONBOARDED_AT`,
+`CHOICES`, `ENTITLEMENT_SNAPSHOT_KEY`, and eight bare string literals) — a
+drift-risk fix, the same shape as the dozen-plus config-agreement guards
+this build has already shipped, except here no second declaration needed
+reconciling: the fix is narrowing the ONE declaration that was too loose.
+
+**Fixed:** `Iq3Schema["meta"]["key"]` is now `MetaKey`, not `string`. No
+other file changed — every real call site already passes a value whose
+type is a `MetaKey` member, so this is a pure narrowing with zero runtime
+behavior change, confirmed by a full `apps/web` vitest run showing every
+suite that touches the `meta` store (`writeLock.test.ts`,
+`append.test.ts`, `schema-onboarding-agreement.test.ts`,
+`schema-billing-agreement.test.ts`, `entitlement/sync.test.ts`,
+`sync/merge.test.ts`, `sync/cursor` via `sync/pull.test.ts`,
+`onboarding/choices.test.ts`, `plan-island.test.tsx`) unaffected.
+
+**RED confirmed directly, mutation-style (the gap was real, not merely
+theoretical — a type guard with nothing to assert against would be
+vacuous):** a new `lib/idb/schema-meta-store-key-typed.test.ts`, mirroring
+`lib/idb/schema-billing-agreement.test.ts`'s own `Equal<A,B>` strict
+type-identity trick (v3-D264), asserts
+`Equal<StoreKey<Iq3Schema, "meta">, MetaKey>` is `true`. Run against the
+unmodified schema (`StoreKey<Iq3Schema, "meta">` resolving to plain
+`string`) it failed exactly as predicted: `tsc --noEmit` reported
+`error TS2344: Type 'false' does not satisfy the constraint 'true'.` on
+the assertion's own line. Narrowing the one field to `MetaKey` made it
+compile clean; reran the full `apps/web` typecheck and vitest suite
+afterward, both clean.
+
+`TZ=UTC make test`: **3075 passing** (was 3074, +1 — exactly this run's
+one new test; apps/web 1690, was 1689; no other suite moved: 255 v2
+vitest, 47 v2/api, 422 v3/api, 120 corpus-compiler, 468 engine, 73
+fold-runner). `check-test-floor.mjs`: OK, 3075 >= floor 1899 (+1176
+margin, unmoved, same discipline as every prior entry). `TZ=UTC make
+build`: exit 0, 30 routes, unchanged — a `lib/idb/schema.ts`-only type
+narrowing plus one new test file, no route or other production file
+touched; all three staged corpus hashes byte-identical to v3-D321's own
+(908ca9edbd2ab2e4/123c6212cc1d074d/77722a2b8b1b6aae) — this diff carries
+no corpus data. `npm run gates`: all green — locked-css OK, 1 documented
+hunk, 294 v1 lines byte-identical; boundaries OK, 339 files, unchanged
+count; fonts degraded-but-non-blocking, pre-existing, 2/6 UI fonts
+present; corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints
+across 4 artifacts — all unchanged. `npx tsc --noEmit` across all four v3
+node packages (via `make test`'s own `typecheck-v3` prerequisite): clean.
+No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache
+diff produced by running the v2 suite was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2` empty
+immediately before committing). No Arabic codepoint (both changed files
+swept programmatically, in Python, over the Arabic, Arabic Supplement,
+Arabic Extended-A and both Presentation Forms Unicode blocks, plus a
+`fromCharCode`/`fromCodePoint` mention check: CLEAN — every new string is
+a TypeScript identifier or a fixed English docblock/comment sentence,
+never corpus text). No oracle/golden-log/fixture/snapshot regenerated —
+this diff touches one existing production file and one new test file
+only.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled corpus
+anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1); installed PHP
+8.4.26 cleanly via the documented `packages.sury.org` apt mirror, no
+refusal this run. `HEAD`, local `main` and `origin/main` all already
+agreed at `b747fda` (v3-D321) — no stale-local-`main` trap this run,
+confirmed directly via `git fetch origin main` before any exploration.
+Both Laravel `composer install`s (`v2/api`, `v3/api`) hit the documented
+transient `api.github.com` dist-download proxy timeout for most of the
+`sebastian/*`/`phpunit/*` dependency tree; `v3/api`'s own first attempt
+recovered automatically via the git-mirror source fallback, while
+`v2/api`'s needed one explicit retry with `COMPOSER_PROCESS_TIMEOUT=900`
+after its first attempt left `vendor/` populated but incomplete — the same
+recovery this file's history has recorded roughly a dozen times before.
+The five Node installs (`v2`, `packages/engine`, `packages/corpus-compiler`,
+`worker/fold-runner`, `apps/web`) were run directly and in parallel ahead
+of the sequential composer installs finishing, the same precedent too.
+
+NOT addressed: `lib/idb/schema.ts`'s own type-only `MetaKey` literal
+duplication is now CLOSED — remove it from future sweeps. Every other item
+on v3-D321's own condensed "NOT addressed" list, unchanged — `rhymeClassOf()`;
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution`/
+`lib/pricing.ts#regionFromCountry()`; `PaywallGate` as a whole class;
+multi-surah enrollment as a product decision; the operational mailer/
+7-night launch window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy naming;
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`;
+`corpusHash`'s zero fold-side consumer; `selection_determinism_check`
+still replaying a committed fixture; `QueueItem.score`'s missing external
+reader; `acknowledgeReentry`'s "makeup" branch; `DrillPicker.tsx`'s unused
+`now` prop; the unused `atoms`/`corpus`/`sessions` IndexedDB object
+stores; `session_start`'s own latency metric; the streak/away-day
+day-space mismatch; `/workbench`'s own Pane 2 per-word inspector and Pane
+3 spec editor; the deferred `vitest@5` major-version bump;
+`laravel/framework`'s own remaining advisories; `v2/api`'s own frozen
+advisories; the `trial_surah_source` column on `entitlements` — all
+unchanged.
