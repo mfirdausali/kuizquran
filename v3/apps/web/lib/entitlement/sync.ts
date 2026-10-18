@@ -39,6 +39,7 @@
 
 import { openDb } from "@/lib/idb/db.ts";
 import { apiFetch } from "@/lib/sync/apiFetch.ts";
+import { ENTITLEMENT_STATES, ENTITLEMENT_TIERS } from "./types";
 import type { EntitlementSnapshot, EntitlementState, EntitlementTier, Region } from "./types";
 
 /** The meta key this module owns. Named here, like `CHOICES`/`ONBOARDED_AT` in
@@ -47,15 +48,20 @@ import type { EntitlementSnapshot, EntitlementState, EntitlementTier, Region } f
  *  header for why that key avoids the more obvious spelling. */
 export const ENTITLEMENT_SNAPSHOT_KEY = "billingSnapshot";
 
-const STATES: readonly EntitlementState[] = ["trial", "active", "grace", "lapsed_review_only"];
-const TIERS: readonly EntitlementTier[] = ["none", "monthly", "lifetime"];
+// `ENTITLEMENT_STATES`/`ENTITLEMENT_TIERS` are `./types`'s own canonical
+// runtime declarations, imported rather than re-declared here — this file
+// used to hand-type an identical second copy (`STATES`/`TIERS`), the exact
+// "two implementations of one decision, no shared source" shape this build
+// has repeatedly closed elsewhere. `entitlement-enum-agreement.test.ts` is
+// what now proves the canonical copy agrees with the server's real
+// `App\Billing\EntitlementState`/`EntitlementTier` enums.
 const REGIONS: readonly Region[] = ["MY", "INTL"];
 
 function isEntitlementState(v: unknown): v is EntitlementState {
-  return typeof v === "string" && (STATES as readonly string[]).includes(v);
+  return typeof v === "string" && (ENTITLEMENT_STATES as readonly string[]).includes(v);
 }
 function isEntitlementTier(v: unknown): v is EntitlementTier {
-  return typeof v === "string" && (TIERS as readonly string[]).includes(v);
+  return typeof v === "string" && (ENTITLEMENT_TIERS as readonly string[]).includes(v);
 }
 function isRegion(v: unknown): v is Region {
   return typeof v === "string" && (REGIONS as readonly string[]).includes(v);

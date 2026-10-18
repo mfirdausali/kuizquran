@@ -14,7 +14,22 @@
 /** The four states, mirroring the server enum exactly (see app/Billing). */
 export type EntitlementState = "trial" | "active" | "grace" | "lapsed_review_only";
 
+/**
+ * Runtime mirror of `EntitlementState` above, so a caller that needs an
+ * actual array (a validator, a dropdown) has ONE declaration to import
+ * instead of re-typing the literal — `lib/entitlement/sync.ts`'s own
+ * `fetchEntitlementSnapshot()` validator is the one real caller this was
+ * built for. `entitlement-enum-agreement.test.ts` is what proves this
+ * agrees with the server's own `App\Billing\EntitlementState` enum; this
+ * comment does not.
+ */
+export const ENTITLEMENT_STATES: readonly EntitlementState[] = ["trial", "active", "grace", "lapsed_review_only"];
+
 export type EntitlementTier = "none" | "monthly" | "lifetime";
+
+/** Runtime mirror of `EntitlementTier` above — see `ENTITLEMENT_STATES`'s
+ *  own comment; the same reasoning, one type over. */
+export const ENTITLEMENT_TIERS: readonly EntitlementTier[] = ["none", "monthly", "lifetime"];
 
 /** v3-D07: region is account-stored and editable. IP only sets the default. */
 export type Region = "MY" | "INTL";

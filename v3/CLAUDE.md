@@ -53,10 +53,139 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3077 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3080 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 422 v3/api + 120 corpus-compiler
-             # + 468 engine + 73 fold-runner + 1692 apps/web. (v3-D324, 2026-10-17)
+             # + 468 engine + 73 fold-runner + 1695 apps/web. (v3-D325, 2026-10-18)
+             # NOTE (v3-D325, 2026-10-18): `App\Billing\EntitlementState`/
+             # `EntitlementTier` — the server's own closed enums, the real
+             # wire contract `GET /api/entitlement` and `POST /api/admin/
+             # billing/{userId}/override` both speak — had two independent
+             # TS-side re-declarations of their case values
+             # (`lib/entitlement/sync.ts`'s own `STATES`/`TIERS` runtime
+             # arrays, the validator guarding every real server response
+             # before `permitsIssuance`/`permitsReview` ever see it; and
+             # `lib/admin/billingAudit.ts`'s own deliberately-decoupled
+             # `BillingStateValue`/`BillingTierValue`, named without the
+             # gated word per `check-boundaries.mjs` clause 9) with NO
+             # agreement test anywhere against the real PHP enum — the exact
+             # "two implementations of one decision, no shared source" shape
+             # this build has repeatedly closed on other closed sets
+             # (`ADMIN_ROLE_VALUES` vs `AdminRole::ALL`, v3-D324;
+             # `REVEAL_REASON_CODES` vs `AdminAudit::REASON_CODES`, v3-D311)
+             # but never before on the entitlement state machine's own two
+             # enums — arguably the single most load-bearing pair in the
+             # whole billing surface. Not a live divergence today — both
+             # copies already agreed byte-for-byte — a drift-risk fix: a
+             # future case added or retired on the PHP side alone would
+             # silently desync what `sync.ts`'s own validator accepts as a
+             # well-formed server response from what the server actually
+             # means, with `fetchEntitlementSnapshot` rejecting the real
+             # response outright and `cache.ts#freshness()` degrading that
+             # to "no cached entitlement at all" for a learner whose
+             # entitlement genuinely changed.
+             #
+             # Fixed in two parts, no behavior change: `lib/entitlement/
+             # types.ts` now exports the one canonical runtime declaration,
+             # `ENTITLEMENT_STATES`/`ENTITLEMENT_TIERS`; `sync.ts` imports
+             # them instead of re-declaring its own copy, the same
+             # "stop re-declaring, just import" move this build made for
+             # `OnboardedSteer.tsx`'s `ONBOARDED_AT` (v3-D312) and
+             # `AdminRolesPanel.tsx`'s `ROLE_OPTIONS` (v3-D324). A new
+             # `lib/entitlement/entitlement-enum-agreement.test.ts` closes
+             # the language-boundary half: it reads `EntitlementState.php`/
+             # `EntitlementTier.php`'s raw source (the same `readFileSync` +
+             # regex-extract technique `admin-role-values-agreement.test.ts`/
+             # `reveal-reason-codes-agreement.test.ts` already use, adapted
+             # for a backed-enum's `case Name = 'value';` shape) and asserts
+             # `ENTITLEMENT_STATES`/`ENTITLEMENT_TIERS` are the exact same
+             # set as the real PHP enum's cases; the same test file also
+             # pins `billingAudit.ts`'s own `BillingStateValue`/
+             # `BillingTierValue` against the canonical types at the TYPE
+             # level (the `Equal<A,B>` strict type-identity trick
+             # `schema-billing-agreement.test.ts` already established) —
+             # guarding that mirror too, from a test file, which is exempt
+             # from clause 9, without ever letting the gated word cross into
+             # `billingAudit.ts`'s own production source.
+             #
+             # RED confirmed directly: the new test was written first,
+             # importing `ENTITLEMENT_STATES`/`ENTITLEMENT_TIERS` from
+             # `./types` before either existed there — failed exactly as
+             # predicted against the unmodified tree, `expected Set{} to
+             # deeply equal Set{'trial','active','grace',…}` (the
+             # unresolved import read as `undefined`). Implemented, reran:
+             # 3/3 green. Mutation-verified both directions afterward,
+             # since both sides already agreed: `EntitlementState.php`'s
+             # `case Grace = 'grace';` temporarily changed to a bogus
+             # value failed the PHP-agreement case exactly, naming both the
+             # real stray and the real missing value; `billingAudit.ts`'s
+             # own `BillingStateValue` temporarily widened with a bogus
+             # fifth member failed `tsc --noEmit` exactly on the new
+             # guard's own line (`TS2344`). Both reverted byte-identically.
+             #
+             # `TZ=UTC make test`: 3080 passing (was 3077, +3 — exactly
+             # this run's three new tests; apps/web 1695, was 1692; no
+             # other suite moved). `check-test-floor.mjs`: OK, 3080 >=
+             # floor 1899 (+1181 margin, unmoved). `TZ=UTC make build`:
+             # exit 0, 30 routes, unchanged — two existing files edited
+             # plus one new test file, no route or new production
+             # component. `npm run gates`: all green — locked-css OK, 1
+             # documented hunk, 294 v1 lines byte-identical; boundaries OK,
+             # 343 files, up from 342 — exactly the one new test file;
+             # fonts degraded-but-non-blocking, pre-existing, 2/6 UI fonts
+             # present; corpus-morphology OK, 362 words; corpus-glyphs OK,
+             # 206 codepoints across 4 artifacts — all unchanged, this
+             # diff carries no corpus data. `npx tsc --noEmit`, run
+             # separately across all four v3 node packages: clean in all
+             # four. No `v1/**`/`v2/**` edit (two stray chmod-mode diffs on
+             # `v2/api/storage/**/.gitignore` from this session's own
+             # earlier `mkdir -p`/`chmod -R` recovery, plus the usual stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff, were all
+             # reverted with `git checkout --` before committing — `git
+             # status --porcelain -- v1 v2` empty immediately before
+             # committing). No Arabic codepoint (all three changed/new
+             # files swept programmatically, in Python, over the Arabic,
+             # Arabic Supplement, Arabic Extended-A and both Presentation
+             # Forms Unicode blocks, plus a `fromCharCode`/`fromCodePoint`
+             # mention check: CLEAN — every new string is a TypeScript
+             # identifier, a closed-set state/tier literal, a file path, or
+             # a fixed English docblock sentence, never corpus text). No
+             # oracle/golden-log/fixture/snapshot regenerated.
+             #
+             # Session start: fresh container, no `node_modules`/`vendor`/
+             # compiled corpus anywhere; PHP defaulted to 8.3.6 (`v3/api`
+             # needs >=8.4.1); installed PHP 8.4.26 cleanly via the
+             # documented `packages.sury.org` apt mirror, no refusal this
+             # run. `HEAD`, local `main` and `origin/main` all already
+             # agreed at `8070dbb` (v3-D324) — no stale-local-`main` trap
+             # this run, confirmed directly via `git fetch origin main`
+             # before any exploration.
+             #
+             # NOT addressed: every item on v3-D324's own condensed "NOT
+             # addressed" list, unchanged — `rhymeClassOf()`;
+             # `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution`/`lib/pricing.ts#regionFromCountry()`;
+             # `PaywallGate` as a whole class; multi-surah enrollment as a
+             # product decision; the operational mailer/7-night launch
+             # window; PAY-1's Stripe fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy naming;
+             # `packages/engine/src/placement.ts`; `MacroFacts.litany
+             # .rhymeLabel`; `corpusHash`'s zero fold-side consumer;
+             # `selection_determinism_check` still replaying a committed
+             # fixture; `QueueItem.score`'s missing external reader;
+             # `acknowledgeReentry`'s "makeup" branch; `DrillPicker.tsx`'s
+             # unused `now` prop; the unused `atoms`/`corpus`/`sessions`
+             # IndexedDB object stores; `session_start`'s own latency
+             # metric; the streak/away-day day-space mismatch;
+             # `/workbench`'s own Pane 2 per-word inspector and Pane 3
+             # spec editor; the deferred `vitest@5` major-version bump;
+             # `laravel/framework`'s own remaining advisories; `v2/api`'s
+             # own frozen advisories; the `trial_surah_source` column on
+             # `entitlements`; `sync.ts`'s own `REGIONS` array (already
+             # indirectly guarded via `lib/pricing.ts`'s own agreement
+             # test) — all unchanged. The entitlement state/tier closed
+             # set's own cross-runtime duplication is now CLOSED — remove
+             # it from future sweeps. See DECISIONS.md v3-D325.
              # NOTE (v3-D324, 2026-10-17): `components/admin/AdminRolesPanel.tsx`
              # hand-declared its own `ROLE_OPTIONS` copy of the closed admin-role
              # set (`operator`/`qari`/`moderator`) instead of importing

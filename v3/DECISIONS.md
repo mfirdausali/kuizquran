@@ -33476,3 +33476,186 @@ not expect another same-shaped finding from a sixteenth or so zero-caller/
 duplicated-closed-set sweep without either a genuinely fresh verification
 method or a willingness to take on one of the larger, already-named
 architectural items above.
+
+## Ratified 2026-10-18 (nightly) — v3-D325: `EntitlementState`/`EntitlementTier`'s own closed sets had two independent TS-side re-declarations and no agreement test against the real PHP enum, ever
+
+`App\Billing\EntitlementState`/`EntitlementTier` (the server's real closed
+enums — the actual wire contract `GET /api/entitlement` and
+`POST /api/admin/billing/{userId}/override` both speak, and the two most
+load-bearing closed sets in the whole billing surface) had TWO independent
+TS-side re-declarations of their case VALUES, with no shared source and no
+agreement test anywhere against the real PHP enum:
+
+1. `lib/entitlement/sync.ts`'s own module-private `STATES`/`TIERS` runtime
+   arrays — the validator that decides whether a REAL server response to
+   `GET /api/entitlement` is well-formed before `permitsIssuance`/
+   `permitsReview` (the two gates `lib/entitlement/gate.ts` exposes) ever
+   see it. A malformed response is treated as "no cached entitlement",
+   never surfaced as an error.
+2. `lib/admin/billingAudit.ts`'s own `BillingStateValue`/`BillingTierValue`
+   closed-union types (and their matching `STATE_VALUES`/`TIER_VALUES`
+   runtime mirrors) — deliberately named without the gated word and
+   deliberately NOT importing `lib/entitlement/types.ts`, per that file's
+   own header: this is an admin support surface, not one of the three real
+   gating surfaces (session assembly, corpus delivery, checkout) plus the
+   snapshot island, so `check-boundaries.mjs` clause 9's entitlement-read
+   allowlist is not available to it — it "earns different names instead."
+   That NAME decoupling is correct and deliberate; it is not a decoupling
+   of the real cases those names stand for, and nothing checked that the
+   VALUES still agree with the server's own enum.
+
+The exact "two (here three, counting the PHP enum itself) independent
+implementations of one decision, no shared source" shape this build has
+repeatedly closed on OTHER closed sets (`ADMIN_ROLE_VALUES` vs.
+`AdminRole::ALL`, v3-D324; `REVEAL_REASON_CODES` vs. `AdminAudit
+::REASON_CODES`, v3-D311; the launch surah set across four files, v3-D296)
+— never once applied to the entitlement state machine's own two enums,
+despite them being the single most consequential pair in the billing
+surface: a future `EntitlementState`/`EntitlementTier` case added or
+retired on the PHP side alone would silently desync what `sync.ts`'s own
+validator accepts as a well-formed server response from what the server
+actually means — a real response in the new shape would be rejected
+outright (`fetchEntitlementSnapshot` returning `null`, which
+`cache.ts#freshness()` degrades to "server is authoritative, allow" per
+v3-D07's never-hostage rule), so a learner whose entitlement genuinely
+changed would silently read as having no cached entitlement at all, with
+nothing to catch the mismatch anywhere.
+
+Not a live divergence today — every declaration already agreed
+byte-for-byte (`trial`/`active`/`grace`/`lapsed_review_only`,
+`none`/`monthly`/`lifetime`) — a drift-risk fix, same discipline as the
+precedents named above. Found by a fresh sweep of `lib/entitlement/`'s own
+"mirrors" claims (every file in that module makes one, in prose, about the
+real PHP enum) cross-checked against whether any TEST actually proves it;
+none did, for either enum, anywhere in the tree (`grep -rln
+"EntitlementState\|EntitlementTier" apps/web/lib --include=*.test.ts`
+returned only `schema-billing-agreement.test.ts`, which guards a completely
+different thing — `EntitlementSnapshot`'s own FIELD SET against
+`BillingSnapshotRecord`'s, never the case VALUES of either enum against the
+PHP source).
+
+**Fixed, in two parts, no behavior change (both sides already agreed):**
+
+1. **The TS-side-only half.** `lib/entitlement/types.ts` now exports the
+   ONE canonical runtime declaration, `ENTITLEMENT_STATES`/
+   `ENTITLEMENT_TIERS`, right beside the type aliases they mirror.
+   `lib/entitlement/sync.ts` imports them instead of re-declaring its own
+   `STATES`/`TIERS` — the same "stop re-declaring, just import" move this
+   build made for `OnboardedSteer.tsx`'s `ONBOARDED_AT` (v3-D312) and
+   `AdminRolesPanel.tsx`'s `ROLE_OPTIONS` (v3-D324). `sync.ts`'s own
+   `REGIONS` array and `billingAudit.ts`'s own `BillingStateValue`/
+   `BillingTierValue` naming are deliberately left untouched — the first is
+   already indirectly guarded via `lib/pricing.ts`'s `PRICING` record (whose
+   keys are the `Region` type and are checked against
+   `config/pricing.php` by `pricing-config-agreement.test.ts`); the second
+   cannot import `lib/entitlement/types.ts` at all without re-opening the
+   exact boundary hole `check-boundaries.mjs` clause 9 exists to close
+   (production files are scanned for the gated word; test files are
+   explicitly exempt, which is what makes part 2 below possible instead).
+
+2. **The language-boundary half**, new
+   `lib/entitlement/entitlement-enum-agreement.test.ts`: reads
+   `api/app/Billing/EntitlementState.php`/`EntitlementTier.php`'s raw
+   source text (the same `readFileSync` + regex-extract-the-enum-case-value
+   technique `admin-role-values-agreement.test.ts`/`reveal-reason-codes
+   -agreement.test.ts` already use for a class-constant pair, adapted here
+   for a backed-enum's `case Name = 'value';` shape) and asserts
+   `ENTITLEMENT_STATES`/`ENTITLEMENT_TIERS` are the exact same SET as the
+   real PHP enum's cases — same members, no stray, none missing, plus a
+   length check so a duplicate on either side (which a bare `Set`
+   comparison would silently absorb) still fails. The SAME test file also
+   pins `billingAudit.ts`'s own deliberately-decoupled
+   `BillingStateValue`/`BillingTierValue` against the canonical
+   `EntitlementState`/`EntitlementTier` types at the TYPE level (the
+   `Equal<A,B>` strict type-identity trick `schema-billing-agreement
+   .test.ts`/`schema-onboarding-agreement.test.ts` already established),
+   so that mirror is guarded too without ever letting the gated word cross
+   into `billingAudit.ts`'s own production source — a test file reaching
+   across the boundary that `billingAudit.ts` itself is correctly forbidden
+   from reaching across.
+
+**RED confirmed directly, twice:** the new test was written FIRST,
+importing `ENTITLEMENT_STATES`/`ENTITLEMENT_TIERS` from `./types` before
+either existed there — run against the unmodified tree it failed exactly
+as predicted on both enum cases, `expected Set{} to deeply equal
+Set{'trial','active','grace',…}` / `Set{'none','monthly','lifetime'}` (the
+unresolved import read as `undefined`, iterating to an empty set).
+Implemented, reran: 3/3 green. **Mutation-verified afterward, both
+directions, since both sides already agreed and there was no live
+failure to otherwise reproduce:** `EntitlementState.php`'s `case Grace =
+'grace';` was temporarily changed to `'skew_mutation_probe'` and the PHP-
+agreement case failed exactly as predicted, naming both the real stray
+value and the real missing one; reverted byte-identically (`git diff
+--stat` empty before continuing). Separately, `billingAudit.ts`'s own
+`BillingStateValue` was temporarily widened with a fifth, bogus member and
+`npx tsc --noEmit` failed exactly on the new guard's own line (`error
+TS2344: Type 'false' does not satisfy the constraint 'true'.`); reverted
+byte-identically, clean again.
+
+`TZ=UTC make test`: 3080 passing (was 3077, +3 — exactly this run's three
+new test cases; apps/web 1695, was 1692; no other suite moved: 255 v2
+vitest, 47 v2/api, 422 v3/api [2 incomplete + 6 skipped, both unchanged,
+PAY-1/environment-dependent], 120 corpus-compiler, 468 engine, 73
+fold-runner). `check-test-floor.mjs`: OK, 3080 >= floor 1899 (+1181
+margin, unmoved, same discipline as every prior entry). `TZ=UTC make
+build`: exit 0, 30 routes, unchanged — this diff touches two existing
+files and one new test file, no route or new production component. `npm
+run gates`: all green — locked-css OK, 1 documented hunk, 294 v1 lines
+byte-identical; boundaries OK, 343 files, up from 342 — exactly the one
+new test file; fonts degraded-but-non-blocking, pre-existing, 2/6 UI fonts
+present; corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints
+across 4 artifacts — all unchanged, this diff carries no corpus data.
+`npx tsc --noEmit`, run separately across all four v3 node packages: clean
+in all four. No `v1/**`/`v2/**` edit (two stray chmod-mode diffs on
+`v2/api/storage/**/.gitignore`, produced by this session's own earlier
+`mkdir -p`/`chmod -R` recovery for a fresh `composer install`, plus the
+usual stray `v2/tsconfig.tsbuildinfo` build-cache diff, were all reverted
+with `git checkout --` before committing — `git status --porcelain -- v1
+v2` empty immediately before committing). No Arabic codepoint (all three
+changed/new files swept programmatically, in Python, over the Arabic,
+Arabic Supplement, Arabic Extended-A and both Presentation Forms Unicode
+blocks, plus a `fromCharCode`/`fromCodePoint` mention check: CLEAN — every
+new string is a TypeScript identifier, a closed-set state/tier literal, a
+file path, or a fixed English docblock sentence, never corpus text). No
+oracle/golden-log/fixture/snapshot regenerated.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled corpus
+anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1); installed PHP
+8.4.26 cleanly via the documented `packages.sury.org` apt mirror, no
+refusal this run. `HEAD`, local `main` and `origin/main` all already
+agreed at `8070dbb` (v3-D324) — no stale-local-`main` trap this run,
+confirmed directly via `git fetch origin main` before any exploration.
+The five npm installs (`v2`, `packages/engine`, `packages/corpus-compiler`,
+`worker/fold-runner`, `apps/web`) were run directly and in parallel; the
+two composer installs (`v2/api`, `v3/api`) ran in parallel afterward —
+`v3/api`'s completed clean on the first attempt, `v2/api`'s first attempt
+failed on a missing `bootstrap/cache`/`storage/framework` tree (a fresh
+checkout's own gitignored directories) and completed clean on a retry
+after creating them, the same recovery this file's history has recorded
+many times before.
+
+NOT addressed: every item on v3-D324's own condensed "NOT addressed" list,
+unchanged — `rhymeClassOf()`; `EntitlementMachine::merge()`;
+`App\Billing\TrialAttribution`/`lib/pricing.ts#regionFromCountry()`;
+`PaywallGate` as a whole class; multi-surah enrollment as a product
+decision; the operational mailer/7-night launch window; PAY-1's Stripe
+fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy naming;
+`packages/engine/src/placement.ts`; `MacroFacts.litany.rhymeLabel`;
+`corpusHash`'s zero fold-side consumer; `selection_determinism_check`
+still replaying a committed fixture; `QueueItem.score`'s missing external
+reader; `acknowledgeReentry`'s "makeup" branch; `DrillPicker.tsx`'s unused
+`now` prop; the unused `atoms`/`corpus`/`sessions` IndexedDB object
+stores; `session_start`'s own latency metric; the streak/away-day
+day-space mismatch; `/workbench`'s own Pane 2 per-word inspector and Pane
+3 spec editor; the deferred `vitest@5` major-version bump;
+`laravel/framework`'s own remaining advisories; `v2/api`'s own frozen
+advisories; the `trial_surah_source` column on `entitlements`;
+`sync.ts`'s own `REGIONS` array (left as its own, already-indirectly-
+guarded, smaller copy — see above) — all unchanged. The entitlement
+state/tier closed-set's own cross-runtime duplication is now CLOSED —
+remove it from future zero-caller/duplicated-closed-set sweeps. A future
+run should not expect another same-shaped finding from yet another
+zero-caller/duplicated-closed-set sweep without either a genuinely fresh
+verification method or a willingness to take on one of the larger,
+already-named architectural items above.
