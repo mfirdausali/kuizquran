@@ -148,11 +148,26 @@ class BackupRestoreDrillCommand extends Command
      * The event-log columns whose exact values the fold depends on. If a restore
      * perturbs ANY of these, the re-fold produces different atoms — which is
      * invariant #2 breaking silently. Ordered so the checksum is stable.
+     *
+     * ── CORRECTED 2026-10-18 (v3-D326) — THIS LIST WAS MISSING THE COLUMNS
+     * THE FOLD ACTUALLY GRADES ON. `packages/engine/src/rebuild.ts#applyEvent()`
+     * reads `rung`, `correct`, `pretest`, `structured` and `step_kind` directly,
+     * plus `received_at` via `effectiveTs()` (edge case #111's clock-skew
+     * clamp) — none of the six were in this list. A restore that silently
+     * flipped a learner's own pass/fail, reinterpreted which rung they were
+     * graded on, dropped the pretest/structured/junction-step flag, or
+     * perturbed the server-stamped receipt time would have produced a
+     * DIFFERENT re-fold while this checksum stayed byte-identical — the exact
+     * silent invariant-#2 break this command's own docblock says it exists to
+     * catch. The pre-existing columns below (`site_key`/`visit_ordinal`/
+     * `grade_class`/`tz`/`corpus_hash`/`locale`) are provenance, not fold
+     * inputs, but are kept for full wire-column restore fidelity.
      */
     private const EVENT_WIRE_COLUMNS = [
         'user_id', 'uuid', 'device_id', 'device_seq', 'ts', 'type',
-        'surah', 'ayah', 'site_key', 'visit_ordinal', 'grade_class',
-        'tz', 'corpus_hash', 'locale',
+        'surah', 'ayah', 'rung', 'correct', 'pretest', 'structured',
+        'step_kind', 'site_key', 'visit_ordinal', 'grade_class',
+        'tz', 'corpus_hash', 'locale', 'received_at',
     ];
 
     public function handle(): int

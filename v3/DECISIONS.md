@@ -33659,3 +33659,133 @@ run should not expect another same-shaped finding from yet another
 zero-caller/duplicated-closed-set sweep without either a genuinely fresh
 verification method or a willingness to take on one of the larger,
 already-named architectural items above.
+
+## v3-D326 (2026-10-18)
+
+`backup:restore-drill`'s own `EVENT_WIRE_COLUMNS` — "the event-log columns
+whose exact values the fold depends on. If a restore perturbs ANY of these,
+the re-fold produces different atoms" — never actually listed the columns
+the fold grades on. `packages/engine/src/rebuild.ts#applyEvent()` reads
+`e.rung`, `e.correct`, `e.pretest`, `isStructured(e)` (i.e. `e.structured`)
+and `e.stepKind` directly, plus `e.receivedAt` via `effectiveTs()` (edge
+case #111's clock-skew clamp, substituted for `ts` whenever a device's
+clock ran ahead of the server's own receipt) — none of these six appeared
+in `EVENT_WIRE_COLUMNS`, which instead carried `site_key`/`visit_ordinal`/
+`grade_class`/`tz`/`corpus_hash`/`locale` — all real wire-frozen columns,
+but none of them read anywhere inside `applyEvent()`. All six are real,
+non-virtual `events` columns (confirmed directly against
+`database/migrations/2026_08_10_222411_create_events_table.php` and
+`App\Models\Event`'s `$fillable`/casts, which round-trip `correct`/
+`pretest`/`structured` as real booleans).
+
+Consequence, not hypothetical: a restore bug that silently flipped a
+learner's own pass/fail (`correct`), reinterpreted which rung they were
+graded on (`rung`), dropped the pretest/structured/junction-step flag, or
+perturbed the server-stamped receipt time used for clock-skew clamping
+would leave `eventChecksum()` byte-identical — the drill would print "✓
+event log — wire checksum identical; a re-fold produces the same atoms"
+and "DRILL PASSED" — while every affected learner's re-folded strength,
+due dates and gate-pass state would in fact differ. That is exactly the
+silent invariant-#2 break (edge case this command's own docblock names
+by name) the whole command exists to catch, on the one checksum
+`BUILD-PLAN`'s own launch checklist reads as "backup restore drill:
+GREEN" and means it. Found by a dedicated fresh-sweep agent (Explore)
+directed at this build's recurring "mechanism built, claim does not
+match reality" bug class, handed the full exclusion list this file's
+recent entries carry — independently re-verified by this run directly
+against `rebuild.ts`'s real column reads, the real migration, and
+`Event`'s real `$fillable`/casts before writing any test.
+
+Fixed: `EVENT_WIRE_COLUMNS` gains `rung`, `correct`, `pretest`,
+`structured`, `step_kind` and `received_at` — the six real fold-input
+columns. The pre-existing six (`site_key`/`visit_ordinal`/`grade_class`/
+`tz`/`corpus_hash`/`locale`) are kept, not removed — they are provenance,
+not fold inputs, but a backup-restore fidelity check is still better off
+covering them than not, and removing them would shrink coverage for no
+reason. No schema change; every added column already existed.
+
+RED confirmed directly, not merely mutation-replayed: a new test,
+`test_the_event_checksum_is_sensitive_to_every_fold_input_column`, was
+written FIRST, run against the unmodified command, and failed exactly as
+predicted — `eventChecksum() did not change when 'rung' changed`
+(`assertNotSame` on two identical strings) — before any production line
+was touched. It exercises the private `eventChecksum()` method directly
+via reflection rather than a full dump/encrypt/wipe/restore round trip
+(already covered end to end by the file's own pre-existing
+`test_the_drill_passes_end_to_end_against_sqlite`): seeds one real
+`Event` row, records the checksum, then for each of the six fields in
+turn replaces the row with an otherwise-identical one differing in only
+that field and asserts the checksum changes. The first draft of this
+test was itself vacuous — it regenerated a fresh random `uuid` on every
+row, so the checksum always changed regardless of which field was
+"mutated", passing even against the unmodified command; caught by
+re-reading the test's own setup before trusting its green run, fixed by
+holding `uuid` fixed across the baseline and every mutated row, after
+which it reproduced the real RED described above. Implemented, reran:
+4/4 green (was 3, +1).
+
+`TZ=UTC make test`: 3081 passing (was 3080, +1 — exactly this run's one
+new test; v3/api 423, was 422; no other suite moved: 255 v2 vitest, 47
+v2/api, 120 corpus-compiler, 468 engine, 73 fold-runner, 1695 apps/web).
+`check-test-floor.mjs`: OK, 3081 >= floor 1899 (+1182 margin, unmoved,
+same discipline as every prior entry). `TZ=UTC make build`: exit 0, 30
+routes, unchanged — this diff touches one existing backend command and
+its one existing test file, no apps/web file, no route. `npm run gates`:
+all green — locked-css OK, 1 documented hunk, 294 v1 lines byte-
+identical; boundaries OK, 343 files, unchanged count — no apps/web file
+in this diff at all; fonts degraded-but-non-blocking, pre-existing, 2/6
+UI fonts present; corpus-morphology OK, 362 words; corpus-glyphs OK, 206
+codepoints across 4 artifacts — all unchanged, this diff carries no
+corpus data. `npx tsc --noEmit`, run separately across all four v3 node
+packages: clean in all four (this diff touches no TypeScript file at
+all; run anyway, per the standing verification discipline).
+`./vendor/bin/pint --test` on both changed PHP files: passed. No
+`v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the suite was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2`
+empty immediately before committing). No Arabic codepoint (both changed
+files swept programmatically, in Python, over the Arabic, Arabic
+Supplement, Arabic Extended-A and both Presentation Forms Unicode
+blocks, plus a `fromCharCode`/`fromCodePoint`/`\u06xx`/`\u07xx` escape
+check: CLEAN — every new string is a PHP identifier, a closed-set
+rung/step-kind literal, a millisecond timestamp, or a fixed English
+docblock/assertion sentence, never corpus text). No oracle/golden-log/
+fixture/snapshot regenerated — this diff touches one production command
+and one existing test file only.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1);
+installed PHP 8.4.26 cleanly via the documented `packages.sury.org` apt
+mirror, no refusal this run. `HEAD` was found detached exactly at
+`origin/main`'s own real tip (`78ff3f1`, v3-D325), on a stale LOCAL
+`main` branch ref nineteen commits behind (`c3e42ab`, v3-D309) — the
+recurring stale-local-`main` trap this file has recorded roughly fifty
+times since v3-D77 — caught before any exploration via `git fetch origin
+main` + `git checkout main && git merge --ff-only origin/main`, a clean
+fast-forward, no work lost or at risk. The five npm installs (`v2`,
+`packages/engine`, `packages/corpus-compiler`, `worker/fold-runner`,
+`apps/web`) were run directly and in parallel ahead of the two composer
+installs (`v2/api`, `v3/api`), which ran in parallel afterward — both
+hit the documented transient git-mirror-clone fallback (slow, ~15-20 min
+each) but neither needed a retry flag.
+
+NOT addressed: every item on v3-D325's own condensed "NOT addressed"
+list, unchanged — `rhymeClassOf()`; `EntitlementMachine::merge()`;
+`App\Billing\TrialAttribution`/`lib/pricing.ts#regionFromCountry()`;
+`PaywallGate` as a whole class; multi-surah enrollment as a product
+decision; the operational mailer/7-night launch window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy naming; `packages/engine/src/placement.ts`;
+`MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero fold-side consumer;
+`selection_determinism_check` still replaying a committed fixture;
+`QueueItem.score`'s missing external reader; `acknowledgeReentry`'s
+"makeup" branch; `DrillPicker.tsx`'s unused `now` prop; the unused
+`atoms`/`corpus`/`sessions` IndexedDB object stores; `session_start`'s
+own latency metric; the streak/away-day day-space mismatch;
+`/workbench`'s own Pane 2 per-word inspector and Pane 3 spec editor; the
+deferred `vitest@5` major-version bump; `laravel/framework`'s own
+remaining advisories; `v2/api`'s own frozen advisories; the
+`trial_surah_source` column on `entitlements`; `sync.ts`'s own
+`REGIONS` array — all unchanged. `backup:restore-drill`'s own
+`EVENT_WIRE_COLUMNS` is now CLOSED for the fold-input half — remove it
+from future sweeps.
