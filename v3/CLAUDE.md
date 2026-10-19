@@ -53,10 +53,151 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3081 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3089 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 423 v3/api + 120 corpus-compiler
-             # + 468 engine + 73 fold-runner + 1695 apps/web. (v3-D326, 2026-10-18)
+             # + 468 engine + 73 fold-runner + 1703 apps/web. (v3-D327, 2026-10-19)
+             # NOTE (v3-D327, 2026-10-19): `lib/admin/billingAudit.ts`'s own
+             # `isBillingSnapshot()` validator — the gate every real `GET
+             # /api/admin/billing/{userId}` response passes through before
+             # `loadBillingSnapshot()` calls it "ready" — decides a server-sent
+             # `state`/`tier` against two module-private RUNTIME arrays,
+             # `STATE_VALUES`/`TIER_VALUES` (`["trial","active","grace",
+             # "lapsed_review_only"]` / `["none","monthly","lifetime"]`), hand-
+             # declared on that file's own lines. `entitlement-enum-agreement
+             # .test.ts` (v3-D325, the night before this one) already pins this
+             # same file's `BillingStateValue`/`BillingTierValue` TYPES against
+             # the canonical `EntitlementState`/`EntitlementTier` types at the
+             # type level (the `Equal<A,B>` trick) — and that test's own comment
+             # explicitly NAMES `STATE_VALUES`/`TIER_VALUES` as existing, but the
+             # guard it adds only reaches the TYPE union, never the separate
+             # RUNTIME value array: TypeScript cannot derive an array literal
+             # from a type, so a future edit that correctly widens
+             # `BillingStateValue` (satisfying that type guard) while forgetting
+             # to widen the plain-literal `STATE_VALUES` beside it would still
+             # compile clean and still pass v3-D325's own test — while
+             # `isBillingSnapshot()` would silently REJECT a real, well-formed
+             # server response carrying the new case, degrading it to
+             # `{state: "unavailable", reason: "the API's answer carried no
+             # billing snapshot"}` for every admin looking up that learner's
+             # billing. The exact "two implementations of one decision, no
+             # shared source" shape this build has repeatedly closed
+             # (`ADMIN_ROLE_VALUES` v3-D324, `REVEAL_REASON_CODES` v3-D311,
+             # `ENTITLEMENT_STATES`/`ENTITLEMENT_TIERS` themselves v3-D325) —
+             # here one level deeper than v3-D325 reached, on the VALUE mirror
+             # its own comment named and left. Not a live divergence today —
+             # `STATE_VALUES`/`TIER_VALUES` already agree with
+             # `ENTITLEMENT_STATES`/`ENTITLEMENT_TIERS` byte-for-byte — a
+             # drift-risk fix, same discipline as every precedent above.
+             #
+             # `billingAudit.ts` cannot import `lib/entitlement/types.ts` to
+             # close this by sharing a source — the same `check-boundaries.mjs`
+             # clause 9 boundary `entitlement-enum-agreement.test.ts` already
+             # explains (a production file outside `ENTITLEMENT_ALLOWLIST` may
+             # not spell the gated word, and this admin support surface
+             # deliberately earns no allowlist entry) — and `STATE_VALUES`/
+             # `TIER_VALUES` are module-private, so a test cannot import them
+             # directly either. Fixed instead with a BEHAVIORAL proof: new
+             # `lib/admin/billing-snapshot-state-values-agreement.test.ts`
+             # drives the real, exported `loadBillingSnapshot()` — the one
+             # place `isBillingSnapshot()` is actually called — with a full,
+             # otherwise-valid server response (the exact fixture shape
+             # `billingAudit.test.ts`'s own existing "requests /api/admin/
+             # billing/{userId}" case already uses) for EVERY member of the
+             # canonical `ENTITLEMENT_STATES`/`ENTITLEMENT_TIERS` (imported
+             # from `lib/entitlement/types.ts` — permitted here only because
+             # a `.test.ts` file is explicitly exempt from clause 9), and
+             # asserts each one is accepted (`state: "ready"`), never silently
+             # downgraded to `"unavailable"`. No production code changed.
+             #
+             # RED confirmed by mutation, twice, since both sides already
+             # agreed (no live failure to reproduce): `STATE_VALUES` was
+             # temporarily narrowed to drop `"lapsed_review_only"` and the new
+             # test failed exactly as predicted — `expected 'unavailable' to
+             # be 'ready'` on the `state=lapsed_review_only` case, the other
+             # seven cases unaffected; reverted byte-identically (`git diff
+             # --stat lib/admin/billingAudit.ts` empty), reran clean. Separately,
+             # `TIER_VALUES` was narrowed to drop `"lifetime"` and failed
+             # identically on `tier=lifetime`; reverted, reran clean. 8/8 green
+             # in the final state either way.
+             #
+             # `TZ=UTC make test`: 3089 passing (was 3081, +8 — exactly this
+             # run's eight new `it.each` cases; apps/web 1703, was 1695; no
+             # other suite moved: 255 v2 vitest, 47 v2/api, 423 v3/api, 120
+             # corpus-compiler, 468 engine, 73 fold-runner). `check-test-
+             # floor.mjs`: OK, 3089 >= floor 1899 (+1190 margin, unmoved, same
+             # discipline as every prior entry). `TZ=UTC make build`: exit 0,
+             # 30 routes, unchanged — this diff adds one new test file only,
+             # no production file, no route. `npm run gates`: all green —
+             # locked-css OK, 1 documented hunk, 294 v1 lines byte-identical;
+             # boundaries OK, 343→344 files (the one new test file; a later
+             # standalone `npm run gates` run read 344 after `next build` had
+             # already created the gitignored, untracked `next-env.d.ts`
+             # Next.js bootstrap-artifact, confirmed via `git status
+             # --porcelain --ignored` — the same pre-existing fluctuation this
+             # file has recorded roughly two dozen times before, not a new
+             # production file); fonts degraded-but-non-blocking, pre-existing,
+             # 2/6 UI fonts present; corpus-morphology OK, 362 words; corpus-
+             # glyphs OK, 206 codepoints across 4 artifacts — all unchanged,
+             # this diff carries no corpus data. `npx tsc --noEmit` (apps/web):
+             # clean. No PHP file changed, so `pint` was not applicable. No
+             # `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-
+             # cache diff produced by running the suite was reverted before
+             # committing, same discipline as every prior entry — `git status
+             # --porcelain -- v1 v2` empty immediately before committing). No
+             # Arabic codepoint (the new file swept programmatically, in
+             # Python, over the Arabic, Arabic Supplement, Arabic Extended-A
+             # and both Presentation Forms Unicode blocks, plus a
+             # `fromCharCode`/`fromCodePoint`/`\u`-escape check: CLEAN — every
+             # new string is a TypeScript identifier, a closed-set state/tier
+             # literal already used elsewhere in this test suite, or a fixed
+             # English docblock sentence, never corpus text). No oracle/
+             # golden-log/fixture/snapshot regenerated — this diff touches one
+             # new test file only.
+             #
+             # Session start: fresh container, no `node_modules`/`vendor`/
+             # compiled corpus anywhere; PHP defaulted to 8.3.6 (`v3/api`
+             # needs >=8.4.1); installed PHP 8.4.26 cleanly via the documented
+             # `packages.sury.org` apt mirror, no refusal this run. `HEAD` and
+             # local `main` both already agreed with `origin/main` at `1cad85c`
+             # (v3-D326) — no stale-local-`main` trap this run, confirmed via
+             # `git fetch origin main` before any exploration. `make setup`'s
+             # own background run hit this session's background-task time
+             # limit mid-way through `v3/api`'s own `composer install` (slow,
+             # via the documented git-mirror-clone fallback); resumed with a
+             # direct `composer install` call and a longer background budget,
+             # which completed cleanly on the warmed cache — the four PHP-
+             # independent `npm install`s (`v2`, `packages/engine`,
+             # `packages/corpus-compiler`, `worker/fold-runner`, plus
+             # `apps/web`'s own) were run directly and in parallel ahead of
+             # the sequential composer installs finishing, the same recovery
+             # this file's history has recorded roughly a dozen times before.
+             #
+             # NOT addressed: every item on v3-D326's own condensed "NOT
+             # addressed" list, unchanged — `rhymeClassOf()`;
+             # `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution`/`lib/pricing.ts
+             # #regionFromCountry()`; `PaywallGate` as a whole class;
+             # multi-surah enrollment as a product decision; the operational
+             # mailer/7-night launch window; PAY-1's Stripe fixtures; surah
+             # 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+             # taxonomy naming; `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero fold-side
+             # consumer; `selection_determinism_check` still replaying a
+             # committed fixture; `QueueItem.score`'s missing external reader;
+             # `acknowledgeReentry`'s "makeup" branch; `DrillPicker.tsx`'s
+             # unused `now` prop; the unused `atoms`/`corpus`/`sessions`
+             # IndexedDB object stores; `session_start`'s own latency metric;
+             # the streak/away-day day-space mismatch; `/workbench`'s own
+             # Pane 2 per-word inspector and Pane 3 spec editor; the deferred
+             # `vitest@5` major-version bump; `laravel/framework`'s own
+             # remaining advisories; `v2/api`'s own frozen advisories; the
+             # `trial_surah_source` column on `entitlements`; `sync.ts`'s own
+             # `REGIONS` array — all unchanged.
+             # `billingAudit.ts`'s own `STATE_VALUES`/`TIER_VALUES` runtime
+             # mirror is now CLOSED and permanently guarded — remove it from
+             # future zero-shared-source/value-agreement sweeps. See
+             # DECISIONS.md v3-D327.
              # NOTE (v3-D326, 2026-10-18): `backup:restore-drill`'s own
              # `EVENT_WIRE_COLUMNS` — "the event-log columns whose exact
              # values the fold depends on" — never actually listed the
