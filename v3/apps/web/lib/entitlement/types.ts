@@ -34,6 +34,20 @@ export const ENTITLEMENT_TIERS: readonly EntitlementTier[] = ["none", "monthly",
 /** v3-D07: region is account-stored and editable. IP only sets the default. */
 export type Region = "MY" | "INTL";
 
+/**
+ * Runtime mirror of `Region` above, so a caller that needs an actual array
+ * (a validator, a dropdown) has ONE declaration to import instead of
+ * re-typing the literal — `lib/entitlement/sync.ts`'s own
+ * `fetchEntitlementSnapshot()` validator is the one real caller this was
+ * built for, mirroring `ENTITLEMENT_STATES`/`ENTITLEMENT_TIERS`'s own
+ * precedent exactly. `region-config-agreement.test.ts` is what proves this
+ * agrees with `config/pricing.php`'s own `'regions'` key (the one place
+ * this exact set is independently declared a third time, already guarded
+ * against `lib/pricing.ts`'s own `PRICING` key set by
+ * `pricing-config-agreement.test.ts`); this comment does not.
+ */
+export const REGIONS: readonly Region[] = ["MY", "INTL"];
+
 export interface EntitlementSnapshot {
   readonly state: EntitlementState;
   readonly tier: EntitlementTier;

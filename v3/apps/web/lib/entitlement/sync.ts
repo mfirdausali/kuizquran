@@ -39,7 +39,7 @@
 
 import { openDb } from "@/lib/idb/db.ts";
 import { apiFetch } from "@/lib/sync/apiFetch.ts";
-import { ENTITLEMENT_STATES, ENTITLEMENT_TIERS } from "./types";
+import { ENTITLEMENT_STATES, ENTITLEMENT_TIERS, REGIONS } from "./types";
 import type { EntitlementSnapshot, EntitlementState, EntitlementTier, Region } from "./types";
 
 /** The meta key this module owns. Named here, like `CHOICES`/`ONBOARDED_AT` in
@@ -48,14 +48,15 @@ import type { EntitlementSnapshot, EntitlementState, EntitlementTier, Region } f
  *  header for why that key avoids the more obvious spelling. */
 export const ENTITLEMENT_SNAPSHOT_KEY = "billingSnapshot";
 
-// `ENTITLEMENT_STATES`/`ENTITLEMENT_TIERS` are `./types`'s own canonical
-// runtime declarations, imported rather than re-declared here — this file
-// used to hand-type an identical second copy (`STATES`/`TIERS`), the exact
-// "two implementations of one decision, no shared source" shape this build
-// has repeatedly closed elsewhere. `entitlement-enum-agreement.test.ts` is
-// what now proves the canonical copy agrees with the server's real
-// `App\Billing\EntitlementState`/`EntitlementTier` enums.
-const REGIONS: readonly Region[] = ["MY", "INTL"];
+// `ENTITLEMENT_STATES`/`ENTITLEMENT_TIERS`/`REGIONS` are `./types`'s own
+// canonical runtime declarations, imported rather than re-declared here —
+// this file used to hand-type its own second copy of each (`STATES`/`TIERS`,
+// then a standalone `REGIONS`), the exact "two implementations of one
+// decision, no shared source" shape this build has repeatedly closed
+// elsewhere. `entitlement-enum-agreement.test.ts`/`region-config-agreement
+// .test.ts` are what now prove the canonical copies agree with the server's
+// real `App\Billing\EntitlementState`/`EntitlementTier` enums and
+// `config/pricing.php`'s own `'regions'` key, respectively.
 
 function isEntitlementState(v: unknown): v is EntitlementState {
   return typeof v === "string" && (ENTITLEMENT_STATES as readonly string[]).includes(v);
