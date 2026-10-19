@@ -33931,3 +33931,105 @@ major-version bump; `laravel/framework`'s own remaining advisories;
 `billingAudit.ts`'s own `STATE_VALUES`/`TIER_VALUES` runtime mirror is now
 CLOSED and permanently guarded — remove it from future zero-shared-source/
 value-agreement sweeps.
+
+## v3-D328 (2026-10-19)
+
+`lib/entitlement/sync.ts` hand-declared its own `REGIONS: readonly Region[]
+= ["MY", "INTL"]` — the array `isRegion()` checks a real server's `GET
+/api/entitlement` response's `region` field against before
+`fetchEntitlementSnapshot()` returns it, the identical gate
+`isEntitlementState`/`isEntitlementTier` use for `state`/`tier`. Those two
+siblings already import their canonical runtime arrays
+(`ENTITLEMENT_STATES`/`ENTITLEMENT_TIERS`) from `./types`, closed at
+v3-D325 on exactly this shape; `REGIONS` was the one field on the same
+validator this file's own history never reached. `config/pricing.php`'s
+own `'regions' => ['MY', 'INTL']` key is the real authoritative source —
+already guarded against `lib/pricing.ts`'s own `PRICING` key set by
+`pricing-config-agreement.test.ts` (v3-D314) — so `sync.ts`'s own copy was
+a THIRD independent declaration of the identical v3-D07 region set, with
+no agreement test covering it at all.
+
+Not a live divergence today — all three copies already agree byte-for-
+byte — a drift-risk fix, same discipline as every prior instance of this
+shape (v3-D150, v3-D158, v3-D296, v3-D311, v3-D314, v3-D325, v3-D327): a
+future region added or retired in `config/pricing.php` alone would
+silently desync what `fetchEntitlementSnapshot()`'s own validator accepts
+as well-formed from what the server actually sends, degrading every
+learner in the new region's own entitlement snapshot to a dropped `null`.
+
+**Fixed:** `lib/entitlement/types.ts` gains an exported `REGIONS: readonly
+Region[]`, the one canonical runtime declaration, mirroring
+`ENTITLEMENT_STATES`/`ENTITLEMENT_TIERS`'s own precedent exactly;
+`sync.ts` imports it instead of re-declaring it. A new
+`lib/entitlement/region-config-agreement.test.ts` reads
+`config/pricing.php`'s raw source via the same regex-extract technique
+`pricing-config-agreement.test.ts` already uses for this exact key, and
+asserts `REGIONS` is the same SET as the parsed `'regions'` list.
+
+**RED confirmed by mutation** (both sides already agreed, so there was no
+live failure to reproduce): `config/pricing.php`'s `'regions'` was
+temporarily narrowed to `['MY']` and the new test failed exactly as
+predicted — `expected [ 'INTL', 'MY' ] to deeply equal [ 'MY' ]`. Reverted
+byte-identically (`git diff --stat config/pricing.php` empty before
+committing), reran clean.
+
+`TZ=UTC make test`: 3090 passing (was 3089, +1 — exactly this run's one
+new test; apps/web 1704, was 1703; no other suite moved: 255 v2 vitest,
+47 v2/api, 423 v3/api, 120 corpus-compiler, 468 engine, 73 fold-runner).
+`check-test-floor.mjs`: OK, 3090 >= floor 1899 (+1191 margin, unmoved,
+same discipline as every prior entry). `TZ=UTC make build`: exit 0, 30
+routes, unchanged — this diff touches two existing files and one new test
+file, no production route or component. `npm run gates`: all green —
+locked-css OK, 1 documented hunk, 294 v1 lines byte-identical; boundaries
+OK, 345 files, up from 344 — exactly the one new test file; fonts
+degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints across 4
+artifacts — all unchanged, this diff carries no corpus data. `npx tsc
+--noEmit`, run separately across all four v3 node packages: clean in all
+four. No PHP file changed, so `pint` was not applicable. No
+`v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the suite was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2` empty
+immediately before committing). No Arabic codepoint (every changed/new
+file swept programmatically, in Python, over the Arabic, Arabic
+Supplement, Arabic Extended-A and both Presentation Forms Unicode blocks,
+plus a `fromCharCode`/`fromCodePoint` mention check: CLEAN — every new
+string is a TypeScript identifier, a closed-set region literal already
+used elsewhere in this test suite, or a fixed English docblock sentence,
+never corpus text). No oracle/golden-log/fixture/snapshot regenerated —
+this diff touches two existing production files and one new test file.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1);
+installed PHP 8.4.26 cleanly via the documented `packages.sury.org` apt
+mirror, no refusal this run. `HEAD` was detached exactly at
+`origin/main`'s own real tip (`0fb87bb`, v3-D327) once this commit
+landed, on a stale LOCAL `main` branch ref 19 commits behind (`c3e42ab`,
+v3-D309) — the recurring stale-local-`main` trap this file has recorded
+roughly fifty times since v3-D77 — caught before pushing via `git fetch
+origin main` + `git checkout main && git merge --ff-only origin/main`, a
+clean fast-forward, no work lost or at risk. The five npm installs (`v2`,
+`packages/engine`, `packages/corpus-compiler`, `worker/fold-runner`,
+`apps/web`) were run directly and in parallel; both composer installs
+(`v2/api`, `v3/api`) completed via the documented git-mirror-clone
+fallback, slow but no retry flag needed.
+
+NOT addressed: every item on v3-D327's own condensed "NOT addressed"
+list, unchanged — `rhymeClassOf()`; `EntitlementMachine::merge()`;
+`App\Billing\TrialAttribution`/`lib/pricing.ts#regionFromCountry()`;
+`PaywallGate` as a whole class; multi-surah enrollment as a product
+decision; the operational mailer/7-night launch window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy naming; `packages/engine/src/placement.ts`;
+`MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero fold-side consumer;
+`selection_determinism_check` still replaying a committed fixture;
+`QueueItem.score`'s missing external reader; `acknowledgeReentry`'s
+"makeup" branch; `DrillPicker.tsx`'s unused `now` prop; the unused
+`atoms`/`corpus`/`sessions` IndexedDB object stores; `session_start`'s own
+latency metric; the streak/away-day day-space mismatch; `/workbench`'s
+own Pane 2 per-word inspector and Pane 3 spec editor; the deferred
+`vitest@5` major-version bump; `laravel/framework`'s own remaining
+advisories; `v2/api`'s own frozen advisories; the `trial_surah_source`
+column on `entitlements` — all unchanged. `sync.ts`'s own `REGIONS`
+cross-runtime duplication is now CLOSED and permanently guarded — remove
+it from future zero-shared-source/value-agreement sweeps.
