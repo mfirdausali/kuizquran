@@ -129,10 +129,19 @@ export function PrivacyPanel() {
   };
 
   const [recheckMessage, setRecheckMessage] = useState<string | null>(null);
+  // Mirrors the Reveal (v3-D241) and CSV-export (v3-D329) fixes on this same
+  // panel: `checkRevealToken()` returns a real `{state: "failed", reason}`
+  // on a genuine network error or bad HTTP status, distinct from the
+  // ordinary `"invalid"` ("no longer valid — re-masked") verdict — and that
+  // failure was rendered in the SAME passive `role="status"` region as an
+  // ordinary verdict, with no indication a request had actually failed.
+  const [recheckFailed, setRecheckFailed] = useState(false);
   const onRecheck = () => {
     if (result?.state !== "revealed") return;
+    setRecheckFailed(false);
     void (async () => {
       const check = await checkRevealToken(result.revealToken);
+      setRecheckFailed(check.state === "failed");
       setRecheckMessage(
         check.state === "valid"
           ? "Still live."
@@ -254,7 +263,7 @@ export function PrivacyPanel() {
                 Re-check token
               </button>
               {recheckMessage ? (
-                <p className="caption" role="status">
+                <p className="caption" role={recheckFailed ? "alert" : "status"}>
                   {recheckMessage}
                 </p>
               ) : null}

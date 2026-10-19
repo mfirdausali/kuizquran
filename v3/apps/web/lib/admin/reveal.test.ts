@@ -181,4 +181,20 @@ describe("checkRevealToken — the refusal is identical for expired, unknown, an
     await checkRevealToken("tok_1");
     expect(seen[0]).toContain("/api/admin/reveal/tok_1");
   });
+
+  it("a genuine bad HTTP status (not 403) returns `failed`, distinct from `invalid`", async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse({ error: "internal error" }, 500)) as unknown as typeof fetch;
+
+    const result = await checkRevealToken("tok_1");
+    expect(result).toEqual({ state: "failed", reason: "the API answered 500" });
+  });
+
+  it("a network throw becomes `failed`, not a rejected promise", async () => {
+    globalThis.fetch = vi.fn(async () => {
+      throw new TypeError("network down");
+    }) as unknown as typeof fetch;
+
+    const result = await checkRevealToken("tok_1");
+    expect(result).toEqual({ state: "failed", reason: "request failed: network down" });
+  });
 });

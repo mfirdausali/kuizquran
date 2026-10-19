@@ -228,7 +228,58 @@ describe("PrivacyPanel — reveal", () => {
     await screen.findByTestId("reveal-result");
 
     fireEvent.click(screen.getByRole("button", { name: "Re-check token" }));
-    await waitFor(() => expect(screen.getByText(/re-masked/i)).toBeTruthy());
+    const invalid = await screen.findByText(/re-masked/i);
+    // An ordinary "no longer valid" verdict is a passive announcement, never
+    // the urgent one a genuine request failure (below) requires.
+    expect(invalid.getAttribute("role")).toBe("status");
+  });
+
+  it("a failed re-check (a real 500) is announced as an alert, not a passive status", async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/reveal/tok_1")) {
+        return jsonResponse({ error: "internal error" }, 500);
+      }
+      return jsonResponse({
+        pseudonym: "u_abc123",
+        identity: { email: "learner@example.com", name: null },
+        revealToken: "tok_1",
+        expiresAt: Date.now() + 900_000,
+      });
+    }) as unknown as typeof fetch;
+
+    render(<PrivacyPanel />);
+    fireEvent.change(screen.getByLabelText(/User id/i), { target: { value: "42" } });
+    fireEvent.change(screen.getByLabelText(/Details/i), { target: { value: "investigating ticket 4821" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reveal" }));
+    await screen.findByTestId("reveal-result");
+
+    fireEvent.click(screen.getByRole("button", { name: "Re-check token" }));
+    const failure = await screen.findByRole("alert");
+    expect(failure.textContent ?? "").toMatch(/500/);
+  });
+
+  it("a network-level re-check failure (apiFetch throws) is announced as an alert too, not only a bad HTTP status", async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/reveal/tok_1")) {
+        throw new TypeError("network request failed");
+      }
+      return jsonResponse({
+        pseudonym: "u_abc123",
+        identity: { email: "learner@example.com", name: null },
+        revealToken: "tok_1",
+        expiresAt: Date.now() + 900_000,
+      });
+    }) as unknown as typeof fetch;
+
+    render(<PrivacyPanel />);
+    fireEvent.change(screen.getByLabelText(/User id/i), { target: { value: "42" } });
+    fireEvent.change(screen.getByLabelText(/Details/i), { target: { value: "investigating ticket 4821" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reveal" }));
+    await screen.findByTestId("reveal-result");
+
+    fireEvent.click(screen.getByRole("button", { name: "Re-check token" }));
+    const failure = await screen.findByRole("alert");
+    expect(failure.textContent ?? "").toMatch(/network request failed/);
   });
 });
 

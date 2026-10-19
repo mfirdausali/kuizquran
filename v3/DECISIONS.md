@@ -34160,3 +34160,138 @@ advisories; `v2/api`'s own frozen advisories; the `trial_surah_source`
 column on `entitlements` — all unchanged. `PrivacyPanel.tsx`'s own
 CSV-export failure-announcement gap is now CLOSED — remove it from future
 "docblock/convention says X, reality is Y" sweeps.
+
+---
+
+## v3-D330 (2026-10-19)
+
+`PrivacyPanel.tsx`'s own "Re-check token" action — the third sibling on
+this panel sharing the Reveal/Export-CSV failure-reporting convention —
+was the one v3-D241 and v3-D329 each closed for its own sibling but never
+reached: `checkRevealToken()` (`lib/admin/reveal.ts`) returns a real
+`{state: "failed", reason}` for a genuine network throw or a bad HTTP
+status, distinct from the ordinary `{state: "invalid"}` ("no longer valid
+— re-masked") verdict a 403 produces — but `onRecheck`'s own
+`recheckMessage` rendered EVERY verdict, including a genuine request
+failure, inside the SAME passive `role="status"` paragraph. Sharper: the
+CSV-export fix's own comment, written the night before, explicitly cited
+this exact line as the reason its own fallback was safe ("same convention
+`role="status"` already carries for `recheckMessage` a few sections
+above") — that reasoning was wrong, since `recheckMessage` was never
+actually guarded the way it assumed. `lib/admin/reveal.test.ts`'s own
+`checkRevealToken` describe block had zero coverage of the `"failed"`
+state at all — only `"valid"`/`"invalid"` were exercised.
+
+Fixed on the identical template v3-D241/v3-D329 established on this same
+file: a new `recheckFailed` boolean, set from `check.state === "failed"`
+and reset on every fresh `onRecheck()` attempt; the rendered paragraph's
+own `role` is `recheckFailed ? "alert" : "status"` instead of the
+hardcoded `"status"`.
+
+RED confirmed directly: two new cases mirroring the Reveal/CSV sections'
+own v3-D241/v3-D329 shape (a real 500 from `/api/admin/reveal/{token}`; a
+thrown `TypeError`) were run against the unmodified component — both
+failed exactly as predicted, `screen.findByRole("alert")` timing out
+since the paragraph was always `role="status"`. A third, strengthened
+case on the pre-existing "re-check reports the server's own verdict" test
+(asserting the rendered paragraph's own `role` is `"status"` for an
+ordinary `"invalid"` verdict) passed vacuously against the unmodified
+component, confirming the fix narrows `role` to the failure branch only.
+Restored byte-identically (`git diff --stat
+components/admin/PrivacyPanel.tsx` empty before implementing), then
+implemented; reran: `test/privacy-panel.test.tsx` 14/14 green (was 12,
++2).
+
+Also closed, one layer down, the sibling coverage gap this same sweep
+found: two new cases in `lib/admin/reveal.test.ts`'s own `checkRevealToken`
+describe block (a real 500; a thrown `TypeError`) prove the function's
+own `"failed"` state — already correctly computed, never previously
+exercised — reports the real HTTP status / error message, mirroring
+`revealIdentity`'s own sibling test one function above. `lib/admin/
+reveal.test.ts` 13/13 green (was 11, +2).
+
+`TZ=UTC make test`: 3096 passing (was 3092, +4 — exactly this run's four
+new cases; apps/web 1710, was 1706; no other suite moved: 255 v2 vitest,
+47 v2/api, 423 v3/api, 120 corpus-compiler, 468 engine, 73 fold-runner).
+`check-test-floor.mjs`: OK, 3096 >= floor 1899 (+1197 margin, unmoved,
+same discipline as every prior entry). `TZ=UTC make build`: exit 0, 30
+routes, unchanged — this diff edits one existing component and its two
+existing test files, no new route or production file. `npm run gates`:
+all green — locked-css OK, 1 documented hunk, 294 v1 lines byte-
+identical; boundaries OK, 345 files, unchanged count (the one-file
+fluctuation reported mid-run is the same pre-existing gitignored
+`next-env.d.ts` Next.js bootstrap-artifact fluctuation this file has
+recorded roughly a dozen times before, confirmed via `git status
+--porcelain --ignored`, not a new production file); fonts degraded-but-
+non-blocking, pre-existing, 2/6 UI fonts present; corpus-morphology OK,
+362 words; corpus-glyphs OK, 206 codepoints across 4 artifacts — all
+unchanged, this diff carries no corpus data. `npx tsc --noEmit`, run
+separately across all four v3 node packages: clean in all four. No PHP
+file changed, so `pint` was not applicable. No `v1/**`/`v2/**` edit (a
+stray `v2/tsconfig.tsbuildinfo` build-cache diff produced by running the
+suite was reverted before committing, same discipline as every prior
+entry — `git status --porcelain -- v1 v2` empty immediately before
+committing). No Arabic codepoint (all three changed files swept
+programmatically, in Python, over the Arabic, Arabic Supplement, Arabic
+Extended-A and both Presentation Forms Unicode blocks, plus a
+`fromCharCode`/`fromCodePoint`/`\u`-escape check: CLEAN — every new
+string is a TypeScript identifier, a fixed English assertion/caption
+sentence, or a synthetic HTTP-status/error-message test fixture, never
+corpus text). No oracle/golden-log/fixture/snapshot regenerated — this
+diff touches three existing files only.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1);
+installed PHP 8.4.26 cleanly via the documented `packages.sury.org` apt
+mirror, no refusal this run. `HEAD`, local `main` and `origin/main` all
+already agreed at `221fb47` (v3-D329) — no stale-local-`main` trap this
+run, confirmed directly via `git status`/`git log` before any
+exploration. The seven npm installs (`v2`, `packages/engine`,
+`packages/corpus-compiler`, `worker/fold-runner`, `apps/web`) and two
+composer installs (`v2/api`, `v3/api`) were first tried together as
+parallel background jobs, which collided on the shared git-mirror VCS
+cache (both composer processes cloning the same package into the same
+cache directory at once, the same recovery this file's history has
+recorded roughly a dozen times before) — recovered by re-running both
+composer installs sequentially, which then completed cleanly. A periodic
+dependency-audit re-check (`npm audit` across all four v3 Node packages;
+`composer audit --locked` on `v3/api`; `composer audit` on `v2/api`,
+read-only, frozen) was also run this night per v3-D309's own standing
+instruction to repeat it periodically rather than treat it as a one-time
+check: every tally matched what v3-D319/v3-D328 already recorded exactly
+— `{critical: 2, high: 1, moderate: 3, total: 6}` on each Node package, 4
+advisories on `laravel/framework` alone for `v3/api`, 20 advisories
+across 5 packages for `v2/api` (frozen, unchanged, informational only) —
+no new CVE published since the last check.
+
+Found by a manual re-read of `PrivacyPanel.tsx`'s own three action
+handlers against the v3-D241/v3-D329 precedent (a dedicated fresh-sweep
+agent's own broader pass — admin lib/panel pairs, Eloquent relations,
+engine/fold-runner/corpus-compiler zero-caller exports, config readers,
+EventWireCodec/NULLABLE_FIELDS parity — came back genuinely empty this
+run, see its own report for the veins checked and ruled out), on the
+reasoning that v3-D329's own fix comment explicitly named `recheckMessage`
+as the established-safe precedent its own fix was modeled on, worth
+re-verifying directly rather than trusting — independently confirmed
+against `checkRevealToken`'s real source and `lib/admin/reveal.test.ts`'s
+real coverage before writing any test.
+
+NOT addressed: every item on v3-D329's own condensed "NOT addressed" list,
+unchanged — `rhymeClassOf()`; `EntitlementMachine::merge()`;
+`App\Billing\TrialAttribution`/`lib/pricing.ts#regionFromCountry()`;
+`PaywallGate` as a whole class; multi-surah enrollment as a product
+decision; the operational mailer/7-night launch window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy naming; `packages/engine/src/placement.ts`;
+`MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero fold-side consumer;
+`selection_determinism_check` still replaying a committed fixture;
+`QueueItem.score`'s missing external reader; `acknowledgeReentry`'s
+"makeup" branch; `DrillPicker.tsx`'s unused `now` prop; the unused
+`atoms`/`corpus`/`sessions` IndexedDB object stores; `session_start`'s own
+latency metric; the streak/away-day day-space mismatch; `/workbench`'s
+own Pane 2 per-word inspector and Pane 3 spec editor; the deferred
+`vitest@5` major-version bump; `laravel/framework`'s own remaining
+advisories; `v2/api`'s own frozen advisories; the `trial_surah_source`
+column on `entitlements` — all unchanged. `PrivacyPanel.tsx`'s own
+third-sibling re-check failure-announcement gap is now CLOSED — remove it
+from future "docblock/convention says X, reality is Y" sweeps.
