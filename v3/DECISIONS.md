@@ -34033,3 +34033,130 @@ advisories; `v2/api`'s own frozen advisories; the `trial_surah_source`
 column on `entitlements` — all unchanged. `sync.ts`'s own `REGIONS`
 cross-runtime duplication is now CLOSED and permanently guarded — remove
 it from future zero-shared-source/value-agreement sweeps.
+
+## v3-D329 (2026-10-19)
+
+`components/admin/PrivacyPanel.tsx`'s own two sibling actions — Reveal
+Identity and Export Users (CSV) — share one failure-reporting convention,
+and only one of them actually followed it. v3-D241 gave the Reveal
+section's own `"failed"` outcome (a real 500, or a dropped connection) a
+`role="alert"` paragraph, reasoning explicitly that "every other outcome
+(revealed/anonymous/not-found/pii-warning/rejected) already has a render
+branch; this one did not, so a real failure left the admin staring at an
+unchanged form with no indication anything went wrong" — and added two
+dedicated tests proving it (`v3-D241 — a failed reveal request...` / `...a
+network-level failure...`). `lib/admin/users.ts#downloadUsersCsv()` — the
+CSV export's own client, built the same night as the Reveal panel
+(build-plan step 24/M8) — computes the IDENTICAL two-outcome shape
+(`{ok: boolean, message: string}`, `ok: false` for both a bad HTTP status
+and a thrown network error) but the panel's `onExportCsv` handler read
+only `.message`, discarding `.ok` entirely — `csvMessage` rendered in a
+plain `role="status"` paragraph regardless of whether the download
+actually succeeded. A genuine CSV export failure (a real 500, or a dropped
+connection) was announced to a screen-reader user with the SAME passive
+live-region priority as an ordinary success, the exact gap v3-D241 closed
+one section above in the same file, never ported to this sibling action.
+`test/privacy-panel.test.tsx`'s own "PrivacyPanel — CSV export" describe
+block had exactly one case ("requests the identity-free CSV and reports
+success") and zero failure coverage, unlike the Reveal block's two
+dedicated failure tests — the asymmetry was visible in the test file
+itself, not only in the component.
+
+**Fixed**, display-only, no server/wire change (the `ok` field was already
+computed and already sent by every real call): `onExportCsv` now tracks a
+new `csvFailed` state (`!outcome.ok`), reset to `false` on every fresh
+attempt; the rendered paragraph's `role` is `csvFailed ? "alert" :
+"status"` instead of a hardcoded `"status"`.
+
+**RED confirmed directly**: two new cases were added to the existing "CSV
+export" describe block, mirroring the Reveal section's own v3-D241 test
+shape exactly (a real 500 response; a thrown `TypeError` from `fetch`), run
+against the unmodified component — both failed exactly as predicted,
+`screen.findByRole("alert")` timing out since the unfixed paragraph was
+always `role="status"`. A third case strengthens the pre-existing success
+test to assert the rendered paragraph's own `role` attribute is `"status"`
+— passed vacuously against the unmodified component (that case was already
+true), confirming the fix narrows the `role` to the failure branch only,
+rather than flipping both branches. Restored byte-identically
+(`git diff --stat components/admin/PrivacyPanel.tsx` empty before
+implementing), then implemented; reran: `test/privacy-panel.test.tsx`
+12/12 green (was 10, +2).
+
+`TZ=UTC make test`: 3092 passing (was 3090, +2 — exactly this run's two
+new cases; apps/web 1706, was 1704; no other suite moved: 255 v2 vitest,
+47 v2/api, 423 v3/api, 120 corpus-compiler, 468 engine, 73 fold-runner).
+`check-test-floor.mjs`: OK, 3092 >= floor 1899 (+1193 margin, unmoved,
+same discipline as every prior entry). `TZ=UTC make build`: exit 0, 30
+routes, unchanged — this diff edits one existing component and its one
+existing test file, no new route or production file. `npm run gates`: all
+green — locked-css OK, 1 documented hunk, 294 v1 lines byte-identical;
+boundaries OK, 344 files, unchanged count; fonts degraded-but-non-blocking,
+pre-existing, 2/6 UI fonts present; corpus-morphology OK, 362 words;
+corpus-glyphs OK, 206 codepoints across 4 artifacts — all unchanged, this
+diff carries no corpus data. `npx tsc --noEmit`, run separately across all
+four v3 node packages: clean in all four. No PHP file changed, so `pint`
+was not applicable. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite
+was reverted before committing, same discipline as every prior entry —
+`git status --porcelain -- v1 v2` empty immediately before committing). No
+Arabic codepoint (both changed files swept programmatically, in Python,
+over the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks, plus a `fromCharCode`/`fromCodePoint`/
+`\u`-escape check: CLEAN — every new string is a TypeScript identifier, a
+fixed English assertion/caption sentence, or a synthetic HTTP-status/
+error-message test fixture, never corpus text). No oracle/golden-log/
+fixture/snapshot regenerated — this diff touches two existing files only.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled corpus
+anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1); installed PHP
+8.4.26 cleanly via the documented `packages.sury.org` apt mirror, no
+refusal this run. `HEAD` was found detached exactly at `origin/main`'s own
+real tip (`888c918`, v3-D328), on a stale LOCAL `main` branch ref 23
+commits behind (`c3e42ab`, v3-D309) — the recurring stale-local-`main`
+trap this file has recorded roughly fifty times since v3-D77 — caught
+before any exploration via `git fetch origin main` + `git checkout main
+&& git merge --ff-only origin/main`, a clean fast-forward, no work lost or
+at risk. The five npm installs (`v2`, `packages/engine`, `packages/
+corpus-compiler`, `worker/fold-runner`, `apps/web`) were run directly and
+in parallel; both composer installs (`v2/api`, `v3/api`) completed via the
+documented git-mirror-clone fallback, slow but no retry flag needed.
+
+Found by a manual field-by-field sweep of this run itself (no sub-agent
+available — a fork cannot nest a further agent call, confirmed directly by
+the harness) directed at `worker/fold-runner/src`/`packages/corpus-
+compiler/src` zero-caller exports (both re-confirmed clean — every export
+has a real caller or is already-known/already-deferred), every Eloquent
+`BelongsTo`/`HasMany` relation in `api/app/Models` (all already the
+known "raw FK queried + pseudonymized instead" pattern, v3-D146/D267,
+unchanged), several numeric/closed-set constants checked for cross-file/
+cross-language duplication (`KIND_ORDER`, `MAKEUP_CAP`,
+`DEMOTE_OFFER_AFTER_FAILS`, `RESCAFFOLD_AFTER_FAILS`,
+`CLOCK_SKEW_ALERT_MS`, `FUTURE_TS_TOLERANCE_MS`, `ATOMIC_MAX_AYAT`,
+`STRIP_MAX_AYAT`, `RING_MIN_RUKU`, `LITANY_MIN_RHYME_SHARE`,
+`LITANY_MIN_REFRAIN`, `HASH_SPEC_VERSION` — none duplicated), and a
+field-by-field pass of every `lib/admin/*.ts` wire-type against its
+corresponding `components/admin/*.tsx` panel (all other pairs fully
+wired) — this was the one genuine, previously-unreported instance,
+independently re-verified directly against `lib/admin/users.ts`'s real
+source and `test/privacy-panel.test.tsx`'s own existing Reveal-section
+tests (the v3-D241 precedent) before writing any test.
+
+NOT addressed: every item on v3-D328's own condensed "NOT addressed" list,
+unchanged — `rhymeClassOf()`; `EntitlementMachine::merge()`;
+`App\Billing\TrialAttribution`/`lib/pricing.ts#regionFromCountry()`;
+`PaywallGate` as a whole class; multi-surah enrollment as a product
+decision; the operational mailer/7-night launch window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy naming; `packages/engine/src/placement.ts`;
+`MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero fold-side consumer;
+`selection_determinism_check` still replaying a committed fixture;
+`QueueItem.score`'s missing external reader; `acknowledgeReentry`'s
+"makeup" branch; `DrillPicker.tsx`'s unused `now` prop; the unused
+`atoms`/`corpus`/`sessions` IndexedDB object stores; `session_start`'s own
+latency metric; the streak/away-day day-space mismatch; `/workbench`'s
+own Pane 2 per-word inspector and Pane 3 spec editor; the deferred
+`vitest@5` major-version bump; `laravel/framework`'s own remaining
+advisories; `v2/api`'s own frozen advisories; the `trial_surah_source`
+column on `entitlements` — all unchanged. `PrivacyPanel.tsx`'s own
+CSV-export failure-announcement gap is now CLOSED — remove it from future
+"docblock/convention says X, reality is Y" sweeps.

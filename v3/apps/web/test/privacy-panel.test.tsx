@@ -256,7 +256,33 @@ describe("PrivacyPanel — CSV export", () => {
     render(<PrivacyPanel />);
     fireEvent.click(screen.getByRole("button", { name: "Download users.csv" }));
 
-    await waitFor(() => expect(screen.getByText("downloaded")).toBeTruthy());
+    const success = await screen.findByText("downloaded");
     expect(seen[0]).toContain("/api/admin/users/export.csv");
+    // A success is a passive announcement, never the urgent one the two
+    // failure cases below require — same convention `role="status"` already
+    // carries for `recheckMessage` a few sections above.
+    expect(success.getAttribute("role")).toBe("status");
+  });
+
+  it("a failed CSV export (a real 500) is announced as an alert, not a passive status, matching the Reveal section's own v3-D241 convention", async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse({ error: "internal error" }, 500)) as unknown as typeof fetch;
+
+    render(<PrivacyPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Download users.csv" }));
+
+    const failure = await screen.findByRole("alert");
+    expect(failure.textContent ?? "").toMatch(/500/);
+  });
+
+  it("a network-level CSV export failure (apiFetch throws) is announced as an alert too, not only a bad HTTP status", async () => {
+    globalThis.fetch = vi.fn(async () => {
+      throw new TypeError("network request failed");
+    }) as unknown as typeof fetch;
+
+    render(<PrivacyPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Download users.csv" }));
+
+    const failure = await screen.findByRole("alert");
+    expect(failure.textContent ?? "").toMatch(/network request failed/);
   });
 });

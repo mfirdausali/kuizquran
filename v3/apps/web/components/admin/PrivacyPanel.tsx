@@ -144,14 +144,24 @@ export function PrivacyPanel() {
   };
 
   const [csvMessage, setCsvMessage] = useState<string | null>(null);
+  // `downloadUsersCsv()`'s own `ok` field was computed on every call and
+  // discarded here — only `.message` was ever read, so a genuine failure
+  // (a bad HTTP status, or a thrown network error) rendered in the same
+  // passive `role="status"` live region as an ordinary success, unlike the
+  // REVEAL section a few lines above, which already renders a "failed"
+  // outcome as `role="alert"` for exactly this reason (v3-D241). `csvFailed`
+  // closes that gap for this sibling export action.
+  const [csvFailed, setCsvFailed] = useState(false);
   const [csvBusy, setCsvBusy] = useState(false);
   const onExportCsv = () => {
     setCsvBusy(true);
     setCsvMessage(null);
+    setCsvFailed(false);
     void (async () => {
       const outcome = await downloadUsersCsv();
       setCsvBusy(false);
       setCsvMessage(outcome.message);
+      setCsvFailed(!outcome.ok);
     })();
   };
 
@@ -268,7 +278,7 @@ export function PrivacyPanel() {
             Download users.csv
           </button>
           {csvMessage ? (
-            <p className="caption" role="status">
+            <p className="caption" role={csvFailed ? "alert" : "status"}>
               {csvMessage}
             </p>
           ) : null}
