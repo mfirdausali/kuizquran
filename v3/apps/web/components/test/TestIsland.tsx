@@ -274,6 +274,7 @@ export function TestIsland({ surah, glossLang }: TestIslandProps) {
         gradeClass: "ungraded",
         structured: false,
         locale: glossLang,
+        corpusHash: corpus.meta.corpusHash,
       };
       await append(event, { now: Date.now(), tz: currentTz() });
       setPhase({ kind: "running" });
@@ -307,6 +308,7 @@ export function TestIsland({ surah, glossLang }: TestIslandProps) {
         correct,
         structured: false,
         locale: glossLang,
+        corpusHash: corpus?.meta.corpusHash,
         // v3-D229's own deferred half, closed: this answer genuinely was
         // about a served site (never a Math.random-shuffled variant of one —
         // this file's own header says Test item selection never goes through
@@ -436,6 +438,7 @@ export function TestIsland({ surah, glossLang }: TestIslandProps) {
         structured: false,
         sentToReviews,
         locale: glossLang,
+        corpusHash: corpus?.meta.corpusHash,
       };
       await append(event, { now: Date.now(), tz: currentTz() });
       router.push("/progress");

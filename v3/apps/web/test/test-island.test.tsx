@@ -399,6 +399,85 @@ describe("TestIsland — the mixed self-check, end to end", () => {
     },
   );
 
+  // `DrillEvent.corpusHash` (v3-D206) pins WHICH compiled corpus an event was
+  // answered against, "so a later corpus recompile can never retroactively
+  // reinterpret a historical event under different content" (its own
+  // docblock, `@engine/types.ts`). v3-D206 wired it into `lib/session/run.ts`
+  // (the graded loop); this component already holds the full `Corpus` object
+  // (`corpus.meta.corpusHash`, used two lines above for `max={corpus.meta
+  // .ayahCount}`) but never carried it onto any of its own three event
+  // literals — the exact sibling gap v3-D213/D214 closed one field earlier
+  // (`locale`) on this identical file.
+  //
+  // `corpusHash` is a STAGING-time addition (`stage-corpus.mjs#slim()`
+  // mirrors `manifest.json`'s own value into `meta.corpusHash` — v3-D206's
+  // own note), never present on the raw, un-staged `corpus-compiler/output`
+  // copy this suite's own `loadCorpus()` falls back to when `public/corpus/`
+  // has not been staged. So — mirroring `run.test.ts`'s own v3-D206 tests
+  // exactly, via the identical `withHash()`-shaped clone — this test serves a
+  // CLONE carrying a synthetic `meta.corpusHash`, never asserting against the
+  // real fixture's own (frequently-absent) value.
+  it(
+    "v3-D332: stamps test_start, every test_answer, and test_result with the corpus's own corpusHash",
+    async () => {
+      const TEST_HASH = "deadbeefcafef00d";
+      const withHash: Corpus = { ...corpus112, meta: { ...corpus112.meta, corpusHash: TEST_HASH } };
+      installFetch(withHash);
+      render(<TestIsland surah={112} glossLang="en" />);
+
+      await screen.findByTestId("test-range");
+      fireEvent.click(screen.getByRole("button", { name: /start test/i }));
+      await waitForRunning();
+
+      await completeTest();
+      await screen.findByTestId("test-result");
+      fireEvent.click(screen.getByRole("button", { name: /^done$/i }));
+      await waitFor(async () => {
+        const evs = await getAllEvents();
+        expect(evs.filter((e) => e.type === "test_result").length).toBe(1);
+      });
+
+      const events = await getAllEvents();
+      const testEvents = events.filter(
+        (e) => e.type === "test_start" || e.type === "test_answer" || e.type === "test_result",
+      );
+      expect(testEvents.length).toBeGreaterThan(0);
+      for (const e of testEvents) {
+        expect(e.corpusHash).toBe(TEST_HASH);
+      }
+    },
+  );
+
+  // Negative sibling: a corpus with no `corpusHash` at all (the real shape
+  // of an un-staged build, or a build predating `stage-corpus.mjs`'s own
+  // mirroring of it) must never have one fabricated onto its events.
+  it("v3-D332: never fabricates a corpusHash — a corpus with none stamps test_* events with none", async () => {
+    const withoutHash: Corpus = { ...corpus112, meta: { ...corpus112.meta, corpusHash: undefined } };
+    installFetch(withoutHash);
+    render(<TestIsland surah={112} glossLang="en" />);
+
+    await screen.findByTestId("test-range");
+    fireEvent.click(screen.getByRole("button", { name: /start test/i }));
+    await waitForRunning();
+
+    await completeTest();
+    await screen.findByTestId("test-result");
+    fireEvent.click(screen.getByRole("button", { name: /^done$/i }));
+    await waitFor(async () => {
+      const evs = await getAllEvents();
+      expect(evs.filter((e) => e.type === "test_result").length).toBe(1);
+    });
+
+    const events = await getAllEvents();
+    const testEvents = events.filter(
+      (e) => e.type === "test_start" || e.type === "test_answer" || e.type === "test_result",
+    );
+    expect(testEvents.length).toBeGreaterThan(0);
+    for (const e of testEvents) {
+      expect(e.corpusHash).toBeUndefined();
+    }
+  });
+
   // v3-D229 named this exactly as the one thing left unaddressed after
   // v3-D213/D214 wired `locale` here: `test_*` events still carried no site
   // coordinate at all, and reasoned that `siteKey` alone is safe to add —

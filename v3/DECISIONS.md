@@ -34428,3 +34428,179 @@ advisories; `v2/api`'s own frozen advisories; the `trial_surah_source`
 column on `entitlements` — all unchanged. `FlagRow.killedAt`/`.ackAt`'s
 own type mismatch is now CLOSED — remove it from future "fetched/computed,
 wrong wire type" sweeps.
+
+---
+
+## v3-D332 (2026-10-20)
+
+`DrillEvent.corpusHash` ("pins provenance so a later corpus recompile can
+never retroactively reinterpret a historical event under different
+content", `@engine/types.ts`'s own docblock) was wired into
+`lib/session/run.ts` (the graded session loop) at v3-D206, which closing
+note flagged one sibling event-producing surface as deliberately left for
+a future run: `lib/test/build.ts`/`components/test/TestIsland.tsx`'s own
+`test_start`/`test_answer`/`test_result` events. v3-D213/D214 closed the
+IDENTICAL gap for `locale` on this exact file one field earlier, and
+v3-D214's own closing note said plainly "with this, `DrillEvent.locale` is
+now stamped by every event-producing surface in `apps/web`" — true for
+`locale`, never true for `corpusHash`. `grep -n "corpusHash"
+lib/test/build.ts components/test/TestIsland.tsx` returned nothing before
+this fix: all three event literals carried `locale: glossLang` but no
+`corpusHash`, despite the component already holding the full `Corpus`
+object (`corpus.meta.corpusHash`, already read two lines away for
+`max={corpus.meta.ayahCount}`). Test events are never folded
+(`rebuild.ts` has no branch for any `test_*` type, invariant #5's
+structural absence), so this is a provenance/audit gap only, not a
+grading-correctness one — the identical scope `locale`'s own fix already
+established on this file.
+
+A genuine authoring trap caught before writing the real test: this file's
+own `loadCorpus()` helper prefers a staged `public/corpus/<n>.json` but
+falls back to the raw, UN-STAGED `corpus-compiler/output/<n>/corpus.json`
+when no staged copy exists (true in this session's own container, which
+had not run `npm run stage-corpus`) — and `corpusHash` is a STAGING-time
+addition only (`stage-corpus.mjs#slim()` mirrors `manifest.json`'s own
+value into `meta.corpusHash`; the raw compiler output never carries it,
+confirmed directly: `python3 -c "import json;
+print(json.load(open('output/112/corpus.json'))['meta'].get
+('corpusHash'))"` printed `None`). A first draft of this test asserted
+`corpus112.meta.corpusHash` directly off the loaded fixture and failed —
+correctly, but for the WRONG reason (the fixture itself had no hash to
+assert, not a wiring gap) — caught by `run.test.ts`'s own v3-D206 tests,
+which never read the real fixture's hash either and instead serve a
+CLONE carrying a synthetic `meta.corpusHash` via a `withHash()`-shaped
+helper. Rewritten to the identical pattern before trusting any RED.
+
+Fixed, additive, no wire/schema change (the field was already optional and
+already reaching every graded event): all three event literals in
+`TestIsland.tsx` gain `corpusHash: corpus.meta.corpusHash` (`startTest`,
+already null-guarded on `corpus`) or `corpusHash: corpus?.meta.corpusHash`
+(`recordAnswer`/`finishTest`, neither of which narrows `corpus` at its own
+scope — `corpus` is component state, not threaded as a parameter to
+either function).
+
+RED confirmed directly, twice, against the unmodified component (`git
+diff --stat components/test/TestIsland.tsx` empty before implementing):
+the real-fixture-assertion draft failed on `expected undefined to be
+truthy` (the fixture itself, not the component); the corrected
+synthetic-clone test failed exactly as predicted on
+`expected undefined to be 'deadbeefcafef00d'` for all three event types;
+a negative sibling (a clone with `corpusHash: undefined`, the real shape
+of an un-staged build) passed vacuously and correctly against the
+unmodified component, proving the fix does not fabricate a hash when none
+exists. Implemented, reran: `test/test-island.test.tsx` 10/10 green (was
+8, +2). `npx vitest run test/test-island.test.tsx lib/session/run.test.ts`:
+138/138 green — no regression on the sibling graded-loop consumer of the
+identical field.
+
+`TZ=UTC make test`: 3099 passing (was 3097, +2 — exactly this run's two
+new tests; apps/web 1713, was 1711; no other suite moved: 255 v2 vitest,
+47 v2/api, 423 v3/api, 120 corpus-compiler, 468 engine, 73 fold-runner).
+`check-test-floor.mjs`: OK, 3099 >= floor 1899 (+1200 margin, unmoved,
+same discipline as every prior entry). `TZ=UTC make build`: exit 0, 30
+routes, unchanged — this diff edits one existing component and its one
+existing test file, no new route or production file. `npm run gates`: all
+green — locked-css OK, 1 documented hunk, 294 v1 lines byte-identical;
+boundaries OK, 345 files, unchanged count; fonts degraded-but-non-blocking,
+pre-existing, 2/6 UI fonts present; corpus-morphology OK, 362 words;
+corpus-glyphs OK, 206 codepoints across 4 artifacts — all unchanged, this
+diff carries no corpus data. `npx tsc --noEmit`, run separately across all
+four v3 node packages: clean in all four. No PHP file changed, so `pint`
+was not applicable. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite
+was reverted before committing, same discipline as every prior entry —
+`git status --porcelain -- v1 v2` empty immediately before committing). No
+Arabic codepoint (both changed files swept programmatically, in Python,
+over the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks, plus a `\u`-escape and
+`fromCharCode`/`fromCodePoint` check: CLEAN — every new string is a
+TypeScript identifier, a wire field name, or the synthetic test hash
+literal `"deadbeefcafef00d"` (matching this test suite's own established
+placeholder convention — the identical literal `run.test.ts` itself uses
+for this exact field), never corpus text). No oracle/golden-log/fixture/
+snapshot regenerated — this diff touches one existing production file and
+one existing test file only.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled corpus
+anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1); installed PHP
+8.4.26 cleanly via the documented `packages.sury.org` apt mirror, no
+refusal this run. `HEAD` was found detached exactly at `origin/main`'s own
+real tip (`211f4ca`, v3-D331), on a stale LOCAL `main` branch ref two
+commits behind (`221fb47`, v3-D329) — the recurring stale-local-`main`
+trap this file has recorded roughly fifty times since v3-D77 — caught
+before any exploration via `git fetch origin main` + `git checkout main &&
+git merge --ff-only origin/main`, a clean fast-forward, no work lost or at
+risk. `make setup` ran clean end to end once `v2/api`'s own
+`bootstrap/cache`/`storage/framework` directories (gitignored, absent on a
+fresh clone) were created ahead of its own `composer install` — the
+documented precondition `make setup`'s own comment already names; every
+PHP-independent `npm install` (`v2`, `packages/engine`,
+`packages/corpus-compiler`, `worker/fold-runner`, `apps/web`) was run
+directly and in parallel ahead of the sequential `make setup` chain
+finishing, the same recovery this file's history has recorded roughly a
+dozen times before.
+
+Found by this run's own field-by-field grep sweep of every `locale:`/
+`glossLang` emit site added since v3-D213/D214 against every sibling field
+on the same shared `DrillEvent` base type (`grep -rn "At\??: string\|Ms\??:
+string"` across `apps/web/lib` for a repeat of v3-D331's own type-mismatch
+shape came back clean elsewhere — `lib/account/api.ts`'s own
+`createdAt: string | null` was independently re-verified correct,
+`AccountController::export()` calls `->toIso8601String()` explicitly;
+`email_verified_at`'s one `'datetime'` cast in the whole `app/Models` tree
+was traced to its one real consumer, likewise already formatted to a
+string). A ~10-vein sweep otherwise came back exhausted and is recorded
+here so a future run does not re-walk the same ground: every `lib/admin/
+*.ts` wire-type against its `components/admin/*.tsx` panel, field by
+field (`billingEvents`/`purgeLedger`/`flagAudit`/`audit`/`roles`/
+`contentFreeze`/`billingAudit`/`nightlyWindow`, every field already
+rendered); every Eloquent `BelongsTo`/`HasMany` relation in
+`api/app/Models` (all either wired or the already-known "raw FK + HMAC
+pseudonymizer instead" pattern); a zero-caller sweep of
+`corpus-compiler/src`'s full export surface (every candidate a same-file-
+only type or helper); every PHP `const [A-Z_]+ = [...]` closed-set array
+against its TypeScript mirror (`GlossDraft::STATUSES`,
+`VerificationsController::TIERS`/`REVIEWER_KINDS`, `GlossDraftsController
+::AUTHOR_KINDS` are each a TYPE-only TS union with no runtime array to
+diverge from — a different, weaker shape than the `STATE_VALUES`/
+`TIER_VALUES`-class bug the agreement-test family already closed); every
+`config/*.php` key against its real PHP reader (no new unread key —
+`pricing.php`'s own price amounts are deliberately read only through the
+existing TS-side mirror-agreement tests, never Laravel's `config()`
+helper); `BackupRestoreDrillCommand::EVENT_WIRE_COLUMNS` re-checked
+against the real `events` migration and `rebuild.ts#applyEvent`'s own
+field reads (confirmed complete and correctly scoped after v3-D326 — the
+thirteen OTHER real columns on that table, `position`/`choice`/`to_ayah`/
+`latency`/`resume`/`test_kind`/`score`/`total`/`sent_to_reviews`/
+`spec_snapshot`/`away_day_index`/`away`/`resume_massed`, are genuinely
+none of them fold inputs, so their deliberate absence from that list is
+correct, not a gap); every `SessionRun` field in `lib/session/run.ts`
+cross-checked against every `start*` entry point (`siteVisit`,
+`freshMachine`, `pace`, `makeupDeferred`, `glossLang`, `lastActivityAt` all
+already correctly threaded, each with its own already-documented
+"undefined/0/null for every OTHER entry point" scoping); `FlagRegistry::
+FLAGS` re-confirmed every member still gates a feature that does not
+exist in code yet (no new live divergence).
+
+NOT addressed: every item already named in v3-D331's own condensed "NOT
+addressed" list, unchanged — `rhymeClassOf()`; `EntitlementMachine::merge()`;
+`App\Billing\TrialAttribution`/`lib/pricing.ts#regionFromCountry()`;
+`PaywallGate` as a whole class; multi-surah enrollment as a product
+decision; the operational mailer/7-night launch window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy naming; `packages/engine/src/placement.ts`;
+`MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero fold-side consumer;
+`selection_determinism_check` still replaying a committed fixture;
+`QueueItem.score`'s missing external reader; `acknowledgeReentry`'s
+"makeup" branch; `DrillPicker.tsx`'s unused `now` prop; the unused
+`atoms`/`corpus`/`sessions` IndexedDB object stores; `session_start`'s own
+latency metric; the streak/away-day day-space mismatch; `/workbench`'s
+own Pane 2 per-word inspector and Pane 3 spec editor; the deferred
+`vitest@5` major-version bump; `laravel/framework`'s own remaining
+advisories; `v2/api`'s own frozen advisories; the `trial_surah_source`
+column on `entitlements` — all unchanged. `TestIsland.tsx`'s own
+`corpusHash` gap is now CLOSED — with this, `DrillEvent.corpusHash` is
+stamped by every event-producing surface in `apps/web`, the identical
+closing statement v3-D214 made for `locale` one field earlier on this
+same file — remove it from future "event-producing surface missing a
+provenance field" sweeps.

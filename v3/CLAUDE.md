@@ -53,10 +53,132 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3097 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3099 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 423 v3/api + 120 corpus-compiler
-             # + 468 engine + 73 fold-runner + 1711 apps/web. (v3-D331, 2026-10-20)
+             # + 468 engine + 73 fold-runner + 1713 apps/web. (v3-D332, 2026-10-20)
+             # NOTE (v3-D332, 2026-10-20): `components/test/TestIsland.tsx`'s
+             # own `test_start`/`test_answer`/`test_result` events carried
+             # `locale: glossLang` (v3-D213/D214) but never `corpusHash`,
+             # despite the component already holding the full `Corpus`
+             # object (`corpus.meta.corpusHash`, already read two lines away
+             # for `max={corpus.meta.ayahCount}`) — the exact sibling gap
+             # v3-D206 wired into `lib/session/run.ts` and flagged this file
+             # as the one surface still left stamping none of it. Test
+             # events are never folded (invariant #5's structural absence),
+             # so this is provenance/audit only, the identical scope
+             # `locale`'s own fix already established here.
+             #
+             # A genuine authoring trap caught before trusting any RED: this
+             # file's own `loadCorpus()` test helper falls back to the raw,
+             # UN-STAGED compiler output when no staged `public/corpus/`
+             # copy exists, and `corpusHash` is a STAGING-time addition only
+             # (`stage-corpus.mjs#slim()` mirrors it in from
+             # `manifest.json` — the raw compiler output never carries it,
+             # confirmed directly: `json.load(open('output/112/corpus
+             # .json'))['meta'].get('corpusHash')` printed `None`). A first
+             # draft asserted the loaded fixture's own hash directly and
+             # failed for the WRONG reason (the fixture had none to assert,
+             # not a wiring gap); rewritten to mirror `run.test.ts`'s own
+             # v3-D206 `withHash()`-shaped clone pattern instead — a
+             # synthetic `meta.corpusHash` on a cloned corpus, never the
+             # real fixture's own (frequently-absent) value.
+             #
+             # Fixed: all three event literals gain `corpusHash:
+             # corpus.meta.corpusHash` (`startTest`, already null-guarded on
+             # `corpus`) or `corpus?.meta.corpusHash` (`recordAnswer`/
+             # `finishTest`, neither of which narrows `corpus` at its own
+             # scope — component state, not a threaded parameter).
+             #
+             # RED confirmed directly, twice: the real-fixture-assertion
+             # draft failed on `expected undefined to be truthy` (the
+             # fixture itself); the corrected synthetic-clone test failed
+             # exactly as predicted, `expected undefined to be
+             # 'deadbeefcafef00d'`, for all three event types; a negative
+             # sibling (a clone with `corpusHash: undefined`, the real
+             # un-staged shape) passed vacuously and correctly, proving no
+             # fabrication. Restored byte-identically (`git diff --stat
+             # components/test/TestIsland.tsx` empty before implementing),
+             # then implemented; reran: `test/test-island.test.tsx` 10/10
+             # green (was 8, +2). `npx vitest run test/test-island.test.tsx
+             # lib/session/run.test.ts`: 138/138 green — no regression on
+             # the sibling graded-loop consumer of the identical field.
+             #
+             # `TZ=UTC make test`: 3099 passing (was 3097, +2 — exactly this
+             # run's two new tests; apps/web 1713, was 1711; no other suite
+             # moved: 255 v2 vitest, 47 v2/api, 423 v3/api, 120
+             # corpus-compiler, 468 engine, 73 fold-runner). `check-test-
+             # floor.mjs`: OK, 3099 >= floor 1899 (+1200 margin, unmoved,
+             # same discipline as every prior entry). `TZ=UTC make build`:
+             # exit 0, 30 routes, unchanged — this diff edits one existing
+             # component and its one existing test file, no new route or
+             # production file. `npm run gates`: all green — locked-css OK,
+             # 1 documented hunk, 294 v1 lines byte-identical; boundaries
+             # OK, 345 files, unchanged count; fonts degraded-but-non-
+             # blocking, pre-existing, 2/6 UI fonts present; corpus-
+             # morphology OK, 362 words; corpus-glyphs OK, 206 codepoints
+             # across 4 artifacts — all unchanged, this diff carries no
+             # corpus data. `npx tsc --noEmit`, run separately across all
+             # four v3 node packages: clean in all four. No PHP file
+             # changed, so `pint` was not applicable. No `v1/**`/`v2/**`
+             # edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+             # produced by running the suite was reverted before
+             # committing, same discipline as every prior entry — `git
+             # status --porcelain -- v1 v2` empty immediately before
+             # committing). No Arabic codepoint (both changed files swept
+             # programmatically, in Python, over the Arabic, Arabic
+             # Supplement, Arabic Extended-A and both Presentation Forms
+             # Unicode blocks, plus a `\u`-escape and
+             # `fromCharCode`/`fromCodePoint` check: CLEAN — every new
+             # string is a TypeScript identifier, a wire field name, or the
+             # synthetic test hash literal `"deadbeefcafef00d"` already used
+             # by `run.test.ts` for this exact field, never corpus text). No
+             # oracle/golden-log/fixture/snapshot regenerated — this diff
+             # touches one existing production file and one existing test
+             # file only.
+             #
+             # Session start: fresh container, no `node_modules`/`vendor`/
+             # compiled corpus anywhere; PHP defaulted to 8.3.6 (`v3/api`
+             # needs >=8.4.1); installed PHP 8.4.26 cleanly via the
+             # documented `packages.sury.org` apt mirror, no refusal this
+             # run. `HEAD` was found detached exactly at `origin/main`'s own
+             # real tip (`211f4ca`, v3-D331), on a stale LOCAL `main` branch
+             # ref two commits behind (`221fb47`, v3-D329) — the recurring
+             # stale-local-`main` trap this file has recorded roughly fifty
+             # times since v3-D77 — caught before any exploration via `git
+             # fetch origin main` + `git checkout main && git merge
+             # --ff-only origin/main`, a clean fast-forward, no work lost or
+             # at risk.
+             #
+             # NOT addressed: every item on v3-D331's own condensed "NOT
+             # addressed" list, unchanged — `rhymeClassOf()`;
+             # `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution`/`lib/pricing.ts
+             # #regionFromCountry()`; `PaywallGate` as a whole class;
+             # multi-surah enrollment as a product decision; the
+             # operational mailer/7-night launch window; PAY-1's Stripe
+             # fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy naming;
+             # `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero
+             # fold-side consumer; `selection_determinism_check` still
+             # replaying a committed fixture; `QueueItem.score`'s missing
+             # external reader; `acknowledgeReentry`'s "makeup" branch;
+             # `DrillPicker.tsx`'s unused `now` prop; the unused
+             # `atoms`/`corpus`/`sessions` IndexedDB object stores;
+             # `session_start`'s own latency metric; the streak/away-day
+             # day-space mismatch; `/workbench`'s own Pane 2 per-word
+             # inspector and Pane 3 spec editor; the deferred `vitest@5`
+             # major-version bump; `laravel/framework`'s own remaining
+             # advisories; `v2/api`'s own frozen advisories; the
+             # `trial_surah_source` column on `entitlements` — all
+             # unchanged. `TestIsland.tsx`'s own `corpusHash` gap is now
+             # CLOSED — with this, `DrillEvent.corpusHash` is stamped by
+             # every event-producing surface in `apps/web`, the identical
+             # closing statement v3-D214 made for `locale` one field
+             # earlier on this same file. Remove it from future
+             # "event-producing surface missing a provenance field"
+             # sweeps.
              # NOTE (v3-D331, 2026-10-20): `lib/admin/flags.ts`'s own
              # `FlagRow.killedAt`/`.ackAt` were typed and runtime-validated
              # as `string | null`, but the real backend sends them as plain
