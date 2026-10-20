@@ -537,3 +537,89 @@ describe("GlossDraftsPanel — the write half: draft, review, reject", () => {
     expect(reviewCall!.body).toMatchObject({ toStatus: "reviewed", actorKind: "human" });
   });
 });
+
+// v3-D334 — the same "a real failure is read by assistive tech no more
+// urgently than an ordinary success" shape v3-D241/v3-D329/v3-D330/v3-D333
+// each already closed on PrivacyPanel.tsx/OverrideEditor.tsx, found here on
+// a different panel none of those four runs ever swept. `onSubmitDraft`
+// rendered both outcomes of `saveGlossDraft()` in the identical passive
+// role="status" paragraph; `onReview` discarded a `{state:"failed"}`
+// outcome entirely, with no message of any kind.
+describe("GlossDraftsPanel — a real write failure is announced, not swallowed (v3-D334)", () => {
+  beforeEach(() => resetApiFetchForTests());
+  afterEach(() => vi.restoreAllMocks());
+
+  it("a failed draft save is announced as role=alert, naming the server's own reason", async () => {
+    let call = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        call++;
+        if (call === 1) return jsonResponse(emptyWorklist());
+        if (init?.method === "POST") return jsonResponse({ error: "text must not be empty" }, 422);
+        return jsonResponse(emptyWorklist());
+      }),
+    );
+
+    render(<GlossDraftsPanel />);
+    await waitFor(() => expect(screen.getByText(/no drafts yet/i)).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText(/^ayah$/i), { target: { value: "3" } });
+    fireEvent.change(screen.getByLabelText(/word position/i), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText(/^text$/i), { target: { value: "first draft text" } });
+    fireEvent.click(screen.getByRole("button", { name: /save draft/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/text must not be empty/i);
+  });
+
+  it("a successful draft save still reports as role=status — the fix narrows role=alert to the failure branch only", async () => {
+    let call = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        call++;
+        if (call === 1) return jsonResponse(emptyWorklist());
+        if (init?.method === "POST") return jsonResponse({ draft: DRAFT_ROW }, 201);
+        return jsonResponse({ ...emptyWorklist(), counts: { draft: 1, reviewed: 0, merged: 0, unauthored: 0 }, drafts: [DRAFT_ROW] });
+      }),
+    );
+
+    render(<GlossDraftsPanel />);
+    await waitFor(() => expect(screen.getByText(/no drafts yet/i)).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText(/^ayah$/i), { target: { value: "3" } });
+    fireEvent.change(screen.getByLabelText(/word position/i), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText(/^text$/i), { target: { value: "first draft text" } });
+    fireEvent.click(screen.getByRole("button", { name: /save draft/i }));
+
+    await waitFor(() => expect(screen.getByText(/draft saved/i)).toBeTruthy());
+    const statusNodes = screen.getAllByRole("status");
+    expect(statusNodes.some((n) => /draft saved/i.test(n.textContent ?? ""))).toBe(true);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("a failed review is announced as role=alert, naming the server's own reason — not silently discarded", async () => {
+    let call = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        call++;
+        const url = String(input);
+        if (call === 1) return jsonResponse({ ...emptyWorklist(), counts: { draft: 1, reviewed: 0, merged: 0, unauthored: 0 }, drafts: [DRAFT_ROW] });
+        if (url.includes("/review")) return jsonResponse({ error: "not authorised to review a gloss draft" }, 403);
+        return jsonResponse({ ...emptyWorklist(), counts: { draft: 1, reviewed: 0, merged: 0, unauthored: 0 }, drafts: [DRAFT_ROW] });
+      }),
+    );
+
+    render(<GlossDraftsPanel />);
+    await waitFor(() => expect(screen.getByText("first draft text")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: /mark reviewed/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/not authorised to review/i);
+    // the row's own status is untouched — the button is still "Mark reviewed", never swapped to "Reject to draft"
+    expect(screen.getByRole("button", { name: /mark reviewed/i })).toBeTruthy();
+  });
+});

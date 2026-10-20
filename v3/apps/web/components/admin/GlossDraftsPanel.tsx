@@ -52,8 +52,11 @@ export function GlossDraftsPanel() {
   const [noteDraft, setNoteDraft] = useState("");
   const [formBusy, setFormBusy] = useState(false);
   const [formMessage, setFormMessage] = useState<string | null>(null);
+  const [formFailed, setFormFailed] = useState(false);
 
   const [reviewBusyId, setReviewBusyId] = useState<number | null>(null);
+  const [reviewMessage, setReviewMessage] = useState<string | null>(null);
+  const [reviewFailed, setReviewFailed] = useState(false);
 
   const refresh = useCallback((forSurah: number) => {
     setLoad({ state: "loading" });
@@ -79,6 +82,7 @@ export function GlossDraftsPanel() {
       if (!isPositiveInt(ayahDraft) || !isPositiveInt(positionDraft) || textDraft.trim().length === 0) return;
       setFormBusy(true);
       setFormMessage(null);
+      setFormFailed(false);
       void (async () => {
         const outcome = await saveGlossDraft({
           surah,
@@ -101,6 +105,7 @@ export function GlossDraftsPanel() {
           refresh(surah);
           return;
         }
+        setFormFailed(true);
         setFormMessage(outcome.reason);
       })();
     },
@@ -110,10 +115,17 @@ export function GlossDraftsPanel() {
   const onReview = useCallback(
     (row: GlossDraftRow, toStatus: "reviewed" | "draft") => {
       setReviewBusyId(row.id);
+      setReviewMessage(null);
+      setReviewFailed(false);
       void (async () => {
         const outcome = await reviewGlossDraft(row.id, { toStatus, actorKind: "human" });
         setReviewBusyId(null);
-        if (outcome.state === "updated") refresh(surah);
+        if (outcome.state === "updated") {
+          refresh(surah);
+          return;
+        }
+        setReviewFailed(true);
+        setReviewMessage(`ayah ${row.ayah}, position ${row.position}: ${outcome.reason}`);
       })();
     },
     [surah, refresh],
@@ -164,6 +176,12 @@ export function GlossDraftsPanel() {
             {load.counts.merged} merged, {load.counts.unauthored} unauthored coordinate
             {load.counts.unauthored === 1 ? "" : "s"}.
           </p>
+
+          {reviewMessage ? (
+            <p className="caption" role={reviewFailed ? "alert" : "status"}>
+              {reviewMessage}
+            </p>
+          ) : null}
 
           {load.drafts.length === 0 ? (
             <p className="caption">No drafts yet for surah {load.surah}.</p>
@@ -305,7 +323,7 @@ export function GlossDraftsPanel() {
           Save draft
         </button>
         {formMessage ? (
-          <p className="caption" role="status">
+          <p className="caption" role={formFailed ? "alert" : "status"}>
             {formMessage}
           </p>
         ) : null}

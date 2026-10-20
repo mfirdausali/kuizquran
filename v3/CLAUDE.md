@@ -53,10 +53,160 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3104 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3107 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 423 v3/api + 120 corpus-compiler
-             # + 468 engine + 73 fold-runner + 1718 apps/web. (v3-D333, 2026-10-20)
+             # + 468 engine + 73 fold-runner + 1721 apps/web. (v3-D334, 2026-10-20)
+             # NOTE (v3-D334, 2026-10-20): `components/admin/GlossDraftsPanel.tsx`'s
+             # own two write actions — `onSubmitDraft` (`saveGlossDraft()`) and
+             # `onReview` (`reviewGlossDraft()`, the "Mark reviewed"/"Reject to
+             # draft" buttons) — carried the same "role=status vs role=alert"
+             # shape v3-D241/v3-D329/v3-D330/v3-D333 each already closed on
+             # `PrivacyPanel.tsx`/`OverrideEditor.tsx`, on a DIFFERENT panel none
+             # of those four runs ever swept, and one of the two actions here was
+             # sharper: `onReview` did not merely under-prioritize a real
+             # failure, it discarded it ENTIRELY — a `{state:"failed",reason}`
+             # outcome left the "Mark reviewed" button simply re-enabled, with
+             # zero feedback of any kind, not even a passive status message.
+             #
+             # `onSubmitDraft` set the same `formMessage` for both
+             # `saveGlossDraft()`'s `"saved"` and `"failed"` outcomes, rendered
+             # in one hardcoded `<p role="status">` — a genuine 422/403 read
+             # with the identical passive priority as an ordinary save.
+             #
+             # Found by a dedicated fresh sweep of every `components/**` file
+             # carrying `role="status"` for a write outcome (`grep -rln
+             # 'role="status"' components/`), checking each against whether its
+             # outcome type has a real failure branch with its own render — the
+             # same check v3-D333's own closing note left open for every OTHER
+             # file carrying this pattern. The same sweep also found the
+             # IDENTICAL shape on `components/admin/FlagsPanel.tsx`'s
+             # `FlagRowView` (its shared `message` state renders
+             # `killFlag`/`acknowledgeFlag`/`enableFlag`'s own real `{ok:false,
+             # message}` outcome in one hardcoded `role="status"` paragraph) —
+             # real, independently verified against `lib/admin/flags.ts`'s real
+             # outcome shapes, deliberately NOT fixed this run, to keep this
+             # entry scoped to the one file whose own two actions were fully
+             # fixed together — the same "fix every sibling action on the file
+             # touched, leave a found sibling on a DIFFERENT file for the next
+             # run" precedent v3-D241/D329/D330 already set on `PrivacyPanel.tsx`.
+             #
+             # Fixed on the same template: both handlers gain their own
+             # `{name}Failed` boolean, reset at the start of every fresh
+             # attempt and set `true` only on the outcome's own `"failed"`
+             # state; `onSubmitDraft`'s existing `formMessage` paragraph now
+             # renders `role={formFailed ? "alert" : "status"}` instead of a
+             # hardcoded `"status"`. `onReview` — which had no message state at
+             # all — gains a new `reviewMessage`/`reviewFailed` pair and a new
+             # paragraph (above the drafts table, inside the `"ready"` branch)
+             # rendering `` `ayah ${row.ayah}, position ${row.position}:
+             # ${outcome.reason}` `` at `role={reviewFailed ? "alert" :
+             # "status"}` — the coordinate prefix matters here because, unlike
+             # `formMessage` (one form on screen), a review failure happens
+             # per-row in a table that can list several drafts at once, and the
+             # message needed to say WHICH row failed. A successful review
+             # still relies on the table's own re-render (the row's status/
+             # action-button column changes) for its feedback, exactly as
+             # before this fix — no new success message was invented.
+             #
+             # RED confirmed directly: three new cases in a new
+             # `test/gloss-drafts-panel.test.tsx` describe block (17
+             # pre-existing cases in the file untouched) — a failed draft-save
+             # case (422, "text must not be empty") and a failed review case
+             # (403, "not authorised to review a gloss draft") were both run
+             # against the unmodified component and failed exactly as
+             # predicted, `screen.findByRole("alert")` timing out on both,
+             # since every message path was `role="status"` or rendered no
+             # message at all. A third, negative case (a genuine draft-save
+             # success) passed vacuously against the unmodified component too,
+             # correctly — it proves the fix narrows `role="alert"` to the
+             # failure branch only, never upgrading an ordinary success.
+             # Mutation-verified directly: `git stash` of
+             # `GlossDraftsPanel.tsx` alone (all three new cases kept, 17
+             # pre-existing cases untouched) reproduced the identical two
+             # failures; restored byte-identically, reran:
+             # `test/gloss-drafts-panel.test.tsx` 20/20 green (was 17, +3).
+             # `npx vitest run test/gloss-drafts-panel.test.tsx
+             # lib/admin/glossDrafts.test.ts`: 31/31 green — no regression on
+             # the one other real consumer of
+             # `saveGlossDraft`/`reviewGlossDraft`.
+             #
+             # `TZ=UTC make test`: 3107 passing (was 3104, +3 — exactly this
+             # run's three new cases; apps/web 1721, was 1718; no other suite
+             # moved: 255 v2 vitest, 47 v2/api, 423 v3/api, 120 corpus-compiler,
+             # 468 engine, 73 fold-runner). `check-test-floor.mjs`: OK, 3107 >=
+             # floor 1899 (+1208 margin, unmoved, same discipline as every
+             # prior entry). `TZ=UTC make build`: exit 0, 30 routes, unchanged —
+             # this diff edits one existing component and its one existing
+             # test file, no new route or production file. `npm run gates`:
+             # all green — locked-css OK, 1 documented hunk, 294 v1 lines
+             # byte-identical; boundaries OK, 345 files, unchanged count; fonts
+             # degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+             # corpus-morphology OK, 362 words; corpus-glyphs OK, 206
+             # codepoints across 4 artifacts — all unchanged, this diff carries
+             # no corpus data. `npx tsc --noEmit` (apps/web): clean. No PHP
+             # file changed, so `pint` was not applicable. No `v1/**`/`v2/**`
+             # edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+             # produced by running the v2 suite was reverted before
+             # committing, same discipline as every prior entry — `git status
+             # --porcelain -- v1 v2` empty immediately before committing). No
+             # Arabic codepoint (both changed files swept programmatically, in
+             # Python, over the Arabic, Arabic Supplement, Arabic Extended-A
+             # and both Presentation Forms Unicode blocks, plus a `\u`-escape
+             # and `fromCharCode`/`fromCodePoint` check: CLEAN — every new
+             # string is a TypeScript identifier, a fixed English assertion/
+             # caption sentence, or a synthetic HTTP-status/error-message test
+             # fixture, never corpus text). No oracle/golden-log/fixture/
+             # snapshot regenerated — this diff touches one existing
+             # production file and one existing test file only.
+             #
+             # Session start: fresh container, no `node_modules`/`vendor`/
+             # compiled corpus anywhere; PHP defaulted to 8.3.6 (`v3/api` needs
+             # >=8.4.1); installed PHP 8.4.26 cleanly via the documented
+             # `packages.sury.org` apt mirror, no refusal this run. `HEAD` and
+             # local `main` already agreed exactly with `origin/main` at
+             # `240a81b` (v3-D333) — no stale-local-`main` trap this run,
+             # confirmed directly via `git fetch origin main` before any
+             # exploration. All five PHP-independent `npm install`s (`v2`,
+             # `packages/engine`, `packages/corpus-compiler`,
+             # `worker/fold-runner`, `apps/web`) were run directly and in
+             # parallel; both composer installs (`v2/api`, `v3/api`) completed
+             # cleanly on the first attempt, no transient-proxy retry needed
+             # this run. A fresh `npm audit`/`composer audit` re-check
+             # (v3-D309's own standing "not a one-time check" instruction) was
+             # also run this session across all four v3 Node packages and
+             # `v3/api`: every tally matched what v3-D328's own last re-check
+             # already recorded exactly — `{critical: 2, high: 1, moderate: 3,
+             # total: 6}` on each Node package (the single deferred `vitest@5`
+             # chain), 4 advisories on `laravel/framework` alone — no new CVE,
+             # not acted on further.
+             #
+             # NOT addressed: `FlagsPanel.tsx`'s own identical role=status/
+             # role=alert gap on `onKill`/`onAck`/`onConfirmEnable` (named
+             # above, real, independently verified, deliberately left for a
+             # future run); every item on v3-D333's own condensed "NOT
+             # addressed" list, unchanged — `rhymeClassOf()`;
+             # `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution`/`lib/pricing.ts
+             # #regionFromCountry()`; `PaywallGate` as a whole class;
+             # multi-surah enrollment as a product decision; the operational
+             # mailer/7-night launch window; PAY-1's Stripe fixtures; surah
+             # 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+             # taxonomy naming; `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero fold-side
+             # consumer; `selection_determinism_check` still replaying a
+             # committed fixture; `QueueItem.score`'s missing external reader;
+             # `acknowledgeReentry`'s "makeup" branch; `DrillPicker.tsx`'s
+             # unused `now` prop; the unused `atoms`/`corpus`/`sessions`
+             # IndexedDB object stores; `session_start`'s own latency metric;
+             # the streak/away-day day-space mismatch; `/workbench`'s own
+             # Pane 2/3; the deferred `vitest@5` bump; `laravel/framework`'s
+             # remaining advisories; `v2/api`'s frozen advisories; the
+             # `trial_surah_source` column on `entitlements` — all unchanged.
+             # `GlossDraftsPanel.tsx`'s own two failure-announcement gaps are
+             # now CLOSED — remove them from future "role=status vs
+             # role=alert" sweeps; `FlagsPanel.tsx`'s own sibling gap is the
+             # next concrete pick for that same sweep.
              # NOTE (v3-D333, 2026-10-20): `components/workbench/OverrideEditor.tsx`'s
              # own four action handlers (`onSubmitGloss`/`onSubmitDisable`/
              # `onSubmitDistractor`/`onSubmitGroup`) shared one
