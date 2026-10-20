@@ -53,10 +53,125 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3099 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3104 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 423 v3/api + 120 corpus-compiler
-             # + 468 engine + 73 fold-runner + 1713 apps/web. (v3-D332, 2026-10-20)
+             # + 468 engine + 73 fold-runner + 1718 apps/web. (v3-D333, 2026-10-20)
+             # NOTE (v3-D333, 2026-10-20): `components/workbench/OverrideEditor.tsx`'s
+             # own four action handlers (`onSubmitGloss`/`onSubmitDisable`/
+             # `onSubmitDistractor`/`onSubmitGroup`) shared one
+             # `submitOverride()` outcome shape (`{state:"created",...} |
+             # {state:"failed",reason}`, `lib/overrides/write.ts`) and
+             # rendered BOTH outcomes in the identical passive `<p
+             # role="status">` region — a genuine submission failure (a 422,
+             # a 403, a dropped connection) read with the same unprivileged
+             # priority as an ordinary success. The exact "a real failure is
+             # announced as a passive status, not an alert" shape v3-D241/
+             # v3-D329/v3-D330 each already closed on `PrivacyPanel.tsx`'s
+             # three sibling actions, found here on a DIFFERENT panel on the
+             # same `/workbench` route that none of those three runs ever
+             # swept.
+             #
+             # Fixed on the identical template: each handler gains its own
+             # `{name}Failed` boolean, reset on every fresh attempt and set
+             # only on `outcome.state === "failed"`; each message `<p>` now
+             # renders `role={xFailed ? "alert" : "status"}` instead of a
+             # hardcoded `"status"`. The hash-recompute warning suffix (a
+             # successful write whose verification-hash recompute still
+             # failed) is untouched and stays `role="status"` — a different,
+             # correctly-passive case.
+             #
+             # RED confirmed directly: four new cases (one 422 per gloss/
+             # disable field, one network throw for distractor, one 403 for
+             # group) all failed exactly as predicted against the
+             # unmodified component — `screen.findByRole("alert")` timing
+             # out, since every message was `role="status"` regardless of
+             # outcome. A fifth, negative case (a genuine gloss success)
+             # passed vacuously, correctly, proving the fix narrows
+             # `role="alert"` to the failure branch only. Mutation-verified:
+             # `git stash` of the one production file alone (every new test
+             # kept, 22 pre-existing cases untouched) reproduced the
+             # identical four failures; restored byte-identically, reran:
+             # `test/workbench-override-editor.test.tsx` 26/26 green (was
+             # 22, +4). `npx vitest run test/workbench-override-editor.test.tsx
+             # test/workbench-ui.test.tsx test/workbench-qari-mode.test.tsx`:
+             # 95/95 green — no regression on either sibling `/workbench`
+             # consumer.
+             #
+             # `TZ=UTC make test`: 3104 passing (was 3099, +5 — exactly this
+             # run's five new cases; apps/web 1718, was 1713; no other suite
+             # moved: 255 v2 vitest, 47 v2/api, 423 v3/api, 120
+             # corpus-compiler, 468 engine, 73 fold-runner). `check-test-
+             # floor.mjs`: OK, 3104 >= floor 1899 (+1205 margin, unmoved,
+             # same discipline as every prior entry). `TZ=UTC make build`:
+             # exit 0, 30 routes, unchanged — this diff edits one existing
+             # component and its one existing test file, no new route or
+             # production file. `npm run gates`: all green — locked-css OK,
+             # 1 documented hunk, 294 v1 lines byte-identical; boundaries
+             # OK, 345 files, unchanged count; fonts degraded-but-non-
+             # blocking, pre-existing, 2/6 UI fonts present; corpus-
+             # morphology OK, 362 words; corpus-glyphs OK, 206 codepoints
+             # across 4 artifacts — all unchanged, this diff carries no
+             # corpus data. `npx tsc --noEmit` (apps/web): clean. No PHP
+             # file changed, so `pint` was not applicable. No
+             # `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff produced by running the suite was reverted
+             # before committing, same discipline as every prior entry —
+             # `git status --porcelain -- v1 v2` empty immediately before
+             # committing). No Arabic codepoint (both changed files swept
+             # programmatically, in Python, over the Arabic, Arabic
+             # Supplement, Arabic Extended-A and both Presentation Forms
+             # Unicode blocks, plus a `\u`-escape and
+             # `fromCharCode`/`fromCodePoint` check: CLEAN — every new
+             # string is a TypeScript identifier, a fixed English
+             # assertion/caption sentence, or a synthetic HTTP-status/
+             # error-message test fixture, never corpus text). No
+             # oracle/golden-log/fixture/snapshot regenerated — this diff
+             # touches one existing production file and one existing test
+             # file only.
+             #
+             # Session start: fresh container, no `node_modules`/`vendor`/
+             # compiled corpus anywhere; PHP defaulted to 8.3.6 (`v3/api`
+             # needs >=8.4.1); installed PHP 8.4.26 cleanly via the
+             # documented `packages.sury.org` apt mirror, no refusal this
+             # run. `HEAD` and local `main` already agreed exactly with
+             # `origin/main` at `58bac8d` (v3-D332) — no stale-local-`main`
+             # trap this run. The five PHP-independent `npm install`s were
+             # run directly and in parallel after an earlier attempt
+             # backgrounded them with a relative `cd` that silently
+             # resolved against this session's own default `v3/` working
+             # directory instead of the repo root — caught immediately and
+             # recovered by using absolute paths, no work lost; both
+             # composer installs (`v2/api`, `v3/api`) each hit the
+             # documented transient proxy timeout and recovered via the
+             # git-mirror fallback, run sequentially per this file's own
+             # recorded shared-cache collision risk.
+             #
+             # NOT addressed: every item on v3-D332's own condensed "NOT
+             # addressed" list, unchanged — `rhymeClassOf()`;
+             # `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution`/`lib/pricing.ts
+             # #regionFromCountry()`; `PaywallGate` as a whole class;
+             # multi-surah enrollment as a product decision; the
+             # operational mailer/7-night launch window; PAY-1's Stripe
+             # fixtures; surah 67's scene beats;
+             # `worker/fold-runner/src/severity.ts`'s taxonomy naming;
+             # `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero
+             # fold-side consumer; `selection_determinism_check` still
+             # replaying a committed fixture; `QueueItem.score`'s missing
+             # external reader; `acknowledgeReentry`'s "makeup" branch;
+             # `DrillPicker.tsx`'s unused `now` prop; the unused
+             # `atoms`/`corpus`/`sessions` IndexedDB object stores;
+             # `session_start`'s own latency metric; the streak/away-day
+             # day-space mismatch; `/workbench`'s own Pane 2/3; the
+             # deferred `vitest@5` bump; `laravel/framework`'s remaining
+             # advisories; `v2/api`'s frozen advisories; the
+             # `trial_surah_source` column on `entitlements` — all
+             # unchanged. `OverrideEditor.tsx`'s own four sibling
+             # failure-announcement gaps are now CLOSED — remove them from
+             # future "role=status vs role=alert" sweeps. See
+             # DECISIONS.md v3-D333.
              # NOTE (v3-D332, 2026-10-20): `components/test/TestIsland.tsx`'s
              # own `test_start`/`test_answer`/`test_result` events carried
              # `locale: glossLang` (v3-D213/D214) but never `corpusHash`,

@@ -681,3 +681,139 @@ describe("OverrideEditor — grouping words into a multi-word idiom", () => {
     expect(submit.disabled).toBe(false);
   });
 });
+
+// v3-D333: all four of this panel's own action handlers (gloss/disable/
+// distractor/group) share one `submitOverride()` call shape — `{state:
+// "created", ...} | {state: "failed", reason}` (`lib/overrides/write.ts`) —
+// but every one of them rendered BOTH outcomes in the identical passive
+// `role="status"` live region (`outcome.state === "created" ? setXMessage
+// ("... corrected" + ...) : setXMessage(outcome.reason)`, then a single
+// hardcoded `<p role="status">`). The exact "a real failure is announced
+// with the same passive priority as an ordinary success" shape v3-D241/
+// v3-D329/v3-D330 each closed on `PrivacyPanel.tsx`'s three sibling
+// actions (Reveal, CSV export, Re-check token) — here on FOUR sibling
+// actions on a DIFFERENT panel those three runs never reached, since none
+// of them ever swept `OverrideEditor.tsx` itself. An admin whose gloss
+// correction, disable, distractor replacement or group grouping genuinely
+// failed (a validation 422, a dropped connection, a 403) saw the server's
+// own reason sitting in the same quiet region a "gloss corrected" success
+// already uses — nothing on screen raised its priority the moment it
+// mattered most.
+describe("OverrideEditor — a failed submission is announced as an alert, not a passive status", () => {
+  const realFetch = globalThis.fetch;
+  beforeEach(() => resetApiFetchForTests());
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    vi.restoreAllMocks();
+  });
+
+  it("a gloss correction that the server rejects is announced with role=alert", async () => {
+    globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      if (method === "POST") return jsonResponse({ message: "the gloss field is required" }, 422);
+      return jsonResponse({ overrides: [] });
+    }) as unknown as typeof fetch;
+
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} distractors={DISTRACTORS} />);
+    await waitFor(() => expect(screen.getByText(/no overrides recorded/i)).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText(/^word$/i), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText(/corrected gloss/i), { target: { value: "at the time" } });
+    fireEvent.click(screen.getByRole("button", { name: /submit gloss correction/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/the gloss field is required/i);
+    expect(screen.queryByText(/gloss corrected/i)).toBeNull();
+  });
+
+  it("a disable that the server rejects is announced with role=alert", async () => {
+    globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      if (method === "POST") return jsonResponse({ message: "that question is already disabled" }, 422);
+      return jsonResponse({ overrides: [] });
+    }) as unknown as typeof fetch;
+
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} distractors={DISTRACTORS} />);
+    await waitFor(() => expect(screen.getByText(/no overrides recorded/i)).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: /^disable$/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/already disabled/i);
+  });
+
+  it("a distractor replacement that throws a network error is announced with role=alert", async () => {
+    globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      if (method === "POST") throw new TypeError("network request failed");
+      return jsonResponse({ overrides: [] });
+    }) as unknown as typeof fetch;
+
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} distractors={DISTRACTORS} />);
+    await waitFor(() => expect(screen.getByText(/no overrides recorded/i)).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText(/target word/i), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText(/replacement 1/i), { target: { value: "4:2" } });
+    fireEvent.click(screen.getByRole("button", { name: /replace distractors/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/request failed/i);
+    expect(screen.queryByText(/distractors replaced/i)).toBeNull();
+  });
+
+  it("a group that the server refuses with a 403 is announced with role=alert", async () => {
+    globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      if (method === "POST") return jsonResponse({}, 403);
+      return jsonResponse({ overrides: [] });
+    }) as unknown as typeof fetch;
+
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} distractors={DISTRACTORS} />);
+    await waitFor(() => expect(screen.getByText(/no overrides recorded/i)).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText(/anchor word/i), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText(/group with 1/i), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: /^group words$/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/not authorised/i);
+  });
+
+  // Negative sibling: a genuine SUCCESS on each of the four fields must
+  // still read role="status", never upgraded to role="alert" — proving the
+  // fix narrows the alert role to the failure branch only, the same
+  // discipline v3-D241's own strengthened-existing-test precedent set.
+  it("a genuine success still reads role=status, not role=alert, on every field", async () => {
+    const posted: string[] = [];
+    globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      if (method === "POST") {
+        const body = JSON.parse(String(init?.body)) as { field: string };
+        posted.push(body.field);
+        return jsonResponse(
+          {
+            override: {
+              id: posted.length, surah: 12, ayah: 4, position: 1, questionType: "s1", field: body.field,
+              payload: body.field === "gloss" ? { lang: "en", text: "at the time" } : { disabled: true },
+              editorId: 3, note: null, createdAt: 1_700_000_000_000 + posted.length,
+            },
+            hashRecompute: { ok: true, rows: 1 },
+          },
+          201,
+        );
+      }
+      return jsonResponse({ overrides: [] });
+    }) as unknown as typeof fetch;
+
+    render(<OverrideEditor surah={12} ayah={4} words={WORDS} surahWords={SURAH_WORDS} distractors={DISTRACTORS} />);
+    await waitFor(() => expect(screen.getByText(/no overrides recorded/i)).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText(/^word$/i), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText(/corrected gloss/i), { target: { value: "at the time" } });
+    fireEvent.click(screen.getByRole("button", { name: /submit gloss correction/i }));
+    await waitFor(() => expect(screen.getByText(/gloss corrected/i)).toBeTruthy());
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByText(/gloss corrected/i).getAttribute("role")).toBe("status");
+  });
+});

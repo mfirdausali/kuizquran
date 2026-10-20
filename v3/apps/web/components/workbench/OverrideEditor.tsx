@@ -224,6 +224,7 @@ export function OverrideEditor({ surah, ayah, words, surahWords, distractors }: 
   const [glossNote, setGlossNote] = useState("");
   const [glossBusy, setGlossBusy] = useState(false);
   const [glossMessage, setGlossMessage] = useState<string | null>(null);
+  const [glossFailed, setGlossFailed] = useState(false);
 
   const [disableScope, setDisableScope] = useState<"ayah" | "position">("ayah");
   const [disablePosition, setDisablePosition] = useState<PositionChoice>("");
@@ -231,18 +232,21 @@ export function OverrideEditor({ surah, ayah, words, surahWords, distractors }: 
   const [disableNote, setDisableNote] = useState("");
   const [disableBusy, setDisableBusy] = useState(false);
   const [disableMessage, setDisableMessage] = useState<string | null>(null);
+  const [disableFailed, setDisableFailed] = useState(false);
 
   const [distractorTarget, setDistractorTarget] = useState<PositionChoice>("");
   const [distractorPicks, setDistractorPicks] = useState<string[]>(() => Array(DISTRACTOR_SLOTS).fill(""));
   const [distractorNote, setDistractorNote] = useState("");
   const [distractorBusy, setDistractorBusy] = useState(false);
   const [distractorMessage, setDistractorMessage] = useState<string | null>(null);
+  const [distractorFailed, setDistractorFailed] = useState(false);
 
   const [groupAnchor, setGroupAnchor] = useState<PositionChoice>("");
   const [groupPicks, setGroupPicks] = useState<string[]>(() => Array(GROUP_SLOTS).fill(""));
   const [groupNote, setGroupNote] = useState("");
   const [groupBusy, setGroupBusy] = useState(false);
   const [groupMessage, setGroupMessage] = useState<string | null>(null);
+  const [groupFailed, setGroupFailed] = useState(false);
 
   // The replacement pool: every surah word EXCEPT the one currently being
   // replaced — offering a word as its own distractor would be a
@@ -291,6 +295,7 @@ export function OverrideEditor({ surah, ayah, words, surahWords, distractors }: 
     if (glossPosition === "" || glossText.trim().length === 0) return;
     setGlossBusy(true);
     setGlossMessage(null);
+    setGlossFailed(false);
     void (async () => {
       const outcome = await submitOverride(
         glossOverride(surah, ayah, glossPosition, glossLang, glossText.trim(), glossNote.trim() || undefined),
@@ -303,6 +308,7 @@ export function OverrideEditor({ surah, ayah, words, surahWords, distractors }: 
         refresh();
         return;
       }
+      setGlossFailed(true);
       setGlossMessage(outcome.reason);
     })();
   }, [surah, ayah, glossPosition, glossLang, glossText, glossNote, refresh]);
@@ -312,6 +318,7 @@ export function OverrideEditor({ surah, ayah, words, surahWords, distractors }: 
     if (disableScope === "position" && position === "") return;
     setDisableBusy(true);
     setDisableMessage(null);
+    setDisableFailed(false);
     void (async () => {
       const outcome = await submitOverride(
         disableOverride(surah, ayah, position === "" ? null : position, disableKind, true, disableNote.trim() || undefined),
@@ -323,6 +330,7 @@ export function OverrideEditor({ surah, ayah, words, surahWords, distractors }: 
         refresh();
         return;
       }
+      setDisableFailed(true);
       setDisableMessage(outcome.reason);
     })();
   }, [surah, ayah, disableScope, disablePosition, disableKind, disableNote, refresh]);
@@ -355,6 +363,7 @@ export function OverrideEditor({ surah, ayah, words, surahWords, distractors }: 
     if (chosen.length === 0) return;
     setDistractorBusy(true);
     setDistractorMessage(null);
+    setDistractorFailed(false);
     void (async () => {
       const outcome = await submitOverride(
         distractorOverride(
@@ -380,6 +389,7 @@ export function OverrideEditor({ surah, ayah, words, surahWords, distractors }: 
         refresh();
         return;
       }
+      setDistractorFailed(true);
       setDistractorMessage(outcome.reason);
     })();
   }, [surah, ayah, distractorTarget, distractorPicks, distractorNote, surahWords, refresh]);
@@ -393,6 +403,7 @@ export function OverrideEditor({ surah, ayah, words, surahWords, distractors }: 
     if (members.length === 0) return;
     setGroupBusy(true);
     setGroupMessage(null);
+    setGroupFailed(false);
     void (async () => {
       const outcome = await submitOverride(groupOverride(surah, ayah, groupAnchor, members, groupNote.trim() || undefined));
       setGroupBusy(false);
@@ -403,6 +414,7 @@ export function OverrideEditor({ surah, ayah, words, surahWords, distractors }: 
         refresh();
         return;
       }
+      setGroupFailed(true);
       setGroupMessage(outcome.reason);
     })();
   }, [surah, ayah, groupAnchor, groupPicks, groupNote, refresh]);
@@ -477,7 +489,7 @@ export function OverrideEditor({ surah, ayah, words, surahWords, distractors }: 
           Submit gloss correction
         </button>
         {glossMessage ? (
-          <p className="caption" role="status">
+          <p className="caption" role={glossFailed ? "alert" : "status"}>
             {glossMessage}
           </p>
         ) : null}
@@ -544,7 +556,7 @@ export function OverrideEditor({ surah, ayah, words, surahWords, distractors }: 
           Disable
         </button>
         {disableMessage ? (
-          <p className="caption" role="status">
+          <p className="caption" role={disableFailed ? "alert" : "status"}>
             {disableMessage}
           </p>
         ) : null}
@@ -614,7 +626,7 @@ export function OverrideEditor({ surah, ayah, words, surahWords, distractors }: 
           Replace distractors
         </button>
         {distractorMessage ? (
-          <p className="caption" role="status">
+          <p className="caption" role={distractorFailed ? "alert" : "status"}>
             {distractorMessage}
           </p>
         ) : null}
@@ -669,7 +681,7 @@ export function OverrideEditor({ surah, ayah, words, surahWords, distractors }: 
           Group words
         </button>
         {groupMessage ? (
-          <p className="caption" role="status">
+          <p className="caption" role={groupFailed ? "alert" : "status"}>
             {groupMessage}
           </p>
         ) : null}
