@@ -37,12 +37,15 @@ const offFlag = {
   ackAutoWaived: false,
 };
 
+// `killed_at`/`ack_at` are `unsignedBigInteger` columns
+// (`Flag::casts()`: `'killed_at' => 'integer'`) — the real wire value is a
+// plain JSON number (epoch milliseconds), never a pre-formatted ISO string.
 const killedFlag = {
   key: "social.friends",
   description: "Friend graph and mutual visibility.",
   enabled: false,
   version: 2,
-  killedAt: "2026-08-20T03:00:00Z",
+  killedAt: 1787194800000, // 2026-08-20T03:00:00Z
   killedBy: "u_ab12cd34ef56",
   bannerVisible: true,
   ackAt: null,
@@ -57,7 +60,7 @@ const killedFlag = {
 const ackedFlag = {
   ...killedFlag,
   key: "social.leaderboard_v2",
-  ackAt: "2026-08-21T09:00:00Z",
+  ackAt: 1787302800000, // 2026-08-21T09:00:00Z
   ackBy: "u_98fe76dc54ba",
   ackAutoWaived: false,
 };
@@ -67,7 +70,7 @@ const ackedFlag = {
 const autoWaivedFlag = {
   ...killedFlag,
   key: "social.mutuals",
-  ackAt: "2026-08-23T04:00:00Z",
+  ackAt: 1787457600000, // 2026-08-23T04:00:00Z
   ackBy: null,
   ackAutoWaived: true,
 };
@@ -120,7 +123,7 @@ describe("FlagsPanel — three states, never two", () => {
     render(<FlagsPanel />);
     await waitFor(() => expect(screen.getByText("social.leaderboard_v2")).toBeTruthy());
     const banner = screen.getByRole("alert").textContent ?? "";
-    expect(banner).toContain("2026-08-21T09:00:00Z");
+    expect(banner).toContain("2026-08-21T09:00:00.000Z");
     expect(banner).not.toMatch(/not yet acknowledged/i);
   });
 
@@ -129,7 +132,7 @@ describe("FlagsPanel — three states, never two", () => {
     render(<FlagsPanel />);
     await waitFor(() => expect(screen.getByText("social.mutuals")).toBeTruthy());
     const banner = screen.getByRole("alert").textContent ?? "";
-    expect(banner).toContain("2026-08-23T04:00:00Z");
+    expect(banner).toContain("2026-08-23T04:00:00.000Z");
     expect(banner).toMatch(/auto-waived after 72h/i);
     expect(banner).not.toMatch(/not yet acknowledged/i);
   });
@@ -145,7 +148,7 @@ describe("FlagsPanel — three states, never two", () => {
     await waitFor(() => expect(screen.getByText("social.friends")).toBeTruthy());
     const banner = screen.getByRole("alert").textContent ?? "";
     expect(banner).toContain("u_ab12cd34ef56");
-    expect(banner).toContain("2026-08-20T03:00:00Z");
+    expect(banner).toContain("2026-08-20T03:00:00.000Z");
   });
 
   it("names the acknowledging admin's pseudonym in the banner", async () => {

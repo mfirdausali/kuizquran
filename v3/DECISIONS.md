@@ -34295,3 +34295,136 @@ advisories; `v2/api`'s own frozen advisories; the `trial_surah_source`
 column on `entitlements` — all unchanged. `PrivacyPanel.tsx`'s own
 third-sibling re-check failure-announcement gap is now CLOSED — remove it
 from future "docblock/convention says X, reality is Y" sweeps.
+
+---
+
+## v3-D331 (2026-10-20)
+
+`lib/admin/flags.ts`'s own `FlagRow.killedAt`/`.ackAt` were typed and
+runtime-validated as `string | null` — but the real backend sends them as
+plain epoch-millisecond INTEGERS, never pre-formatted strings.
+`flags.killed_at`/`.ack_at` are `unsignedBigInteger` columns
+(`2026_08_11_120000_create_flags_tables.php`), cast `'killed_at' =>
+'integer'`/`'ack_at' => 'integer'` on the `Flag` model with no accessor
+overriding either, and `Admin\FlagController::index()` sends `$row
+->killed_at ?? null`/`$row->ack_at ?? null` with no formatting at all — so
+the real wire value is a JSON number or `null`, matching every sibling
+admin ms-timestamp field in this codebase (`lib/admin/purgeLedger.ts
+#purgedAtMs: number`, `lib/admin/billingAudit.ts#trialStartedAt: number |
+null`). `isFlagRow()`'s own type guard checked `typeof f.killedAt ===
+"string"` instead, and `loadFlags()` discards the WHOLE `flags` ARRAY —
+not just the one malformed row — the instant `.every(isFlagRow)` fails on
+any element: `if (... !((body...).flags as unknown[]).every(isFlagRow)) {
+return { state: "unavailable", ... }`. `FlagService::kill()` is this
+system's own one-click, unconditional incident-response safety mechanism —
+the moment ANY real flag has ever been killed or acknowledged, the entire
+`/settings/flags` console goes dark for every admin, hiding every OTHER
+flag's state too, at precisely the moment an operator has just used the
+kill switch and most needs to see its result. `FlagsPanel.tsx`'s own
+banner line compounded it one layer down: even with a correct type, it
+interpolated the raw value directly (`` ` at ${flag.killedAt}` ``) rather
+than formatting it, unlike every sibling panel's own established
+convention (`PurgeLedgerPanel.tsx:122 new Date(e.purgedAtMs)
+.toISOString()`, `BillingAuditPanel.tsx`, `NightlyWindowPanel.tsx` all
+format their own ms fields this way) — so even a successful parse would
+have rendered a raw millisecond integer instead of a date.
+
+**Why nothing caught it:** `lib/admin/flags.test.ts`'s own test, explicitly
+titled "returns `ready` for the controller's real response shape,"
+fabricated `killedAt: "2026-08-20T03:00:00Z"` — an ISO string, never what
+the real controller sends. `test/flags-panel.test.tsx` repeated the
+identical fabricated-string fixture. Neither test file ever drove a real
+kill through the real Laravel backend and fed that real response into the
+real `loadFlags()` parser, so the type mismatch was invisible to `make
+test` while live-broken against any real server.
+
+Found by a dedicated fresh-sweep agent (general-purpose, high effort)
+handed the full exclusion list this file's own recent entries carry and
+told not to re-report any of it — independently re-verified by this run
+directly against the migration, `Flag::casts()`, `FlagController::index()`
+and every sibling admin ms-timestamp field's own convention before writing
+any test.
+
+Fixed: `FlagRow.killedAt`/`.ackAt` are now `number | null`; `isFlagRow()`
+checks `typeof f.killedAt === "number"` (and the same for `ackAt`);
+`FlagsPanel.tsx`'s banner line now formats both via `new Date(...)
+.toISOString()`, present only when non-null, matching `PurgeLedgerPanel
+.tsx`'s own precedent exactly.
+
+RED confirmed directly: `git stash` of the two production files alone (the
+new `flags.test.ts` case plus every existing assertion in both test files,
+all kept, now using real integer fixtures) failed exactly 8 of 27 — every
+case whose fixture carries a real, non-null `killedAt`/`ackAt` integer
+failed with `screen.getByText(...)` never finding the flag's own key at
+all, the rendered DOM reading "the API's answer carried no flag list" —
+the real production symptom this entry describes, reproduced exactly, not
+merely a type-level assertion. Restored byte-identically (`git diff`
+empty before re-implementing), reran: `flags.test.ts` 15/15 green (was
+14, +1), `flags-panel.test.tsx` 12/12 green (unchanged count — every
+existing case's own fixture/assertion was corrected from a fabricated
+string to the real integer shape, carrying no new case).
+
+`TZ=UTC make test`: 3097 passing (was 3096, +1 — exactly this run's one
+new test; apps/web 1711, was 1710; no other suite moved: 255 v2 vitest,
+47 v2/api, 423 v3/api, 120 corpus-compiler, 468 engine, 73 fold-runner).
+`check-test-floor.mjs`: OK, 3097 >= floor 1899 (+1198 margin, unmoved,
+same discipline as every prior entry). `TZ=UTC make build`: exit 0, 30
+routes, unchanged — this diff edits two existing production files and
+their two existing test files, no new route or production file. `npm run
+gates`: all green — locked-css OK, 1 documented hunk, 294 v1 lines
+byte-identical; boundaries OK, 345 files, unchanged count; fonts
+degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints across 4
+artifacts — all unchanged, this diff carries no corpus data. `npx tsc
+--noEmit`, run as part of `typecheck-v3` across all four v3 node packages:
+clean in all four. No PHP file changed, so `pint` was not applicable. No
+`v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+produced by running the suite was reverted before committing, same
+discipline as every prior entry — `git status --porcelain -- v1 v2` empty
+immediately before committing). No Arabic codepoint (all four changed
+files swept programmatically, in Python, over the Arabic, Arabic
+Supplement, Arabic Extended-A and both Presentation Forms Unicode blocks,
+plus a `fromCharCode`/`fromCodePoint`/`\u`-escape check: CLEAN — every new
+string is a TypeScript identifier, a wire field name, or a millisecond
+integer/ISO-timestamp test fixture value, never corpus text). No
+oracle/golden-log/fixture/snapshot regenerated — this diff touches four
+existing files only.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1);
+installed PHP 8.4.26 cleanly via the documented `packages.sury.org` apt
+mirror, no refusal this run. `HEAD` was found detached exactly at
+`origin/main`'s own real tip (`1ed35bc`, v3-D330), on a stale LOCAL `main`
+branch ref one commit behind (`221fb47`, v3-D329) — the recurring
+stale-local-`main` trap this file has recorded roughly fifty times since
+v3-D77 — caught before any exploration via `git fetch origin main` + `git
+checkout main && git merge --ff-only origin/main`, a clean fast-forward,
+no work lost or at risk. `make setup`'s own sequential `v2/api`/`v3/api`
+composer installs both hit the documented transient `api.github.com`
+dist-download proxy timeout for most of their dependency trees and
+recovered automatically via the git-mirror source fallback, slow (~15 min
+total) but no retry flag needed; every PHP-independent `npm install`
+(`v2`, `packages/engine`, `packages/corpus-compiler`, `worker/fold-runner`,
+`apps/web`) was run directly and in parallel ahead of the sequential
+composer installs finishing, the same recovery this file's history has
+recorded roughly a dozen times before.
+
+NOT addressed: every item on v3-D330's own condensed "NOT addressed" list,
+unchanged — `rhymeClassOf()`; `EntitlementMachine::merge()`;
+`App\Billing\TrialAttribution`/`lib/pricing.ts#regionFromCountry()`;
+`PaywallGate` as a whole class; multi-surah enrollment as a product
+decision; the operational mailer/7-night launch window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy naming; `packages/engine/src/placement.ts`;
+`MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero fold-side consumer;
+`selection_determinism_check` still replaying a committed fixture;
+`QueueItem.score`'s missing external reader; `acknowledgeReentry`'s
+"makeup" branch; `DrillPicker.tsx`'s unused `now` prop; the unused
+`atoms`/`corpus`/`sessions` IndexedDB object stores; `session_start`'s own
+latency metric; the streak/away-day day-space mismatch; `/workbench`'s
+own Pane 2 per-word inspector and Pane 3 spec editor; the deferred
+`vitest@5` major-version bump; `laravel/framework`'s own remaining
+advisories; `v2/api`'s own frozen advisories; the `trial_surah_source`
+column on `entitlements` — all unchanged. `FlagRow.killedAt`/`.ackAt`'s
+own type mismatch is now CLOSED — remove it from future "fetched/computed,
+wrong wire type" sweeps.

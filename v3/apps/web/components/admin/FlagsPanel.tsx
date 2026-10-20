@@ -122,9 +122,9 @@ function FlagRowView({
         {flag.bannerVisible ? (
           <p className="caption" role="alert">
             Killed{flag.killedBy ? ` by ${flag.killedBy}` : ""}
-            {flag.killedAt ? ` at ${flag.killedAt}` : ""}
-            {flag.ackAt
-              ? ` — acknowledged${flag.ackBy ? ` by ${flag.ackBy}` : ""} at ${flag.ackAt}${flag.ackAutoWaived ? " (auto-waived after 72h)" : ""}.`
+            {flag.killedAt !== null ? ` at ${new Date(flag.killedAt).toISOString()}` : ""}
+            {flag.ackAt !== null
+              ? ` — acknowledged${flag.ackBy ? ` by ${flag.ackBy}` : ""} at ${new Date(flag.ackAt).toISOString()}${flag.ackAutoWaived ? " (auto-waived after 72h)" : ""}.`
               : " — not yet acknowledged."}
           </p>
         ) : null}

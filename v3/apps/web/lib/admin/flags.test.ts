@@ -56,7 +56,7 @@ describe("loadFlags — failure is a STATE, never an exception", () => {
               description: "Web push reminders. Requires template approval.",
               enabled: true,
               version: 4,
-              killedAt: "2026-08-20T03:00:00Z",
+              killedAt: 1787194800000,
               killedBy: "u_ab12cd34ef56",
               bannerVisible: true,
               ackAt: null,
@@ -77,8 +77,44 @@ describe("loadFlags — failure is a STATE, never an exception", () => {
       expect(load.flags[0]!.enabled).toBe(false);
       expect(load.flags[0]!.killedBy).toBeNull();
       expect(load.flags[1]!.bannerVisible).toBe(true);
-      expect(load.flags[1]!.killedAt).toBe("2026-08-20T03:00:00Z");
+      expect(load.flags[1]!.killedAt).toBe(1787194800000);
       expect(load.flags[1]!.killedBy).toBe("u_ab12cd34ef56");
+    }
+  });
+
+  // `killed_at`/`ack_at` are `unsignedBigInteger` columns
+  // (`Flag::casts()`: `'killed_at' => 'integer'`,
+  // `Admin\FlagController::index()` sends `$row->killed_at ?? null` with no
+  // formatting) — the wire value is a plain JSON NUMBER, never an ISO
+  // string. `isFlagRow()` must accept the real shape, not a fabricated one.
+  it("accepts the real integer-millisecond killedAt/ackAt shape, never a string", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          flags: [
+            {
+              key: "social.friends",
+              description: "Friend graph and mutual visibility.",
+              enabled: false,
+              version: 2,
+              killedAt: 1787194800000,
+              killedBy: "u_ab12cd34ef56",
+              bannerVisible: true,
+              ackAt: 1787302800000,
+              ackBy: "u_98fe76dc54ba",
+              ackAutoWaived: false,
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    ) as unknown as typeof fetch;
+
+    const load = await loadFlags();
+    expect(load.state).toBe("ready");
+    if (load.state === "ready") {
+      expect(load.flags[0]!.killedAt).toBe(1787194800000);
+      expect(load.flags[0]!.ackAt).toBe(1787302800000);
     }
   });
 
