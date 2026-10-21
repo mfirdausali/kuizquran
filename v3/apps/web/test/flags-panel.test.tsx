@@ -272,3 +272,111 @@ describe("FlagsPanel — enable is the full ceremony, every field required", () 
     await waitFor(() => expect(screen.getByText(/at least 20 characters/)).toBeTruthy());
   });
 });
+
+// v3-D335: `killFlag`/`acknowledgeFlag`/`enableFlag` (lib/admin/flags.ts)
+// each compute a real `{ok:false, message}` outcome for a genuine failure
+// (a network throw, a non-2xx status, a 409 version conflict) — but
+// `FlagRowView`'s shared `message` state rendered EVERY outcome, success or
+// failure, in the identical passive `<p role="status">` — the same
+// "a real failure is announced as a passive status, not an alert" shape
+// v3-D241/v3-D329/v3-D330/v3-D333/v3-D334 each already closed on
+// `PrivacyPanel.tsx`/`OverrideEditor.tsx`/`GlossDraftsPanel.tsx`, found here
+// on the one sibling panel none of those runs ever swept.
+describe("FlagsPanel — a real action failure is an alert, not a passive status", () => {
+  const realFetch = globalThis.fetch;
+
+  beforeEach(() => resetApiFetchForTests());
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    vi.restoreAllMocks();
+  });
+
+  it("a failed Kill is announced with role=alert, naming the real server error", async () => {
+    const enabledFlag = { ...offFlag, key: "social.leaderboard", enabled: true, version: 3 };
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/kill")) {
+        return jsonResponse({ error: "flag is already being modified by another request" }, 409);
+      }
+      // never actually changed state server-side, so it still reads enabled
+      return jsonResponse({ flags: [enabledFlag] });
+    }) as unknown as typeof fetch;
+
+    render(<FlagsPanel />);
+    await waitFor(() => expect(screen.getByText("social.leaderboard")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: /^kill$/i }));
+
+    const alert = await screen.findByText("flag is already being modified by another request");
+    expect(alert.getAttribute("role")).toBe("alert");
+  });
+
+  it("a successful Kill still reports role=status, not alert — the fix narrows, it does not widen", async () => {
+    const enabledFlag = { ...offFlag, key: "social.leaderboard", enabled: true, version: 3 };
+    let killed = false;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/kill")) {
+        killed = true;
+        return jsonResponse({ killed: true, key: "social.leaderboard" });
+      }
+      return jsonResponse({ flags: [{ ...enabledFlag, enabled: !killed }] });
+    }) as unknown as typeof fetch;
+
+    render(<FlagsPanel />);
+    await waitFor(() => expect(screen.getByText("social.leaderboard")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: /^kill$/i }));
+
+    const status = await screen.findByText("killed");
+    expect(status.getAttribute("role")).toBe("status");
+  });
+
+  it("a failed Acknowledge is announced with role=alert", async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/ack")) {
+        return jsonResponse({ error: "the API answered 500" }, 500);
+      }
+      return jsonResponse({ flags: [killedFlag] });
+    }) as unknown as typeof fetch;
+
+    render(<FlagsPanel />);
+    await waitFor(() => expect(screen.getByText("social.friends")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: /^acknowledge$/i }));
+
+    // the existing "not yet acknowledged" banner is itself role=alert
+    // (#159), so scope to the NEW message distinctly by content.
+    const alert = await screen.findByText("the API answered 500");
+    expect(alert.getAttribute("role")).toBe("alert");
+  });
+
+  it("a failed enable-ceremony submission (a real 409 version conflict, no field errors) is role=alert", async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/enable")) {
+        return jsonResponse({ error: "version conflict — re-read and retry" }, 409);
+      }
+      return jsonResponse({ flags: [offFlag] });
+    }) as unknown as typeof fetch;
+
+    render(<FlagsPanel />);
+    await waitFor(() => expect(screen.getByText("experiments.scheduler_v2")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: /enable/i }));
+    const row = screen.getByTestId("flag-ceremony-experiments.scheduler_v2");
+    fireEvent.change(within(row).getByLabelText(/reason/i), {
+      target: { value: "ramping to 5% to measure retention effect over 28 days" },
+    });
+    fireEvent.change(within(row).getByLabelText(/type the flag name/i), {
+      target: { value: "experiments.scheduler_v2" },
+    });
+    fireEvent.click(within(row).getByLabelText(/retention/i));
+    fireEvent.click(within(row).getByLabelText(/dark pattern/i));
+    fireEvent.click(within(row).getByRole("button", { name: /confirm/i }));
+
+    const alert = await screen.findByText("version conflict — re-read and retry");
+    expect(alert.getAttribute("role")).toBe("alert");
+  });
+});

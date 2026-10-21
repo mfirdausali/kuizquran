@@ -53,10 +53,126 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3107 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3111 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 423 v3/api + 120 corpus-compiler
-             # + 468 engine + 73 fold-runner + 1721 apps/web. (v3-D334, 2026-10-20)
+             # + 468 engine + 73 fold-runner + 1725 apps/web. (v3-D335, 2026-10-21)
+             # NOTE (v3-D335, 2026-10-21): `components/admin/FlagsPanel.tsx`'s own
+             # three actions — `onKill`, `onAck` and `onConfirmEnable` — shared one
+             # `message` state and announced a real failure (a 409 version
+             # conflict, a dropped connection, a real 500 from
+             # `killFlag()`/`acknowledgeFlag()`/`enableFlag()`, `lib/admin/flags.ts`)
+             # with the same passive `role="status"` priority as an ordinary
+             # success — the exact shape v3-D241/v3-D329/v3-D330/v3-D333/v3-D334
+             # each already closed on `PrivacyPanel.tsx`/`OverrideEditor.tsx`/
+             # `GlossDraftsPanel.tsx`, named explicitly by v3-D334's own closing
+             # note as "the next concrete pick for that same sweep."
+             #
+             # Fixed on the identical template: a new `messageFailed` boolean,
+             # reset on every fresh attempt and set from the real outcome's own
+             # `!ok`; the shared message paragraph now renders `role={messageFailed
+             # ? "alert" : "status"}` instead of a hardcoded `"status"`. The 422
+             # ceremony field-errors (`ceremonyErrors.reason`/`.typed_flag_name`)
+             # were already `role="alert"` and are untouched.
+             #
+             # RED confirmed directly: 4 new cases in
+             # `test/flags-panel.test.tsx` (a failed Kill, a failed Acknowledge, a
+             # failed enable-ceremony 409 with no field errors, plus a negative
+             # successful-Kill case) run against the unmodified component — the
+             # three failure cases failed exactly as predicted (`role="status"`
+             # where `"alert"` was expected); the negative case passed vacuously,
+             # correctly, proving the fix narrows rather than widens. One
+             # authoring mistake caught before this note was written: the
+             # negative case's own mock first returned `enabled: false` on every
+             # refetch including the FIRST one, so no "Kill" button ever
+             # rendered to click — fixed with a local `killed` flag tracking the
+             # real post-kill state transition, mirroring this file's own
+             # pre-existing "clicking Kill... refreshes" test. Mutation-verified:
+             # `git stash` of `FlagsPanel.tsx` alone (all four new cases kept, 12
+             # pre-existing cases untouched) reproduced exactly 3 of the 4
+             # predicted failures; restored byte-identically, reran:
+             # `test/flags-panel.test.tsx` 16/16 green (was 12, +4).
+             #
+             # `TZ=UTC make test`: 3111 passing (was 3107, +4 — exactly this run's
+             # four new cases; apps/web 1725, was 1721; no other suite moved: 255
+             # v2 vitest, 47 v2/api, 423 v3/api, 120 corpus-compiler, 468 engine,
+             # 73 fold-runner). `check-test-floor.mjs`: OK, 3111 >= floor 1899
+             # (+1212 margin, unmoved, same discipline as every prior entry).
+             # `TZ=UTC make build`: exit 0, 30 routes, unchanged — this diff edits
+             # one existing component and its one existing test file, no new
+             # route or production file. `npm run gates`: all green — locked-css
+             # OK, 1 documented hunk, 294 v1 lines byte-identical; boundaries OK,
+             # 345 files, the usual pre-existing gitignored `next-env.d.ts`
+             # fluctuation against `make build`'s own prebuild-chain count of
+             # 344, confirmed via `git status --porcelain --ignored`, not a new
+             # production file; fonts degraded-but-non-blocking, pre-existing,
+             # 2/6 UI fonts present; corpus-morphology OK, 362 words;
+             # corpus-glyphs OK, 206 codepoints across 4 artifacts — all
+             # unchanged, this diff carries no corpus data. `npx tsc --noEmit`,
+             # run separately across all four v3 node packages: clean in all
+             # four. No PHP file changed, so `pint` was not applicable. No
+             # `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo` build-cache
+             # diff produced by running the suite was reverted before
+             # committing, same discipline as every prior entry — `git status
+             # --porcelain -- v1 v2` empty immediately before committing). No
+             # Arabic codepoint (both changed files swept programmatically, in
+             # Python, over the Arabic, Arabic Supplement, Arabic Extended-A and
+             # both Presentation Forms Unicode blocks, plus a `\u`-escape and
+             # `fromCharCode`/`fromCodePoint` check: CLEAN — every new string is
+             # a TypeScript identifier, a fixed English assertion/caption
+             # sentence, or a synthetic HTTP-status/error-message test fixture,
+             # never corpus text). No oracle/golden-log/fixture/snapshot
+             # regenerated — this diff touches one existing production file and
+             # one existing test file only.
+             #
+             # Session start: fresh container, no `node_modules`/`vendor`/
+             # compiled corpus anywhere; PHP defaulted to 8.3.6 (`v3/api` needs
+             # >=8.4.1); installed PHP 8.4.27 cleanly via the documented
+             # `packages.sury.org` apt mirror, no refusal this run. `HEAD`
+             # (detached) matched `origin/main`'s real tip exactly at `4768d29`
+             # (v3-D334); local `main` was a stale branch ref two commits behind
+             # — the recurring stale-local-`main` trap this file has recorded
+             # roughly fifty times since v3-D77 — caught before any exploration
+             # via `git fetch origin main` + `git checkout main && git merge
+             # --ff-only origin/main`, a clean fast-forward, no work lost or at
+             # risk. All five PHP-independent `npm install`s were run directly
+             # and in parallel while `make setup`'s own sequential composer
+             # installs ran in the background via the documented git-mirror-
+             # clone fallback; both completed cleanly, no manual retry needed.
+             # A fresh `npm audit`/`composer audit` re-check (v3-D309's own
+             # standing instruction) matched v3-D333's own last recorded
+             # tallies exactly on both sides — no new CVE.
+             #
+             # NOT addressed: every item on v3-D334's own condensed "NOT
+             # addressed" list, unchanged — `rhymeClassOf()`;
+             # `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution`/`lib/pricing.ts
+             # #regionFromCountry()`; `PaywallGate` as a whole class;
+             # multi-surah enrollment as a product decision; the operational
+             # mailer/7-night launch window; PAY-1's Stripe fixtures; surah 67's
+             # scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy
+             # naming; `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero fold-side
+             # consumer; `selection_determinism_check` still replaying a
+             # committed fixture; `QueueItem.score`'s missing external reader;
+             # `acknowledgeReentry`'s "makeup" branch; `DrillPicker.tsx`'s unused
+             # `now` prop; the unused `atoms`/`corpus`/`sessions` IndexedDB
+             # object stores; `session_start`'s own latency metric; the
+             # streak/away-day day-space mismatch; `/workbench`'s own Pane 2/3;
+             # the deferred `vitest@5` bump; `laravel/framework`'s remaining
+             # advisory; `v2/api`'s own frozen advisories; the
+             # `trial_surah_source` column on `entitlements` — all unchanged.
+             # `FlagsPanel.tsx`'s own role=status/role=alert gap is now CLOSED
+             # — remove it from future "role=status vs role=alert" sweeps.
+             # NEWLY named and NOT addressed, verified directly this same run:
+             # `StripeSettingsPanel.tsx`'s own "Test connection" probe button
+             # shares the IDENTICAL shape — `runProbe()`'s real `ProbeResult.ok`
+             # can genuinely be `false` (a caught network exception or a
+             # server-reported failure), but its rendered message paragraph is
+             # hardcoded `role="status"` regardless — confirmed directly
+             # against the real source, deliberately left for a future run,
+             # same one-file-per-run precedent as every prior instance of this
+             # bug class.
              # NOTE (v3-D334, 2026-10-20): `components/admin/GlossDraftsPanel.tsx`'s
              # own two write actions — `onSubmitDraft` (`saveGlossDraft()`) and
              # `onReview` (`reviewGlossDraft()`, the "Mark reviewed"/"Reject to

@@ -57,6 +57,7 @@ function FlagRowView({
 }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [messageFailed, setMessageFailed] = useState(false);
   const [ceremonyOpen, setCeremonyOpen] = useState(false);
   const [draft, setDraft] = useState<CeremonyDraft>(EMPTY_DRAFT);
   const [ceremonyErrors, setCeremonyErrors] = useState<Record<string, string>>({});
@@ -64,9 +65,11 @@ function FlagRowView({
   const onKill = useCallback(() => {
     setBusy(true);
     setMessage(null);
+    setMessageFailed(false);
     void (async () => {
       const outcome = await killFlag(flag.key);
       setMessage(outcome.message);
+      setMessageFailed(!outcome.ok);
       setBusy(false);
       if (outcome.ok) onChanged();
     })();
@@ -75,9 +78,11 @@ function FlagRowView({
   const onAck = useCallback(() => {
     setBusy(true);
     setMessage(null);
+    setMessageFailed(false);
     void (async () => {
       const outcome = await acknowledgeFlag(flag.key);
       setMessage(outcome.message);
+      setMessageFailed(!outcome.ok);
       setBusy(false);
       if (outcome.ok) onChanged();
     })();
@@ -93,6 +98,7 @@ function FlagRowView({
     };
     setBusy(true);
     setMessage(null);
+    setMessageFailed(false);
     setCeremonyErrors({});
     void (async () => {
       const outcome = await enableFlag(flag.key, input);
@@ -104,6 +110,7 @@ function FlagRowView({
         return;
       }
       setMessage(outcome.message);
+      setMessageFailed(true);
       setCeremonyErrors(outcome.errors ?? {});
     })();
   }, [draft, flag.key, flag.version, onChanged]);
@@ -153,7 +160,7 @@ function FlagRowView({
             </button>
           ) : null}
           {message ? (
-            <p className="caption" role="status">
+            <p className="caption" role={messageFailed ? "alert" : "status"}>
               {message}
             </p>
           ) : null}
