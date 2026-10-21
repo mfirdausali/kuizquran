@@ -157,7 +157,15 @@ export function SystemHealthPanel() {
           <p className="caption">A rebuild is already running.</p>
         ) : null}
         {outcome ? (
-          <p className="caption" role="status">
+          // A genuine failure (a network exception, a non-2xx response) must
+          // alert — the exact "a real failure announced as a passive status"
+          // shape already closed on PrivacyPanel/OverrideEditor/
+          // GlossDraftsPanel/FlagsPanel/StripeSettingsPanel/AccountAuthPanel.
+          // `queued` (#168 — another rebuild already holds the mutex) is
+          // deliberately NOT a failure for this purpose: it is informational,
+          // not alarming, so it stays a passive status like an ordinary
+          // success.
+          <p className="caption" role={!outcome.ok && !outcome.queued ? "alert" : "status"}>
             {outcome.ok
               ? `Rebuild complete — ${outcome.usersProcessed ?? 0} learner(s), ${outcome.atomsWritten ?? 0} atom(s) written.` +
                 (outcome.deadLetterCount ? ` ${outcome.deadLetterCount} learner(s) skipped (unencodable data) — their existing cache is untouched.` : "")

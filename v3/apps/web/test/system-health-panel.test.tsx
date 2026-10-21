@@ -295,5 +295,76 @@ describe("SystemHealthPanel — the rebuild button, edge case #168", () => {
     fireEvent.click(button);
 
     await waitFor(() => expect(screen.getByText(/already running/i)).toBeTruthy());
+    // Queued is informational, not an error — another admin's rebuild is
+    // simply already running. It must stay a passive status, never an
+    // alert, so the fix below cannot be satisfied by alerting on every
+    // non-"ok" outcome indiscriminately.
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  /**
+   * `rebuildAtomCache()` returns a real `{ok:false}` outcome on a genuine
+   * server error (a non-2xx, non-queued response) — but the message was
+   * rendered in the same passive `role="status"` paragraph as an ordinary
+   * success, the exact "a real failure is announced as a passive status,
+   * not an alert" shape already closed on several sibling admin panels
+   * (PrivacyPanel, OverrideEditor, GlossDraftsPanel, FlagsPanel,
+   * StripeSettingsPanel, AccountAuthPanel). An admin who triggers a rebuild
+   * that genuinely fails server-side saw no elevated announcement at all.
+   */
+  it("a genuine rebuild failure is announced as an alert, not a passive status", async () => {
+    stubHealthThenRebuild(new Response(JSON.stringify({ reason: "atom_cache table is locked" }), { status: 500 }));
+
+    render(<SystemHealthPanel />);
+    const button = await screen.findByRole("button", { name: /rebuild/i });
+    fireEvent.click(button);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/atom_cache table is locked/);
+  });
+
+  /** A thrown network exception reaches the identical `{ok:false}` shape —
+   *  it must alert too, not merely a non-2xx HTTP response. */
+  it("a thrown network exception during rebuild is also announced as an alert", async () => {
+    let calls = 0;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls += 1;
+      const url = String(input);
+      if (init?.method === "POST" && url.includes("rebuild-atom-cache")) {
+        throw new TypeError("network error");
+      }
+      return new Response(
+        JSON.stringify({
+          checks: [{ metric: "fold_determinism_check", status: "ok", value: 0, detail: null }],
+          rebuildRunning: false,
+        }),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+    void calls;
+
+    render(<SystemHealthPanel />);
+    const button = await screen.findByRole("button", { name: /rebuild/i });
+    fireEvent.click(button);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/network error/);
+  });
+
+  /** The ordinary success path stays a passive status — this fix narrows
+   *  `role="alert"` to a genuine failure only, it never widens it. */
+  it("a completed rebuild still reports success as a passive status, not an alert", async () => {
+    stubHealthThenRebuild(
+      new Response(JSON.stringify({ started: true, queued: false, usersProcessed: 5, atomsWritten: 12 }), {
+        status: 200,
+      }),
+    );
+
+    render(<SystemHealthPanel />);
+    const button = await screen.findByRole("button", { name: /rebuild/i });
+    fireEvent.click(button);
+
+    await waitFor(() => expect(screen.getByText(/5/)).toBeTruthy());
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

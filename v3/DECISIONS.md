@@ -35194,3 +35194,131 @@ could misreport), per v3-D335's own note, so the next concrete pick for
 this exact sweep is not yet named — a future run should look for a
 genuinely fresh candidate rather than re-walking the six already-excluded
 read-only panels named above.
+
+### v3-D338 — SystemHealthPanel's own "Rebuild atom cache" button announced a real failure as a passive status, not an alert
+
+`components/admin/SystemHealthPanel.tsx`'s "Rebuild atom cache" button
+(build-plan step 24, edge case #168) carried the exact same "role=status
+vs role=alert" shape v3-D241/v3-D329/v3-D330/v3-D333/v3-D334/v3-D335/
+v3-D336/v3-D337 each already closed on `PrivacyPanel.tsx`/
+`OverrideEditor.tsx`/`GlossDraftsPanel.tsx`/`FlagsPanel.tsx`/
+`StripeSettingsPanel.tsx`/`AccountAuthPanel.tsx` — a genuinely fresh
+instance, not a re-walk: v3-D336's own closing note explicitly claimed
+`SystemHealthPanel.tsx` was already excluded from this sweep as
+"read-only (no write action of their own whose failure this shape could
+misreport)" — that claim was false. The panel's one real write action,
+`onRebuild()` → `rebuildAtomCache()` (`lib/admin/health.ts`), has a
+genuinely reachable `{ok: false}` outcome on a real network exception, a
+non-2xx server response, or an unparseable body (`loadHealth`'s own
+"FAILURE IS A STATE, NOT AN EXCEPTION" discipline, ported to the rebuild
+path) — but `outcome.message` rendered inside one hardcoded
+`<p className="caption" role="status">`, regardless of `outcome.ok`.
+
+One real nuance this fix had to get right, distinct from every prior
+instance of this bug class: `RebuildOutcome` also has a THIRD outcome,
+`{ok: false, queued: true}` — edge case #168's "another rebuild already
+holds the mutex" case. That is not a failure; it is informational (the
+admin's request was accepted, just deferred), and alerting on it would
+have been a false alarm, the identical "training deafness" risk this
+build's own top risk #6 already names for a different mechanism. The
+correct narrowing is therefore `!outcome.ok && !outcome.queued`, not
+simply `!outcome.ok` — a genuine `{ok:false}` network/server failure
+alerts; the `{ok:false, queued:true}` already-running case stays a
+passive status, same as an ordinary success.
+
+Fixed on the identical template the eight prior fixes in this sweep
+established: the message paragraph's `role` attribute changed from the
+hardcoded `"status"` to `!outcome.ok && !outcome.queued ? "alert" :
+"status"`.
+
+RED confirmed directly: two new cases in
+`test/system-health-panel.test.tsx` (a real 500 response from the
+rebuild endpoint; a thrown `TypeError` network exception) were run
+against the unmodified component — both failed exactly as predicted,
+`screen.findByRole("alert")` timing out, the message rendering
+`role="status"` instead. Two further cases — the pre-existing #168
+queued case (strengthened with an explicit `queryByRole("alert")` is
+`null` assertion) and a strengthened ordinary-success case — passed
+vacuously against the unmodified component too, correctly: they prove
+the fix narrows `role="alert"` to the genuine-failure branch only, never
+to `queued`, and never upgrading an ordinary success. Mutation-verified:
+`git stash` of `SystemHealthPanel.tsx` alone (all four new/strengthened
+cases kept, the 11 pre-existing cases in the file untouched) reproduced
+exactly the two predicted failures; restored byte-identically, reran:
+`test/system-health-panel.test.tsx` 15/15 green (was 12, +3 net new —
+one case strengthened an existing assertion rather than adding a new
+`it()` block).
+
+`TZ=UTC make test`: 3119 passing (was 3116, +3 — exactly this run's three
+new cases; apps/web 1733, was 1730; no other suite moved: 255 v2 vitest,
+47 v2/api, 423 v3/api, 120 corpus-compiler, 468 engine, 73 fold-runner).
+`check-test-floor.mjs`: OK, 3119 >= floor 1899 (+1220 margin, unmoved,
+same discipline as every prior entry). `TZ=UTC make build`: exit 0, 30
+routes, unchanged — this diff edits one existing component and its one
+existing test file, no new route or production file. `npm run gates`:
+all green — locked-css OK, 1 documented hunk, 294 v1 lines
+byte-identical; boundaries OK, 345 files (matching the prior entry's own
+count exactly — no new production file); fonts degraded-but-non-
+blocking, pre-existing, 2/6 UI fonts present; corpus-morphology OK, 362
+words; corpus-glyphs OK, 206 codepoints across 4 artifacts — all
+unchanged, this diff carries no corpus data. `npx tsc --noEmit`: clean,
+`Version 5.9.3` confirmed. No PHP file changed, so `pint` was not
+applicable. No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff produced by running the suite was reverted before
+committing, same discipline as every prior entry — `git status
+--porcelain -- v1 v2` empty immediately before committing). No Arabic
+codepoint (both changed files swept programmatically, in Python, over
+the Arabic, Arabic Supplement, Arabic Extended-A and both Presentation
+Forms Unicode blocks, plus a `fromCharCode`/`fromCodePoint` mention
+check: CLEAN — every new string is a TypeScript identifier, a fixed
+English caption fragment, or a synthetic HTTP-status/error-message test
+fixture, never corpus text). No oracle/golden-log/fixture/snapshot
+regenerated — this diff touches one existing production file and one
+existing test file only.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1);
+installed PHP 8.4.27 cleanly via the documented `packages.sury.org` apt
+mirror, no refusal this run. `HEAD` was found detached exactly at
+`origin/main`'s own real tip (`430eb06`, v3-D337), on a stale LOCAL
+`main` branch ref five commits behind (`58bac8d`) — the recurring
+stale-local-`main` trap this file has recorded roughly fifty times since
+v3-D77 — caught before any exploration via `git fetch origin main` + `git
+checkout main && git merge --ff-only origin/main`, a clean fast-forward,
+no work lost or at risk. The five PHP-independent `npm install`s were run
+directly and in parallel; both composer installs (`v2/api`, `v3/api`)
+completed cleanly on the first attempt, no transient-proxy retry needed
+this run.
+
+Also noted, not fixed: `v3-D337` (AccountAuthPanel's own fix, the commit
+immediately before this one) never got its own DECISIONS.md entry — only
+CLAUDE.md's running comment and the diff itself recorded its reasoning.
+This file's own "v3-D141 — backfilled" precedent names the right fix for
+that gap; it was not performed here, since this run's own scope was the
+one genuinely fresh instance found above, not auditing a sibling run's
+documentation discipline.
+
+NOT addressed: every item on v3-D336's own condensed "NOT addressed"
+list, unchanged — `rhymeClassOf()`; `EntitlementMachine::merge()`;
+`App\Billing\TrialAttribution`/`lib/pricing.ts#regionFromCountry()`;
+`PaywallGate` as a whole class; multi-surah enrollment as a product
+decision; the operational mailer/7-night launch window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy naming; `packages/engine/src/placement.ts`;
+`MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero fold-side consumer;
+`selection_determinism_check` still replaying a committed fixture;
+`QueueItem.score`'s missing external reader; `acknowledgeReentry`'s
+"makeup" branch; `DrillPicker.tsx`'s unused `now` prop; the unused
+`atoms`/`corpus`/`sessions` IndexedDB object stores; `session_start`'s
+own latency metric; the streak/away-day day-space mismatch; `/workbench`'s
+own Pane 2/3; the deferred `vitest@5` bump; `laravel/framework`'s
+remaining advisory; `v2/api`'s own frozen advisories; the
+`trial_surah_source` column on `entitlements`; v3-D337's own missing
+DECISIONS.md backfill (above) — all unchanged. `SystemHealthPanel.tsx`'s
+own role=status/role=alert gap is now CLOSED — remove it from future
+"role=status vs role=alert" sweeps. `AdminRolesPanel.tsx`/
+`PurgeLedgerPanel.tsx`/`AuditLogPanel.tsx`/`FlagAuditPanel.tsx`/
+`ContentFreezePanel.tsx` are re-confirmed genuinely read-only (no write
+action of their own this shape could misreport); a future run should
+look for a new candidate outside this now-nine-deep sweep, or take on one
+of the larger deferred items above, rather than re-walking those five.
