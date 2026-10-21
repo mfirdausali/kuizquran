@@ -53,10 +53,137 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3114 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3116 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 423 v3/api + 120 corpus-compiler
-             # + 468 engine + 73 fold-runner + 1728 apps/web. (v3-D336, 2026-10-21)
+             # + 468 engine + 73 fold-runner + 1730 apps/web. (v3-D337, 2026-10-21)
+             # NOTE (v3-D337, 2026-10-21): `components/settings/AccountAuthPanel.tsx`'s
+             # own "Resend verification email" action — `NamedAccountView`'s
+             # `resend()` handler — carried the identical "role=status vs
+             # role=alert" shape v3-D241/v3-D329/v3-D330/v3-D333/v3-D334/v3-D335/
+             # v3-D336 each already closed on `PrivacyPanel.tsx`/
+             # `OverrideEditor.tsx`/`GlossDraftsPanel.tsx`/`FlagsPanel.tsx`/
+             # `StripeSettingsPanel.tsx`. `resendVerificationEmail()`'s own
+             # `AuthOutcome.ok` is genuinely `false` on either a real
+             # non-2xx HTTP status from `POST /api/email/verification-
+             # notification` or a caught network exception
+             # (`lib/account/auth.ts`'s own `{ok: false, error}` shapes), but
+             # the component already tracked this correctly in its own
+             # `resendState` ("idle" | "sending" | "sent" | "error") — only
+             # the RENDER never read it: both the "sent" and "error" branches
+             # shared one hardcoded `<p role="status">`, so a real resend
+             # failure (a 429 rate limit, a dropped connection) was announced
+             # with the same unprivileged, passive live-region priority as an
+             # ordinary successful resend.
+             #
+             # Fixed on the identical template: no new state invented —
+             # `resendState` already distinguished "sent" from "error"; the
+             # message paragraph's own `role` attribute changed from the
+             # hardcoded `"status"` to `resendState === "error" ? "alert" :
+             # "status"`.
+             #
+             # RED confirmed directly: 2 new cases in
+             # `test/settings-account-auth.test.tsx` (10 pre-existing cases in
+             # the file untouched) — a real 429 response run against the
+             # unmodified component failed exactly as predicted
+             # (`screen.findByRole("alert")` timing out, the message
+             # rendering `role="status"` instead); a negative, genuine-success
+             # case passed vacuously, correctly, proving the fix narrows
+             # rather than widens. Mutation-verified: `git stash` of
+             # `AccountAuthPanel.tsx` alone (both new cases kept, the 10
+             # pre-existing cases in the file untouched) reproduced exactly
+             # the 1 predicted failure (the negative case passed vacuously
+             # either way); restored byte-identically, reran:
+             # `test/settings-account-auth.test.tsx` 12/12 green (was 10, +2).
+             #
+             # `TZ=UTC make test`: 3116 passing (was 3114, +2 — exactly this
+             # run's two new cases; apps/web 1730, was 1728; no other suite
+             # moved: 255 v2 vitest, 47 v2/api, 423 v3/api, 120
+             # corpus-compiler, 468 engine, 73 fold-runner). `check-test-
+             # floor.mjs`: OK, 3116 >= floor 1899 (+1217 margin, unmoved, same
+             # discipline as every prior entry). `TZ=UTC make build`: exit 0,
+             # 30 routes, unchanged — this diff edits one existing component
+             # and its one existing test file, no new route or production
+             # file. `npm run gates`: all green — locked-css OK, 1 documented
+             # hunk, 294 v1 lines byte-identical; boundaries OK, 345 files
+             # (matching the prior entry's own count exactly — no new
+             # production file); fonts degraded-but-non-blocking,
+             # pre-existing, 2/6 UI fonts present; corpus-morphology OK, 362
+             # words; corpus-glyphs OK, 206 codepoints across 4 artifacts —
+             # all unchanged, this diff carries no corpus data. `npx tsc
+             # --noEmit`: clean, `Version 5.9.3` confirmed. No PHP file
+             # changed, so `pint` was not applicable. No `v1/**`/`v2/**` edit
+             # (a stray `v2/tsconfig.tsbuildinfo` build-cache diff produced
+             # by running the suite was reverted before committing, same
+             # discipline as every prior entry — `git status --porcelain --
+             # v1 v2` empty immediately before committing). No Arabic
+             # codepoint (both changed files swept programmatically, in
+             # Python, over the Arabic, Arabic Supplement, Arabic Extended-A
+             # and both Presentation Forms Unicode blocks, plus a
+             # `fromCharCode`/`fromCodePoint` mention check: CLEAN — every
+             # new string is a TypeScript identifier, a fixed English
+             # assertion/caption sentence, or a synthetic HTTP-status test
+             # fixture ("rate limited", 429), never corpus text). No
+             # oracle/golden-log/fixture/snapshot regenerated — this diff
+             # touches one existing production file and one existing test
+             # file only.
+             #
+             # Session start: fresh container, no `node_modules`/`vendor`/
+             # compiled corpus anywhere; PHP defaulted to 8.3.6 (`v3/api`
+             # needs >=8.4.1); installed PHP 8.4.27 cleanly via the
+             # documented `packages.sury.org` apt mirror, no refusal this
+             # run. `HEAD`, local `main` and `origin/main` all already agreed
+             # at `f7bd9b4` (v3-D336) — no stale-local-`main` trap this run,
+             # confirmed directly via `git fetch origin main` before any
+             # exploration. The five PHP-independent `npm install`s were run
+             # directly and in parallel while `make setup`'s own sequential
+             # composer installs ran in the background (`v2/api` via the
+             # documented git-mirror fallback); once `v2/api` finished,
+             # `v3/api`'s own composer install failed on the stock PHP
+             # 8.3.6 (`symfony/clock`/`css-selector`/`event-dispatcher`/
+             # `string`/`translation`/`yaml` all locked to versions needing
+             # >=8.4.1) — recovered by installing PHP 8.4 via the
+             # `packages.sury.org` mirror and re-running `composer install`
+             # for `v3/api` directly with `COMPOSER_PROCESS_TIMEOUT=900`,
+             # which completed cleanly against the now-warm git-mirror VCS
+             # cache from the `v2/api` install moments earlier.
+             #
+             # Found by a dedicated fresh read of every `role="status"`
+             # write-action panel not yet swept by this exact bug class
+             # (`grep -rln 'role="status"' components/`, cross-checked
+             # against `lib/account/auth.ts`'s real outcome shapes) — this
+             # was the one genuine, previously-unreported instance;
+             # `AccountDeletionPanel.tsx`/`BillingAuditPanel.tsx`/
+             # `AnchorHourPanel.tsx`/`PlanPanel.tsx`/`AccountExportPanel.tsx`
+             # were each independently re-checked and confirmed already
+             # correct (every one of their own `role="status"` sites either
+             # has no real failure branch to misreport, or already branches
+             # on outcome correctly).
+             #
+             # NOT addressed: every item on v3-D336's own condensed "NOT
+             # addressed" list, unchanged — `rhymeClassOf()`;
+             # `EntitlementMachine::merge()`;
+             # `App\Billing\TrialAttribution`/`lib/pricing.ts
+             # #regionFromCountry()`; `PaywallGate` as a whole class;
+             # multi-surah enrollment as a product decision; the operational
+             # mailer/7-night launch window; PAY-1's Stripe fixtures; surah
+             # 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+             # taxonomy naming; `packages/engine/src/placement.ts`;
+             # `MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero fold-side
+             # consumer; `selection_determinism_check` still replaying a
+             # committed fixture; `QueueItem.score`'s missing external
+             # reader; `acknowledgeReentry`'s "makeup" branch;
+             # `DrillPicker.tsx`'s unused `now` prop; the unused
+             # `atoms`/`corpus`/`sessions` IndexedDB object stores;
+             # `session_start`'s own latency metric; the streak/away-day
+             # day-space mismatch; `/workbench`'s own Pane 2/3; the deferred
+             # `vitest@5` bump; `laravel/framework`'s remaining advisory;
+             # `v2/api`'s own frozen advisories; the `trial_surah_source`
+             # column on `entitlements` — all unchanged.
+             # `AccountAuthPanel.tsx`'s own role=status/role=alert gap is now
+             # CLOSED — remove it from future "role=status vs role=alert"
+             # sweeps. No new instance of this bug class was named this run
+             # beyond the five panels re-checked and confirmed clean above.
              # NOTE (v3-D336, 2026-10-21): `components/admin/StripeSettingsPanel.tsx`'s
              # own "Test connection" probe button — named explicitly by
              # v3-D335's own closing note as "the next concrete pick for that

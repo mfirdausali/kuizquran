@@ -212,6 +212,42 @@ describe("AccountAuthPanel", () => {
     await waitFor(() => expect(screen.getByRole("status").textContent).toMatch(/reset link is on its way/i));
   });
 
+  it("resending verification: a real server failure is announced as an alert, not a passive status", async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/email/verification-notification")) return jsonResponse({ error: "rate limited" }, 429);
+      if (url.includes("/api/me")) {
+        return jsonResponse({ signedIn: true, email: "learner@example.com", isAnonymous: false, emailVerified: false });
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }) as unknown as typeof fetch;
+
+    render(<AccountAuthPanel />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /resend verification email/i }));
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/could not send it/i));
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("resending verification: a genuine success stays a passive status, never an alert", async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/email/verification-notification")) return jsonResponse({ ok: true });
+      if (url.includes("/api/me")) {
+        return jsonResponse({ signedIn: true, email: "learner@example.com", isAnonymous: false, emailVerified: false });
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }) as unknown as typeof fetch;
+
+    render(<AccountAuthPanel />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /resend verification email/i }));
+
+    await waitFor(() => expect(screen.getByRole("status").textContent).toMatch(/sent — check your inbox/i));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("sign out: posts to /api/auth/logout and returns to the anonymous view", async () => {
     let calls = 0;
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {

@@ -118,7 +118,7 @@ function NamedAccountView({
           <button type="button" className="btn hit" onClick={resend} disabled={resendState === "sending"}>
             {resendState === "sending" ? "Sending…" : "Resend verification email"}
           </button>
-          <p role="status" className="caption">
+          <p role={resendState === "error" ? "alert" : "status"} className="caption">
             {resendState === "sent" ? "Sent — check your inbox." : null}
             {resendState === "error" ? "Could not send it — try again in a moment." : null}
           </p>
