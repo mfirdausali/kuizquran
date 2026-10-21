@@ -112,6 +112,11 @@ export function StripeSettingsPanel() {
 
   const { data } = load;
 
+  // The probe's own `ok` is genuinely false on either a real server-reported
+  // Stripe API failure or a caught network exception — never upgrade a
+  // `null` (not-yet-run) state, and never upgrade a success.
+  const probeFailed = probe?.ok === false;
+
   return (
     <div className="stack">
       {data.mixedModes ? (
@@ -207,7 +212,7 @@ export function StripeSettingsPanel() {
           <p className="caption">Set every credential before testing.</p>
         ) : null}
         {probe ? (
-          <p className="caption" role="status">
+          <p className="caption" role={probeFailed ? "alert" : "status"}>
             {probe.message}
           </p>
         ) : null}

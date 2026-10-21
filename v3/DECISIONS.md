@@ -35049,3 +35049,148 @@ inferred. `AdminRolesPanel.tsx`/`PurgeLedgerPanel.tsx`/
 `ContentFreezePanel.tsx` are all read-only (no write action of their own
 whose failure this shape could misreport) and were not re-swept for this
 exact gap beyond that structural check.
+
+---
+
+## Ratified 2026-10-21 — nightly sweep
+
+### v3-D336 — StripeSettingsPanel's own "Test connection" probe announced a real failure as a passive status, not an alert
+
+`components/admin/StripeSettingsPanel.tsx`'s "Test connection" button
+carried the exact same "role=status vs role=alert" shape v3-D241/v3-D329/
+v3-D330/v3-D333/v3-D334/v3-D335 each already closed on `PrivacyPanel.tsx`/
+`OverrideEditor.tsx`/`GlossDraftsPanel.tsx`/`FlagsPanel.tsx` — named
+explicitly by v3-D335's own closing note as "the next concrete pick for
+that same sweep," verified directly against the real source before this
+run started, not merely inferred.
+
+`runProbe()`'s own `ProbeResult.ok` is genuinely `false` on either a real
+server-reported Stripe API failure (whatever `test()`'s own handler
+returns when Stripe itself rejects the probe) or a caught network
+exception (`{ok: false, reason: "unreachable", message: "Could not reach
+the API."}`, the component's own `catch` branch) — but the rendered `<p
+className="caption" role="status">{probe.message}</p>` was hardcoded
+regardless of `probe.ok`. An admin whose connection test genuinely failed
+— a revoked key, a dropped connection, a real Stripe-side rejection — saw
+the server's own error text rendered with the identical unprivileged,
+passive live-region priority as an ordinary successful probe, on the one
+console screen whose entire job is confirming whether this app can
+actually reach Stripe before a real charge is attempted.
+
+Found by a direct, manual re-read of `StripeSettingsPanel.tsx` against
+`ProbeResult`'s real shape — named by name in v3-D335's own closing note,
+not a fresh sweep candidate — and independently re-verified against the
+real component source before writing any test.
+
+Fixed on the identical template v3-D241/v3-D329/v3-D330/v3-D333/v3-D334/
+v3-D335 each already established: a new `probeFailed` boolean, derived
+from `probe?.ok === false` — never upgrading a `null` (not-yet-run) state,
+and never upgrading a success — and the message paragraph's own `role`
+attribute changed from the hardcoded `"status"` to `probeFailed ? "alert"
+: "status"`. The separate `banner banner--warn` mode-mismatch block
+beneath it (already `role="alert"`, a different, already-correctly-alerted
+code path comparing Stripe's own reported `livemode` against the
+configured key prefix) is untouched — in scope, deliberately not touched,
+matching this fix's own stated boundary.
+
+RED confirmed directly: three new cases in a new describe block in
+`test/stripe-settings-panel.test.tsx` (the file's 5 pre-existing cases
+untouched) — a real server-reported failure (`{ok: false, reason:
+"api-error", message: "Stripe reported a card_error."}`) and a thrown
+network exception (`TypeError: Failed to fetch`, the component's own
+catch branch) were each run against the unmodified component and failed
+exactly as predicted, `screen.findByRole("alert")` timing out on both
+since the message paragraph was always `role="status"` regardless of
+outcome. A third, negative case (a genuine successful probe, `{ok: true,
+livemode: false, message: "Connected to Stripe in test mode."}`) passed
+vacuously against the unmodified component too, correctly — it proves the
+fix narrows `role="alert"` to the failure branch only, never upgrading an
+ordinary success. Mutation-verified directly: `git stash` of
+`StripeSettingsPanel.tsx` alone (all three new cases kept, the 5
+pre-existing cases in the file untouched) reproduced exactly the 2
+predicted failures (the negative/vacuous case passed either way, as
+expected); restored byte-identically (`git diff --stat` confirmed the
+restore matched the implemented fix exactly before re-running), reran:
+`test/stripe-settings-panel.test.tsx` 8/8 green (was 5, +3).
+`npx vitest run test/stripe-settings-panel.test.tsx test/workbench-ui.test.tsx`:
+65/65 green — no regression on a sibling `/settings`/`/workbench` admin
+consumer.
+
+`TZ=UTC make test`: 3114 passing (was 3111, +3 — exactly this run's three
+new cases; apps/web 1728, was 1725; no other suite moved: 255 v2 vitest,
+47 v2/api, 423 v3/api, 120 corpus-compiler, 468 engine, 73 fold-runner).
+`check-test-floor.mjs`: OK, 3114 >= floor 1899 (+1215 margin, unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 30 routes,
+unchanged — this diff edits one existing component and its one existing
+test file, no new route or production file. `npm run gates`: all green —
+locked-css OK, 1 documented hunk, 294 v1 lines byte-identical; boundaries
+OK, 344 files, matching `make build`'s own prebuild-chain count exactly
+this run — no new production file; fonts degraded-but-non-blocking,
+pre-existing, 2/6 UI fonts present; corpus-morphology OK, 362 words;
+corpus-glyphs OK, 206 codepoints across 4 artifacts — all unchanged, this
+diff carries no corpus data (all three staged corpusHashes
+908ca9edbd2ab2e4/123c6212cc1d074d/77722a2b8b1b6aae byte-identical to
+v3-D335's own). `npx tsc --noEmit`, run separately across all four v3
+node packages: clean in all four. No PHP file changed, so `pint` was not
+applicable. No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff produced by running the suite was reverted before
+committing, same discipline as every prior entry — `git status
+--porcelain -- v1 v2` empty immediately before committing). No Arabic
+codepoint (`git diff | python3 -c "..."` swept the full diff over the
+Arabic, Arabic Supplement, Arabic Extended-A, Arabic Presentation Forms-A
+and Arabic Presentation Forms-B Unicode blocks: CLEAN — every new string
+is a TypeScript identifier, a fixed English assertion/caption sentence,
+or a synthetic HTTP-status/error-message test fixture, never corpus
+text). No oracle/golden-log/fixture/snapshot regenerated — this diff
+touches one existing production file and one existing test file only.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1);
+installed PHP 8.4.27 cleanly via the documented `packages.sury.org` apt
+mirror, no refusal this run. `HEAD` (detached) was already at
+`origin/main`'s real tip exactly at `f7b7d8f` (v3-D335) — the 3 commits
+(v3-D333/D334/D335) this run's own brief named as "unpushed" turned out
+to ALREADY be on the real remote: `git fetch origin main` advanced only
+the local cached remote-tracking ref (from `58bac8d` to `f7b7d8f`, the
+same "stale local ref" shape this file has recorded roughly fifty times
+since v3-D77, here on the CACHED REMOTE ref rather than the local `main`
+branch ref), and `git log --oneline origin/main..HEAD` was already
+empty — nothing to push. A prior session had evidently already pushed
+them. This run completed the housekeeping anyway, as asked: a genuinely
+stale local `main` BRANCH ref (also pointing at an older commit) was
+replaced with one at the real tip (`git checkout -B main HEAD`), and `git
+push origin main` correctly reported "Everything up-to-date" rather than
+transferring anything. All five PHP-independent `npm install`s (`v2`,
+`packages/engine`, `packages/corpus-compiler`, `worker/fold-runner`,
+`apps/web`) were run directly and in parallel while `make setup`'s own
+sequential composer installs (`v2/api`, `v3/api`) ran in the background,
+both via the documented `packages.sury.org`/git-mirror-clone fallback for
+several packages; both completed cleanly, no manual retry needed this
+run.
+
+NOT addressed: every item on v3-D335's own condensed "NOT addressed"
+list, unchanged — `rhymeClassOf()`; `EntitlementMachine::merge()`;
+`App\Billing\TrialAttribution`/`lib/pricing.ts#regionFromCountry()`;
+`PaywallGate` as a whole class; multi-surah enrollment as a product
+decision; the operational mailer/7-night launch window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy naming; `packages/engine/src/placement.ts`;
+`MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero fold-side consumer;
+`selection_determinism_check` still replaying a committed fixture;
+`QueueItem.score`'s missing external reader; `acknowledgeReentry`'s
+"makeup" branch; `DrillPicker.tsx`'s unused `now` prop; the unused
+`atoms`/`corpus`/`sessions` IndexedDB object stores; `session_start`'s own
+latency metric; the streak/away-day day-space mismatch; `/workbench`'s
+own Pane 2/3; the deferred `vitest@5` bump; `laravel/framework`'s
+remaining advisory; `v2/api`'s own frozen advisories; the
+`trial_surah_source` column on `entitlements` — all unchanged.
+`StripeSettingsPanel.tsx`'s own role=status/role=alert gap is now CLOSED
+— remove it from future "role=status vs role=alert" sweeps. No new
+instance of this bug class was independently named this run;
+`AdminRolesPanel.tsx`/`PurgeLedgerPanel.tsx`/`AuditLogPanel.tsx`/
+`FlagAuditPanel.tsx`/`SystemHealthPanel.tsx`/`ContentFreezePanel.tsx`
+remain read-only (no write action of their own whose failure this shape
+could misreport), per v3-D335's own note, so the next concrete pick for
+this exact sweep is not yet named — a future run should look for a
+genuinely fresh candidate rather than re-walking the six already-excluded
+read-only panels named above.

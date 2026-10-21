@@ -215,3 +215,96 @@ describe("StripeSettingsPanel — each credential's own setVia reaches the conso
     await screen.findByText(/STRIPE_SECRET in the API environment/);
   });
 });
+
+// `runProbe()`'s own `ProbeResult.ok` is genuinely `false` on either a real
+// server-reported Stripe API failure or a caught network exception — but
+// the rendered message paragraph was hardcoded `role="status"` regardless
+// of `probe.ok`, the same "role=status vs role=alert" shape v3-D241/D329/
+// D330/D333/D334/D335 each already closed on PrivacyPanel.tsx/
+// OverrideEditor.tsx/GlossDraftsPanel.tsx/FlagsPanel.tsx — named explicitly
+// by v3-D335's own closing note as the next concrete pick for that same
+// sweep, on the one panel none of those five runs ever touched.
+describe("StripeSettingsPanel — announces a real probe failure as an alert, not a passive status", () => {
+  const realFetch = globalThis.fetch;
+
+  beforeEach(() => resetApiFetchForTests());
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    vi.restoreAllMocks();
+  });
+
+  function mockLoad() {
+    return new Response(
+      JSON.stringify({
+        fields: [],
+        configured: true,
+        mode: "test",
+        mixedModes: false,
+        webhookUrl: "https://example.test/api/billing/stripe/webhook",
+        note: "",
+      }),
+      { status: 200 },
+    );
+  }
+
+  it("renders role=alert when the server reports a real Stripe API failure", async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/test") && init?.method === "POST") {
+        return new Response(
+          JSON.stringify({
+            ok: false,
+            reason: "api-error",
+            message: "Stripe reported a card_error.",
+          }),
+          { status: 200 },
+        );
+      }
+      return mockLoad();
+    }) as unknown as typeof fetch;
+
+    render(<StripeSettingsPanel />);
+    const button = await screen.findByRole("button", { name: /test connection/i });
+    button.click();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/card_error/i);
+  });
+
+  it("renders role=alert when the probe request throws (network unreachable)", async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/test") && init?.method === "POST") {
+        throw new TypeError("Failed to fetch");
+      }
+      return mockLoad();
+    }) as unknown as typeof fetch;
+
+    render(<StripeSettingsPanel />);
+    const button = await screen.findByRole("button", { name: /test connection/i });
+    button.click();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/could not reach the api/i);
+  });
+
+  it("still renders role=status for an ordinary successful probe — never upgraded", async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/test") && init?.method === "POST") {
+        return new Response(
+          JSON.stringify({ ok: true, livemode: false, message: "Connected to Stripe in test mode." }),
+          { status: 200 },
+        );
+      }
+      return mockLoad();
+    }) as unknown as typeof fetch;
+
+    render(<StripeSettingsPanel />);
+    const button = await screen.findByRole("button", { name: /test connection/i });
+    button.click();
+
+    await screen.findByText(/Connected to Stripe in test mode\./);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
