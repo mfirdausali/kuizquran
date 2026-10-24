@@ -35450,3 +35450,110 @@ candidate: a dedicated pass over every OTHER `role="status"`-wrapped
 read-failure branch outside `/workbench` and the admin console already
 checked here (e.g. settings panels not yet named), rather than assuming the
 convention is now fully enforced everywhere.
+
+
+### v3-D340 — `/progress`'s "slipping" sentence named the noun from the WHOLE memory graph, not from what is actually slipping
+
+A dedicated fresh-sweep agent (Explore), told to stop re-walking the now-
+exhausted role=status/alert sweep and find a genuinely new instance of this
+build's other recurring class ("a fact is computed correctly somewhere but
+the wrong already-computed fact feeds the sentence a learner reads"),
+found: `apps/web/lib/progress/retention.ts#buildRetentionSummary()` computed
+`anyJoints` — the flag `slippingWords()` uses to pick "ayat" vs the vaguer,
+joint-hedged "items" — from the **entire walked memory graph** (every atom
+in `present`, i.e. every site of the surah, slipping or not), not from the
+`slipping` subset the sentence is actually about.
+
+`AtomState.encoded` is one shared boolean for both ayah and connection
+(joint) atoms, so any surah with more than one ayah, once a learner is
+partway through it, ordinarily has at least one healthy, encoded joint
+somewhere. Section 10's own header calls the slipping sentence "THE ONE THAT
+MATTERS MOST"; a learner whose three genuinely slipping atoms are all ayat
+saw `/progress` print "3 items are slipping" instead of "3 ayat are
+slipping" purely because an unrelated, perfectly healthy joint existed
+elsewhere in the same surah — the file's own stated rule ("the noun agrees
+with the number... rather than calling a junction an ayah") violated in the
+opposite direction it was written to prevent.
+
+**Why no test caught it:** `test/progress-retention.test.tsx`'s
+`slippingFixture()` builds only `"ayah"` atoms, so `anyJoints` was
+coincidentally `false` there regardless of scope; the file's only test that
+adds a `"connection"` atom makes that joint itself decayed (so it is part of
+`slipping` too, masking the scoping bug) and never asserts on
+`slippingLabel`. No test built "slipping ayat + a separate, healthy, encoded
+joint" — the one input that exposes the gap.
+
+**Fixed, display-only, no engine/wire change** (every field was already
+computed correctly; only which one feeds the sentence was wrong): dropped
+the `let anyJoints = false` / `if (isSeam && atom.encoded) anyJoints = true`
+tracked over the whole walk, and instead derive it from the `slipping` array
+itself, immediately after it is built — `const anyJoints = slipping.some((p)
+=> p.isSeam)`.
+
+**RED confirmed directly.** One new `it()` in `test/progress-retention.test.tsx`'s
+existing "slippage is read from the scheduler's own signal" describe block:
+`slippingFixture()`'s three genuinely-slipping ayat plus one additional,
+healthy, encoded connection atom (retrieved a minute ago, the same "safe"
+shape the fixture already uses for its two non-slipping ayat) — run against
+the unmodified source it failed exactly as predicted,
+`screen.getByText(/3 ayat are slipping/)` finding nothing because the panel
+rendered "3 items are slipping" instead. Mutation-verified: `git stash` of
+`retention.ts` alone (the new test kept, the file's other 33 cases
+untouched) reproduced the identical failure; restored byte-identically
+(`git diff --stat` empty before re-implementing), reran:
+`test/progress-retention.test.tsx` 34/34 green (was 33, +1).
+
+`TZ=UTC make test`: **3120 passing** (was 3119, +1 — exactly this run's one
+new test; apps/web 1734, was 1733; every other suite unchanged: 255 v2
+vitest, 47 v2/api, 423 v3/api, 120 corpus-compiler, 468 engine, 73
+fold-runner). `check-test-floor.mjs`: OK, 3120 >= floor 1899 (+1221 margin,
+unmoved). `TZ=UTC make build`: exit 0, 30 routes, unchanged — this diff
+edits one existing lib file and its one existing test file, no new route or
+production file (first invocation stopped on Next.js's own one-time
+`SecurityFatalError` CLI nudge about a known advisory, same as v3-D339's own
+run; not acted on — upgrading Next.js is outside this one-step scope and
+needs a human decision; a plain retry built clean). `npm run gates`: all
+green — locked-css OK, 1 documented hunk, 294 v1 lines byte-identical;
+boundaries OK, 345 files, unchanged; fonts degraded-but-non-blocking,
+pre-existing, 2/6 UI fonts present; corpus-morphology OK, 362 words;
+corpus-glyphs OK, 206 codepoints across 4 artifacts — all unchanged, this
+diff carries no corpus data. `npx tsc --noEmit`: clean, `Version 5.9.3`
+confirmed. No PHP file changed. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the suite was
+reverted before committing — `git status --porcelain -- v1 v2` empty
+immediately before committing). No Arabic codepoint (both changed files
+swept programmatically, in Python, over the Arabic, Arabic Supplement,
+Arabic Extended-A and both Presentation Forms Unicode blocks: zero matches
+in either file; every new string is a TypeScript identifier or a fixed
+English assertion/comment sentence, never corpus text). No oracle/golden-
+log/fixture/snapshot regenerated — this diff touches one existing
+production file and one existing test file only.
+
+**Session context.** This run installed PHP 8.4 (sury.org apt mirror) and
+ran `make setup` from a fresh container; the dependency installs hit the
+documented `api.github.com` dist-download proxy timeout for most packages
+and recovered automatically via the git-mirror source fallback (no manual
+retry needed). `HEAD`, local `main` and `origin/main` all agreed exactly at
+`f2733e6` (v3-D339) after one `git fetch` — no stale-local-`main` trap this
+run.
+
+**NOT addressed, named so a future run doesn't re-discover them as new:**
+the streak/away-day day-space mismatch (v3-D209, needs design); `rhymeClassOf()`
+(v3-D136); `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148); `lib/pricing.ts#regionFromCountry()`
+(v3-D163); `PaywallGate`/`permitsIssuance`/`permitsReview` (v3-D88/D151);
+multi-surah enrollment (product decision); the operational mailer (built,
+v3-D18, `DeterminismP1Alert` — but the 7-night window itself still needs a
+host running `schedule:run` against real staging data, calendar-bound);
+PAY-1's Stripe replay fixtures (blocked on Stripe MY business verification);
+surah 67's scene beats (human authoring); `worker/fold-runner/src/severity.ts`
+taxonomy naming (v3-D127); `packages/engine/src/placement.ts`
+(v3-D111/D113/D123); `MacroFacts.litany.rhymeLabel` (v3-D188); `corpusHash`'s
+zero fold-side consumer (v3-D206); `acknowledgeReentry`'s "makeup" branch
+(apps/web/lib/session/run.ts — its own header states this is deliberately
+out of scope, a larger product decision, not a bug); `DrillPicker.tsx`'s
+`now` prop (investigated this run — genuinely dead/vestigial: readiness is
+`atom.encoded`, time-invariant; not a live defect) — all unchanged. The
+"role=status vs role=alert" sweep (v3-D241/D329/D330/D333..D339) is
+exhausted; do not re-walk it. `retention.ts`'s own `anyJoints` scoping gap
+is now CLOSED.

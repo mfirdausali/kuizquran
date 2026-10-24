@@ -233,6 +233,21 @@ describe("slippage is read from the scheduler's own signal, not from a band", ()
     expect(screen.getByText(/3 ayat are slipping/)).toBeTruthy();
   });
 
+  it("names the noun from what's actually slipping, not from an unrelated healthy joint elsewhere in the graph (v3-D340)", () => {
+    // The joint between 12:1 and 12:2 is encoded and perfectly healthy —
+    // retrieved a minute ago, nowhere near the slipping fixture's three
+    // decayed ayat. `anyJoints` must answer "is any SLIPPING atom a joint?",
+    // never "is any atom anywhere in the graph a joint?".
+    const atoms = slippingFixture();
+    put(atoms, "connection", 1, {
+      strength: 95, stability: 20, lastRetrieval: NOW - 60_000, reps: 10, encoded: true,
+    });
+    const summary = summarize(atoms, 5);
+    expect(summary.slippingCount).toBe(3);
+    render(<RetentionPanel summary={summary} />);
+    expect(screen.getByText(/3 ayat are slipping/)).toBeTruthy();
+  });
+
   it("carries §10's reframe beside the count", () => {
     render(<RetentionPanel summary={summarize(slippingFixture(), 5)} />);
     expect(screen.getByText(/Not a failure — this is what memory does/)).toBeTruthy();

@@ -53,10 +53,42 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3119 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3120 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 423 v3/api + 120 corpus-compiler
-             # + 468 engine + 73 fold-runner + 1733 apps/web. (v3-D339, 2026-10-24)
+             # + 468 engine + 73 fold-runner + 1734 apps/web. (v3-D340, 2026-10-24)
+             # NOTE (v3-D340, 2026-10-24): `lib/progress/retention.ts`'s own
+             # `anyJoints` flag — which `slippingWords()` uses to choose "ayat"
+             # vs the joint-hedged "items" in /progress's §10 slipping sentence,
+             # the module's own "THE ONE THAT MATTERS MOST" line — was computed
+             # over the WHOLE walked memory graph (any encoded joint anywhere in
+             # the surah), not over the `slipping` subset the sentence is
+             # actually about. A surah partway through learning ordinarily has
+             # at least one healthy, encoded joint elsewhere, so an all-ayah
+             # slipping set could print "items" instead of "ayat" for a reason
+             # unrelated to what was slipping. Found by a dedicated fresh-sweep
+             # agent after the role=status/alert sweep (v3-D241..D339) was
+             # declared exhausted and told to find a different recurring-class
+             # instance instead. Fixed, display-only: `anyJoints` now derives
+             # from `slipping.some((p) => p.isSeam)`, computed right after
+             # `slipping` itself, instead of tracked across the whole walk.
+             # RED confirmed directly: one new case in
+             # `test/progress-retention.test.tsx` (three slipping ayat + one
+             # separate healthy, encoded joint) failed exactly as predicted
+             # against the unmodified source — `/3 ayat are slipping/` not
+             # found, the panel printing "items" instead. Mutation-verified:
+             # `git stash` of `retention.ts` alone reproduced the identical
+             # failure; restored byte-identically, reran: 34/34 green (was 33).
+             # `TZ=UTC make test`: 3120 passing (was 3119, +1; apps/web 1734,
+             # was 1733; every other suite unchanged). `check-test-floor.mjs`:
+             # OK, 3120 >= floor 1899 (+1221 margin). `TZ=UTC make build`: exit
+             # 0, 30 routes, unchanged (first invocation hit Next.js's own
+             # one-time `SecurityFatalError` CLI nudge, same as v3-D339 — not
+             # acted on, a plain retry built clean). `npm run gates`: all
+             # green, boundaries 345 files unchanged. `npx tsc --noEmit`:
+             # clean. No PHP changed. No `v1/**`/`v2/**` edit. No Arabic
+             # codepoint. No oracle/golden-log/fixture/snapshot regenerated.
+             # Full detail: DECISIONS.md v3-D340.
              # NOTE (v3-D339, 2026-10-24): `components/workbench/FrontierNavigator.tsx`'s
              # own `load.state === "unavailable"` branch — the GATE-A
              # verification-frontier failed-read state, reachable on a real

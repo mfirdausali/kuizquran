@@ -228,7 +228,6 @@ export function buildRetentionSummary(input: RetentionInput): RetentionSummary {
   for (const stage of BAND_ORDER) bandCounts.set(stage, 0);
 
   let encodedCount = 0;
-  let anyJoints = false;
 
   for (const site of sites) {
     const atom = atoms.get(siteToAtomKey(site));
@@ -244,7 +243,6 @@ export function buildRetentionSummary(input: RetentionInput): RetentionSummary {
     if (atom) {
       if (atom.encoded) encodedCount += 1;
       present.push({ atom, isSeam, ayah: site.ayah });
-      if (isSeam && atom.encoded) anyJoints = true;
     }
   }
 
@@ -271,9 +269,15 @@ export function buildRetentionSummary(input: RetentionInput): RetentionSummary {
     };
   });
 
-  // SLIPPING. Counted here, never in JSX.
+  // SLIPPING. Counted here, never in JSX. `anyJoints` names the noun for
+  // the sentence below, so it must be scoped to what is ACTUALLY slipping —
+  // never to the whole walked graph, or a healthy, encoded joint anywhere in
+  // the surah (completely ordinary once a learner is partway through it)
+  // would make an all-ayah slipping set print "items" instead of "ayat"
+  // (v3-D340).
   const slipping = present.filter((p) => isSlipping(p.atom, now, cfg));
   const slippingCount = slipping.length;
+  const anyJoints = slipping.some((p) => p.isSeam);
 
   // DECAY ROWS. Only atoms that ACTUALLY DECLINED are shown — a row reading
   // "72% → 72% since Thursday" is noise, and a row that went UP would be
