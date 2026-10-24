@@ -694,7 +694,18 @@ export function SessionIsland({
           : phase.reason === "nothing-due"
             ? nothingDueMessage
             : "This surah is not available on this device yet.";
-    return <p className="caption">{message}</p>;
+    // Only "no-corpus" is the genuine failure this component's own comment
+    // names two lines up — the other three reasons are an ordinary decline
+    // (a finished queue, an unready selection, a bad deep link) and must not
+    // be upgraded to the same urgent live-region priority as a real load
+    // failure, mirroring `phase.kind === "failed"`'s own role="alert" a few
+    // lines above and the file-wide convention of reserving it for genuine
+    // failures.
+    return (
+      <p className="caption" role={phase.reason === "no-corpus" ? "alert" : undefined}>
+        {message}
+      </p>
+    );
   }
 
   if (phase.kind === "summary") {

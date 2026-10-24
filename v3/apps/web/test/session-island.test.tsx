@@ -200,6 +200,42 @@ describe("#103 — it never blocks the session (cache warm, not a precondition)"
   });
 });
 
+// `lib/session/run.ts#SessionUnavailable`'s own docblock distinguishes
+// "no-corpus" (a genuine load failure) from "nothing-due" (success) — but
+// the "unavailable" render branch painted every reason through one plain
+// `<p className="caption">` with no live-region role at all, so a screen
+// reader user got the identical, unprivileged silence for "the corpus
+// failed to load" as for an ordinary "nothing is due right now".
+describe("the 'no-corpus' unavailable reason is a real failure, not an ordinary decline", () => {
+  it("renders role=alert when the corpus asset fails to load", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = String(url);
+        if (path.startsWith("/corpus/")) {
+          return { ok: false, json: async () => ({}) } as Response;
+        }
+        return new Response("{}", { status: 200 });
+      }),
+    );
+    render(<SessionIsland surah={SURAH} />);
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/not available on this device/i);
+  });
+
+  it("does NOT upgrade the ordinary 'nothing-due' decline to an alert", async () => {
+    installFetch();
+    // Surah 112's own budget fits its whole 4-ayah surah in one sitting, so a
+    // freshly-encoded learner with every ayah already due today still reaches
+    // "nothing-due" only after finishing it — simplest is to drive the floor
+    // mode's own virgin-log decline, already proven text-wise by the
+    // v3-D108 block above, and assert its role here instead.
+    render(<SessionIsland surah={SURAH} mode="floor" />);
+    const message = await screen.findByText(/nothing to check in on yet/i);
+    expect(message.getAttribute("role")).not.toBe("alert");
+  });
+});
+
 // v3-D217 — FR5 (`packages/engine/src/resume.ts#resumePolicy`) reaches the
 // real session loop for the first time. `resumePolicy` classified a genuine
 // re-entry gap since it landed, unit-tested (`resume.test.ts`), but had ZERO

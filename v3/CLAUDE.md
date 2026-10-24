@@ -53,10 +53,39 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3120 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3122 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 423 v3/api + 120 corpus-compiler
-             # + 468 engine + 73 fold-runner + 1734 apps/web. (v3-D340, 2026-10-24)
+             # + 468 engine + 73 fold-runner + 1736 apps/web. (v3-D341, 2026-10-24)
+             # v3/api's 423 is CARRIED FORWARD, UNVERIFIED this run — this
+             # session's sandbox refused the packages.sury.org PHP 8.4 install
+             # every prior run has used cleanly; see v3-D341's own "Session
+             # context" for the full account. Nothing in v3-D341's diff touches
+             # PHP, so there is no reason to expect it moved, but re-run
+             # `cd v3/api && php artisan test` yourself before trusting this
+             # line at face value.
+             # NOTE (v3-D341, 2026-10-24): `components/session/SessionIsland.tsx`'s
+             # own "unavailable" branch rendered a real corpus-load failure
+             # ("no-corpus") with the identical bare, roleless paragraph as an
+             # ordinary decline ("nothing-due"/"none-ready"/"invalid-ayah") —
+             # on `/session`, "the ONLY graded path in the product." Both this
+             # component's own inline comment and `lib/session/run.ts
+             # #SessionUnavailable`'s docblock already named "no-corpus" as the
+             # one genuine failure among the four reasons, but the render
+             # branch gave none of them a `role` at all, unlike this same
+             # file's own `"failed"` branch (`role="alert"`) and
+             # surah-completion celebration (`role="status"`) a few lines
+             # above. Fixed: `role={phase.reason === "no-corpus" ? "alert" :
+             # undefined}` — only the one failure reason upgraded, the three
+             # ordinary declines left exactly as they were. RED confirmed
+             # directly (a stubbed non-ok corpus fetch, `findByRole("alert")`
+             # timing out against the unmodified component) and
+             # mutation-verified (`git stash` of the one production file alone
+             # reproduced the identical single failure; restored
+             # byte-identically, reran 41/41 green, was 39). `TZ=UTC npx vitest
+             # run` (apps/web): 1736 passing (was 1734, +2). Full detail,
+             # including the honest PHP-8.4 sandbox blocker: DECISIONS.md
+             # v3-D341.
              # NOTE (v3-D340, 2026-10-24): `lib/progress/retention.ts`'s own
              # `anyJoints` flag — which `slippingWords()` uses to choose "ayat"
              # vs the joint-hedged "items" in /progress's §10 slipping sentence,

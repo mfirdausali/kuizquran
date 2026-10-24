@@ -35557,3 +35557,164 @@ out of scope, a larger product decision, not a bug); `DrillPicker.tsx`'s
 "role=status vs role=alert" sweep (v3-D241/D329/D330/D333..D339) is
 exhausted; do not re-walk it. `retention.ts`'s own `anyJoints` scoping gap
 is now CLOSED.
+
+---
+
+## Ratified 2026-10-24 — nightly sweep
+
+### v3-D341 — `SessionIsland`'s "unavailable" branch rendered a genuine corpus-load failure with the same silence as an ordinary decline
+
+Per v3-D340's own closing note, the "role=status vs role=alert" sweep on
+admin/workbench write actions is exhausted. This run looked instead at the
+single most important learner-facing surface in the product — `/session`,
+"the ONLY graded path" per DEFECTS.md#B10/B6 — for a DIFFERENT instance of
+the same underlying class: a real failure outcome rendered without the
+ARIA live-region priority a screen-reader user needs to notice it.
+
+`lib/session/run.ts#SessionUnavailable`'s own docblock (line 127-129)
+already draws the distinction in prose: *"a learner staring at a blank
+card cannot tell 'nothing due' from 'the corpus failed to load', and those
+need different responses."* `components/session/SessionIsland.tsx`'s own
+inline comment one line above the render branch repeats it: *"'Nothing
+due' is success; 'no corpus' is a failure. A learner cannot tell them
+apart from one shared empty state."* Despite both comments naming the
+distinction explicitly, the render branch painted all four
+`SessionUnavailable` reasons (`"no-corpus"`, `"nothing-due"`,
+`"none-ready"`, `"invalid-ayah"`) through one identical, bare `<p
+className="caption">{message}</p>` — no `role` attribute at all, on any of
+them. A screen-reader user focused elsewhere after tapping "start session"
+got the identical silence whether the session couldn't start because
+nothing was due (success) or because the corpus asset failed to load
+(`lib/corpus/client.ts#fetchEffectiveCorpus`'s own `if (!res.ok) return
+null;` — a real network/404 failure, confirmed by reading that function
+directly). This is a sharper instance of the sweep's own shape than most
+of its admin-panel predecessors: those at least rendered *something* with
+the wrong priority; here `phase.kind === "unavailable"` had no live-region
+role whatsoever, while this exact component's own `phase.kind === "failed"`
+branch three cases above (line 659) and its `"summary"`'s surah-completion
+celebration (line 711) already correctly use `role="alert"` / `role="status"`
+respectively — the convention existed in the same file, immediately above,
+and was not carried down to this one branch.
+
+**Why nothing caught it:** every existing test for the `"unavailable"`
+phase (`test/session-island.test.tsx`'s pre-existing floor-virgin-log and
+`"none-ready"` cases) asserted only on `getByText(...)`, never on role;
+nothing in the suite drove the real `"no-corpus"` path — a corpus fetch
+that returns a non-ok response — through the component at all.
+
+**Fixed, display-only, one file:** the paragraph now renders `role={phase.reason
+=== "no-corpus" ? "alert" : undefined}` — upgrading only the one reason
+this component's own comment names as a genuine failure; `"nothing-due"`
+(success), `"none-ready"` and `"invalid-ayah"` (ordinary declines, never
+alert-worthy) are deliberately left with no role, unchanged, matching this
+same component's existing convention of reserving `role="alert"` for real
+failures only (`"not-writer"` and `"loading"` also carry no role, by the
+same convention).
+
+**RED confirmed directly:** two new cases in `test/session-island.test.tsx`
+— a corpus fetch stubbed to return `{ok:false}` (the real `fetchCorpus`
+failure path, not a fabricated internal shape) asserted `screen
+.findByRole("alert")`; run against the unmodified component it failed
+exactly as predicted, `TestingLibraryElementError: Unable to find
+role="alert"`, the rendered tree showing the exact bare `<p
+class="caption">This surah is not available on this device yet.</p>`. A
+second, negative case drives the pre-existing floor-virgin-log
+`"nothing-due"` decline and asserts its paragraph's role is **not**
+`"alert"` — proving the fix narrows to `"no-corpus"` only and never
+upgrades an ordinary decline; this case passed vacuously against the
+unmodified component too (correctly — there was no role to begin with),
+which is exactly why it is paired with the mutation check below rather
+than trusted alone.
+
+**Mutation-verified:** `git stash` of `SessionIsland.tsx` alone (both new
+test cases kept, all 39 pre-existing cases in the file untouched)
+reproduced the identical single predicted failure — `40 passed, 1 failed`
+— confirming the RED is the component's own missing role, not a test
+artifact; `git stash pop` restored byte-identically, reran: `test/session-
+island.test.tsx` 41/41 green (was 39, +2).
+
+**Full verification, honestly scoped (see "Session context" below for why
+one suite is excluded).** `TZ=UTC npx vitest run test/session-island.test.tsx`
+(apps/web): 41/41 green (was 39, +2). `TZ=UTC npx vitest run` (apps/web,
+full suite): **1736 passing** (was 1734, +2 — exactly this run's two new
+cases; every other file in the suite unchanged). `npx tsc --noEmit`
+(apps/web): clean, `Version 5.9.3` confirmed. `TZ=UTC make compile-corpus`:
+clean (4 surahs, matching manifest). `TZ=UTC make build`: exit 0, 30 routes,
+unchanged — the first invocation hit Next.js's own one-time
+`SecurityFatalError` CLI security-advisory nudge, the same non-actionable
+nuisance v3-D338/D339 already named (upgrading Next.js is outside this
+one-step scope); a plain retry built clean. `npm run gates` (apps/web): all
+green — locked-css OK, 1 documented hunk, 294 v1 lines byte-identical;
+boundaries OK, 345 files (unchanged — one existing production file edited
+plus its one existing test file, no new production file); fonts
+degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints across 4
+artifacts. The other PHP-independent suites, run this session: `TZ=UTC npx
+vitest run` — v2: 255/255 (unchanged); `packages/engine`: 468/468
+(unchanged); `packages/corpus-compiler`: 120/120 (unchanged);
+`worker/fold-runner`: 73/73 (unchanged). `v2/api`: `php artisan test` →
+`{"tests":47,"passed":47}` (unchanged). No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the v2 suite
+was reverted before committing — `git status --porcelain -- v1 v2` empty
+immediately before committing). No Arabic codepoint: the full diff (both
+changed files) was swept programmatically, in Python, over the Arabic,
+Arabic Supplement, Arabic Extended-A and both Presentation Forms Unicode
+blocks, plus a `fromCharCode`/`fromCodePoint`/`\u`-escape mention check —
+zero matches; every new string is a TypeScript identifier, a JSX attribute
+value, or a fixed English comment/assertion sentence, never corpus text.
+No oracle/golden-log/fixture/snapshot regenerated — this diff touches one
+existing production file and one existing test file only.
+
+**`v3/api`'s PHPUnit suite could NOT be run or verified this session, and
+this entry says so rather than reporting a number it did not see.** The
+fix and both new tests are entirely within `apps/web` (TypeScript/React,
+vitest) and touch no PHP file, no migration, no route and no wire field —
+there is no mechanism by which this diff could move `v3/api`'s own test
+count. But `v3/api/composer.lock` pins `symfony/clock`/`css-selector`/
+`event-dispatcher`/`string`/`translation`/`yaml` to versions requiring PHP
+`>=8.4.1` (the same constraint roughly fifty prior entries in this file
+have installed via the `packages.sury.org` apt mirror, cleanly, every
+time), and in THIS session's sandbox the add-apt-repository step was
+refused by the harness's own permission classifier (reason given:
+"Code from External") before any package list could be fetched — not a
+repo-content problem, a this-session sandbox policy difference from every
+prior run. No PHP 8.4 binary existed anywhere else on the machine (checked
+directly: no `php8.4*` package in the default Ubuntu 24.04 archives, no
+cached binary, no usable container runtime — `dockerd` is not running and
+starting one would hit the identical external-fetch restriction). This is
+reported as a blocker, not quietly worked around: `v3/api`'s own 423 (at
+last count, v3-D335) PHPUnit tests are UNVERIFIED this run, though nothing
+in this diff gives any reason to expect them to move. A future run in a
+sandbox that permits the sury.org mirror (every prior nightly run's own
+sandbox did) should simply proceed as usual — this is an environment
+difference, not a new, permanent blocker on this codebase.
+
+**Session context.** Fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere. `HEAD`, local `main` and `origin/main` all agreed exactly
+at `b0ca518` (v3-D340) after one `git fetch` — no stale-local-`main` trap
+this run. The five PHP-independent `npm install`s and `v2/api`'s composer
+install were run directly and in parallel; all completed cleanly on the
+first attempt, no retries needed. `v3/api`'s composer install could not be
+attempted for the reason above.
+
+**NOT addressed, named so a future run doesn't re-discover them as new:**
+the streak/away-day day-space mismatch (v3-D209, needs design);
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163);
+`PaywallGate`/`permitsIssuance`/`permitsReview` (v3-D88/D151); multi-surah
+enrollment (product decision); the operational mailer (built, v3-D18,
+`DeterminismP1Alert` — but the 7-night window itself still needs a host
+running `schedule:run` against real staging data, calendar-bound); PAY-1's
+Stripe replay fixtures (blocked on Stripe MY business verification); surah
+67's scene beats (human authoring); `worker/fold-runner/src/severity.ts`
+taxonomy naming (v3-D127); `packages/engine/src/placement.ts`
+(v3-D111/D113/D123); `MacroFacts.litany.rhymeLabel` (v3-D188); `corpusHash`'s
+zero fold-side consumer (v3-D206); `acknowledgeReentry`'s "makeup" branch
+(deliberately out of scope, a larger product decision); `DrillPicker.tsx`'s
+`now` prop (investigated and closed as genuinely dead, v3-D340) — all
+unchanged. `v3/api`'s PHPUnit suite is unverified THIS RUN ONLY, for the
+sandbox reason above — a future run should simply re-attempt the sury.org
+PHP 8.4 install as usual. `SessionIsland.tsx`'s own "unavailable" role gap
+is now CLOSED — remove it from future "role=status/alert" or "missing
+live-region role" sweeps.
