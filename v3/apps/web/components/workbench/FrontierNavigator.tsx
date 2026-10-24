@@ -129,7 +129,7 @@ export function FrontierNavigator({
         </div>
         {/* NOT an empty list. #167's rule: a failed probe renders `unknown`,
             never 0 — the console must distinguish healthy from blind. */}
-        <p role="status" className="voice">
+        <p role="alert" className="voice">
           The frontier could not be read, so this build cannot say what is
           verified. {load.reason}.
         </p>

@@ -85,8 +85,15 @@ describe("FrontierNavigator — three states, never two", () => {
     // read as "nothing outstanding".
     expect(screen.queryByRole("list")).toBeNull();
     expect(section.textContent).not.toMatch(/\ball green\b/);
-    // Announced, so it is not a silent blank pane.
-    expect(screen.getByRole("status")).toBeTruthy();
+    // Announced with an UNPRIVILEGED priority is still a silent blank pane in
+    // practice for a screen-reader user who has moved focus away: a failed
+    // read of GATE-A's own frontier is a genuine failure, not an ordinary
+    // status update, and every other "unavailable"/"could not read" branch in
+    // this codebase (SystemHealthPanel, AnchorHourPanel, PlanPanel, etc.)
+    // already announces it as `role="alert"`. This pane was the one
+    // exception.
+    expect(screen.getByRole("alert")).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
   it("a TRUE empty says the API returned nothing — a different sentence from unavailable", () => {

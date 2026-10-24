@@ -35322,3 +35322,131 @@ own role=status/role=alert gap is now CLOSED — remove it from future
 action of their own this shape could misreport); a future run should
 look for a new candidate outside this now-nine-deep sweep, or take on one
 of the larger deferred items above, rather than re-walking those five.
+
+### v3-D339 — FrontierNavigator's own "unavailable" frontier-read failure announced with `role="status"`, the one exception to the codebase's alert convention
+
+`components/workbench/FrontierNavigator.tsx:132` — Pane 1 of §22b, the GATE-A
+verification worklist a qari's sign-off depends on — rendered its `load.state
+=== "unavailable"` branch (a genuine fetch failure: a thrown network
+exception, a non-2xx status, a non-JSON body, or a JSON body missing its
+`frontier` key, all real reachable outcomes of `lib/workbench/verifications.ts
+#loadFrontier()`) inside a hardcoded `<p role="status" className="voice">`.
+The component's own docblock calls an empty/unknown frontier "the single most
+dangerous sentence this screen could tell a qari" since GATE-A blocks public
+launch — yet the one state that means "this screen cannot currently tell you
+anything" was announced with the same passive, unprivileged live-region
+priority as an ordinary status update.
+
+A different bug shape from the "role=status vs role=alert" write-action sweep
+v3-D241/D329/D330/D333/D334/D335/D336/D337/D338 closed across nine admin
+panels (PrivacyPanel, OverrideEditor, GlossDraftsPanel, FlagsPanel,
+StripeSettingsPanel, AccountAuthPanel, SystemHealthPanel) — this is a READ-
+failure branch, not a write outcome, on `/workbench`, a route none of those
+nine runs ever swept. Checked directly against every other "unavailable"/
+"could not read" render branch in the tree (`SystemHealthPanel.tsx`,
+`AnchorHourPanel.tsx`, `PlanPanel.tsx`, and the admin panels named above):
+every one of them already uses `role="alert"` for its own failed-read state.
+`FrontierNavigator.tsx` was the single exception. Not a deliberate design
+choice: the only test touching this branch,
+`test/workbench-ui.test.tsx`'s "UNAVAILABLE renders..." case, only asserted
+`screen.getByRole("status")` to prove the failure is announced via *some*
+live region at all ("so it is not a silent blank pane") — it never pinned
+the specific priority, so nothing documented this as intentional.
+
+Found by a dedicated fresh-sweep agent (Explore), handed the exclusion list
+from v3-D338's own "NOT addressed" note and told to look for a genuinely
+fresh candidate outside the nine-deep admin sweep or take on one of the
+larger deferred items — it reported this one directly, having independently
+checked every other "unavailable" branch in the tree first.
+
+Fixed, display-only, no server/wire change: `role="status"` → `role="alert"`
+on the one paragraph. `load.reason` and all surrounding markup are untouched.
+
+RED confirmed directly: the pre-existing "UNAVAILABLE renders..." case in
+`test/workbench-ui.test.tsx` was strengthened in place (not a new `it()`
+block) to assert `screen.getByRole("alert")` is present and
+`screen.queryByRole("status")` is `null`, replacing the old assertion that
+only checked `getByRole("status")` was truthy. Run against the unmodified
+component it failed exactly as predicted —
+`TestingLibraryElementError: Unable to find an accessible element with the
+role "alert"` — since the paragraph was always `role="status"`. Mutation-
+verified: `git stash` of `FrontierNavigator.tsx` alone (the strengthened
+test kept, the file's other 56 cases untouched) reproduced the identical
+failure; restored byte-identically (`git diff --stat` empty before
+re-implementing), reran: `test/workbench-ui.test.tsx` 57/57 green, unchanged
+from before this run — no new `it()` block, one pre-existing assertion
+strengthened in place.
+
+`TZ=UTC make test`: **3119 passing** (unchanged from v3-D338's own 3119 —
+this run strengthened an existing assertion rather than adding a new test,
+so the net count does not move; apps/web 1733, unchanged; every other suite
+unchanged: 255 v2 vitest, 47 v2/api, 423 v3/api, 120 corpus-compiler, 468
+engine, 73 fold-runner). `check-test-floor.mjs`: OK, 3119 >= floor 1899
+(+1220 margin, unmoved, same discipline as every prior entry). `TZ=UTC make
+build`: exit 0, 30 routes, unchanged — this diff edits one existing
+component and its one existing test file, no new route or production file.
+(First `make build` invocation this run stopped on Next.js's own one-time
+`SecurityFatalError` CLI nudge about a known Next.js advisory, explicitly
+instructing "retry the same command to continue the original task" — not a
+real build failure; a plain retry built clean, exit 0, unchanged route list.
+Not acted on further by this run — upgrading Next.js is outside tonight's
+one-step scope and the nudge itself says to ask a human before running its
+suggested `next upgrade --agent=security`, which this unattended run has no
+human to ask; left named here for a human to decide.) `npm run gates`: all
+green — locked-css OK, 1 documented hunk, 294 v1 lines byte-identical;
+boundaries OK, 345 files (unchanged — no new production file); fonts
+degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints across 4
+artifacts — all unchanged, this diff carries no corpus data. `npx tsc
+--noEmit`: clean, `Version 5.9.3` confirmed. No PHP file changed, so `pint`
+was not applicable. No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff produced by running the suite was reverted before
+committing, same discipline as every prior entry — `git status --porcelain
+-- v1 v2` empty immediately before committing). No Arabic codepoint (the full
+diff swept programmatically, in Python, over the Arabic, Arabic Supplement,
+Arabic Extended-A and both Presentation Forms Unicode blocks, plus a
+`fromCharCode`/`fromCodePoint` mention check: CLEAN — every new string is a
+JSX attribute value or a fixed English test-comment/assertion sentence,
+never corpus text). No oracle/golden-log/fixture/snapshot regenerated — this
+diff touches one existing production file and one existing test file only.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled corpus
+anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1); installed PHP
+8.4.27 cleanly via the documented `packages.sury.org` apt mirror, no refusal
+this run. `HEAD`, local `main` and `origin/main` all already agreed at
+`bd15cee` (v3-D338) — no stale-local-`main` trap this run, confirmed
+directly via `git fetch origin main` before any exploration. The four
+PHP-independent `npm install`s (`packages/corpus-compiler`,
+`packages/engine`, `worker/fold-runner`, `apps/web`) plus `v2`'s were run
+directly and in parallel; both composer installs (`v2/api`, `v3/api`) were
+run sequentially per this file's own documented shared-git-mirror-cache
+collision risk, each via the git-mirror-clone fallback for part of its
+dependency tree (`v2/api` hung briefly on `sebastian/lines-of-code`'s own
+clone, confirmed still progressing via `ps aux` rather than assumed stuck),
+both completing cleanly with no manual retry flag needed.
+
+NOT addressed: every item on v3-D338's own condensed "NOT addressed" list,
+unchanged — `rhymeClassOf()`; `EntitlementMachine::merge()`;
+`App\Billing\TrialAttribution`/`lib/pricing.ts#regionFromCountry()`;
+`PaywallGate` as a whole class; multi-surah enrollment as a product
+decision; the operational mailer/7-night launch window; PAY-1's Stripe
+fixtures; surah 67's scene beats; `worker/fold-runner/src/severity.ts`'s
+taxonomy naming; `packages/engine/src/placement.ts`;
+`MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero fold-side consumer;
+`selection_determinism_check` still replaying a committed fixture;
+`QueueItem.score`'s missing external reader; `acknowledgeReentry`'s "makeup"
+branch; `DrillPicker.tsx`'s unused `now` prop; the unused
+`atoms`/`corpus`/`sessions` IndexedDB object stores; `session_start`'s own
+latency metric; the streak/away-day day-space mismatch (v3-D209, real, needs
+design, deliberately deferred); `/workbench`'s own Pane 2/3; the deferred
+`vitest@5` bump; `laravel/framework`'s remaining advisory; `v2/api`'s own
+frozen advisories; the `trial_surah_source` column on `entitlements`; the
+Next.js security-advisory nudge above (named, not acted on — needs a human
+decision on when to run `next upgrade`) — all unchanged. `FrontierNavigator
+.tsx`'s own role=status/role=alert gap is now CLOSED — remove it from future
+"role=status vs role=alert" sweeps. The nine-deep admin-panel write-action
+sweep and this one read-failure instance together suggest a worthwhile next
+candidate: a dedicated pass over every OTHER `role="status"`-wrapped
+read-failure branch outside `/workbench` and the admin console already
+checked here (e.g. settings panels not yet named), rather than assuming the
+convention is now fully enforced everywhere.

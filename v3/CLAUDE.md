@@ -56,7 +56,43 @@ make dev     # SPA :5273, API :8000
 make test    # 3119 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 423 v3/api + 120 corpus-compiler
-             # + 468 engine + 73 fold-runner + 1733 apps/web. (v3-D338, 2026-10-22)
+             # + 468 engine + 73 fold-runner + 1733 apps/web. (v3-D339, 2026-10-24)
+             # NOTE (v3-D339, 2026-10-24): `components/workbench/FrontierNavigator.tsx`'s
+             # own `load.state === "unavailable"` branch — the GATE-A
+             # verification-frontier failed-read state, reachable on a real
+             # network exception, a non-2xx status, or a malformed response
+             # (`lib/workbench/verifications.ts#loadFrontier()`) — rendered
+             # `role="status"` instead of `role="alert"`, the one exception to
+             # this codebase's otherwise-universal "unavailable"/"could not
+             # read" convention (checked directly against
+             # `SystemHealthPanel.tsx`/`AnchorHourPanel.tsx`/`PlanPanel.tsx`
+             # and the full admin-panel write-action sweep closed in
+             # v3-D329..D338 — all already `role="alert"`). A different bug
+             # shape from that sweep: a READ failure on `/workbench`, not a
+             # write outcome on an admin panel, found by a fresh-sweep agent
+             # handed v3-D338's own exclusion list. Fixed, display-only:
+             # `role="status"` → `role="alert"` on the one paragraph. The
+             # pre-existing "UNAVAILABLE renders..." case in
+             # `test/workbench-ui.test.tsx` was strengthened in place (no new
+             # `it()` block) to assert `getByRole("alert")` present and
+             # `queryByRole("status")` null; run against the unmodified
+             # component it failed exactly as predicted. Mutation-verified:
+             # `git stash` of the one production file alone reproduced the
+             # identical failure; restored byte-identically, reran: 57/57
+             # green, count unchanged. `TZ=UTC make test`: 3119 passing,
+             # unchanged from v3-D338 (this run strengthened an existing
+             # assertion, added none; apps/web 1733, every other suite
+             # unchanged). `check-test-floor.mjs`: OK, 3119 >= floor 1899
+             # (+1220 margin, unmoved). `TZ=UTC make build`: exit 0, 30
+             # routes, unchanged (first invocation stopped on Next.js's own
+             # one-time security-advisory CLI nudge, not a real failure; a
+             # plain retry built clean — named here, not acted on, since
+             # upgrading Next.js is outside this one-step scope and needs a
+             # human decision). `npm run gates`: all green, 345 files,
+             # unchanged. `npx tsc --noEmit`: clean. No PHP changed. No
+             # `v1/**`/`v2/**` edit. No Arabic codepoint. No oracle/golden-
+             # log/fixture/snapshot regenerated. Full detail: DECISIONS.md
+             # v3-D339.
              # NOTE (v3-D338, 2026-10-22): `components/admin/SystemHealthPanel.tsx`'s
              # own "Rebuild atom cache" button (build-plan step 24, edge case
              # #168) carried the identical "role=status vs role=alert" shape
