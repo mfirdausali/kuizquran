@@ -37,10 +37,22 @@ export function decaySince(
 ): DecaySince {
   const nowPct = Math.round(currentStrength(atom, now, cfg));
   const sincePct = Math.round(currentStrength(atom, since, cfg));
+  // A `since` instant that falls BEFORE the atom's own `lastRetrieval` cannot
+  // be answered honestly: `currentStrength` has no record of what the atom's
+  // strength was before that retrieval happened. Asking it anyway routes
+  // through `retrievability`'s now<lastRetrieval guard — built for mild
+  // clock skew, never for querying a date before the atom's own history
+  // starts — which answers with the atom's full, undecayed `strength`
+  // instead of a real historical figure. That makes a genuine retrieval
+  // (one that HELPED the atom) read as a decline from that inflated value,
+  // which is exactly the "green dashboard... has lied to them" failure §10
+  // forbids — manufactured from a retrieval that actually happened, not a
+  // measurement of forgetting. So no decline is ever reported across one.
+  const sinceBeforeRetrieval = atom.lastRetrieval !== null && since < atom.lastRetrieval;
   return {
     nowPct,
     sincePct,
     sinceLabel: sinceLabel(since, now, cfg),
-    declined: nowPct < sincePct,
+    declined: !sinceBeforeRetrieval && nowPct < sincePct,
   };
 }

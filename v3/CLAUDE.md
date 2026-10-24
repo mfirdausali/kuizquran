@@ -53,17 +53,55 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3122 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3123 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 423 v3/api + 120 corpus-compiler
-             # + 468 engine + 73 fold-runner + 1736 apps/web. (v3-D341, 2026-10-24)
-             # v3/api's 423 is CARRIED FORWARD, UNVERIFIED this run — this
-             # session's sandbox refused the packages.sury.org PHP 8.4 install
-             # every prior run has used cleanly; see v3-D341's own "Session
-             # context" for the full account. Nothing in v3-D341's diff touches
+             # + 469 engine + 73 fold-runner + 1736 apps/web. (v3-D342, 2026-10-24)
+             # v3/api's 423 is CARRIED FORWARD, UNVERIFIED for a SECOND
+             # consecutive run — this session's sandbox again refused the
+             # packages.sury.org PHP 8.4 install; see v3-D342's own "Session
+             # context" for the full account. Nothing in v3-D342's diff touches
              # PHP, so there is no reason to expect it moved, but re-run
              # `cd v3/api && php artisan test` yourself before trusting this
              # line at face value.
+             # NOTE (v3-D342, 2026-10-24): `packages/engine/src/decay.ts
+             # #decaySince()` could fabricate a DECLINE across an atom's own
+             # retrieval event, on `/progress`'s §10 "decay made visible" rows
+             # — a different, logic/derived-state bug class from the now-twice-
+             # exhausted "role=status vs role=alert" sweep (v3-D241..D341): a
+             # fresh-sweep agent was told to look at computed state instead and
+             # found it in `decaySince(atom, since, now)`, which reports
+             # `sincePct` via `currentStrength(atom, since)` →
+             # `retrievability(atom, since)`'s `dt = Math.max(0,
+             # daysBetween(lastRetrieval, since))` clamp — written for mild
+             # clock skew, not for `since` predating `lastRetrieval` by days,
+             # which is the ORDINARY case once `app/(app)/progress/page.tsx`'s
+             # fixed ~1-week lookback is wider than a healthy learner's own
+             # review gap. When `since < lastRetrieval`, `dt` clamps to 0 and
+             # `sincePct` comes back as the atom's full, undecayed CURRENT
+             # strength rather than a real historical figure — e.g. an atom
+             # reviewed 2-3 days ago (fresh `strength: 95`), decayed slightly
+             # since to `~86`, reported "95% → 86% since last week": a decline
+             # the atom never had, fabricated from the very retrieval that
+             # produced the 95. Fixed, scoped to one function:
+             # `declined: !sinceBeforeRetrieval && nowPct < sincePct`, where
+             # `sinceBeforeRetrieval = atom.lastRetrieval !== null && since <
+             # atom.lastRetrieval` — `nowPct`/`sincePct` themselves untouched;
+             # `strength.ts#retrievability`/`currentStrength` (load-bearing in
+             # gate/scheduler/update logic) deliberately left alone. RED
+             # confirmed directly (a day-1010-retrieval atom queried at
+             # since=day1003/now=day1012 failed `expected true to be false`
+             # against the unmodified source) and mutation-verified (`git
+             # stash` of the one production file alone reproduced the
+             # identical single failure; restored byte-identically, reran
+             # 20/20 green, was 19). `npx vitest run` (engine): 469 passing
+             # (was 468, +1). Downstream consumer (`lib/progress/retention.ts`,
+             # the sole caller) sanity-checked: 36/36 green, unchanged — its
+             # own fixtures don't happen to exercise `since < lastRetrieval`,
+             # consistent with the bug being previously unreported. `v3/api`'s
+             # PHPUnit suite UNVERIFIED a second consecutive run, same sandbox
+             # PHP-8.4-install refusal as v3-D341; this diff touches no PHP
+             # file. Full detail: DECISIONS.md v3-D342.
              # NOTE (v3-D341, 2026-10-24): `components/session/SessionIsland.tsx`'s
              # own "unavailable" branch rendered a real corpus-load failure
              # ("no-corpus") with the identical bare, roleless paragraph as an

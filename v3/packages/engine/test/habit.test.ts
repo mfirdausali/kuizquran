@@ -115,6 +115,24 @@ describe("decay visible (FR9)", () => {
     expect(sinceLabel(dayMs(999), now, DEFAULT_DAY_CONFIG)).toBe("yesterday");
     expect(sinceLabel(dayMs(990), now, DEFAULT_DAY_CONFIG)).toBe("10 days ago");
   });
+  it("never reports a decline across a retrieval that happened AFTER `since`", () => {
+    // The atom was reviewed on day 1010 (fresh strength 95, a real retrieval
+    // event) — three days after the `since` snapshot (day 1003) this call asks
+    // about. `currentStrength(atom, since)` has no record of what the atom's
+    // strength genuinely was on day 1003 (that is before its own
+    // `lastRetrieval`); `retrievability`'s now<lastRetrieval guard (built for
+    // mild clock skew, not for querying a date before the atom's own history
+    // starts) answers with the atom's full, undecayed strength instead,
+    // which would make a review that genuinely HELPED the atom read as a
+    // decline from 95% — exactly the "green dashboard... has lied to them"
+    // failure §10 forbids, manufactured from a retrieval that actually
+    // happened rather than a real measurement of forgetting.
+    const atom = { ...initAtom(12, "ayah", 4), encoded: true, strength: 95, stability: 20, lastRetrieval: dayMs(1010) };
+    const since = dayMs(1003);
+    const now = dayMs(1012);
+    const d = decaySince(atom, since, now, DEFAULT_DAY_CONFIG);
+    expect(d.declined).toBe(false);
+  });
 });
 
 describe("mushaf heatmap (FR9 P1)", () => {

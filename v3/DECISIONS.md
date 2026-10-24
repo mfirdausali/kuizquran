@@ -35718,3 +35718,141 @@ sandbox reason above — a future run should simply re-attempt the sury.org
 PHP 8.4 install as usual. `SessionIsland.tsx`'s own "unavailable" role gap
 is now CLOSED — remove it from future "role=status/alert" or "missing
 live-region role" sweeps.
+
+---
+
+### v3-D342 — `decaySince()` could fabricate a decline across an atom's own retrieval, on `/progress`'s §10 "decay made visible" rows
+
+Per v3-D340/D341's own closing notes, the "role=status vs role=alert" sweep is
+exhausted (independently re-confirmed this run against
+`components/shell/SyncStatus.tsx` and `components/home/MySurahs.tsx` — both
+read as deliberate-by-design, not bugs: the former's own docblock explicitly
+argues for a calm, never-alarming indicator even for its two escalated facts,
+the latter's "it's been a while" banner is reassurance, not a failure). A
+dedicated fresh-sweep agent was handed the full exclusion list and told to
+look at derived/computed state instead of ARIA roles — the same shape
+v3-D340's own find (`anyJoints` scoped over the wrong subset) belongs to —
+and found a different, real instance in `packages/engine/src/decay.ts`.
+
+`decaySince(atom, since, now, cfg)` computes `sincePct` via
+`currentStrength(atom, since, cfg)`, which calls `retrievability(atom,
+since)`. `retrievability` computes `dt = Math.max(0, daysBetween(atom
+.lastRetrieval, since))` — the `Math.max(0, …)` clamp exists for mild clock
+skew (`since` a few seconds before `lastRetrieval`), not for the case
+`decaySince` actually hits on `/progress`: a `since` snapshot that sits DAYS
+or WEEKS before the atom's own `lastRetrieval`, because `app/(app)/progress/
+page.tsx` sets `since = now - SINCE_WINDOW_MS` — a fixed ~1-week-back
+instant, independent of any atom's own review history. When `since` predates
+`lastRetrieval`, `dt` clamps to 0, `retrievability` returns `1.0`, and
+`sincePct` comes back as the atom's full, undecayed CURRENT `strength` — not
+a real historical figure, because the model has no record of what the
+atom's strength was before its own last retrieval. Concretely: an atom
+reviewed 2–3 days ago (fresh `strength: 95`), decayed slightly since to
+`~86` today, reported `sincePct: 95, nowPct: 86, declined: true` — "95% → 86%
+since last week" — fabricating a decline the atom never had; the review is
+what PRODUCED the 95, not something that happened after a decline from it.
+This row would appear in `lib/progress/retention.ts`'s §10 decay list, which
+WIREFRAME.md itself calls the headline, honesty-promised metric ("these are
+the SAME NUMBERS the scheduler uses… nothing is decorative") — exactly the
+"green dashboard… has lied to them" failure class this feature exists to
+prevent, manufactured here from a retrieval that genuinely happened.
+
+**Why nothing caught it:** the only existing test of `decaySince`
+(`test/habit.test.ts`) used `since === atom.lastRetrieval` exactly; nothing
+exercised `since < lastRetrieval`, the ordinary case for any healthy,
+recently-reviewed atom once `/progress`'s fixed lookback window is wider
+than the atom's own last gap. A grep of this file for the shape found zero
+prior mentions across DECISIONS.md.
+
+**Fixed, scoped to the one function:** `decaySince` now tracks
+`sinceBeforeRetrieval = atom.lastRetrieval !== null && since <
+atom.lastRetrieval` and reports `declined: !sinceBeforeRetrieval && nowPct <
+sincePct` — it never claims a decline across a `since` instant that predates
+the atom's own last retrieval. `nowPct`/`sincePct` themselves are untouched
+(still informational); only `declined` — the one field `retention.ts`
+branches on to decide whether to show the row at all — is corrected.
+`strength.ts#retrievability`/`currentStrength` (load-bearing throughout
+gate/scheduler/update logic) were deliberately left untouched, to avoid any
+risk to unrelated, correctness-critical scheduling paths — this is a
+narrow, display-logic fix, not a change to the forgetting model itself.
+
+**RED confirmed directly:** one new case in `test/habit.test.ts`'s existing
+"decay visible (FR9)" describe block — an atom reviewed on day 1010 (fresh
+`strength: 95`), queried with `since` = day 1003 (before the retrieval) and
+`now` = day 1012 — asserts `d.declined` is `false`. Run against the
+unmodified source it failed exactly as predicted: `expected true to be
+false`. Mutation-verified: `git stash` of `decay.ts` alone (the new test
+kept, the file's other 19 cases untouched) reproduced the identical single
+failure (19 passed, 1 failed); restored byte-identically (`git diff --stat
+v3/packages/engine/src/decay.ts` empty before re-finalizing), reran:
+`test/habit.test.ts` 20/20 green (was 19, +1).
+
+**Full verification.** `npx vitest run` (engine): **469 passing** (was 468,
++1 — exactly this run's one new test; 45/45 test files). `npx tsc --noEmit`
+(engine): clean. Downstream consumer sanity check — `TZ=UTC npx vitest run
+test/progress-retention.test.tsx lib/progress/retention-config-agreement
+.test.ts` (apps/web, the one production caller of `decaySince`): 36/36 green,
+unchanged count — no regression, and those fixtures don't happen to exercise
+`since < lastRetrieval`, consistent with the bug being previously unreported
+there too. `TZ=UTC npx vitest run` (apps/web, full suite): **1736 passing**,
+unchanged — this diff touches no apps/web file. Other suites, run this
+session: v2 vitest 255/255 (unchanged); v2/api PHPUnit
+`{"tests":47,"passed":47}` (unchanged); corpus-compiler 120/120 (unchanged);
+fold-runner 73/73 (unchanged). `TZ=UTC make build`: exit 0, 30 routes,
+unchanged (first invocation hit Next.js's own one-time `SecurityFatalError`
+CLI nudge, same non-actionable nuisance as v3-D338..D341's own runs — not
+acted on; a plain retry built clean). `npm run gates` (apps/web): all
+green — locked-css OK, 1 documented hunk, 294 v1 lines byte-identical;
+boundaries OK, 344 files, unchanged (no new production file); fonts
+degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology OK; corpus-glyphs OK, 206 codepoints across 4 artifacts —
+this diff carries no corpus data. No Arabic codepoint: both changed files
+swept programmatically, in Python, over the Arabic, Arabic Supplement,
+Arabic Extended-A and both Presentation Forms Unicode blocks, plus a
+`fromCharCode`/`fromCodePoint`/`\u`-escape mention check — CLEAN; every new
+string is a TypeScript identifier or a fixed English comment/assertion
+sentence, never corpus text. No `v1/**`/`v2/**` edit (`git status
+--porcelain -- v1 v2` empty before committing). No oracle/golden-log/
+fixture/snapshot regenerated — this diff touches one existing engine source
+file and one existing engine test file only.
+
+**Session context.** Fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere. `HEAD`, local `main` and `origin/main` all agreed exactly at
+`da63cae` (v3-D341) after one `git fetch` — no stale-local-`main` trap this
+run. The five PHP-independent `npm install`s were run directly and in
+parallel; `v2/api`'s composer install completed via the documented
+git-mirror-source fallback (slow, no manual retry needed). **`v3/api`'s own
+composer install could not be attempted**: this session's sandbox again
+refused the `packages.sury.org` PHP 8.4 apt-mirror step (`add-apt-repository`
+denied by the harness's own permission classifier, "Code from External"),
+the identical environment-specific blocker v3-D341 already named, not a
+repo-content problem. No PHP 8.4 binary existed anywhere else on the machine
+(checked directly: no cached binary; `docker` is installed but its daemon is
+not running and starting one would hit the same external-fetch restriction).
+`v3/api`'s own 423 (at last count, v3-D335) PHPUnit tests are UNVERIFIED this
+run, though nothing in this diff gives any reason to expect them to move —
+this diff touches no PHP file, no migration, no route and no wire field. A
+future run in a sandbox that permits the sury.org mirror should simply
+proceed as usual.
+
+**NOT addressed, named so a future run doesn't re-discover them as new:**
+the streak/away-day day-space mismatch (v3-D209, needs design);
+`rhymeClassOf()` (v3-D136, needs a vendored per-ayah rhyme profile — real,
+separate scope); `EntitlementMachine::merge()` (v3-D88..D94/D144/D145);
+`App\Billing\TrialAttribution` (v3-D148); `lib/pricing.ts#regionFromCountry()`
+(v3-D163); `PaywallGate`/`permitsIssuance`/`permitsReview` (v3-D88/D151);
+multi-surah enrollment (product decision); the operational mailer (built,
+v3-D18, `DeterminismP1Alert` — the 7-night window itself still needs a host
+running `schedule:run` against real staging data, calendar-bound); PAY-1's
+Stripe replay fixtures (blocked on Stripe MY business verification); surah
+67's scene beats (human authoring); `worker/fold-runner/src/severity.ts`
+taxonomy naming (v3-D127); `packages/engine/src/placement.ts`
+(v3-D111/D113/D123); `MacroFacts.litany.rhymeLabel` (v3-D188); `corpusHash`'s
+zero fold-side consumer (v3-D206); `acknowledgeReentry`'s "makeup" branch
+(deliberately out of scope, a larger product decision); `DrillPicker.tsx`'s
+`now` prop (genuinely dead, closed v3-D340) — all unchanged. The
+"role=status vs role=alert" sweep remains exhausted (re-confirmed again this
+run on two more files); do not re-walk it. `decay.ts#decaySince()`'s own
+`since`-predates-`lastRetrieval` gap is now CLOSED — remove it from future
+sweeps, and prefer this run's own lead (derived/computed state scoped over
+the wrong window or subset, rather than ARIA roles) for the next one.
