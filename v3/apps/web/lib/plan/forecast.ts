@@ -283,8 +283,15 @@ function concreteItems(
       items.push({ kind: "gate", label: `Gate ${l.surah}:${l.ayah}` });
     }
   }
-  const reviews = Math.max(1, due.reviews - offset);
-  items.push({ kind: "review", label: `${reviews} review${reviews === 1 ? "" : "s"}` });
+  // v3-D346: a floor of 1 here used to push a "review" item unconditionally,
+  // even when the decayed count is zero or negative — fabricating a review
+  // that is not due, exactly the invented precision this module's header
+  // forbids. Offset 0's own branch above already guards with `if
+  // (due.reviews > 0)`; this mirrors it instead of flooring.
+  const reviews = Math.max(0, due.reviews - offset);
+  if (reviews > 0) {
+    items.push({ kind: "review", label: `${reviews} review${reviews === 1 ? "" : "s"}` });
+  }
   return items;
 }
 

@@ -53,10 +53,53 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3129 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3131 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 423 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1741 apps/web. (v3-D345, 2026-10-25)
+             # + 470 engine + 73 fold-runner + 1743 apps/web. (v3-D346, 2026-10-25)
+             # NOTE (v3-D346, 2026-10-25): `apps/web/lib/plan/forecast.ts
+             # #concreteItems()` floored a DECAYED review count back up to 1
+             # for the Plan Calendar's own +1/+2/+3 concrete-zone days,
+             # fabricating a "1 review" item even when zero reviews were
+             # genuinely due. The function's own offset-0 branch already gets
+             # this right — `if (due.reviews > 0) items.push(...)` — but the
+             # shared tail for +1..+3 computed `Math.max(1, due.reviews -
+             # offset)` and pushed the review item UNCONDITIONALLY, no `> 0`
+             # guard at all. A learner with zero reviews due today (a brand-
+             # new learner, or one who already cleared today's backlog) saw a
+             # fabricated review on every one of the three concrete-zone
+             # future days — the exact invented-precision lie this module's
+             # own header says it exists to prevent ("Populating every future
+             # day with specific ayat would look more satisfying and would be
+             # a LIE"), found one layer inside the zone boundary the header is
+             # actually about. Found by a fresh-sweep pass explicitly steered
+             # away from both exhausted bug classes (role=status/alert;
+             # cross-runtime constant duplication) and both further-exhausted
+             # derived-state shapes (wrong window/subset; wrong event-type
+             # filter) — a genuinely different shape: an unconditional push
+             # with a numeric floor, where the same function's own sibling
+             # branch already proves the intended guard. Why nothing caught
+             # it: every fixture in `forecast.test.ts` already passes
+             # `reviews: 0`, and the file has a dedicated test proving gates
+             # are never fabricated at +2/+3 — but no equivalent test ever
+             # existed for the REVIEW kind, so the `reviews: 0` fixture every
+             # test already supplied silently exercised the fabrication
+             # without anything reading `items.filter(i => i.kind ===
+             # "review")` to notice. Fixed: `Math.max(0, due.reviews -
+             # offset)`, guarded by `if (reviews > 0)` before pushing —
+             # mirroring the day-0 branch instead of flooring. RED confirmed
+             # directly (two new cases — zero due today across +1/+2/+3; a
+             # positive count decayed past zero by +3 — both run against the
+             # unmodified source failed exactly as predicted, `expected [
+             # {kind: 'review', ...} ] to have a length of +0 but got 1`) and
+             # mutation-verified (`git stash` of `forecast.ts` alone
+             # reproduced both failures identically; restored byte-
+             # identically, reran 10/10 green, was 8). `TZ=UTC make test`:
+             # 3131 passing (was 3129, +2 — exactly these two new cases;
+             # apps/web 1743, was 1741; every other suite unchanged).
+             # `test/plan-calendar.test.tsx` 25/25 green, unchanged — no
+             # regression on the one real consumer. Full detail: DECISIONS.md
+             # v3-D346.
              # NOTE (v3-D345, 2026-10-25): `components/admin/AdminGate.tsx`'s
              # own `denied` session-check verdict — a GENUINE server-side
              # failure from `checkAdminSession()` (a thrown network

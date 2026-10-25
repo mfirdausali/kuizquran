@@ -181,4 +181,44 @@ describe("buildForecast — the concrete zone may only name what is actually sch
     expect(dayAfterTomorrow?.items.filter((i) => i.kind === "gate")).toHaveLength(0);
     expect(inThreeDays?.items.filter((i) => i.kind === "gate")).toHaveLength(0);
   });
+
+  // v3-D346: offset 0's own branch already guards correctly — `if
+  // (due.reviews > 0) items.push(...)` — proving the module's own intent is
+  // "never show a review item when none is due." Offsets +1..+3 instead
+  // computed `Math.max(1, due.reviews - offset)`, an unconditional push with
+  // a floor of 1: a learner with ZERO reviews due today (a real case — a new
+  // learner, or one who has already cleared today's backlog) saw a
+  // fabricated "1 review" at +1, +2 AND +3, with no real review behind it —
+  // the exact invented-precision lie this module's header forbids, on the
+  // one kind of item its own day-0 branch already protects correctly.
+  it("never fabricates a review for +1, +2 or +3 when none is due today", () => {
+    const f = buildForecast({
+      now: NOW,
+      tz: TZ,
+      minutesPerDay: 8,
+      enrolled: [{ surah: 112, remainingAyat: 10, avgWordsPerAyah: 5 }],
+      dueToday: { gates: [], reviews: 0, learn: [] },
+      awayDays: [],
+    });
+    for (const offset of [1, 2, 3]) {
+      const day = f.days.find((d) => d.offset === offset);
+      expect(day?.items.filter((i) => i.kind === "review")).toHaveLength(0);
+    }
+  });
+
+  // The floor also fabricated a review once the real count had already
+  // decayed past zero (e.g. 2 reviews today, 3 days out — genuinely 0 left,
+  // never a guessed 1).
+  it("never floors a decayed review count back up to 1", () => {
+    const f = buildForecast({
+      now: NOW,
+      tz: TZ,
+      minutesPerDay: 8,
+      enrolled: [{ surah: 112, remainingAyat: 10, avgWordsPerAyah: 5 }],
+      dueToday: { gates: [], reviews: 2, learn: [] },
+      awayDays: [],
+    });
+    const inThreeDays = f.days.find((d) => d.offset === 3);
+    expect(inThreeDays?.items.filter((i) => i.kind === "review")).toHaveLength(0);
+  });
 });

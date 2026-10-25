@@ -36276,3 +36276,135 @@ vs role=alert" sweep on admin WRITE-action panels (v3-D241..D341) and the
 D343) remain exhausted at their own search depths. `AdminGate.tsx`'s own
 missing-alert-entirely gap on a genuine session-check failure is now
 CLOSED — remove it from future "unavailable"/"could not read" role sweeps.
+
+### v3-D346 — `concreteItems()` floored a decayed review count back up to 1, fabricating a review on `/plan`'s own honesty-gated concrete zone
+
+A fresh-sweep pass, explicitly avoiding the two bug classes this file's own
+record declares exhausted (role=status vs role=alert on admin write actions,
+v3-D241..D345; cross-runtime/cross-language closed-set constant duplication,
+v3-D311/D314/D324/D325/D327/D328) and the two further-exhausted derived-state
+shapes (wrong window/subset, v3-D340/D342/D343; wrong event-type filter,
+v3-D344), looked instead at `apps/web/lib/plan/forecast.ts` — the Plan
+Calendar's own §14 "honesty mechanic" module, whose header states its whole
+reason for existing: "Populating every future day with specific ayat would
+look more satisfying and would be a LIE."
+
+Found: `concreteItems()`'s own day-0 branch already gets this right —
+`if (due.reviews > 0) items.push({kind: "review", ...})` — proving the
+module's own intent is "never show a review item when none is due." But the
+shared tail for offsets +1, +2 and +3 computed
+`const reviews = Math.max(1, due.reviews - offset);` and pushed the review
+item UNCONDITIONALLY, with no `> 0` guard at all. A learner with ZERO
+reviews due today — a genuinely common case: a brand-new learner with
+nothing yet encoded, or one who has simply cleared today's backlog in the
+same session — saw a fabricated "1 review" at +1, +2 **and** +3 on the Plan
+Calendar, with no real review behind it. The same floor also fires once a
+real, positive review count has legitimately decayed to zero or below by a
+later offset (e.g. 2 reviews today, offset 3: `max(1, 2-3)` = 1, not 0) —
+claiming a review that the learner has, by any reasonable reading of the
+backlog, already cleared. This is the identical invented-precision shape
+the module's header forbids for ayat/items past the concrete zone, found one
+layer inside it: the zone boundary was respected, the COUNT within the zone
+was not.
+
+**Why nothing caught it:** `lib/plan/forecast.test.ts` passes
+`dueToday: { gates: [], reviews: 0, learn: [...] }` in every one of its
+fixtures (the natural choice once gates/learn are the thing under test) and
+has a dedicated test, "never fabricates a gate for a day +2 or +3," proving
+the module's author cared about exactly this shape of bug for the GATE kind
+— but no equivalent assertion ever existed for the REVIEW kind, so the
+`reviews: 0` fixture every test already supplied silently exercised the
+fabrication at +1/+2/+3 without any test ever reading `items.filter(i =>
+i.kind === "review")` to notice.
+
+**Fixed**, scoped to the one line: `Math.max(0, due.reviews - offset)`,
+guarded by `if (reviews > 0)` before pushing — mirroring the day-0 branch's
+own already-correct convention instead of flooring. `reviews > 0` after a
+genuine decay (e.g. 5 reviews today, offset 2 → 3) is untouched.
+
+RED confirmed directly: two new cases in `lib/plan/forecast.test.ts`
+(`dueToday.reviews: 0` across offsets 1/2/3; `dueToday.reviews: 2` at offset
+3) run against the unmodified source both failed exactly as predicted —
+`expected [ { kind: 'review', … } ] to have a length of +0 but got 1` — the
+real fabricated item, not a type-level assertion. Mutation-verified:
+`git stash` of `forecast.ts` alone (both new cases kept, the 8 pre-existing
+cases in the file untouched) reproduced the identical two failures; restored
+byte-identically, reran: `lib/plan/forecast.test.ts` 10/10 green (was 8,
++2), `test/plan-calendar.test.tsx` 25/25 green, unchanged — no regression on
+the one real consumer of `buildForecast()`.
+
+`TZ=UTC make test`: 3131 passing (was 3129 per v3-D345's own count,
+confirmed unchanged for every suite this run did not touch; apps/web 1743,
+was 1741, +2 — exactly these two new cases; 255 v2 vitest, 47 v2/api, 423
+v3/api, 120 corpus-compiler, 470 engine, 73 fold-runner). `check-test-
+floor.mjs`: OK, 3131 >= floor 1899 (+1232 margin, unmoved). `TZ=UTC make
+build`: exit 0, 30 routes, unchanged — this diff touches one existing
+production file and one existing test file, no new route or component (the
+first invocation hit Next.js's own one-time `SecurityFatalError` CLI nudge,
+same as v3-D338/D339/D340 — not acted on, a plain retry built clean). `npm
+run gates`: locked-css OK (1 documented hunk, 294 v1 lines byte-identical);
+boundaries OK, 344 files, unchanged; fonts degraded-but-non-blocking,
+pre-existing, 2/6 UI fonts present; corpus-morphology OK, 0 words (no corpus
+compiled this run outside `make build`/`make test`'s own `compile-corpus`
+prerequisite); corpus-glyphs SKIPPED outside that same prerequisite — both
+as expected, this diff carries no corpus data. `npx tsc --noEmit`, run
+separately across all four v3 Node packages: clean in all four. No PHP file
+touched, so `pint` was not applicable. No `v1/**`/`v2/**` edit (a stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the v2 suite
+was reverted before committing, same discipline as every prior entry — `git
+status --porcelain -- v1 v2` empty immediately before committing). No
+Arabic codepoint (both changed files swept over the Arabic, Arabic
+Supplement, Arabic Extended-A and both Presentation Forms Unicode blocks,
+plus a `fromCharCode`/`fromCodePoint`/`\u`-escape check: CLEAN — every new
+string is a TypeScript identifier or a fixed English assertion/comment
+sentence, never corpus text). No oracle/golden-log/fixture/snapshot
+regenerated — this diff touches one existing production file and one
+existing test file only.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1); installed
+PHP 8.4.27 cleanly via the documented `packages.sury.org` apt mirror, no
+refusal this run. `HEAD` was found detached exactly at `origin/main`'s own
+real tip (`3d2c5a5`, v3-D345), on a stale LOCAL `main` branch ref 7 commits
+behind (`bd15cee`, v3-D338) — the recurring stale-local-`main` trap this
+file has recorded roughly fifty times since v3-D77 — caught before any
+exploration via `git fetch origin main` + `git checkout main && git merge
+--ff-only origin/main`, a clean fast-forward, no work lost or at risk. The
+five PHP-independent `npm install`s were run directly and in parallel while
+`v2/api`'s own `composer install` ran in the background via the documented
+git-mirror-source fallback for most of its dependency tree (`curl error 28`
+proxy timeouts on individual GitHub zipball downloads, each recovered
+automatically by composer's own source-clone fallback, no manual retry
+needed) — slow (~20 min) but no refusal.
+
+**NOT addressed**, named so a future run doesn't re-discover them as new:
+the streak/away-day day-space mismatch (v3-D209, needs design);
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145, re-read this run and confirmed still the same
+already-discussed product-decision gap, not a fresh mechanical defect);
+`App\Billing\TrialAttribution` (v3-D148); `lib/pricing.ts
+#regionFromCountry()` (v3-D163); `PaywallGate`/`permitsIssuance`/
+`permitsReview` (v3-D88/D151, re-read this run and confirmed correct);
+multi-surah enrollment (product decision); the operational mailer (built,
+v3-D18 — the 7-night window itself still needs a host running
+`schedule:run` against real staging data, calendar-bound; confirmed again
+this run that `DeterminismCheckCommand::sampleFromDatabase()` is a real DB
+adapter with per-user advisory locks and dead-letter quarantine, closing
+HANDOVER.md's own E6 engineering half); PAY-1's Stripe replay fixtures
+(blocked on Stripe MY business verification); surah 67's scene beats (human
+authoring); `worker/fold-runner/src/severity.ts` taxonomy naming (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123);
+`MacroFacts.litany.rhymeLabel` (v3-D188); `corpusHash`'s zero fold-side
+consumer (v3-D206); `acknowledgeReentry`'s "makeup" branch (deliberately out
+of scope); `check-test-floor.mjs`'s own `TEST-FLOOR` file (1899, +1232
+margin — HANDOVER.md's own E10 is already closed as a mechanism; raising the
+number itself is optional tightening, not a defect) — all unchanged. The
+"role=status vs role=alert" sweep (v3-D241..D345) and the cross-runtime
+constant-duplication sweep (v3-D311..D328) both remain exhausted; do not
+re-walk either. The "derived/computed state scoped over the wrong window or
+subset" shape (v3-D340/D342/D343) and the "wrong event-type filter" shape
+(v3-D344) are also closed. `forecast.ts`'s own review-count floor is now
+CLOSED — remove it from future sweeps; a future run should prefer a genuinely
+different shape again (an inverted boolean, a wrong comparison operator, a
+missing-but-reachable null guard, a security gap) over re-walking any of the
+above, or take on one of the larger deferred items named above.
