@@ -158,6 +158,24 @@ describe("mushaf heatmap (FR9 P1)", () => {
     expect(w1.taps).toBe(2); // pretest excluded
     expect(w1.accuracy).toBe(0.5); // 1/2
   });
+  it("v3-D344 — counts the real session loop's own `reconstruct_tap` events, not only the legacy `tap` type", () => {
+    // `apps/web/lib/session/run.ts`'s `answerAfterTap` — the ONLY place a real
+    // learner's word-level taps are ever committed — emits `type:
+    // "reconstruct_tap"` (v2-D05), never bare `"tap"`. `rebuild.ts` and
+    // `sessionSummary.ts` both already treat the two as equivalent
+    // (`e.type === "tap" || e.type === "reconstruct_tap"`); this is the one
+    // reader that still checks `"tap"` alone, so this exact fixture shape — a
+    // real `reconstruct_tap` pair — is what a genuine learner's log looks
+    // like, never a hand-rolled type nothing commits.
+    const events: DrillEvent[] = [
+      { type: "reconstruct_tap", ts: 1, surah: 12, ayah: 4, rung: "S2", gradeClass: "rc", position: 2, correct: true },
+      { type: "reconstruct_tap", ts: 2, surah: 12, ayah: 4, rung: "S2", gradeClass: "rc", position: 2, correct: false },
+    ];
+    const diag = wordDiagnostics(corpus, events, 4);
+    const w2 = diag.find((d) => d.position === 2)!;
+    expect(w2.taps).toBe(2);
+    expect(w2.accuracy).toBe(0.5);
+  });
 });
 
 describe("growthCurve (v2-D17/D20 Progress Report)", () => {

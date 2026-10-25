@@ -154,6 +154,21 @@ function wordTapEventsFixture(): DrillEvent[] {
   ];
 }
 
+/** v3-D344 — the same word-tap shape `wordTapEventsFixture()` carries, but
+ *  through the REAL session loop's own event type (`lib/session/run.ts
+ *  #answerAfterTap` commits `"reconstruct_tap"`, never bare `"tap"`). Proves
+ *  the fix reaches the real page, not only the engine unit. */
+function realWordTapEventsFixture(): DrillEvent[] {
+  const base = { surah: SURAH, ayah: AYAH, rung: "S2" as const, gradeClass: "rc" as const, type: "reconstruct_tap" as const };
+  const start = NOW - 60_000;
+  return [
+    { ...base, ts: start, position: 3, correct: true, latency: 1_000 },
+    { ...base, ts: start + 1_000, position: 3, correct: false, latency: 1_200 },
+    { ...base, ts: start + 2_000, position: 7, correct: true, latency: 900 },
+    { ...base, ts: start + 3_000, position: 9, correct: false, pretest: true, latency: 1_100 },
+  ];
+}
+
 function rowsFixture(n = 8) {
   return buildProgressRows({
     corpus: windowCorpus(n),
@@ -619,6 +634,19 @@ describe("the four states, as a learner sees them (#73)", () => {
     // Never-tapped words (e.g. position 1) are dropped, not shown at "—" or "0%".
     expect(text).not.toContain("Word 1 ");
     expect(text).not.toMatch(/Word 1\b.*0%/);
+  });
+
+  it("v3-D344 — ready with word taps from the REAL session loop's own `reconstruct_tap` events", () => {
+    const { container } = view({ status: "ready", data: realWordTapEventsFixture() as LocalEventRow[] });
+    const text = container.textContent ?? "";
+    expect(text).toContain("Word 3");
+    expect(text).toContain("50%");
+    expect(text).toContain("2 taps");
+    expect(text).toContain("Word 7");
+    expect(text).toContain("100%");
+    expect(text).toContain("1 tap");
+    expect(text).not.toContain("Word 9");
+    expect(text).not.toMatch(/No word-level taps recorded/i);
   });
 
   it("ready with no word taps: says so plainly, never a table of absent measurements", () => {

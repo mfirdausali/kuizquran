@@ -53,14 +53,54 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3125 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3127 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 423 v3/api + 120 corpus-compiler
-             # + 469 engine + 73 fold-runner + 1738 apps/web. (v3-D343, 2026-10-25)
-             # v3/api's 423 was VERIFIED FOR REAL this run (this sandbox
-             # permitted the packages.sury.org PHP 8.4 install, unlike the two
-             # immediately preceding runs, v3-D341/D342) — closing the
-             # "carried forward, unverified" gap those two runs had to note.
+             # + 470 engine + 73 fold-runner + 1739 apps/web. (v3-D344, 2026-10-25)
+             # NOTE (v3-D344, 2026-10-25): `packages/engine/src/heatmap.ts
+             # #wordDiagnostics()` — the `/surah/[surah]/[ayah]` ayah-detail
+             # page's "Tap accuracy, word by word" panel — filtered events on
+             # `e.type !== "tap"` alone. The ONLY place a real learner's
+             # word-level taps are ever committed, `apps/web/lib/session
+             # /run.ts#answerAfterTap`, emits `type: "reconstruct_tap"`
+             # (v2-D05), never bare `"tap"`; `rebuild.ts`/`sessionSummary.ts`
+             # already treat the two as equivalent, but this one reader never
+             # got the same OR. So the panel matched ZERO real events and
+             # always rendered its honest-empty-state copy, even after
+             # extensive real drilling of that exact ayah — a diagnostic
+             # built, wired, and silently dead on arrival. Found by a
+             # fresh-sweep agent after a narrower search for a fourth
+             # instance of v3-D340/D342/D343's own "wrong window/subset"
+             # shape came back empty (every candidate in that exact shape was
+             # already fixed or disproven) and was redirected to any fresh
+             # bug shape instead — a different shape from that sweep: a
+             # missing OR on an event-type filter, not a scoping error. Why
+             # nothing caught it: both `habit.test.ts`'s own unit test and
+             # `ayah-detail.test.tsx`'s `wordTapEventsFixture()` fabricate
+             # `type: "tap"` events — matching the buggy filter, never the
+             # real session loop's own `"reconstruct_tap"`. Fixed: the filter
+             # is now `(e.type !== "tap" && e.type !== "reconstruct_tap")`,
+             # the identical precedent `rebuild.ts`/`sessionSummary.ts`
+             # already set. RED confirmed directly at both the engine-unit
+             # level (`expected +0 to be 2` against the unmodified source)
+             # and the real component level (the panel rendering "No
+             # word-level taps recorded" instead of the real rows) and
+             # mutation-verified both ways (`git stash` of `heatmap.ts` alone
+             # reproduced both failures identically; restored
+             # byte-identically, reran 21/21 and 47/47 green, were 20/46).
+             # `TZ=UTC make test`: 3127 passing (was 3125, +2 — exactly these
+             # two new cases; engine 470, apps/web 1739; every other suite
+             # unchanged). One environment flake confirmed, not a regression:
+             # `v3/api`'s PHPUnit suite hit `SQLSTATE[HY000]: database is
+             # locked` on `NightlyWindowLedger`/`OverrideHashRecomputeTest`
+             # under this sandbox's file-based sqlite test DB (`busy_timeout`
+             # is `null` in the stock Laravel config) — reproduced on one
+             # standalone re-run, cleared completely on a second standalone
+             # re-run (423 passed, matching the documented count exactly, 0
+             # code touched in between); the full `make test` that followed
+             # this diff's fix was clean end to end, no retry needed. Full
+             # detail, including the sandbox's own curl-into-keyring refusal
+             # and recovery during PHP 8.4 setup: DECISIONS.md v3-D344.
              # NOTE (v3-D343, 2026-10-25): `lib/progress/rows.ts#timeOnTaskMs()`
              # judged each event's interruption by the gap to the SAME ATOM's
              # own previous tap, not by the gap `resumePolicy` was actually

@@ -64,7 +64,11 @@ export function wordDiagnostics(
     .sort((a, b) => a.position - b.position);
   const byPos = new Map<number, { correct: number; total: number }>();
   for (const e of events) {
-    if (e.type !== "tap" || e.ayah !== ayah || e.position === undefined) continue;
+    // `"tap"` is the legacy type a pre-v2-D05 log may still carry; the real
+    // session loop (`lib/session/run.ts#answerAfterTap`) commits
+    // `"reconstruct_tap"` — `rebuild.ts`/`sessionSummary.ts` already treat
+    // the two as equivalent (v3-D344).
+    if ((e.type !== "tap" && e.type !== "reconstruct_tap") || e.ayah !== ayah || e.position === undefined) continue;
     if (e.pretest === true) continue; // pretest excluded
     if (e.correct === undefined) continue;
     const agg = byPos.get(e.position) ?? { correct: 0, total: 0 };
