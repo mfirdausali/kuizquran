@@ -53,17 +53,47 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3123 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3125 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 423 v3/api + 120 corpus-compiler
-             # + 469 engine + 73 fold-runner + 1736 apps/web. (v3-D342, 2026-10-24)
-             # v3/api's 423 is CARRIED FORWARD, UNVERIFIED for a SECOND
-             # consecutive run — this session's sandbox again refused the
-             # packages.sury.org PHP 8.4 install; see v3-D342's own "Session
-             # context" for the full account. Nothing in v3-D342's diff touches
-             # PHP, so there is no reason to expect it moved, but re-run
-             # `cd v3/api && php artisan test` yourself before trusting this
-             # line at face value.
+             # + 469 engine + 73 fold-runner + 1738 apps/web. (v3-D343, 2026-10-25)
+             # v3/api's 423 was VERIFIED FOR REAL this run (this sandbox
+             # permitted the packages.sury.org PHP 8.4 install, unlike the two
+             # immediately preceding runs, v3-D341/D342) — closing the
+             # "carried forward, unverified" gap those two runs had to note.
+             # NOTE (v3-D343, 2026-10-25): `lib/progress/rows.ts#timeOnTaskMs()`
+             # judged each event's interruption by the gap to the SAME ATOM's
+             # own previous tap, not by the gap `resumePolicy` was actually
+             # asked about at commit time (`run.ts`'s `lastActivityAt`, which
+             # advances on every commit across EVERY atom in the run, never
+             # per atom) — a different, logic/derived-state bug class from the
+             # now-exhausted "role=status vs role=alert" sweep (v3-D241..D341),
+             # the same "derived state scoped over the wrong window/subset"
+             # shape as v3-D340's `anyJoints` and v3-D342's `decaySince()`. A
+             # dedicated fresh-sweep agent was pointed at that shape per
+             # v3-D342's own closing note and found it here. Two failure
+             # directions: (1) a clean day-2 latency wrongly DISCARDED when
+             # the same atom's own previous tap was yesterday, even though the
+             # real previous commit (on a different atom) was seconds ago; (2)
+             # a genuinely interrupted 40-minute latency wrongly KEPT on an
+             # atom's FIRST-EVER tap, since `previousTs === null` always
+             # counted it regardless of size. Both land on `/progress`'s and
+             # the ayah-detail page's "time on task" cell — §15's own promise
+             # that the number is never wall-clock. Fixed, scoped to one
+             # function: the per-atom `previousTs` walk is replaced with
+             # `resumePolicy(e.ts - (e.latency ?? 0), e.ts).discardLatency`
+             # per event, reconstructing the exact window the session loop
+             # itself asked about, independent of atom order. RED confirmed
+             # directly (a cross-atom day-boundary case expecting 5000 instead
+             # of 2000; a first-tap-interrupted case expecting 0 instead of
+             # 2400000, both against the unmodified source) and
+             # mutation-verified (`git stash` of the one production file alone
+             # reproduced the identical two failures; restored
+             # byte-identically, reran 29/29 green, was 27). `TZ=UTC npx
+             # vitest run` (apps/web, full suite): 1738 passing (was 1736,
+             # +2). No regression on the sibling consumer (`test/ayah-detail
+             # .test.tsx`, 46/46 unchanged). Full detail: DECISIONS.md
+             # v3-D343.
              # NOTE (v3-D342, 2026-10-24): `packages/engine/src/decay.ts
              # #decaySince()` could fabricate a DECLINE across an atom's own
              # retrieval event, on `/progress`'s §10 "decay made visible" rows

@@ -128,6 +128,46 @@ function eventsFixture(): DrillEvent[] {
   ];
 }
 
+/** Reproduces v3-D343: `timeOnTaskMs()` judged each event by the gap since
+ *  the PREVIOUS EVENT ON THE SAME ATOM, not by the gap `resumePolicy()` was
+ *  actually asked about at commit time (`run.lastActivityAt` → `now`, which
+ *  runs across EVERY atom in the session, never one atom's own history).
+ *
+ *  12:3 is tapped once on day 1 (short latency). On day 2 the learner first
+ *  taps a DIFFERENT atom, 12:5 — an ordinary same-session commit — and
+ *  seconds later returns to 12:3 with a short, genuinely uninterrupted
+ *  latency. The real gap behind that second 12:3 tap is "seconds since the
+ *  12:5 tap", which `resumePolicy` reads as an ordinary "resume". But the
+ *  buggy per-atom lookup instead compares against 12:3's OWN previous tap —
+ *  yesterday — crosses the learning-day boundary, and discards a latency
+ *  that was never actually interrupted.
+ *
+ *  Correct time on task for 12:3 = 2_000 (day 1) + 3_000 (day 2) = 5_000. */
+function crossAtomFixture(): DrillEvent[] {
+  const day1 = NOW - DAY;
+  return [
+    { surah: SURAH, ayah: 3, rung: "S2", type: "tap", ts: day1, correct: true, latency: 2_000 },
+    // A different atom, tapped moments before the event under test — this is
+    // what the real `lastActivityAt` gap is measured against, not 12:3's own
+    // stale previous tap from the day before.
+    { surah: SURAH, ayah: 5, rung: "S2", type: "tap", ts: NOW, correct: true, latency: 5_000 },
+    { surah: SURAH, ayah: 3, rung: "S2", type: "tap", ts: NOW + 5_000, correct: true, latency: 3_000 },
+  ];
+}
+
+/** Reproduces v3-D343's other direction: a genuinely interrupted latency on
+ *  an atom's FIRST-EVER tap must still be discarded — "no preceding
+ *  activity on THIS atom" is not the same fact as "no preceding activity in
+ *  the session". 12:7's only tap carries a 40-minute latency, exactly the
+ *  shape `eventsFixture()` above proves gets discarded when it is the
+ *  SECOND tap on an atom; here it is the first, which the buggy code always
+ *  kept regardless of size. Correct time on task for 12:7 = 0. */
+function firstTapInterruptedFixture(): DrillEvent[] {
+  return [
+    { surah: SURAH, ayah: 7, rung: "S2", type: "tap", ts: NOW, correct: true, latency: 40 * 60_000 },
+  ];
+}
+
 // ---------------------------------------------------------------------------
 // 1. A REAL SEMANTIC TABLE
 // ---------------------------------------------------------------------------
@@ -439,6 +479,22 @@ describe("time on task (§15)", () => {
       now: NOW,
     });
     for (const r of rows) expect(r.timeOnTask).toBe("—");
+  });
+
+  // v3-D343: the interruption check must ask about the EVENT'S OWN latency
+  // window (the gap `resumePolicy` was actually asked about at commit time),
+  // never the gap since the previous event on the SAME atom — those are
+  // different windows the moment another atom is tapped in between.
+  it("keeps a clean day-2 latency on an atom even though that SAME atom was last tapped on day 1", () => {
+    const events = crossAtomFixture();
+    const ms = timeOnTaskMs(events, SURAH, "ayah", 3);
+    expect(ms).toBe(5_000);
+  });
+
+  it("discards a genuinely interrupted latency even on an atom's FIRST-EVER tap", () => {
+    const events = firstTapInterruptedFixture();
+    const ms = timeOnTaskMs(events, SURAH, "ayah", 7);
+    expect(ms).toBe(0);
   });
 });
 

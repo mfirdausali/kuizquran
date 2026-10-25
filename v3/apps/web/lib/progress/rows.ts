@@ -190,11 +190,17 @@ export function formatDuration(ms: number): string {
  * so time-taken must be reported as TIME ON TASK, never wall-clock —
  * otherwise a learner who took a phone call looks slower than they were."
  *
- * The discard rule is not re-implemented here; `resumePolicy()` is asked. An
- * event whose gap from the previous one classifies as anything other than
- * "resume" had its item interrupted, and `resumePolicy` says so via
- * `discardLatency` — the same function the session loop uses, so the number in
- * this column is the number the engine believes.
+ * The discard rule is not re-implemented here; `resumePolicy()` is asked
+ * about the SAME WINDOW the session loop asked it about at commit time —
+ * `[e.ts - e.latency, e.ts]`, i.e. the run's own `lastActivityAt` just
+ * before this commit to `now` (`run.ts#commitThenContinue`/`answerAfterTap`)
+ * — never the gap since this atom's own previous measured event. Those two
+ * windows differ the moment another atom is tapped in between (v3-D343):
+ * `lastActivityAt` advances on every commit, across every atom in the run.
+ * An event whose own window classifies as anything other than "resume" had
+ * its item interrupted, and `resumePolicy` says so via `discardLatency` —
+ * the same function the session loop uses, so the number in this column is
+ * the number the engine believes.
  */
 export function timeOnTaskMs(
   events: DrillEvent[],
@@ -219,14 +225,14 @@ export function timeOnTaskMs(
   });
 
   let total = 0;
-  let previousTs: number | null = null;
   for (const e of mine) {
-    // The FIRST measured item on an atom has no preceding activity to be
-    // interrupted from, so it always counts.
-    const interrupted =
-      previousTs !== null && resumePolicy(previousTs, e.ts).discardLatency;
+    // `e.latency` IS `e.ts - lastActivityAt` at the moment this event was
+    // committed (`run.ts`), so `e.ts - e.latency` reconstructs that same
+    // `lastActivityAt` exactly — asking the identical question
+    // `classifyReentry` asked, regardless of which atom (if any) the run's
+    // previous commit happened to land on.
+    const interrupted = resumePolicy(e.ts - (e.latency ?? 0), e.ts).discardLatency;
     if (!interrupted) total += e.latency ?? 0;
-    previousTs = e.ts;
   }
   return total;
 }

@@ -35856,3 +35856,150 @@ run on two more files); do not re-walk it. `decay.ts#decaySince()`'s own
 `since`-predates-`lastRetrieval` gap is now CLOSED — remove it from future
 sweeps, and prefer this run's own lead (derived/computed state scoped over
 the wrong window or subset, rather than ARIA roles) for the next one.
+
+### v3-D343 — `timeOnTaskMs()` judged an event's interruption by the gap to the SAME ATOM's own previous tap, not by the gap `resumePolicy` was actually asked about at commit time
+
+Per v3-D342's own closing note, a dedicated fresh-sweep agent (general-purpose,
+high effort) was pointed at derived/computed state scoped over the wrong
+window or subset — the same shape as v3-D340's `anyJoints` and v3-D342's
+`decaySince()` — rather than ARIA roles, and found a different, real instance
+in `apps/web/lib/progress/rows.ts#timeOnTaskMs()`.
+
+**The real window.** `lib/session/run.ts`'s `latency` field on a committed
+event is `Math.max(0, ctx.now - visited.lastActivityAt)` (run.ts:1208) —
+`lastActivityAt` refreshes on EVERY commit, across EVERY atom in the run
+(`commitThenContinue`, run.ts:1118: "the one place, rather than..."), not per
+atom. The session loop's own interruption check, `classifyReentry`, asks
+`resumePolicy(run.lastActivityAt, now)` (run.ts:1473) about that exact same
+global gap. So for any committed event `e`, `e.ts - e.latency` reconstructs
+the real `lastActivityAt` the engine itself used to decide `discardLatency` —
+the window `resumePolicy` was actually asked about.
+
+**What `timeOnTaskMs` asked instead.** It filtered `events` down to `mine` —
+only the events on the ONE atom under test — then walked `mine` tracking
+`previousTs`, and asked `resumePolicy(previousTs, e.ts)` for each event after
+the first. That is the gap since this ATOM's own previous measured event,
+which is a different question from "the gap since the run's last commit on
+ANYTHING" the moment another atom is tapped in between — exactly the
+"wrong subset" shape v3-D340 closed on `anyJoints` one layer up the stack.
+Two independent failure directions, both reproduced directly by running the
+real, unmodified function:
+
+1. **A clean latency wrongly discarded.** An atom tapped on day 1, then
+   tapped again on day 2 moments after a DIFFERENT atom was tapped (an
+   ordinary same-session continuation — the real gap behind that second tap
+   is seconds, and `resumePolicy` would call it an ordinary "resume"). But
+   `previousTs` for THIS atom is still yesterday's tap, so `resumePolicy`
+   sees a learning-day boundary crossed and returns `{action: "makeup",
+   discardLatency: true}` — a genuinely clean 3-second latency thrown away.
+   This is the ordinary shape of a cold-gate-the-day-after-Learn session: the
+   atom under test is tapped once near the start of a session that already
+   warmed up on something else.
+2. **A genuinely interrupted latency wrongly kept.** An atom's FIRST-EVER
+   tap carries its own real 40-minute `latency` (the learner was away before
+   it, same as the SECOND-tap case `eventsFixture()` already proves gets
+   discarded) — but `previousTs === null` on the first iteration
+   unconditionally counts it ("the FIRST measured item on an atom has no
+   preceding activity to be interrupted from" — true of the ATOM's history,
+   false of the SESSION's). The full 2,400,000ms is added to the column.
+
+Both land on `ProgressTable`/`AyahStatsIsland`'s "time on task" cell — §15's
+own named promise that this number is TIME ON TASK, never wall-clock, "so a
+learner who took a phone call looks slower than they were." Direction 1
+quietly shortchanges a learner's own visible effort; direction 2 is the exact
+failure the column exists to prevent, reintroduced on an atom's first tap.
+
+**Why nothing caught it:** the only existing fixture, `eventsFixture()`
+(`test/progress-list.test.tsx`), has every event on the SAME atom, so "gap
+since the previous event on this atom" and "gap since the run's last commit"
+are always identical by construction — the bug has no triggering input in
+that fixture. No test anywhere seeded a second atom between two taps on the
+one under test, or gave an atom's own FIRST tap a large latency.
+
+**Fixed, scoped to the one function:** the per-atom `previousTs` walk is
+replaced with a direct per-event check, `resumePolicy(e.ts - (e.latency ??
+0), e.ts).discardLatency` — reconstructing the same window `classifyReentry`
+asked about at commit time, independent of which atom (if any) came before
+it in the filtered list. The docblock's false "gap from the previous one"
+framing is corrected to name the real window. `mine`'s own per-atom filter
+(which events are credited to this atom at all) is untouched — only the
+interruption judgment per kept event changed.
+
+**RED confirmed directly:** two new cases in `test/progress-list.test.tsx`'s
+existing "time on task (§15)" describe block — a cross-atom day-boundary
+case (expects `5_000`, the sum of both legitimately-kept latencies) and a
+first-tap-interrupted case (expects `0`) — run against the unmodified source
+failed exactly as predicted: `expected 2000 to be 5000` and `expected
+2400000 to be 0`. Mutation-verified: `git stash` of `rows.ts` alone (both new
+cases kept, the pre-existing 27 untouched) reproduced the identical two
+failures; restored byte-identically (`git diff --stat
+v3/apps/web/lib/progress/rows.ts` empty before re-finalizing), reran:
+`test/progress-list.test.tsx` 29/29 green (was 27, +2).
+
+**Full verification.** `TZ=UTC npx vitest run test/progress-list.test.tsx
+test/ayah-detail.test.tsx` (apps/web, the two consumers of this column): 75
+green (29 + 46), no regression. `TZ=UTC make test`: **3125 passing** (was
+3123, +2 — exactly this run's two new cases; apps/web 1738, was 1736; every
+other suite unchanged: 255 v2 vitest, 47 v2/api, 423 v3/api — **verified
+this run**, not carried forward, see Session context below — 120
+corpus-compiler, 469 engine, 73 fold-runner). `check-test-floor.mjs`: OK,
+3125 >= floor 1899 (+1226 margin). `TZ=UTC make build`: exit 0, 30 routes,
+unchanged (first invocation hit Next.js's own one-time `SecurityFatalError`
+CLI nudge, same non-actionable nuisance as v3-D338..D342's own runs — not
+acted on, including its own embedded suggestion to run `next upgrade`,
+which this run did not do; a plain retry built clean). `npm run gates`
+(apps/web): all green — locked-css OK, 1 documented hunk, 294 v1 lines
+byte-identical; boundaries OK, 345 files, unchanged (no new production
+file); fonts degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints across 4
+artifacts — all unchanged, this diff carries no corpus data. `npx tsc
+--noEmit` (apps/web): clean, `Version 5.9.3` confirmed. No Arabic codepoint:
+the diff swept programmatically, in Python, over the Arabic, Arabic
+Supplement, Arabic Extended-A and both Presentation Forms Unicode blocks,
+plus a `fromCharCode`/`fromCodePoint`/`\u`-escape mention check — CLEAN;
+every new string is a TypeScript identifier or a fixed English
+comment/assertion sentence, never corpus text. No `v1/**`/`v2/**` edit (a
+stray `v2/tsconfig.tsbuildinfo` build-cache diff produced by running the
+suite was reverted before committing, same discipline as every prior entry
+— `git status --porcelain -- v1 v2` empty immediately before committing).
+No oracle/golden-log/fixture/snapshot regenerated — this diff touches one
+existing production file and one existing test file only.
+
+**Session context.** Fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere. `HEAD` was detached exactly at `origin/main`'s own real tip
+(`e688caf`, v3-D342) on a stale LOCAL `main` branch ref 4 commits behind
+(`bd15cee`, v3-D338) — the recurring stale-local-`main` trap this file has
+recorded roughly fifty times since v3-D77 — caught before any exploration
+via `git fetch origin main` + `git checkout main && git merge --ff-only
+origin/main`, a clean fast-forward, no work lost or at risk. **Unlike the
+two immediately preceding runs (v3-D341, v3-D342), this sandbox permitted
+the `packages.sury.org` PHP 8.4 apt-mirror step** (`add-apt-repository` was
+not denied this run) — PHP 8.4.27 installed cleanly, both `composer
+install`s (`v2/api` via the documented git-mirror-source fallback, `v3/api`
+directly) completed, and `v3/api`'s 423 PHPUnit tests ran and passed for
+real this run, closing the two-run "carried forward, unverified" gap
+v3-D341/D342 each had to note. The five PHP-independent `npm install`s were
+run directly and in parallel ahead of the composer installs finishing.
+
+**NOT addressed, named so a future run doesn't re-discover them as new:**
+the streak/away-day day-space mismatch (v3-D209, needs design);
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()`
+(v3-D88..D94/D144/D145); `App\Billing\TrialAttribution` (v3-D148);
+`lib/pricing.ts#regionFromCountry()` (v3-D163); `PaywallGate`/
+`permitsIssuance`/`permitsReview` (v3-D88/D151); multi-surah enrollment
+(product decision); the operational mailer (built, v3-D18 — the 7-night
+window itself still needs a host running `schedule:run` against real
+staging data, calendar-bound); PAY-1's Stripe replay fixtures (blocked on
+Stripe MY business verification); surah 67's scene beats (human authoring);
+`worker/fold-runner/src/severity.ts` taxonomy naming (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123);
+`MacroFacts.litany.rhymeLabel` (v3-D188); `corpusHash`'s zero fold-side
+consumer (v3-D206); `acknowledgeReentry`'s "makeup" branch (deliberately out
+of scope) — all unchanged. The "role=status vs role=alert" sweep remains
+exhausted; do not re-walk it. `timeOnTaskMs()`'s own per-atom-vs-per-run
+window confusion is now CLOSED — remove it from future "derived/computed
+state scoped over the wrong window or subset" sweeps, and prefer a fresh
+instance of that same general shape (NOT ARIA roles, NOT a cross-runtime
+constant mirror — both already exhausted classes) for the next one, in
+`packages/engine/src/**`, `apps/web/lib/**`, `worker/fold-runner/src/**`, or
+`v3/api/app/**`.
