@@ -80,6 +80,50 @@ describe("AdminGate — a real verdict, never a client-invented flag", () => {
     expect(screen.getByText(/u_ops/)).toBeTruthy();
   });
 
+  it("a denied session check (/whoami answers 500): announces the reason as an alert, not a silent caption", async () => {
+    // A LIVE token whose own check genuinely fails server-side — distinct
+    // from `signed-out` (no token / a 401-or-403 verdict), this is
+    // `checkAdminSession`'s own `denied` state: a real server-side error
+    // (`lib/admin/session.ts`'s own four `denied` cases — network failure,
+    // a non-401/403 non-2xx status, unparseable JSON, or a malformed body).
+    // `AdminGate` rendered `deniedReason` in a bare, roleless `<p>` — the
+    // ONE place on this screen that does not follow the sibling login-error
+    // paragraph's own `role="alert"` convention a few lines below, and the
+    // same "unavailable"/"could not read" convention this codebase follows
+    // everywhere else (e.g. `FrontierNavigator.tsx`, v3-D339).
+    setToken("admin-token", "admin-token");
+    globalThis.fetch = vi.fn(async () => jsonResponse({ error: "internal" }, 500)) as unknown as typeof fetch;
+
+    render(
+      <AdminGate>
+        <div data-testid="staff-content">secret workbench</div>
+      </AdminGate>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain("the API answered 500"),
+    );
+    expect(screen.queryByTestId("staff-content")).toBeNull();
+  });
+
+  it("a denied session check (a thrown network exception): announces the reason as an alert, not a silent caption", async () => {
+    setToken("admin-token", "admin-token");
+    globalThis.fetch = vi.fn(() => {
+      throw new TypeError("network down");
+    }) as unknown as typeof fetch;
+
+    render(
+      <AdminGate>
+        <div data-testid="staff-content">secret workbench</div>
+      </AdminGate>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain("request failed"),
+    );
+    expect(screen.queryByTestId("staff-content")).toBeNull();
+  });
+
   it("a real login round-trip: submitting the form calls /api/admin/login, then re-checks and reveals the content", async () => {
     const seenUrls: string[] = [];
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {

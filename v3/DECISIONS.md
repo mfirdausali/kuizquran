@@ -36141,3 +36141,138 @@ instances: v3-D340/D342/D343) are now treated as exhausted for THIS run's
 search depth — a future run should widen the search (different directories,
 a different bug shape entirely, as this run did) rather than re-walking
 either. `wordDiagnostics()`'s own missing-event-type gap is now CLOSED.
+
+### v3-D345 — `AdminGate.tsx`'s own `denied` session-check verdict was announced with no ARIA role at all, not even `role="status"`
+
+A fresh-sweep search (same discipline v3-D344's own closing note asked for:
+a different bug shape, widened beyond the now-exhausted "role=status vs
+role=alert" sweep on admin WRITE-action panels, v3-D241..D341) looked
+instead at every admin/settings CLIENT gate and panel not yet named in any
+prior sweep's exclusion list, cross-checked against the "two implementations
+of one closed set" sweep (a `grep -rn "readonly.*\[\]" apps/web/lib` pass —
+`lib/corpus/staged.ts#CLIENT_SURAHS` vs `lib/corpus/load.ts#AVAILABLE_SURAHS`
+and `lib/onboarding/surahs.ts#OFFERED_SURAHS`/`ENROLLABLE_SURAHS` all
+cross-checked directly against their own agreement tests and confirmed
+already correct — surah 12's deliberate client/server split, not a drift)
+and a `packages/engine/src/placement.ts`/`EntitlementMachine::merge()` re-
+read (both independently re-confirmed as the same real-but-M6/product-
+decision-gated items v3-D88..D94/D111/D113/D123/D144/D145 already named,
+not a mechanical one-night fix, so left untouched again).
+
+Found: `components/admin/AdminGate.tsx` — the client-side gate wrapping
+every `/workbench` and `/settings/*` screen (v3-D124/D125/D126) — has never
+appeared in any of the ~15 prior "role=status vs role=alert" entries'
+closed/confirmed-clean lists, and its own `checkAdminSession()`
+(`lib/admin/session.ts`) genuinely reaches a `denied` state on any of FOUR
+real server-side failures: a thrown network exception, a non-2xx/non-401/403
+HTTP status (e.g. a real 500), an unparseable JSON body, or a body that
+parses but carries no recognizable admin identity. `AdminGate`'s own render
+showed `deniedReason` in a bare `<p className="caption">` — not merely the
+wrong role (`"status"` instead of `"alert"`, this build's other ~15
+instances of this shape), but NO role attribute at all — while the sibling
+login-error paragraph four lines below, on the exact same screen, already
+correctly uses `role="alert"`. This is this codebase's otherwise-universal
+"unavailable"/"could not read" convention (`FrontierNavigator.tsx`, v3-D339,
+is the closest precedent, and that one at least had `role="status"` to
+upgrade) violated more completely than any prior instance: an admin whose
+live session check genuinely fails — a flaky connection, a 500 during a
+deploy, a malformed response — is silently parked on the login form with a
+caption a screen reader never announces, no indication anything is wrong
+rather than simply "not yet signed in."
+
+**Why nothing caught it:** `test/admin-gate.test.tsx`'s own 403 case
+(`"with a token that /whoami rejects (403)"`) exercises `checkAdminSession`'s
+`signed-out` branch, not `denied` — `lib/admin/session.ts` maps 401/403 to
+`signed-out` specifically, by design (`AdminSession`'s own docblock: "not a
+server verdict" vs "denied" is a server verdict) — so the one existing test
+that gets closest to this path never actually reaches the `denied` state at
+all, and `denied` had zero coverage of any kind before this run.
+
+**Fixed:** `deniedReason`'s paragraph now renders `role="alert"`, matching
+the sibling login-error paragraph's own convention on the same component,
+one JSX change, no new state, no wire change.
+
+**Verified:**
+- RED confirmed directly: two new cases in `test/admin-gate.test.tsx` — a
+  live token whose `/whoami` answers a real 500; a live token whose
+  `/whoami` call throws a network exception — both run against the
+  unmodified component and failed exactly as predicted,
+  `screen.getByRole("alert")` finding nothing (the rendered DOM showed the
+  real `deniedReason` text, `"the API answered 500"` / `"request failed:
+  network down"`, inside a roleless `<p className="caption">`). The 6
+  pre-existing cases in the file were unaffected.
+- Mutation-verified: `git stash` of `AdminGate.tsx` alone (both new cases
+  kept, the 6 pre-existing cases untouched) reproduced the identical two
+  failures; restored byte-identically (`git stash pop`), reran:
+  `test/admin-gate.test.tsx` 8/8 green (was 6, +2).
+- `TZ=UTC make test`: 3129 passing (was 3127, +2 — exactly these two new
+  cases; apps/web 1741, was 1739; no other suite moved: 255 v2 vitest, 47
+  v2/api, 423 v3/api, 120 corpus-compiler, 470 engine, 73 fold-runner).
+  `check-test-floor.mjs`: OK, 3129 >= floor 1899 (+1230 margin, unmoved).
+  `TZ=UTC make build`: exit 0, 30 routes, unchanged — this diff edits one
+  existing component and its one existing test file, no new route or
+  production file (first invocation hit Next.js's own one-time
+  `SecurityFatalError` CLI nudge, the same non-actionable nuisance v3-D339/
+  D340/D344 already named — not acted on, a plain retry built clean). `npm
+  run gates`: all green — locked-css OK, 1 documented hunk, 294 v1 lines
+  byte-identical; boundaries OK, 345 files, unchanged; fonts degraded-but-
+  non-blocking, pre-existing, 2/6 UI fonts present; corpus-morphology OK,
+  362 words; corpus-glyphs OK, 206 codepoints across 4 artifacts — all
+  unchanged, this diff carries no corpus data. `npx tsc --noEmit`, run
+  separately across all four v3 node packages: clean in all four. `v3/api`'s
+  PHPUnit re-run standalone: 423 passed, 2 incomplete, 6 skipped, matching
+  the documented count exactly, no sqlite-lock flake this run. No PHP file
+  changed, so `pint` was not applicable. No `v1/**`/`v2/**` edit (the usual
+  stray `v2/tsconfig.tsbuildinfo` build-cache diff from running the v2 suite
+  was reverted before committing — `git status --porcelain -- v1 v2` empty
+  immediately before committing). No Arabic codepoint (both changed files
+  swept programmatically, in Python, over the Arabic, Arabic Supplement,
+  Arabic Extended-A and both Presentation Forms Unicode blocks, plus a
+  `fromCharCode`/`fromCodePoint`/`\u`-escape mention check: CLEAN — every new
+  string is a TypeScript identifier or a fixed English assertion/comment
+  sentence, never corpus text). No oracle/golden-log/fixture/snapshot
+  regenerated — this diff touches one existing production file and one
+  existing test file only.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled corpus
+anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1); installed PHP
+8.4.27 cleanly via the documented `packages.sury.org` apt mirror, no refusal
+this run. `HEAD`, local `main` and `origin/main` all already agreed exactly
+at `dfe35cb` (v3-D344) — no stale-local-`main` trap this run. The five PHP-
+independent `npm install`s (`v2`, `packages/engine`, `packages/corpus-
+compiler`, `worker/fold-runner`, `apps/web`) were run directly and in
+parallel; both composer installs (`v2/api`, `v3/api`) hit the documented
+transient `api.github.com` dist-download proxy timeout for most of their
+PHPUnit-side dependency trees and recovered automatically via composer's own
+git-mirror source fallback, run in parallel against separate target
+directories with no cache collision this run.
+
+**NOT addressed, named so a future run doesn't re-discover them as new:**
+every item on v3-D344's own condensed list, unchanged — the streak/away-day
+day-space mismatch (v3-D209); `rhymeClassOf()` (v3-D136);
+`EntitlementMachine::merge()` (v3-D88..D94/D144/D145, re-confirmed this run
+as real-but-M6-scope, not a mechanical fix); `App\Billing\TrialAttribution`
+(v3-D148); `lib/pricing.ts#regionFromCountry()` (v3-D163);
+`PaywallGate`/`permitsIssuance`/`permitsReview` (v3-D88/D151); multi-surah
+enrollment (product decision); the operational mailer (built, v3-D18 — the
+7-night window itself still needs a host running `schedule:run` against
+real staging data, calendar-bound); PAY-1's Stripe replay fixtures (blocked
+on Stripe MY business verification); surah 67's scene beats (human
+authoring); `worker/fold-runner/src/severity.ts` taxonomy naming (v3-D127);
+`packages/engine/src/placement.ts` (v3-D111/D113/D123, re-confirmed this run
+as the same M6/product-decision gap); `MacroFacts.litany.rhymeLabel`
+(v3-D188); `corpusHash`'s zero fold-side consumer (v3-D206);
+`acknowledgeReentry`'s "makeup" branch (deliberately out of scope);
+`session_start`'s own latency metric (named in prior runs' lists; traced
+this run to `lib/session/run.ts#startFromQueue`, which never stamps one at
+all — a genuinely unimplemented metric, not a wiring gap, and "what instant
+counts as app-open" is a product decision, left untouched); `DrillPicker
+.tsx`'s unused `now` prop (traced this run: `buildDrillPreview()`'s own
+readiness gate is `atom.encoded` only, never decay/time-dependent, so the
+prop is genuinely unread rather than silently wrong — a cleanup, not a
+behavioral defect, left untouched) — all unchanged. Both the "role=status
+vs role=alert" sweep on admin WRITE-action panels (v3-D241..D341) and the
+"derived state scoped over the wrong window/subset" sweep (v3-D340/D342/
+D343) remain exhausted at their own search depths. `AdminGate.tsx`'s own
+missing-alert-entirely gap on a genuine session-check failure is now
+CLOSED — remove it from future "unavailable"/"could not read" role sweeps.

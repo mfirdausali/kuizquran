@@ -53,10 +53,46 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3127 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3129 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 423 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1739 apps/web. (v3-D344, 2026-10-25)
+             # + 470 engine + 73 fold-runner + 1741 apps/web. (v3-D345, 2026-10-25)
+             # NOTE (v3-D345, 2026-10-25): `components/admin/AdminGate.tsx`'s
+             # own `denied` session-check verdict — a GENUINE server-side
+             # failure from `checkAdminSession()` (a thrown network
+             # exception, a real non-2xx/non-401/403 status, unparseable
+             # JSON, or a malformed body — `lib/admin/session.ts`'s own four
+             # `denied` cases) — was announced in a bare `<p
+             # className="caption">`, with NO ARIA role at all, not even
+             # `role="status"`: worse than every prior instance of this
+             # build's "role=status vs role=alert" shape (v3-D241..D341),
+             # since the sibling login-error paragraph four lines below, on
+             # the SAME screen, already correctly used `role="alert"`.
+             # `AdminGate.tsx` had never appeared in any of those ~15 prior
+             # entries' closed/confirmed-clean lists — found by a
+             # fresh-sweep search of every admin/settings client gate not
+             # yet named in any prior sweep, after a `grep -rn
+             # "readonly.*\[\]" apps/web/lib` closed-set-duplication pass and
+             # a `placement.ts`/`EntitlementMachine::merge()` re-read both
+             # came back as the same already-named M6/product-decision gaps.
+             # Why nothing caught it: the one existing test that gets
+             # closest (`test/admin-gate.test.tsx`'s 403 case) actually
+             # exercises `signed-out`, not `denied` — `session.ts` maps
+             # 401/403 to `signed-out` by design — so `denied` had ZERO
+             # coverage before this run. Fixed: the one paragraph now
+             # renders `role="alert"`, matching its own sibling's
+             # convention. RED confirmed directly (a real 500 and a thrown
+             # network exception on `/whoami`, both run against the
+             # unmodified component, `screen.getByRole("alert")` finding
+             # nothing even though the real `deniedReason` text was in the
+             # DOM) and mutation-verified (`git stash` of `AdminGate.tsx`
+             # alone reproduced both failures identically; restored
+             # byte-identically, reran 8/8 green, was 6). `TZ=UTC make
+             # test`: 3129 passing (was 3127, +2 — exactly these two new
+             # cases; apps/web 1741, was 1739; every other suite unchanged).
+             # `v3/api` PHPUnit re-run standalone: 423 passed, matching the
+             # documented count exactly, no sqlite-lock flake this run. Full
+             # detail: DECISIONS.md v3-D345.
              # NOTE (v3-D344, 2026-10-25): `packages/engine/src/heatmap.ts
              # #wordDiagnostics()` — the `/surah/[surah]/[ayah]` ayah-detail
              # page's "Tap accuracy, word by word" panel — filtered events on

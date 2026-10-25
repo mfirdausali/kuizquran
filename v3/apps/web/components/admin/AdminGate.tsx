@@ -131,7 +131,11 @@ function AdminLoginForm({
           <h1>Admin sign-in</h1>
           <p className="caption">Staff tooling. Not a learner surface.</p>
         </header>
-        {deniedReason ? <p className="caption">{deniedReason}</p> : null}
+        {deniedReason ? (
+          <p role="alert" className="caption">
+            {deniedReason}
+          </p>
+        ) : null}
         <form onSubmit={submit} className="stack">
           <label>
             Email
