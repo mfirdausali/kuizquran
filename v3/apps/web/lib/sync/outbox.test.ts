@@ -300,6 +300,32 @@ describe("#110 — oversize quarantine", () => {
     expect(result.quarantined).toHaveLength(2);
     expect(server.posts).toHaveLength(0);
   });
+
+  it("a SECOND cycle still re-reports a poison row at the HEAD of the queue, after the ones behind it synced", async () => {
+    // summary.ts's own documented contract (the comment on SyncSummaryStore
+    // .report): "outbox.ts#selectPending re-scans and re-reports every
+    // still-quarantined row on every call" — `cannotSync` is read fresh every
+    // cycle, never accumulated. This is the test for that promise, on the
+    // exact shape #110 names: poison at the HEAD of the queue (lowest
+    // deviceSeq), sendable rows behind it.
+    const server = makeServer();
+    installFetch(server);
+    await append(ev({ id: "poison", specSnapshot: bigSnapshot }), CTX);
+    await append(ev({ id: "after-1" }), CTX);
+    await append(ev({ id: "after-2" }), CTX);
+
+    const first = await pushOutbox({ now: CTX.now });
+    expect(first.quarantined.map((q) => q.id)).toEqual(["poison"]);
+
+    // Nothing new is pending — "after-1"/"after-2" are synced, "poison" never
+    // can be. A low-water hint advanced PAST "poison"'s own deviceSeq (the
+    // lowest in the log) would make this second cycle's scan start after it
+    // and silently lose track of the one row that is still, and will always
+    // be, stuck.
+    const second = await pushOutbox({ now: CTX.now });
+    expect(second.quarantined.map((q) => q.id)).toEqual(["poison"]);
+    expect(await countPending()).toBe(1);
+  });
 });
 
 describe("selectPending", () => {

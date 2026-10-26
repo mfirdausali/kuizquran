@@ -36649,3 +36649,149 @@ now read and this one gap is CLOSED — remove the controller from future
 "handler bodies not read" sweeps; `FlagService.php`'s `ramp()`/
 `acknowledgeKill()` were also re-read in full while fixing `kill()` and no
 second gap was found in either.
+
+### v3-D349 — the outbox's low-water hint could advance PAST a permanently-quarantined row, so a later sync cycle silently stopped re-reporting it as stuck
+
+A fresh-sweep run read widely across `lib/sync/*` (merge.ts was already fully
+checked by v3-D347; `outbox.ts`/`sync.ts`/`cursor.ts` were not individually
+named on any prior "not reached" list, so this is genuinely fresh ground) and
+found a mismatch between two cooperating functions that, individually, each
+read as correct.
+
+`outbox.ts#selectPending()` scans the `by_deviceSeq` index and, for every
+pending row, pushes it to EXACTLY ONE of two arrays: `rows` (sendable) or
+`quarantined` (over `EVENT_BYTE_MAX`, #110's own "poison event" case) — never
+both. `sync.ts#pushOutbox()` then calls `advanceLowWaterIfProven(highest,
+quarantined, lowestQuarantined)`, where `highest` is the top deviceSeq among
+the rows just SENT and `lowestQuarantined` was computed by a private helper,
+`lowestSeqOf(quarantined, rows)`, that looked up each quarantined id's
+deviceSeq by searching `rows` — the array `selectPending` had, by
+construction, already excluded every quarantined id from. `lowestSeqOf`
+therefore always returned `null`, on every call, regardless of whether
+anything was actually quarantined.
+
+`advanceLowWaterIfProven`'s own guard reads `if (quarantined.length > 0 &&
+lowestQuarantinedSeq !== null) { if (lowestQuarantinedSeq <= throughSeq)
+return; }` — written correctly, to stop the hint advancing past a row that
+"STAYS pending forever" (its own docblock, verbatim). But with
+`lowestQuarantinedSeq` always `null`, the `&&` was always false, so the guard
+never fired and the hint advanced to `throughSeq` unconditionally whenever a
+batch quarantined something. On the canonical #110 shape — a poison event at
+the HEAD of the queue (lowest deviceSeq), sendable rows behind it — the
+quarantined row's own deviceSeq is lower than every sent row's, so
+`throughSeq` lands well past it. The next `selectPending` call, bounded below
+by the now-advanced hint, never scans that deviceSeq again: the still-pending
+poison row silently drops out of every future cycle's `quarantined` array,
+even though `countPending()` (a full, unbounded scan) keeps counting it
+forever.
+
+This directly contradicts a documented contract one file over:
+`summary.ts`'s own `SyncSummaryStore.report()` docblock states "each cycle's
+counts are the CURRENT state of the log, not a delta —
+`outbox.ts#selectPending` re-scans and re-reports every still-quarantined row
+on every call." After the hint advances past it, that stops being true: the
+`cannotSync` figure `SyncStatus.tsx` would show an operator (if a real poison
+event is ever quarantined in production) silently drops to zero on the very
+next cycle, even though the event is still, and will always be, stuck. The
+practical floor on how bad this gets: `EVENT_BYTE_MAX` is a fixed constant
+today, so nothing currently "repairs" a quarantined row and makes it
+re-sendable — but the hint still permanently forgets to look, which is the
+exact silent-divergence shape this codebase treats as a defect on its own
+terms, independent of whether today's constants happen to mask the
+consequence.
+
+**Why nothing caught it:** every existing quarantine test (`#110 — oversize
+quarantine`) asserts the FIRST cycle's outcome only — `result.quarantined`
+right after the one `pushOutbox()` call that discovers the poison row. None
+of them called `pushOutbox()` a second time and checked that the SAME row
+was still reported. `advanceLowWaterIfProven` had no dedicated unit test of
+its own at all, and `lowestSeqOf` (a private, unexported function) had none
+either — both existed only as plumbing inside one already-passing integration
+test.
+
+**Fixed:** `QuarantinedEvent` now carries its own `deviceSeq` (the value was
+already on hand inside `selectPending`'s scan — it just never got threaded
+out). `advanceLowWaterIfProven` derives `lowestQuarantinedSeq` directly from
+`quarantined.reduce(...)` instead of taking it as a third parameter, so there
+is no second, independently-fallible lookup left to get wrong. The broken
+`lowestSeqOf` helper in `sync.ts` is deleted outright rather than repaired in
+place — fixing its lookup would have kept a second source of truth for a
+value `QuarantinedEvent` can now just carry.
+
+**Verified:**
+- RED confirmed directly: a new case in `outbox.test.ts` ("a SECOND cycle
+  still re-reports a poison row at the HEAD of the queue, after the ones
+  behind it synced") — poison appended first (lowest deviceSeq), two sendable
+  rows behind it, `pushOutbox()` called twice — run against the unmodified
+  source failed exactly as predicted: `expected [] to deeply equal
+  ['poison']` on the second cycle's own `quarantined` array, even though
+  `countPending()` still read 1.
+- Mutation-verified: `git stash` of `outbox.ts`/`sync.ts` alone (the new test
+  kept) reproduced the identical single failure; restored byte-identically
+  (`git diff --stat` empty before re-implementing), reran:
+  `outbox.test.ts` 17/17 green (was 16, +1).
+- Widening `QuarantinedEvent` with a required `deviceSeq` broke three
+  pre-existing literal fixtures that predate this field
+  (`summary.test.ts` ×4 call sites, `sync-status.test.tsx` ×2) under
+  `tsc --noEmit` — each was given an explicit `deviceSeq`, no assertion
+  weakened. `npx tsc --noEmit` (apps/web): clean. No regression on either
+  sibling consumer: `summary.test.ts` 17/17, `sync-status.test.tsx` 21/21,
+  `sync-trigger.test.tsx` 16/16, `pull.test.ts` 16/16, `merge.test.ts` 23/23 —
+  all unchanged.
+
+`TZ=UTC make test`: **3133 passing** (was 3132, +1 — exactly this run's one
+new test; apps/web 1744, was 1743; no other suite moved: 255 v2 vitest, 47
+v2/api, 424 v3/api, 120 corpus-compiler, 470 engine, 73 fold-runner — a
+TS-only fix touches none of them). `check-test-floor.mjs`: OK, 3133 >= floor
+1899 (+1234 margin). `TZ=UTC make build`: exit 0, 30 routes, unchanged (first
+invocation hit Next.js's own one-time `SecurityFatalError` CLI nudge, same as
+every entry since v3-D338 — not acted on, a plain retry built clean). `npm
+run gates`: all green — locked-css OK, 1 documented hunk, 294 v1 lines
+byte-identical; boundaries OK, 345 files, unchanged (no new production file —
+this diff edits two existing production files and widens one shared type, no
+new file); fonts degraded-but-non-blocking, pre-existing, 2/6 UI fonts
+present; corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints
+across 4 artifacts — all unchanged, this diff carries no corpus data. No PHP
+file changed, so `pint` was not applicable. No `v1/**`/`v2/**` edit (the
+usual stray `v2/tsconfig.tsbuildinfo` build-cache diff was reverted before
+committing — `git status --porcelain -- v1 v2` empty immediately before
+committing). No Arabic codepoint (all five changed files swept
+programmatically, in Python, over the Arabic, Arabic Supplement, Arabic
+Extended-A and both Presentation Forms Unicode blocks, plus a
+`\u`-escape/`fromCharCode`/`fromCodePoint` check: CLEAN — every new string or
+token is a TypeScript identifier or a small integer test fixture, never
+corpus text). No oracle/golden-log/fixture/snapshot regenerated — this diff
+touches two existing production files and three existing test files only.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; `git fetch origin main` confirmed `HEAD`, local `main` and
+`origin/main` already agreed at `91f5140` (v3-D348) — no stale-local-`main`
+trap this run. PHP defaulted to 8.3.6 (`v3/api`'s composer.lock pins dev deps
+needing >=8.4.1); per v3-D347's/v3-D348's own recorded shortcut, ran
+`composer install --ignore-platform-req=php` directly on stock 8.3.6 for both
+`v2/api` and `v3/api` rather than installing PHP 8.4 — both completed
+cleanly via the documented git-mirror fallback (the proxy's dist-zipball
+downloads timed out throughout, as usual; every package resolved from the
+mirrored VCS cache instead), confirming the shortcut holds on a third,
+independent container. The five PHP-independent `npm install`s were run
+directly and in parallel ahead of the composer installs finishing.
+
+**NOT addressed, unchanged from v3-D348's list:** `rhymeClassOf()`;
+`EntitlementMachine::merge()`; `TrialAttribution`/`regionFromCountry()`;
+`PaywallGate`; multi-surah enrollment; the mailer/7-night launch window;
+PAY-1's Stripe fixtures; surah 67's scene beats; `severity.ts` taxonomy;
+`placement.ts`; `MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero fold-side
+consumer; `selection_determinism_check`'s replayed fixture; the streak/
+away-day day-space mismatch; `/workbench`'s own Pane 2/3; `check-test-
+floor.mjs`'s floor number — all unchanged. `outbox.ts`'s own low-water/
+quarantine interaction is now CLOSED — remove it from future sweeps.
+Genuinely still-unswept, worth a future pass: `lib/workbench/sign.ts` and
+`explain.ts` (both read this run, found correct — see the body above —
+remove them from the "not reached" list too), `lib/onboarding/pass.ts`/
+`surahs.ts` (also read and found correct this run), the IDB append/writeLock
+island implementation itself (`append.ts`/`writeLock.ts`/`read.ts` read this
+run and found correct; `cursor.ts` read and is where this run's actual find
+was, one file over), and `v3/apps/web/app/**` route handlers/pages as
+opposed to the `lib/` functions they call (several of the dynamic-param pages
+— `surah/[surah]`, `surah/[surah]/[ayah]`, `drill` — were read this run and
+found correct).

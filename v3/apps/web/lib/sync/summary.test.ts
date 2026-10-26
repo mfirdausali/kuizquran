@@ -36,7 +36,7 @@ describe("report() overwrites, never accumulates", () => {
   it("reflects exactly the last reported cycle's counts", () => {
     syncSummary.report(
       {
-        quarantined: [{ id: "a", bytes: 9_000 }],
+        quarantined: [{ id: "a", bytes: 9_000, deviceSeq: 1 }],
         divergences: [],
       },
       false,
@@ -183,7 +183,7 @@ describe("v3-D243 — clockSkewMs (#111's device-level clock-skew measurement)",
 
 describe("subscribe()", () => {
   it("calls the listener immediately with the current value", () => {
-    syncSummary.report({ quarantined: [{ id: "a", bytes: 9_000 }], divergences: [] }, false);
+    syncSummary.report({ quarantined: [{ id: "a", bytes: 9_000, deviceSeq: 1 }], divergences: [] }, false);
     const fn = vi.fn();
     syncSummary.subscribe(fn);
     expect(fn).toHaveBeenCalledWith({
@@ -228,13 +228,13 @@ describe("subscribe()", () => {
   });
 
   it("does NOT notify subscribers when the reported counts are unchanged", () => {
-    syncSummary.report({ quarantined: [{ id: "a", bytes: 9_000 }], divergences: [] }, false);
+    syncSummary.report({ quarantined: [{ id: "a", bytes: 9_000, deviceSeq: 1 }], divergences: [] }, false);
     const fn = vi.fn();
     syncSummary.subscribe(fn);
     fn.mockClear();
     // Identical counts, a different array instance — a real second cycle
     // scanning the same still-quarantined row produces exactly this shape.
-    syncSummary.report({ quarantined: [{ id: "a", bytes: 9_000 }], divergences: [] }, false);
+    syncSummary.report({ quarantined: [{ id: "a", bytes: 9_000, deviceSeq: 1 }], divergences: [] }, false);
     expect(fn).not.toHaveBeenCalled();
   });
 
@@ -243,7 +243,7 @@ describe("subscribe()", () => {
     const unsubscribe = syncSummary.subscribe(fn);
     fn.mockClear();
     unsubscribe();
-    syncSummary.report({ quarantined: [{ id: "a", bytes: 9_000 }], divergences: [] }, false);
+    syncSummary.report({ quarantined: [{ id: "a", bytes: 9_000, deviceSeq: 1 }], divergences: [] }, false);
     expect(fn).not.toHaveBeenCalled();
   });
 });

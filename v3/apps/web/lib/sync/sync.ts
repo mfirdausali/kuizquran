@@ -195,13 +195,14 @@ export async function pushOutbox(ctx: SyncContext): Promise<PushResult> {
 
       // The hint may advance only through the highest deviceSeq proven sent,
       // and never past anything still pending (a quarantined row stays
-      // pending forever).
+      // pending forever). `advanceLowWaterIfProven` derives the lowest
+      // quarantined seq straight from `quarantined` itself (v3-D349) — there
+      // is no second lookup here to get wrong.
       const highest = batch.reduce(
         (max, r) => (typeof r.deviceSeq === "number" && r.deviceSeq > max ? r.deviceSeq : max),
         0,
       );
-      const lowestQuarantined = lowestSeqOf(quarantined, rows);
-      await advanceLowWaterIfProven(highest, quarantined, lowestQuarantined);
+      await advanceLowWaterIfProven(highest, quarantined);
     }
 
     // Nothing moved this pass ⇒ everything left is quarantined ⇒ stop, or this
@@ -211,23 +212,6 @@ export async function pushOutbox(ctx: SyncContext): Promise<PushResult> {
 
   return result;
 }
-
-/** The deviceSeq of the earliest quarantined row, if it is in this selection. */
-function lowestSeqOf(
-  quarantined: readonly QuarantinedEvent[],
-  rows: readonly { id?: string; deviceSeq?: number }[],
-): number | null {
-  if (quarantined.length === 0) return null;
-  const ids = new Set(quarantined.map((q) => q.id));
-  let lowest: number | null = null;
-  for (const r of rows) {
-    if (r.id && ids.has(r.id) && typeof r.deviceSeq === "number") {
-      if (lowest === null || r.deviceSeq < lowest) lowest = r.deviceSeq;
-    }
-  }
-  return lowest;
-}
-
 
 /**
  * Pull every page the server has past our cursor, merging each in its own

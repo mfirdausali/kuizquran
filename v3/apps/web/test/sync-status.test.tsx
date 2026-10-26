@@ -176,9 +176,9 @@ describe("v3-D161 — a REAL mount (no props) escalates from the live SyncTrigge
     syncSummary.report(
       {
         quarantined: [
-          { id: "oversize-1", bytes: 9_000 },
-          { id: "oversize-2", bytes: 9_500 },
-          { id: "oversize-3", bytes: 10_000 },
+          { id: "oversize-1", bytes: 9_000, deviceSeq: 1 },
+          { id: "oversize-2", bytes: 9_500, deviceSeq: 2 },
+          { id: "oversize-3", bytes: 10_000, deviceSeq: 3 },
         ],
         divergences: [],
       },
@@ -192,7 +192,7 @@ describe("v3-D161 — a REAL mount (no props) escalates from the live SyncTrigge
 
   it("an explicit prop still overrides the live summary", async () => {
     await appendEvents(5);
-    syncSummary.report({ quarantined: [{ id: "oversize-1", bytes: 9_000 }], divergences: [] }, false);
+    syncSummary.report({ quarantined: [{ id: "oversize-1", bytes: 9_000, deviceSeq: 1 }], divergences: [] }, false);
     const { container } = render(<SyncStatus cannotSync={0} />);
     const scoped = within(container);
     await waitFor(() => expect(scoped.getByText(/5 waiting to sync/i)).toBeTruthy());

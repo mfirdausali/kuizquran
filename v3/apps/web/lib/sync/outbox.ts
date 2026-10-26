@@ -52,10 +52,18 @@ export const OUTBOX_BATCH_MAX = 200;
 export const EVENT_BYTE_MAX = 8 * 1024;
 
 /** A row too large to ever send. `specSnapshot` is the only unbounded field on
- *  the wire, so this is where an oversize event comes from. */
+ *  the wire, so this is where an oversize event comes from.
+ *
+ *  Carries its own `deviceSeq` (v3-D349) so a caller can tell the low-water
+ *  hint which seq is still stuck WITHOUT re-deriving it by cross-referencing
+ *  against `PendingSelection.rows` — `rows` never contains a quarantined row
+ *  in the first place (the branch below pushes a row to exactly one of the
+ *  two arrays, never both), so that cross-reference always came back empty.
+ *  See `advanceLowWaterIfProven`'s own header for what that emptiness broke. */
 export interface QuarantinedEvent {
   id: string;
   bytes: number;
+  deviceSeq: number;
 }
 
 export interface PendingSelection {
@@ -112,7 +120,11 @@ export async function selectPending(limit = OUTBOX_BATCH_MAX): Promise<PendingSe
         // event — so the policy is to never send it and, crucially, to NEVER
         // LET IT BLOCK THE BATCH BEHIND IT. The wedge #110 names is precisely
         // a poison event at the head of the queue retried forever.
-        quarantined.push({ id: row.id ?? "", bytes });
+        quarantined.push({
+          id: row.id ?? "",
+          bytes,
+          deviceSeq: typeof row.deviceSeq === "number" ? row.deviceSeq : 0,
+        });
       } else if (rows.length < limit) {
         rows.push(row);
       } else {
@@ -171,13 +183,31 @@ export async function markSynced(ids: readonly string[], now: number): Promise<v
  * makes this conditional — a quarantined row STAYS pending forever, so the
  * hint must never advance past one, or a later `syncedAt`-clearing repair
  * would leave it permanently unscanned.
- */
+ *
+ * v3-D349: `lowestQuarantinedSeq` used to be a THIRD parameter the caller
+ * computed by cross-referencing `quarantined` against `PendingSelection.rows`
+ * — which never worked, because `selectPending` pushes a scanned row to
+ * EITHER `rows` OR `quarantined`, never both, so that cross-reference always
+ * found nothing and this guard's own `lowestQuarantinedSeq !== null` was
+ * always false. The hint then advanced past every quarantined row's own
+ * deviceSeq unconditionally, and the NEXT `selectPending` call — bounded
+ * below by the hint — silently stopped scanning it at all, contradicting this
+ * module's own promise one paragraph up ("a quarantined row STAYS pending
+ * forever... the hint must never advance past one") and `summary.ts`'s
+ * documented contract that `selectPending` "re-scans and re-reports every
+ * still-quarantined row on every call". Fixed by deriving the lowest
+ * quarantined seq HERE, from `QuarantinedEvent.deviceSeq` itself — the value
+ * was always available, it was just never threaded through a second,
+ * independently-fallible lookup. */
 export async function advanceLowWaterIfProven(
   throughSeq: number,
   quarantined: readonly QuarantinedEvent[],
-  lowestQuarantinedSeq: number | null,
 ): Promise<void> {
-  if (quarantined.length > 0 && lowestQuarantinedSeq !== null) {
+  if (quarantined.length > 0) {
+    const lowestQuarantinedSeq = quarantined.reduce(
+      (min, q) => Math.min(min, q.deviceSeq),
+      Infinity,
+    );
     // Never past the earliest thing still pending.
     if (lowestQuarantinedSeq <= throughSeq) return;
   }

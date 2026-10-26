@@ -53,10 +53,71 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3132 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3133 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 424 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1743 apps/web. (v3-D348, 2026-10-26)
+             # + 470 engine + 73 fold-runner + 1744 apps/web. (v3-D349, 2026-10-26)
+             # NOTE (v3-D349, 2026-10-26): the outbox's low-water hint
+             # (`lib/sync/outbox.ts`) could advance PAST a permanently-
+             # quarantined row (#110's "poison event"), so a LATER sync
+             # cycle silently stopped re-reporting it as stuck.
+             # `selectPending()` pushes a scanned row to EXACTLY ONE of
+             # `rows`/`quarantined`, never both, but `sync.ts`'s own
+             # `lowestSeqOf(quarantined, rows)` looked up each quarantined
+             # id's deviceSeq by searching `rows` — the array it had, by
+             # construction, already been excluded from — so it always
+             # returned `null`, `advanceLowWaterIfProven`'s own
+             # `lowestQuarantinedSeq !== null` guard was always false, and
+             # the hint advanced to `throughSeq` unconditionally. On the
+             # canonical #110 shape (poison at the HEAD of the queue,
+             # sendable rows behind it), that moves the hint PAST the
+             # poison row's own deviceSeq, so the NEXT `selectPending`
+             # call — bounded below by the hint — never scans it again:
+             # `cannotSync` silently drops to zero on the second cycle
+             # even though the row is still, and will always be, stuck —
+             # contradicting `summary.ts`'s own documented contract that
+             # `selectPending` "re-scans and re-reports every still-
+             # quarantined row on every call." Found by a fresh-sweep
+             # read of `lib/sync/outbox.ts`/`sync.ts`/`cursor.ts`, none of
+             # which were individually named on any prior "not reached"
+             # list (`merge.ts` was already fully checked by v3-D347).
+             # Fixed: `QuarantinedEvent` now carries its own `deviceSeq`
+             # (already on hand inside `selectPending`'s scan, never
+             # threaded out before); `advanceLowWaterIfProven` derives
+             # `lowestQuarantinedSeq` straight from `quarantined.reduce
+             # (...)` instead of a third parameter computed by a second,
+             # independently-fallible lookup — the broken `lowestSeqOf`
+             # helper is deleted outright, not repaired in place. RED
+             # confirmed directly (poison appended first, two sendable
+             # rows behind it, `pushOutbox()` called twice — the second
+             # cycle's own `quarantined` array, run against the
+             # unmodified source, failed `expected [] to deeply equal
+             # ['poison']` even though `countPending()` still read 1) and
+             # mutation-verified (`git stash` of `outbox.ts`/`sync.ts`
+             # alone reproduced the identical single failure; restored
+             # byte-identically, reran `outbox.test.ts` 17/17 green, was
+             # 16). Widening `QuarantinedEvent` with a required
+             # `deviceSeq` broke three pre-existing literal fixtures
+             # under `tsc --noEmit` (`summary.test.ts` ×4 call sites,
+             # `sync-status.test.tsx` ×2); each was given an explicit
+             # `deviceSeq`, no assertion weakened. `TZ=UTC make test`:
+             # 3133 passing (was 3132, +1 — exactly this one new test;
+             # apps/web 1744, was 1743; no other suite moved — a TS-only
+             # fix). `check-test-floor.mjs`: OK, 3133 >= floor 1899 (+1234
+             # margin). `TZ=UTC make build`: exit 0, 30 routes, unchanged
+             # (the usual one-time `SecurityFatalError` CLI nudge on
+             # first invocation, not acted on, plain retry built clean).
+             # `npm run gates`: all green, 345 files, unchanged. No PHP
+             # file changed, so `pint` was not applicable. No
+             # `v1/**`/`v2/**` edit, no Arabic codepoint, no oracle/
+             # golden-log/fixture/snapshot regenerated. Session start
+             # found `HEAD`, local `main` and `origin/main` already
+             # agreed at `91f5140` (v3-D348) — no stale-local-`main` trap
+             # this run. Per v3-D347's/v3-D348's own recorded shortcut,
+             # `composer install --ignore-platform-req=php` on stock PHP
+             # 8.3.6 worked cleanly for both `v2/api` and `v3/api` a
+             # third time, no PHP 8.4 install needed. Full detail:
+             # DECISIONS.md v3-D349.
              # NOTE (v3-D348, 2026-10-26): `FlagService::kill()` never cleared
              # a prior kill's acknowledgment (`ack_at`/`ack_by`/
              # `ack_auto_waived`) — only a `ramp()` did. `kill()` is, by its
