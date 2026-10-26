@@ -81,6 +81,17 @@ class FlagService
             // the pre-kill version still match its predicate and win — the flag
             // ends ENABLED after a kill, which is precisely the failure #126
             // describes. Killing must INVALIDATE every ramp already in flight.
+            // AND THE PRIOR ACKNOWLEDGMENT IS CLEARED. `kill()` is callable at
+            // any time on any flag state — two admins racing the panic button,
+            // or an automated incident script firing `kill()` unconditionally
+            // on every alert (both already-named scenarios in this method's
+            // own #126 reasoning) can land a SECOND kill while the first
+            // kill's `ack_at` is still on the row, with no ramp in between to
+            // clear it (only a ramp cleared `ack_at` before this fix). Without
+            // this reset, that second, never-acknowledged incident reads the
+            // FIRST incident's stale acknowledgment — `FlagsPanel.tsx` prints
+            // "acknowledged by … at …" for a kill nobody has actually seen.
+            // Every kill is its own incident and needs its own ack.
             $existing = Flag::where('key', $key)->first();
             Flag::updateOrCreate(
                 ['key' => $key],
@@ -89,6 +100,9 @@ class FlagService
                     'version' => ($existing->version ?? 0) + 1,
                     'killed_at' => $now,
                     'killed_by' => (string) $adminId,
+                    'ack_at' => null,
+                    'ack_by' => null,
+                    'ack_auto_waived' => false,
                 ],
             );
 

@@ -266,6 +266,56 @@ class FlagPlaneTest extends TestCase
     }
 
     /**
+     * A SECOND kill is a FRESH incident and must need its OWN acknowledgment.
+     *
+     * `kill()` is deliberately callable at any time, on any flag state — the
+     * header's own words: "Deliberately requires NOTHING but the key." The
+     * admin UI happens to hide the Kill button once a flag already reads
+     * `enabled: false` (`FlagsPanel.tsx`), but the server is supposed to be
+     * the authority here ("ceremony... SERVER-ENFORCED"), and nothing in
+     * `FlagController`/`FlagService` stops a second kill from landing while
+     * the first kill's ack is still on the row — two admins racing a panic
+     * button, or an automated incident script firing `kill()` unconditionally
+     * on every alert, are both already-named scenarios in this file's own
+     * #126 reasoning.
+     *
+     * `acknowledgeKill` never clears `killed_at`/`enabled` (#159, tested
+     * above) — but `kill()` itself never cleared `ack_at`/`ack_by`/
+     * `ack_auto_waived` either, so a kill → ack → kill sequence (no ramp in
+     * between) left the SECOND, never-acknowledged kill reading the FIRST
+     * kill's stale `ack_at`. The admin console (`FlagsPanel.tsx`) renders
+     * exactly that field — "— acknowledged by … at …" vs "— not yet
+     * acknowledged." — so the fresh, unacknowledged incident displayed as
+     * already handled.
+     *
+     * MUTATION: remove the `ack_at`/`ack_by`/`ack_auto_waived` reset from
+     * `FlagService::kill()`. The second kill's `ack_at` then stays equal to
+     * the first kill's timestamp and this test goes red.
+     */
+    public function test_a_second_kill_resets_the_stale_acknowledgment(): void
+    {
+        $admin = $this->admin();
+        $key = 'social.friends';
+        Flag::create(['key' => $key, 'enabled' => true, 'version' => 1]);
+
+        // First incident: killed, then acknowledged.
+        $this->flags()->kill($key, $admin->id, 1_700_000_000_000);
+        $this->flags()->acknowledgeKill($key, $admin->id, 1_700_000_001_000);
+        $firstAck = Flag::where('key', $key)->first();
+        $this->assertNotNull($firstAck->ack_at, 'the first kill must be acknowledged before the second lands');
+
+        // A second, independent kill — no ramp in between.
+        $this->flags()->kill($key, $admin->id, 1_700_000_002_000);
+
+        $flag = Flag::where('key', $key)->first();
+        $this->assertSame(1_700_000_002_000, $flag->killed_at, 'the second kill is the one on record');
+        $this->assertNull($flag->ack_at, 'the second kill is a fresh incident — the first ack must not carry over');
+        $this->assertNull($flag->ack_by);
+        $this->assertFalse((bool) $flag->ack_auto_waived);
+        $this->assertTrue($flag->bannerVisible(), 'still killed, still unacknowledged — the banner stays up');
+    }
+
+    /**
      * v3-D17's 72-hour audited auto-waive.
      *
      * MUTATION: waive without writing an audit row.

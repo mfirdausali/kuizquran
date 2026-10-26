@@ -36532,3 +36532,120 @@ surah 67's scene beats (human authoring); `worker/fold-runner/src
 unchanged. A future run should pick up the "not reached this run" list above
 before re-walking any exhausted shape, or take on one of HANDOVER.md's larger
 human-gated items that has since become agent-doable.
+
+### v3-D348 — `FlagService::kill()` never cleared a prior kill's acknowledgment, so a second kill could read as already-handled
+
+A fresh-sweep run picked up v3-D347's own "not reached this run" list and
+read `FlagController.php`'s handler bodies in full (named there as "routes
+checked, handler bodies not read") — a genuinely different file from the
+four exhausted shapes, and a different shape again: a write path that
+resets some, but not all, of the state a sibling write path established.
+
+`FlagService::kill()` is, by its own header's words, "deliberately callable
+at any time, on any flag state — no version predicate, no confirmation, no
+second admin, no ceremony." `FlagsPanel.tsx` hides the "Kill" button once a
+flag reads `enabled: false`, but the server is the stated authority here
+(the enable-hard ceremony is explicitly "SERVER-ENFORCED" precisely because
+a UI-only gate is bypassable with one curl command) — and nothing in
+`FlagController`/`FlagService` stops a SECOND `kill()` call on an
+already-killed, already-acknowledged flag: two admins racing the same panic
+button, or an automated incident script firing `kill()` unconditionally on
+every alert, are both scenarios this exact file already reasons about for
+edge case #126 (concurrent kill+ramp).
+
+`kill()`'s `Flag::updateOrCreate()` wrote `enabled`/`version`/`killed_at`/
+`killed_by` but never touched `ack_at`/`ack_by`/`ack_auto_waived`. Only a
+RAMP cleared those three fields (as part of re-enabling). So a
+kill → acknowledge → kill sequence with no ramp in between left the SECOND,
+genuinely fresh, never-acknowledged kill incident carrying the FIRST
+incident's stale `ack_at`/`ack_by` — `FlagsPanel.tsx`'s own banner line
+reads exactly this field and would print "— acknowledged by … at …" for a
+kill nobody watching the second incident had actually seen, on the one
+console surface `v3-D17`'s whole kill-switch design exists to make
+trustworthy.
+
+**Why nothing caught it:** every existing `FlagPlaneTest`/`AutoWaiveKillsCommandTest`
+case that calls `kill()` does so exactly once per flag; none chains a
+second `kill()` after an `acknowledgeKill()` on the same key, so the stale
+carry-over had no test anywhere to contradict it.
+
+**Fixed:** `kill()`'s own `Flag::updateOrCreate()` now also writes
+`'ack_at' => null, 'ack_by' => null, 'ack_auto_waived' => false` — mirroring
+exactly what `ramp()` already resets when it clears a kill, so the two
+writers stay symmetric: a ramp clears the kill fields, a kill clears the
+ack fields. `acknowledgeKill()` itself is untouched — #159 ("an ack never
+re-enables") does not change.
+
+**Verified:**
+- RED confirmed directly: a new `test_a_second_kill_resets_the_stale_acknowledgment`
+  case (kill → acknowledge → kill again, no ramp in between) run against the
+  unmodified source failed exactly as predicted — `Failed asserting that
+  1700000001000 is null` on the second kill's own `ack_at`, the first kill's
+  timestamp leaking through.
+- Mutation-verified: `git stash` of `FlagService.php` alone (the new test
+  kept) reproduced the identical single failure; restored byte-identically,
+  reran `FlagPlaneTest`: 21/21 green (was 20, +1).
+- `v3/api` full suite: 424 passed (was 423, +1 — exactly this run's one new
+  test; 2 incomplete/PAY-1 and 6 skipped unchanged).
+
+`TZ=UTC make test`: **3132 passing** (was 3131, +1 — exactly this run's one
+new test; 255 v2 vitest, 47 v2/api, 424 v3/api, 120 corpus-compiler, 470
+engine, 73 fold-runner, 1743 apps/web, apps/web unchanged since this is a
+PHP-only fix). `check-test-floor.mjs`: OK, 3132 >= floor 1899 (+1233 margin).
+`TZ=UTC make build`: exit 0, 30 routes, unchanged (first invocation hit
+Next.js's own one-time `SecurityFatalError` CLI nudge, same as every entry
+since v3-D338 — not acted on, a plain retry built clean). `npm run gates`:
+all green — locked-css OK, 1 documented hunk, 294 v1 lines byte-identical;
+boundaries OK, 345 files, unchanged; fonts degraded-but-non-blocking,
+pre-existing, 2/6 UI fonts present; corpus-morphology OK, 362 words;
+corpus-glyphs OK, 206 codepoints across 4 artifacts — all unchanged, this
+diff touches no corpus data and no TS/JS file. `TZ=UTC make typecheck-v3`:
+clean across all four v3 node packages (unaffected by a PHP-only change;
+run anyway per the standing discipline). `./vendor/bin/pint --test` on both
+changed files: passed. No `v1/**`/`v2/**` edit (the usual stray
+`v2/tsconfig.tsbuildinfo` build-cache diff was reverted before this commit —
+`git status --porcelain -- v1 v2` empty immediately before committing). No
+Arabic codepoint (both changed files swept programmatically, in Python,
+over the Arabic, Arabic Supplement, Arabic Extended-A and both Presentation
+Forms Unicode blocks, plus a `\u`-escape/`fromCharCode`/`fromCodePoint`
+check: CLEAN — every new string is a PHP identifier, a closed-set field
+name, or a millisecond-integer test fixture, never corpus text). No
+oracle/golden-log/fixture/snapshot regenerated — this diff touches one
+existing production file and one existing test file only.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; found `HEAD` detached 9 commits ahead of a stale local
+`main` (itself already equal to `origin/main`) — the prior session's work
+was never merged onto the `main` branch ref, only committed in a detached
+state. Recovered via `git checkout -B main <HEAD-sha> && git push origin
+main`, a clean fast-forward, before reading anything else — no work lost or
+at risk. PHP defaulted to 8.3.6 (`v3/api`'s composer.lock pins dev deps
+needing >=8.4.1); per v3-D347's own recorded shortcut, ran `composer
+install --ignore-platform-req=php` directly on stock 8.3.6 for both
+`v2/api` and `v3/api` rather than installing PHP 8.4 — both completed
+cleanly via the documented git-mirror fallback (the proxy's dist-zipball
+downloads timed out throughout, as usual; every package resolved from the
+mirrored VCS cache instead) and the full suite ran with no runtime error,
+confirming v3-D347's shortcut holds on a second, independent container.
+
+**NOT addressed, unchanged from v3-D347's own list:** the broader "not
+reached this run" set minus this file — `lib/workbench/sign.ts`,
+`lib/workbench/explain.ts`, `lib/onboarding/pass.ts`/`surahs.ts`,
+`packages/engine/src/{freeplay,bridge,canonicalOrder,corpusRef,faces,
+heatmap,options,render,sessionSummary,variant}.ts` (all read this run —
+each checked directly against its own documented contract and found
+correct, no fresh defect), the IDB append/writeLock island implementation
+itself, and `v3/apps/web/app/**` route handlers as opposed to the `lib/`
+functions they call — all still genuinely unswept except where named above.
+Every item on v3-D347's/v3-D346's "NOT addressed" list (`rhymeClassOf()`,
+`EntitlementMachine::merge()`, `TrialAttribution`/`regionFromCountry()`,
+`PaywallGate`, multi-surah enrollment, the mailer/7-night window, PAY-1
+fixtures, surah 67's scene beats, `severity.ts` taxonomy, `placement.ts`,
+`MacroFacts.litany.rhymeLabel`, `corpusHash`'s zero fold-side consumer,
+`selection_determinism_check`'s replayed fixture, the streak/away-day
+day-space mismatch, `/workbench`'s own Pane 2/3, `check-test-floor.mjs`'s
+floor number) — all unchanged. `FlagController.php`'s handler bodies are
+now read and this one gap is CLOSED — remove the controller from future
+"handler bodies not read" sweeps; `FlagService.php`'s `ramp()`/
+`acknowledgeKill()` were also re-read in full while fixing `kill()` and no
+second gap was found in either.

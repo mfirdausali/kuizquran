@@ -53,10 +53,52 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3131 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3132 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 423 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1743 apps/web. (v3-D346, 2026-10-25)
+             # 255 v2 vitest + 47 v2/api + 424 v3/api + 120 corpus-compiler
+             # + 470 engine + 73 fold-runner + 1743 apps/web. (v3-D348, 2026-10-26)
+             # NOTE (v3-D348, 2026-10-26): `FlagService::kill()` never cleared
+             # a prior kill's acknowledgment (`ack_at`/`ack_by`/
+             # `ack_auto_waived`) — only a `ramp()` did. `kill()` is, by its
+             # own header, "callable at any time, on any flag state" (two
+             # admins racing the panic button, or an automated incident
+             # script firing it on every alert — both already-named #126
+             # scenarios), so a kill → acknowledge → kill sequence with no
+             # ramp in between left a SECOND, genuinely fresh,
+             # never-acknowledged kill carrying the FIRST kill's stale
+             # `ack_at` — `FlagsPanel.tsx`'s banner would print "acknowledged
+             # by … at …" for an incident nobody had actually seen. Found by
+             # reading `FlagController.php`'s handler bodies in full — named
+             # by v3-D347 as "routes checked, handler bodies not read," a
+             # genuinely fresh file, and a fresh shape: a writer that resets
+             # some but not all of a sibling writer's fields. Fixed:
+             # `kill()`'s own `updateOrCreate()` now also clears
+             # `ack_at`/`ack_by`/`ack_auto_waived`, symmetric with `ramp()`
+             # already clearing the kill fields. RED confirmed directly (kill
+             # → acknowledge → kill again, run against the unmodified source,
+             # failed `expected 1700000001000 to be null` on the second
+             # kill's own `ack_at`) and mutation-verified (`git stash` of
+             # `FlagService.php` alone reproduced the identical failure;
+             # restored byte-identically, reran `FlagPlaneTest` 21/21 green,
+             # was 20). `TZ=UTC make test`: 3132 passing (was 3131, +1 —
+             # exactly this one new test; v3/api 424, was 423; apps/web
+             # unchanged at 1743, a PHP-only fix). `check-test-floor.mjs`:
+             # OK, 3132 >= floor 1899 (+1233 margin). `TZ=UTC make build`:
+             # exit 0, 30 routes, unchanged (the usual one-time
+             # `SecurityFatalError` CLI nudge on first invocation, not acted
+             # on, plain retry built clean). `npm run gates`: all green,
+             # unchanged. `./vendor/bin/pint --test`: passed. No
+             # `v1/**`/`v2/**` edit, no Arabic codepoint, no oracle/golden-
+             # log/fixture/snapshot regenerated. Session start found `HEAD`
+             # detached 9 commits ahead of a stale local `main` (equal to
+             # `origin/main`) from a prior session that never merged onto the
+             # branch ref — recovered via `git checkout -B main <sha> && git
+             # push origin main`, a clean fast-forward, before reading
+             # anything else. Per v3-D347's own recorded shortcut,
+             # `composer install --ignore-platform-req=php` on stock PHP
+             # 8.3.6 worked cleanly for both `v2/api` and `v3/api` a second
+             # time, no PHP 8.4 install needed. Full detail: DECISIONS.md
+             # v3-D348.
              # NOTE (v3-D347, 2026-10-26): a fresh-sweep night found NO
              # confirmed defect, across three independent passes (two
              # research agents plus a direct read of the remaining
