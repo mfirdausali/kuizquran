@@ -36408,3 +36408,127 @@ CLOSED — remove it from future sweeps; a future run should prefer a genuinely
 different shape again (an inverted boolean, a wrong comparison operator, a
 missing-but-reachable null guard, a security gap) over re-walking any of the
 above, or take on one of the larger deferred items named above.
+
+---
+
+### v3-D347 — A fresh-sweep night found no confirmed defect, across three independent passes
+
+Unlike every entry since v3-D241, this one closes nothing. Three independent
+passes (two dedicated research agents plus a direct read of the remaining
+candidate files) searched explicitly for a shape OTHER than the four this
+file's own record already declares exhausted — role=status vs role=alert
+(v3-D241..D345), cross-runtime/cross-language constant duplication without an
+agreement test (v3-D311..D328), derived state scoped over the wrong
+window/subset (v3-D340/D342/D343), and a stale/wrong event-type filter
+(v3-D344) — per v3-D346's own closing suggestion ("an inverted boolean, a
+wrong comparison operator, a missing-but-reachable null guard, a security
+gap"). **None of the three passes found a genuine, previously-unreported,
+fixable defect.** This is recorded in full so a future run does not re-spend
+the same ~470K tokens of agent search re-checking the same files.
+
+**What was checked and found correct** (re-reading the real source, not
+trusting a docblock, same discipline as every prior entry):
+
+- Security/authorization surfaces: `EnsureIsAdmin` (allowlist, fails closed),
+  `AdminRevealController` (audit-before-return, TTL, token scoped to
+  `admin_id`), `AccountController` export/deletion/restore (self-service
+  scoped to `$request->user()->id`, `hash_equals` token compare),
+  `EventsController` (store/index both scoped to the authenticated caller),
+  `AdminBillingController::override/show` (pseudonymizes `user_id` and a
+  numeric `actor` on the way out, requires an existing entitlement row,
+  reason length-gated, routed through the one guarded `EntitlementMachine
+  ::apply()` — never a raw `Entitlement::update()`), and the full
+  `routes/api.php` middleware grouping (every admin route behind both
+  `auth:sanctum` and the `admin` allowlist gate; `/billing/{userId}` digit-
+  constrained so it can never shadow `/billing/events`).
+- Billing/webhook correctness: `WebhookHandler.php`'s full transition table
+  and every handler; `grace_until` turns out to be purely informational (never
+  compared against `now` to auto-transition state, so there is no time
+  arithmetic there to have an off-by-one in) — `EntitlementMachine::apply()`'s
+  own ordering-precedence guard (`$providerCreatedAt < $fresh
+  ->last_provider_event_at`) and optimistic-lock guard are both correct.
+- `packages/engine/src` broadly: `selection.ts`/`rotation.ts` (lapPerm/
+  affineIndex — the lane-rotation mechanism), `daybound.ts` (the tz-explicit
+  day-boundary arithmetic), `strength.ts`, `gate.ts`, `update.ts` (the core
+  FSRS-shaped scheduling function — every invariant #3/#4/#5 branch verified
+  against the actual code), `resume.ts#resumePolicy`, `scheduler.ts#assembleQueue`
+  (all five FR3 steps, the make-up cap, the budget fit, the learn interleave),
+  `floor.ts#floorQueue` (its header's literal "NEVER empty" is not quite true
+  for zero encoded atoms, but `run.ts#startFromQueue`'s own `queue.length ===
+  0` guard at that call site already degrades this correctly to
+  `unavailable:"nothing-due"` — not a bug, already handled one layer up),
+  `capacity.ts#planFor/etaDaysWithRamp`, `pace.ts`, `multiSurah.ts#splitBudget`,
+  `placement.ts` (the binary-search-over-acts assumption is a documented
+  product decision, not a fresh mechanical bug), `ladder.ts`/`chain.ts` (both
+  attic'd per v3-D25, no learner-reachable caller).
+- `apps/web/lib/sync/merge.ts` in full (chunking, the abort-on-throw
+  transaction discipline, the #50/#58/#110/#111 edge cases) — no gap beyond
+  B5, already closed.
+- The override write/resolve path on both sides: `lib/overrides/write.ts`,
+  `packages/engine/src/overrides.ts#applyOverrides/isQuestionDisabled` (the
+  `(createdAt, id)` tie-break, latest-wins-per-key precedence, group/gloss/
+  distractor/disable all independently verified against their documented
+  contracts).
+- `lib/workbench/frontier.ts#reduceChip/buildWorklist/allGreen` — matches the
+  documented weakest-tier-wins spec exactly, including the "empty is never
+  success" guard.
+- `lib/onboarding/choices.ts#commitOnboarding` — genuinely atomic (both
+  `put`s inside one IDB transaction, cookie write correctly ordered after
+  `tx.done`).
+- `worker/fold-runner/src` thresholds (`foldCheck.ts`, `determinism.ts`,
+  `selectionCheck.ts`) and `packages/corpus-compiler/src/foilKernels.ts`'s
+  four distractor kernels (visual/semantic/contextual/phonetic) — all
+  self-exclusion checks and grade-key/display-key rejection logic consistent
+  and correct.
+
+**Not reached this run** (genuinely unswept, worth a future pass before
+re-walking anything above): `lib/workbench/sign.ts`, `lib/workbench/explain.ts`,
+`lib/onboarding/pass.ts`/`surahs.ts`, `packages/engine/src/{freeplay,bridge,
+canonicalOrder,corpusRef,faces,heatmap,options,render,sessionSummary,variant}.ts`,
+`FlagController.php` (routes checked, handler bodies not read), the IDB
+append/writeLock island implementation itself (only its callers — `merge.ts`,
+`choices.ts` — were read), and `v3/apps/web/app/**` route handlers themselves
+as opposed to the `lib/` functions they call.
+
+**Environment note, worth recording:** this session's sandbox classifier
+refused the usual `wget`-a-GPG-key-into-`/etc/apt/trusted.gpg.d` step this
+file has used roughly fifty times to install PHP 8.4 for `v3/api` (reason:
+"Code from External" — installing an external trust anchor). Recovered
+without it: `v3/api/composer.json` only declares `"php": "^8.2"`; the
+`>=8.4.1` floor every prior entry worked around comes from a composer.lock-
+pinned `symfony/clock`/`css-selector`/`event-dispatcher`/`string`/
+`translation`/`yaml` minor version, not from any real PHP 8.4 syntax the
+application code uses. `composer install --ignore-platform-req=php` on the
+stock PHP 8.3.6 installed cleanly and `php artisan test` ran the full suite
+with no runtime error. Worth trying this first on a future run before
+spending time on the apt-repo dance, since it is faster and needs no
+external key at all; revisit only if a future Symfony bump introduces a
+genuine 8.4-only language feature.
+
+**Full verification** (nothing changed, so this is a baseline re-confirmation,
+not a before/after diff): `TZ=UTC make test`: **3131 passing**, unchanged from
+v3-D346 (255 v2 vitest, 47 v2/api, 423 v3/api, 120 corpus-compiler, 470
+engine, 73 fold-runner, 1743 apps/web). `check-test-floor.mjs`: OK, 3131 >=
+floor 1899 (+1232 margin, unmoved). `TZ=UTC make build`: exit 0, 30 routes,
+unchanged (first invocation hit Next.js's own one-time `SecurityFatalError`
+CLI nudge, same as v3-D338/D339/D340/D346 — not acted on, a plain retry built
+clean). No `v1/**`/`v2/**` edit (the usual stray `v2/tsconfig.tsbuildinfo`
+build-cache diff reverted before this entry was written). No file was
+touched by this run — it is a documentation-only commit, a record of what
+was searched and ruled out.
+
+**NOT addressed**, unchanged from v3-D346's own list (re-confirmed current,
+not re-derived): the streak/away-day day-space mismatch (v3-D209);
+`rhymeClassOf()` (v3-D136); `EntitlementMachine::merge()` (v3-D88..D94/D144/
+D145); `App\Billing\TrialAttribution` (v3-D148); `lib/pricing.ts
+#regionFromCountry()` (v3-D163); `PaywallGate`/`permitsIssuance`/
+`permitsReview` (v3-D88/D151); multi-surah enrollment (product decision);
+PAY-1's Stripe replay fixtures (blocked on Stripe MY business verification);
+surah 67's scene beats (human authoring); `worker/fold-runner/src
+/severity.ts` taxonomy naming (v3-D127); `MacroFacts.litany.rhymeLabel`
+(v3-D188); `corpusHash`'s zero fold-side consumer (v3-D206);
+`acknowledgeReentry`'s "makeup" branch (deliberately out of scope);
+`check-test-floor.mjs`'s own floor number (1899, optional tightening) — all
+unchanged. A future run should pick up the "not reached this run" list above
+before re-walking any exhausted shape, or take on one of HANDOVER.md's larger
+human-gated items that has since become agent-doable.

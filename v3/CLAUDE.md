@@ -57,6 +57,59 @@ make test    # 3131 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 423 v3/api + 120 corpus-compiler
              # + 470 engine + 73 fold-runner + 1743 apps/web. (v3-D346, 2026-10-25)
+             # NOTE (v3-D347, 2026-10-26): a fresh-sweep night found NO
+             # confirmed defect, across three independent passes (two
+             # research agents plus a direct read of the remaining
+             # candidate files) explicitly steered away from the four
+             # exhausted shapes (role=status/alert, v3-D241..D345;
+             # cross-runtime constant duplication, v3-D311..D328;
+             # wrong-window/subset derived state, v3-D340/D342/D343; wrong
+             # event-type filter, v3-D344) and toward v3-D346's own
+             # suggestions (an inverted boolean, a wrong comparison
+             # operator, a missing-but-reachable null guard, a security
+             # gap). Checked and found correct: every admin/account
+             # authorization surface (EnsureIsAdmin, AdminRevealController,
+             # AccountController, EventsController, AdminBillingController,
+             # the full routes/api.php middleware grouping), the Stripe
+             # WebhookHandler's grace-period logic (grace_until turns out
+             # to be purely informational — never compared against `now`,
+             # so there is no expiry arithmetic to have an off-by-one in),
+             # and a broad read of packages/engine/src (selection/rotation/
+             # daybound/strength/gate/update/resume/scheduler/floor/
+             # capacity/pace/multiSurah/placement/ladder/chain), lib/sync
+             # /merge.ts in full, the override write/resolve path on both
+             # sides, lib/workbench/frontier.ts, lib/onboarding/choices.ts,
+             # fold-runner thresholds and corpus-compiler's foil kernels —
+             # all correct, no gap found. `floor.ts#floorQueue`'s header
+             # claims "NEVER empty" but can return `[]` for zero encoded
+             # atoms; not a bug, since `run.ts#startFromQueue`'s own
+             # `queue.length === 0` guard already degrades that to
+             # `unavailable:"nothing-due"` one layer up. Not reached this
+             # run, named for next time: lib/workbench/sign.ts and
+             # explain.ts, lib/onboarding/pass.ts and surahs.ts, several
+             # smaller engine/src files (freeplay/bridge/canonicalOrder/
+             # corpusRef/faces/heatmap/options/render/sessionSummary/
+             # variant), FlagController.php's handler bodies, the IDB
+             # append/writeLock island implementation itself, and the
+             # app/** route handlers as opposed to the lib/ functions they
+             # call. Environment note: this sandbox's classifier refused
+             # the usual wget-a-GPG-key step to install PHP 8.4 (reason:
+             # "Code from External"); recovered without it — v3/api's own
+             # composer.json needs only php ^8.2, the >=8.4.1 floor is a
+             # composer.lock-pinned Symfony minor-version artifact, not a
+             # real language requirement, so `composer install
+             # --ignore-platform-req=php` on stock PHP 8.3.6 installed and
+             # ran the full suite cleanly — try this first on a future run
+             # before the apt-repo dance. This is a documentation-only
+             # commit: no production file changed. `TZ=UTC make test`:
+             # 3131 passing, unchanged from v3-D346 (255 v2 vitest, 47
+             # v2/api, 423 v3/api, 120 corpus-compiler, 470 engine, 73
+             # fold-runner, 1743 apps/web). `check-test-floor.mjs`: OK,
+             # 3131 >= floor 1899 (+1232 margin, unmoved). `TZ=UTC make
+             # build`: exit 0, 30 routes, unchanged (first invocation hit
+             # Next.js's own one-time `SecurityFatalError` CLI nudge, same
+             # as prior entries — not acted on, a plain retry built
+             # clean). Full detail: DECISIONS.md v3-D347.
              # NOTE (v3-D346, 2026-10-25): `apps/web/lib/plan/forecast.ts
              # #concreteItems()` floored a DECAYED review count back up to 1
              # for the Plan Calendar's own +1/+2/+3 concrete-zone days,
