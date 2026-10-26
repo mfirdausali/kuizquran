@@ -120,4 +120,22 @@ describe("failure classification carries the right copy", () => {
     // Anything unrecognised still lands in a broken state — never swallowed.
     expect(classifyIdbError(new Error("something odd"))).toBe("open-failed");
   });
+
+  it("an open refused with VersionError reaches the log state as `open-blocked`, not re-derived to `open-failed` from db.ts's IdbOpenError wrapper", async () => {
+    // A newer tab already upgraded the on-disk database past this build's
+    // DB_VERSION, so this tab's own open is refused with a VersionError —
+    // db.ts classifies that correctly as `open-blocked` and carries it on
+    // IdbOpenError.reason. Every reader must surface THAT reason, not
+    // re-derive one from the wrapper's own message.
+    await new Promise<void>((resolve, reject) => {
+      const req = indexedDB.open("iq3", 99);
+      req.onsuccess = () => {
+        req.result.close();
+        resolve();
+      };
+      req.onerror = () => reject(req.error);
+    });
+    const state = await loadLogState();
+    expect(state).toEqual({ status: "broken", reason: "open-blocked" });
+  });
 });

@@ -36795,3 +36795,140 @@ was, one file over), and `v3/apps/web/app/**` route handlers/pages as
 opposed to the `lib/` functions they call (several of the dynamic-param pages
 — `surah/[surah]`, `surah/[surah]/[ayah]`, `drill` — were read this run and
 found correct).
+
+### v3-D350 — `classifyIdbError()` re-derived a failure reason from `db.ts`'s own `IdbOpenError` wrapper, losing the one recoverable case
+
+A fresh-sweep run picked up v3-D349's own "genuinely still-unswept" list and
+read `lib/idb/read.ts`/`useLogState.ts`/`index.ts`/`db.ts` in full — the IDB
+read/schema/db/state half that list explicitly separated from the
+append/writeLock half (already found correct at v3-D349).
+
+`db.ts#openDb()` catches every real open failure and classifies it exactly
+once, via `classifyIdbError(err)`, then throws `new IdbOpenError(reason,
+err)` — a wrapper that carries that classification on its own `.reason`
+field specifically so a caller never has to re-derive it. But every real
+reader of a failed `openDb()` call — `state.ts#readIntoState`'s catch
+(reached from `read.ts#loadLogState`/`loadSurahLogState`, in turn from every
+`useLogState` selector) and `useLogState.ts`'s own catch directly around
+`openDb()` — caught the WRAPPER and called `classifyIdbError` on it a
+SECOND time, rather than reading `.reason`.
+
+That second pass only has the wrapper's own `Error` name (`"IdbOpenError"`)
+and message (`` `IndexedDB open failed: ${reason}` ``) to classify from —
+none of `classifyIdbError`'s branches test for either, so it falls through
+the message regexes. `state.ts`'s own module header is explicit about why
+this matters: the `IdbFailure` reasons "are separated because each needs
+DIFFERENT learner-facing copy — 'you're in private browsing' and 'another
+tab is mid-upgrade' are not the same problem." `"open-blocked"` is
+specifically the recoverable "another tab is mid-upgrade" case — `db.ts`'s
+own `blocked()` callback and `VersionError` handling exist for exactly a
+learner who has a newer tab open after a deploy raised the schema version.
+That case's own message (`` `IndexedDB open failed: open-blocked` ``)
+matches none of the regexes below (`quota`, `timed? ?out`, `private`), so
+it fell through to the generic `"open-failed"` fallback every time —
+unreachable from any real open failure. So did the sixth reason,
+`"unsupported"`. This is the ONE case this type exists to tell apart from
+an unrecoverable failure: every log-reading island (`GrowthIsland`,
+`RetentionIsland`, `AyahStatsIsland`, `PlanIsland`, `MySurahs`,
+`SurahAyahListIsland`, `ProgressListIsland`, `TestHistoryIsland`,
+`MacroPanelIsland`, `SyncStatus`, `DeviceReset`) would show the generic
+"open failed" hard-fail copy instead of "close your other tabs" — telling a
+learner to lose confidence in the app rather than just close a tab.
+
+**Why nothing caught it:** `state.test.ts`'s own "failure classification"
+tests call `classifyIdbError` directly on raw causes (a `DOMException`, an
+`IdbTimeoutError`, a plain `Error`) — never on a real `IdbOpenError`
+produced by a real `openDb()` failure. No test ever drove an actual
+`VersionError` through `openDb()` into a `LogState`.
+
+**Fixed:** `classifyIdbError` now checks first whether `err` is itself an
+`IdbOpenError` (duck-typed on `err.name === "IdbOpenError"` plus an `in`
+check for `.reason`, not `instanceof` — `db.ts` already imports `state.ts`,
+so importing `IdbOpenError` back into `state.ts` would be circular) and, if
+so, returns `.reason` verbatim. No second, lossy re-derivation; the message
+regexes below are now reached only for a genuinely raw, unwrapped cause.
+
+**Verified:**
+- RED confirmed directly: a new case in `state.test.ts` opens the on-disk
+  fake-indexeddb `"iq3"` database directly at version 99 (closes it
+  immediately) — exactly "a newer tab already upgraded the schema past this
+  build's `DB_VERSION`" — then calls `loadLogState()`, which must now open
+  at the real (lower) `DB_VERSION` and hit a genuine `VersionError`. Run
+  against the unmodified source: `expected { status: 'broken', reason:
+  'open-blocked' } ... Received { status: 'broken', reason: 'open-failed'
+  }`.
+- Mutation-verified: `git stash` of `state.ts` alone (the new test kept)
+  reproduced the identical single failure; restored byte-identically (`git
+  diff --stat` empty before re-implementing), reran: `state.test.ts` 9/9
+  green (was 8, +1).
+- No regression on either real consumer: `npx vitest run lib/idb/` — 47/47
+  green across the 7 files in that directory (`append.test.ts`,
+  `writeLock.test.ts`, the three agreement tests, `state.test.ts`).
+
+`TZ=UTC make test`: **3134 passing** (was 3133, +1 — exactly this run's one
+new test; apps/web 1745, was 1744; no other suite moved: 255 v2 vitest, 47
+v2/api, 424 v3/api, 120 corpus-compiler, 470 engine, 73 fold-runner — a
+TS-only fix touches none of them). `check-test-floor.mjs`: OK, 3134 >= floor
+1899 (+1235 margin). `TZ=UTC make build`: exit 0, 30 routes, unchanged
+(first invocation hit Next.js's own one-time `SecurityFatalError` CLI
+nudge, same as every entry since v3-D338 — not acted on, a plain retry
+built clean). `npm run gates`: all green — locked-css OK, 1 documented
+hunk, 294 v1 lines byte-identical; boundaries OK, 345 files, unchanged (one
+existing production file edited plus its one existing test file, no new
+production file); fonts degraded-but-non-blocking, pre-existing, 2/6 UI
+fonts present; corpus-morphology OK, 362 words; corpus-glyphs OK, 206
+codepoints across 4 artifacts — all unchanged, this diff carries no corpus
+data. `npx tsc --noEmit` (apps/web): clean. No PHP file changed, so `pint`
+was not applicable. No `v1/**`/`v2/**` edit (the usual stray
+`v2/tsconfig.tsbuildinfo` build-cache diff was reverted before committing —
+`git status --porcelain -- v1 v2` empty immediately before committing). No
+Arabic codepoint (both changed files swept programmatically, in Python,
+over the Arabic, Arabic Supplement, Arabic Extended-A and both Presentation
+Forms Unicode blocks, plus a `\u`-escape/`fromCharCode`/`fromCodePoint`
+check: CLEAN — every new string is a TypeScript identifier, a wire-adjacent
+constant name, or a fixed English docblock/comment sentence, never corpus
+text). No oracle/golden-log/fixture/snapshot regenerated — this diff
+touches one existing production file and one existing test file only.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; `git fetch origin main` confirmed `HEAD`, local `main` and
+`origin/main` already agreed at `71e8018` (v3-D349) — no stale-local-`main`
+trap this run. PHP defaulted to 8.3.6 (`v3/api`'s composer.lock pins dev
+deps needing >=8.4.1); per v3-D347's/v3-D348's/v3-D349's own recorded
+shortcut, ran `composer install --ignore-platform-req=php` directly on
+stock 8.3.6 for both `v2/api` and `v3/api` rather than installing PHP 8.4 —
+the first attempt hit the documented shared-git-mirror-cache collision from
+running two composer installs concurrently (a `ClassMapGenerator` "could
+not scan for classes" error on `v3/api`'s first attempt), recovered by
+re-running each sequentially rather than in parallel, confirming the
+shortcut still holds on a fourth independent container once the known
+concurrency trap is avoided. The five PHP-independent `npm install`s were
+run directly and in parallel. The actual defect was found by a dedicated
+fresh-sweep subagent (general-purpose, high effort) given the full
+exclusion list this file's recent entries carry plus v3-D349's own
+"genuinely still-unswept" pointers; independently re-verified directly
+against the real source before writing this entry.
+
+**NOT addressed, unchanged from v3-D349's list:** `rhymeClassOf()`;
+`EntitlementMachine::merge()`; `TrialAttribution`/`regionFromCountry()`;
+`PaywallGate`; multi-surah enrollment; the mailer/7-night launch window;
+PAY-1's Stripe fixtures; surah 67's scene beats; `severity.ts` taxonomy;
+`placement.ts`; `MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero
+fold-side consumer; `selection_determinism_check`'s replayed fixture; the
+streak/away-day day-space mismatch; `/workbench`'s own Pane 2/3;
+`check-test-floor.mjs`'s floor number — all unchanged. `lib/idb/state.ts`'s
+own `classifyIdbError` double-classification gap is now CLOSED — remove it
+from future sweeps, along with `read.ts`/`useLogState.ts`/`index.ts`/
+`db.ts` (all read in full this run, found correct apart from the one
+finding above). `packages/engine/src/variant.ts`'s own s1-supply/
+distractor-pool mismatch under a group override (real but unreached by any
+compiled corpus and by `variant.ts`'s own zero-learner-facing-consumer
+status, v3-D30) and `heatmap.ts`'s `growthCurve`/`wordDiagnostics` ayah-only
+keying (both real callers already scope through `getEventsForSurah` first)
+were each investigated directly this run and deliberately NOT fixed — named
+here so a future run does not re-discover either as new. Still genuinely
+unswept: `v3/apps/web/app/**` route handlers/pages beyond the dynamic-param
+pages v3-D349 already checked; `v2/api`/`v3/api` Eloquent model relations,
+Console Commands, Jobs and Notifications not yet individually verified;
+`packages/corpus-compiler/src/**` internals beyond what prior entries
+touched; `worker/fold-runner/src` files beyond `canonicalOrder.ts`.

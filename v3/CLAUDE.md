@@ -53,10 +53,69 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3133 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3134 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 424 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1744 apps/web. (v3-D349, 2026-10-26)
+             # + 470 engine + 73 fold-runner + 1745 apps/web. (v3-D350, 2026-10-26)
+             # NOTE (v3-D350, 2026-10-26): `lib/idb/state.ts#classifyIdbError()`
+             # re-derived a failure reason from `db.ts`'s own `IdbOpenError`
+             # wrapper instead of reading the reason the wrapper already
+             # carries. `openDb()` classifies the real cause ONCE (e.g. a
+             # `VersionError` → `"open-blocked"`, the "another tab is mid-
+             # upgrade" case) and stamps it on `IdbOpenError.reason` — but
+             # every reader (`readIntoState`'s catch, `useLogState`'s own
+             # catch around `openDb()`) caught the WRAPPER and ran
+             # `classifyIdbError` on IT a second time. The second pass only
+             # has the wrapper's own `Error` name/message to go on, so it can
+             # only recover the reasons whose name happens to also match a
+             # message regex (`quota-exceeded`, `read-timeout`,
+             # `private-mode`) — `"open-blocked"` and `"unsupported"` matched
+             # none of them and silently fell through to the generic
+             # `"open-failed"` fallback. Consequence: the one genuinely
+             # recoverable case this type exists to distinguish — "close
+             # your other tabs" — rendered as an unexplained generic open
+             # failure on every log-reading island (`GrowthIsland`,
+             # `RetentionIsland`, `AyahStatsIsland`, `PlanIsland`,
+             # `MySurahs`, `SurahAyahListIsland`, `ProgressListIsland`,
+             # `TestHistoryIsland`, `MacroPanelIsland`, `SyncStatus`,
+             # `DeviceReset`), and `"unsupported"` was unreachable from any
+             # real open failure too. Found by a fresh-sweep agent reading
+             # `lib/idb/read.ts`/`useLogState.ts`/`index.ts`/`db.ts` in full
+             # (named on v3-D349's own "genuinely still-unswept" list) —
+             # `state.ts` itself had unit tests only on raw errors, never on
+             # a real `IdbOpenError` threaded through `openDb()` into a
+             # `LogState`. Fixed: `classifyIdbError` now checks `err.name ===
+             # "IdbOpenError"` first (duck-typed, not `instanceof`, since
+             # `db.ts` already imports `state.ts` and the reverse import
+             # would be circular) and returns `.reason` verbatim — no second,
+             # lossy re-derivation. RED confirmed directly (a real
+             # `VersionError`, produced by opening the on-disk fake-indexeddb
+             # database at a higher version first — exactly "a newer tab
+             # already upgraded the schema" — run through `loadLogState()`
+             # against the unmodified source, failed `expected "open-
+             # blocked" … Received "open-failed"`) and mutation-verified
+             # (`git stash` of `state.ts` alone reproduced the identical
+             # single failure; restored byte-identically, reran
+             # `state.test.ts` 9/9 green, was 8). `TZ=UTC make test`: 3134
+             # passing (was 3133, +1 — exactly this one new test; apps/web
+             # 1745, was 1744; no other suite moved — a TS-only fix).
+             # `check-test-floor.mjs`: OK, 3134 >= floor 1899 (+1235 margin).
+             # `TZ=UTC make build`: exit 0, 30 routes, unchanged (the usual
+             # one-time `SecurityFatalError` CLI nudge on first invocation,
+             # not acted on, plain retry built clean). `npm run gates`: all
+             # green, 345 files, unchanged (one existing production file
+             # edited plus its one existing test file, no new production
+             # file). No PHP file changed, so `pint` was not applicable. No
+             # `v1/**`/`v2/**` edit, no Arabic codepoint, no oracle/
+             # golden-log/fixture/snapshot regenerated. Other candidates
+             # checked and ruled out this run: `packages/engine/src
+             # /variant.ts` (a real but low-impact s1-supply/distractor-pool
+             # mismatch under a group override — not taken, since
+             # `variant.ts` is v3-D30's own placeholder with no
+             # learner-facing consumer, and no compiled corpus today
+             # contains a group); `heatmap.ts`'s `growthCurve`/
+             # `wordDiagnostics` keying on ayah alone (both real callers
+             # already scope through `getEventsForSurah`, so not a bug).
              # NOTE (v3-D349, 2026-10-26): the outbox's low-water hint
              # (`lib/sync/outbox.ts`) could advance PAST a permanently-
              # quarantined row (#110's "poison event"), so a LATER sync

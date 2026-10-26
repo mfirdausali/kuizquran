@@ -70,6 +70,18 @@ export const broken = <T,>(reason: IdbFailure): LogState<T> => ({ status: "broke
  * swallowed — an unknown cause is still a broken state the learner must see.
  */
 export function classifyIdbError(err: unknown): IdbFailure {
+  // db.ts's `IdbOpenError` already carries the reason it was classified with
+  // at open time (it is itself built by calling this function once). Running
+  // the message regexes below on the WRAPPER a second time can only recover
+  // the reasons whose name happens to also match a regex ("quota-exceeded",
+  // "read-timeout", "private-mode") and silently loses the rest
+  // ("open-blocked", "unsupported") to the generic "open-failed" fallback.
+  // Duck-typed on `.name` rather than `instanceof IdbOpenError` because
+  // db.ts already imports this module, and importing IdbOpenError back here
+  // would make that a circular import.
+  if (err instanceof Error && err.name === "IdbOpenError" && "reason" in err) {
+    return (err as Error & { reason: IdbFailure }).reason;
+  }
   if (typeof DOMException !== "undefined" && err instanceof DOMException) {
     if (err.name === "QuotaExceededError") return "quota-exceeded";
     if (err.name === "VersionError") return "open-blocked";
