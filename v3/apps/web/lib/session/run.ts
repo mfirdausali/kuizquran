@@ -85,7 +85,7 @@ import {
 // notion `update()` uses to damp massed same-day successes ×0.35 (invariant #4),
 // which is exactly the cost the nudge is honest about. DEFAULT_DAY_CONFIG,
 // matching the config the offer functions' own `rebuild(prior)` folds under.
-import { isSameLearningDay } from "@engine/daybound.ts";
+import { isSameLearningDay, DEFAULT_DAY_CONFIG } from "@engine/daybound.ts";
 // v3-D107 — gate forgiveness ladder (v2-D08): see `demoteOfferFor`/
 // `acceptGateDemote` below for why `gateForgiveness`/`demoteToLearn` were
 // UNREACHABLE (not merely unwired) until this run's slip-tracking fix.
@@ -923,7 +923,7 @@ async function startFromQueue(
   // A session already open today? Then this is a RESUME: reuse its origin and
   // do not emit a second session_start.
   const openStart = prior.filter((e) => e.type === "session_start").pop();
-  const isResume = openStart !== undefined && sameDay(openStart.ts, now);
+  const isResume = openStart !== undefined && sameDay(openStart.ts, now, tz);
   const startedAt = isResume ? openStart.ts : now;
 
   if (!isResume) {
@@ -2184,7 +2184,10 @@ function learnCandidatesFor(c: Corpus, atoms: ReturnType<typeof rebuild>): numbe
 }
 
 /** Same LOCAL day, used only to decide resume-vs-new. Day boundaries for
- *  GRADING are the engine's `DayConfig`; this is a UI-session question. */
-function sameDay(a: number, b: number): boolean {
-  return Math.abs(a - b) < 12 * 60 * 60 * 1000;
+ *  GRADING are the engine's `DayConfig`; this is a UI-session question —
+ *  but "LOCAL" means the learner's own `tz`, via the same `{ ...
+ *  DEFAULT_DAY_CONFIG, tz }` idiom `lib/home/queue.ts` already uses for
+ *  this exact "today" question, never a tz-blind absolute window. */
+function sameDay(a: number, b: number, tz: string): boolean {
+  return isSameLearningDay(a, b, { ...DEFAULT_DAY_CONFIG, tz });
 }

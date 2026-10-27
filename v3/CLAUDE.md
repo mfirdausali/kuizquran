@@ -53,10 +53,64 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3138 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3140 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 424 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1749 apps/web. (v3-D353, 2026-10-27)
+             # + 470 engine + 73 fold-runner + 1751 apps/web. (v3-D354, 2026-10-27)
+             # NOTE (v3-D354, 2026-10-27): `apps/web/lib/session/run.ts
+             # #sameDay()` — used by `startFromQueue` to decide RESUME-vs-NEW
+             # for every session entry point — carried the docstring "Same
+             # LOCAL day" but the body was a tz-blind `Math.abs(a - b) < 12h`
+             # sliding window, with no `tz` parameter at all, even though
+             # `startFromQueue` already has `tz` in scope and this same file
+             # already uses the engine's tz-aware `isSameLearningDay` for an
+             # analogous (but separately, correctly UTC-pinned)
+             # same-day question in `diminishingReturnsNudge`. Two opposite
+             # failure modes on the default 04:30 rollover: a learner at
+             # 10:00→23:00 local (13h, same real day) got a spurious second
+             # `session_start` and a reset duration origin; a learner at
+             # 23:00→09:00-next-day (10h, crosses the rollover) wrongly kept
+             # resuming into a new day. Found by a fresh-sweep agent reading
+             # `lib/session/run.ts` in full (2191 lines — previously flagged
+             # "too large for one pass") after a first sweep of several
+             # named-not-yet-reached `lib/` files came back empty. Fixed:
+             # `sameDay(a, b, tz)` now calls `isSameLearningDay(a, b, {
+             # ...DEFAULT_DAY_CONFIG, tz })` — the same idiom
+             # `lib/home/queue.ts` already uses for its own "today"
+             # question. RED confirmed directly (a 13h same-local-day gap and
+             # a 10h cross-rollover gap, both using the `Asia/Kuala_Lumpur`
+             # fixture tz already established elsewhere, run against the
+             # unmodified source — both failed exactly as predicted, each
+             # off by the other scenario's own instant) and mutation-verified
+             # (`git stash` of `run.ts` alone reproduced both failures
+             # identically; restored byte-identically, reran:
+             # `lib/session/run.test.ts` 130/130 green, was 128). `TZ=UTC
+             # make test`: 3140 passing (was 3138, +2 — exactly this run's
+             # two new cases; apps/web 1751, was 1749; no other suite
+             # moved). `check-test-floor.mjs`: OK, 3140 >= floor 1899 (+1241
+             # margin, unmoved). `TZ=UTC make build`: exit 0, 30 routes,
+             # unchanged (the usual one-time `SecurityFatalError` CLI nudge
+             # on first invocation, not acted on, plain retry built clean).
+             # `npm run gates`: all green, unchanged counts. `npx tsc
+             # --noEmit`: clean, `Version 5.9.3` confirmed. No PHP file
+             # changed, so `pint` was not applicable. No `v1/**`/`v2/**` edit
+             # (a stray `v2/tsconfig.tsbuildinfo` build-cache diff produced
+             # by running the v2 suite was reverted before committing — `git
+             # status --porcelain -- v1 v2` empty immediately before
+             # committing). No Arabic codepoint (both changed files swept
+             # programmatically over the Arabic/Arabic Supplement/Arabic
+             # Extended-A/Presentation-Forms blocks plus a
+             # fromCharCode/fromCodePoint/\u-escape check: CLEAN — every new
+             # string is a TypeScript identifier, an IANA tz name, or a fixed
+             # English comment/assertion sentence, never corpus text). No
+             # oracle/golden-log/fixture/snapshot regenerated — this diff
+             # touches one existing production file and one existing test
+             # file only. `lib/session/run.ts#sameDay()`'s own tz-blind gap
+             # is now CLOSED; `lib/session/run.ts` and the `app/**` route
+             # handlers are now both fully read at least once — remove them
+             # from future "too large to reach" lists. Full detail,
+             # including session-start notes and the unchanged "NOT
+             # addressed" list: DECISIONS.md v3-D354.
              # NOTE (v3-D353, 2026-10-27): `apps/web/lib/corpus/client.ts`'s
              # module-level `cache` keyed the whole caller-facing
              # `EffectiveCorpus` — raw corpus bytes PLUS the overrides-resolved

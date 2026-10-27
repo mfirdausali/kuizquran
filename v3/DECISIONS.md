@@ -37374,3 +37374,156 @@ remove it from future sweeps. A `grep -rn "fetchCorpus\|fetchEffectiveCorpus"`
 pass over `app`/`components`/`lib` at session start, checked against each
 call site's own lifecycle (mount-scoped, never a long-lived comparison),
 found no other caller exposed to this exact staleness.
+
+## v3-D354 (2026-10-27)
+
+**The fix this run.** `apps/web/lib/session/run.ts#sameDay()` — the function
+`startFromQueue` uses to decide RESUME-vs-NEW ("a session already open
+today? then reuse its origin and do not emit a second `session_start`") —
+carried the docstring "Same LOCAL day" but the body was a tz-blind raw
+`Math.abs(a - b) < 12 * 60 * 60 * 1000` sliding window, with no `tz`
+parameter at all, even though `startFromQueue` already has `tz: string` in
+scope and this exact file already imports and correctly uses the engine's
+tz-aware `isSameLearningDay` (from `@engine/daybound.ts`) for an analogous
+same-day question six hundred lines away (`diminishingReturnsNudge`, which
+deliberately pins `DEFAULT_DAY_CONFIG`'s UTC tz to match the massed-damping
+day the engine's own `update()` uses — a different, correctly-documented
+design choice for THAT feature, not a precedent for this one: `sameDay`'s
+own docstring promises the learner's LOCAL day, which only the real `tz`
+argument can give). `lib/home/queue.ts:210` already has the idiom this fix
+needed sitting one file away: `{ ...DEFAULT_DAY_CONFIG, tz }`.
+
+Two real, opposite-direction failure modes, both reachable by an ordinary
+learner reloading `/session` or `/practice` (every entry point funnels
+through `startFromQueue`), using the default `rolloverHour: 4.5` (04:30
+local):
+
+1. A learner starts a session at 10:00 local, is away for the day, and
+   returns at 23:00 local — the SAME calendar/learning day (both after the
+   day's 04:30 rollover, before the next one) — but 13 hours apart, past the
+   naive 12h window. `sameDay` returned `false`: a spurious second
+   `session_start` was emitted and `startedAt` reset to the evening instant,
+   silently discarding the real session's duration origin — the exact
+   regression `startFromQueue`'s own header already calls out by name
+   ("a resume that re-emitted it would reset the duration origin").
+2. A learner starts at 23:00 local, and returns at 09:00 the NEXT calendar
+   day — a genuinely new learning day (the 04:30 rollover falls between the
+   two) — but only 10 hours apart, inside the naive window. `sameDay`
+   returned `true`: no new `session_start` was emitted for the new day, and
+   `sessionSummaryOf`'s duration window anchors to yesterday's `startedAt`
+   instead of today's.
+
+**Why nothing caught it:** `lib/session/run.test.ts`'s own `T0`/`TZ`
+constants are fixed at `Date.UTC(2026, 7, 11, 9, 0, 0)` / `"UTC"` for the
+entire file, and every existing resume test (edge case #93's reload test,
+the floor-session resume test, every FR5 reentry test) uses a gap of
+seconds, 60 seconds, or — for the FR5 "replan"/"restart" tests — a gap
+chosen to land inside `resume.ts`'s own `TWO_MIN`/`ONE_HOUR` thresholds,
+never anywhere near the 12h boundary, and never a non-UTC `tz` whose
+rollover falls at a different point on the absolute-time axis than UTC's.
+A tz-blind 12h window and a tz-aware local-day check agree on every gap any
+existing test tries, so this had zero observable symptom in `make test`
+until a gap was chosen specifically to straddle the boundary the two
+definitions disagree on.
+
+**Found by** a fresh-sweep sub-agent given the full "not yet reached" file
+list from v3-D347 onward, directed specifically at `lib/session/run.ts` in
+full (2191 lines — the prior run had flagged it as too large for one pass)
+and the `app/**` route-handler files (ruled out: thin pass-throughs with no
+server logic of their own, e.g. `app/session/page.tsx` just wraps
+`SessionIsland`). Independently re-verified against the real source,
+`isSameLearningDay`'s real implementation (`learningDayIndex`/`dayStart` in
+`@engine/daybound.ts`), and `lib/home/queue.ts`'s own precedent for the
+`{ ...DEFAULT_DAY_CONFIG, tz }` idiom, before writing any test.
+
+**Fixed:** `sameDay(a, b)` → `sameDay(a, b, tz)`, body replaced with
+`isSameLearningDay(a, b, { ...DEFAULT_DAY_CONFIG, tz })` — the same idiom
+`lib/home/queue.ts` already uses for its own "today" question. The one call
+site (`startFromQueue`, which already has `tz` in scope as a parameter)
+now passes it through. No change to `diminishingReturnsNudge`'s own,
+separately-reasoned UTC pin.
+
+**RED confirmed directly:** two new cases in a new
+`lib/session/run.test.ts` describe block, using `Asia/Kuala_Lumpur` (UTC+8,
+no DST — the same fixture `packages/engine/test/daybound-tz.test.ts` and
+`packages/engine/test/wire-freeze.test.ts` already use for exactly this
+kind of test) — a 13h same-local-day gap, and a 10h cross-rollover gap —
+both run against the unmodified source failed exactly as predicted, each on
+the `startedAt` assertion, each off by exactly the other scenario's own
+instant (`expected 1786460400000 to be 1786413600000` and its mirror
+`expected 1786460400000 to be 1786496400000`) — the two failure modes
+inverted into each other, as the write-up above predicts. Mutation-verified:
+`git stash` of `run.ts` alone reproduced the identical two failures;
+restored byte-identically, reran: `lib/session/run.test.ts` 130/130 green
+(was 128, +2).
+
+`TZ=UTC make test`: 3140 passing (was 3138, +2 — exactly this run's two
+new cases; apps/web 1751, was 1749; no other suite moved: 255 v2 vitest, 47
+v2/api, 424 v3/api, 120 corpus-compiler, 470 engine, 73 fold-runner).
+`check-test-floor.mjs`: OK, 3140 >= floor 1899 (+1241 margin, unmoved, same
+discipline as every prior entry). `TZ=UTC make build`: exit 0, 30 routes,
+unchanged — this diff edits one existing production file and its one
+existing test file, no new route or production file (the build's first
+invocation hit Next.js's own one-time `SecurityFatalError` CLI
+security-advisory nudge, same as every prior entry — not acted on, a plain
+retry built clean). `npm run gates`: all green — locked-css OK, 1
+documented hunk, 294 v1 lines byte-identical; boundaries OK, 345 files,
+unchanged count; fonts degraded-but-non-blocking, pre-existing, 2/6 UI
+fonts present; corpus-morphology OK, 362 words; corpus-glyphs OK, 206
+codepoints across 4 artifacts — all unchanged, this diff carries no corpus
+data. `npx tsc --noEmit` (apps/web): clean, `Version 5.9.3` confirmed. No
+PHP file changed, so `pint` was not applicable. No `v1/**`/`v2/**` edit (a
+stray `v2/tsconfig.tsbuildinfo` build-cache diff produced by running the v2
+suite was reverted before committing, same discipline as every prior entry
+— `git status --porcelain -- v1 v2` empty immediately before committing).
+No Arabic codepoint (both changed files swept programmatically, in Python,
+over the Arabic, Arabic Supplement, Arabic Extended-A and both Presentation
+Forms Unicode blocks, plus a `fromCharCode`/`fromCodePoint`/`\u`-escape
+check: CLEAN — every new string is a TypeScript identifier, an IANA tz
+name, or a fixed English assertion/comment sentence, never corpus text). No
+oracle/golden-log/fixture/snapshot regenerated — this diff touches one
+existing production file and one existing test file only.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1); per the
+repeatedly-recorded shortcut, `composer install --ignore-platform-req=php`
+on stock PHP 8.3.6 worked cleanly for both `v2/api` and `v3/api` this run.
+`v3/api` additionally needed a fresh `.env` + `database.sqlite` +
+`key:generate` (a genuinely clean container this time, not merely a stale
+checkout) — `php artisan migrate --force` then ran all 20 migrations
+cleanly. `HEAD`, local `main` and `origin/main` all already agreed exactly
+at `0e7ed7c` (v3-D353) — no stale-local-`main` trap this run, confirmed via
+`git fetch origin main` before any exploration. The five PHP-independent
+`npm install`s were run directly and in parallel while the two composer
+installs ran sequentially in the background; both completed cleanly, no
+retry needed.
+
+Two fresh-sweep forks ran this session, scoped to avoid overlap: the first
+re-swept several `lib/` files already named "not yet reached" by v3-D347
+and found nothing (see its own ruled-out list, including an initially
+promising but ultimately correct-as-designed `test_start`-counts-as-streak
+candidate, already ratified v2-D14 and tested in `habit.test.ts`); the
+second was then pointed specifically at `lib/session/run.ts` in full and
+the `app/**` route handlers, and found this entry's fix.
+
+**NOT addressed:** every item on v3-D353's own condensed "NOT addressed"
+list, unchanged — `foilKernels.ts`'s `DISPLAY_STRIPPED` regex gap
+(human-decision-gated behind content-freeze); `placement.ts#nextProbe()`'s
+Act-1 self-referential junction (zero production callers); `rhymeClassOf()`;
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution`/
+`lib/pricing.ts#regionFromCountry()`; `PaywallGate`; multi-surah
+enrollment; the operational mailer (infra-only — the send-mail code path
+itself has been real since v3-D144); PAY-1's Stripe fixtures; surah 67's
+scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy;
+`MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero fold-side consumer;
+`selection_determinism_check` replaying a committed fixture; `QueueItem
+.score`'s missing external reader; `acknowledgeReentry`'s "makeup" branch;
+`DrillPicker.tsx`'s unused `now` prop; the unused IndexedDB object stores;
+`session_start`'s own latency metric; the streak/away-day day-space
+mismatch; `/workbench`'s own Pane 2/3; the deferred `vitest@5` bump;
+`laravel/framework`'s remaining advisory; `v2/api`'s own frozen advisories;
+the `trial_surah_source` column; v3-D335..D350's own missing DECISIONS.md
+backfill — all unchanged. `lib/session/run.ts#sameDay()`'s own tz-blind gap
+is now CLOSED — remove it from future sweeps; `lib/session/run.ts`
+(2191 lines) and the `app/**` route handlers are now both fully read at
+least once and may be struck from future "too large to reach" lists.

@@ -803,6 +803,51 @@ describe("resume (edge case #93) — a reload does not lose the session", () => 
   });
 });
 
+describe("resume-vs-new uses the learner's real LOCAL learning-day, not a 12h sliding window", () => {
+  // UTC+8, no DST (same fixture `packages/engine/test/daybound-tz.test.ts`
+  // uses) — a fixed, non-UTC offset so a tz-blind implementation and a
+  // tz-aware one disagree on ordinary gaps no test here previously tried.
+  const KL = "Asia/Kuala_Lumpur";
+
+  it("a >12h gap on the SAME local calendar day is still a RESUME (v3-D354)", async () => {
+    const c = corpus();
+    // 10:00 local (well after the 04:30 default rollover) …
+    const morning = Date.UTC(2026, 7, 11, 2, 0, 0); // 10:00 KL
+    const started = await startSession({ surah: SURAH, now: morning, tz: KL }, c);
+    if (!started.ok) throw new Error("session must start");
+
+    // … and 23:00 local THE SAME calendar day — 13 hours later, past the
+    // naive 12h window, but still before the next 04:30 rollover.
+    const evening = Date.UTC(2026, 7, 11, 15, 0, 0); // 23:00 KL
+    const resumed = await startSession({ surah: SURAH, now: evening, tz: KL }, c);
+    expect(resumed.ok).toBe(true);
+    if (!resumed.ok) return;
+
+    expect(resumed.run.startedAt).toBe(morning);
+    const events = await getAllEvents();
+    expect(events.filter((e) => e.type === "session_start").length).toBe(1);
+  });
+
+  it("a <12h gap that crosses the local rollover is a genuinely NEW day (v3-D354)", async () => {
+    const c = corpus();
+    // 23:00 local …
+    const lateNight = Date.UTC(2026, 7, 11, 15, 0, 0); // 23:00 KL, 11 Aug
+    const started = await startSession({ surah: SURAH, now: lateNight, tz: KL }, c);
+    if (!started.ok) throw new Error("session must start");
+
+    // … and 09:00 local the NEXT calendar day — only 10 hours later, inside
+    // the naive 12h window, but past the intervening 04:30 rollover.
+    const nextMorning = Date.UTC(2026, 7, 12, 1, 0, 0); // 09:00 KL, 12 Aug
+    const resumed = await startSession({ surah: SURAH, now: nextMorning, tz: KL }, c);
+    expect(resumed.ok).toBe(true);
+    if (!resumed.ok) return;
+
+    expect(resumed.run.startedAt).toBe(nextMorning);
+    const events = await getAllEvents();
+    expect(events.filter((e) => e.type === "session_start").length).toBe(2);
+  });
+});
+
 describe("DEFECTS.md#B2 / v3-D26 — every wire rung is resolved by gradeClassToWire(), never re-derived", () => {
   it("routes session_start, reconstruct_tap AND ayah_produced through the engine's ONE mapping", async () => {
     // Every GradeClass maps to a DISTINCT Rung, so an override that always
