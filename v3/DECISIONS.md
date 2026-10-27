@@ -36932,3 +36932,153 @@ pages v3-D349 already checked; `v2/api`/`v3/api` Eloquent model relations,
 Console Commands, Jobs and Notifications not yet individually verified;
 `packages/corpus-compiler/src/**` internals beyond what prior entries
 touched; `worker/fold-runner/src` files beyond `canonicalOrder.ts`.
+
+## v3-D351 (2026-10-27)
+
+**Backfill note first.** v3-D335 through v3-D350 (16 nightly fixes) were
+never backfilled into this file — only `CLAUDE.md`'s own running `make test`
+comment recorded them, the same gap v3-D337/D338 each named and left for a
+future run. Still not fixed here (out of scope for this entry); naming it
+again so it is not lost a third time.
+
+**The fix this run.** `apps/web/lib/progress/retention.ts#isSlipping()` —
+the function §10's own module header binds to "the SAME NUMBERS the
+scheduler uses" — re-derived only HALF of `packages/engine/src/scheduler.ts
+#isReviewDue()`'s three-conjunct admission rule
+(`atom.encoded && atom.gatePassed && reviewScore(atom, now) >
+REVIEW_RISK_THRESHOLD`). It correctly imported the two shared constants
+(`REVIEW_RISK_THRESHOLD`/`CONNECTION_WEIGHT`, already fixed for cross-runtime
+duplication at v3-D263) but then inlined its own copy of the weighted
+forgetting-risk comparison instead of calling `isReviewDue` itself — silently
+dropping the `gatePassed` conjunct.
+
+`isReviewDue` treats a cold-gate-pending atom as a GATE, never a review
+(`scheduler.ts` step 2 queues it as `kind: "gate"`; step 3's review admission
+is gated on `gatePassed` precisely so the two queues never double-claim one
+atom). `isSlipping` had no such guard, so `/progress`'s retention panel could
+report an ayah as "slipping" purely from decayed `forgettingRisk`, often
+within hours of the ayah first being encoded: a fresh S3 encode's stability
+≈2.64 learning-days (typical GAIN/STAB_GAIN at difficulty 0.3) clears the
+0.15 threshold at `dt ≈ 0.43` learning-days (~10 hours) — well before the
+atom's first cold gate is even due (next learning-day start), let alone
+passed. That is the exact inverse of the lie §10's own governing sentence
+warns against ("An app that shows a green dashboard while its own scheduler
+thinks the learner is lapsing has lied to them") — here the retention panel
+reports forgetting on an atom the scheduler does not consider review-eligible
+at all, while `/plan`/`/session` would correctly be showing it as a pending
+gate. The same mismatch recurs, more durably, for any atom whose cold gate
+has gone overdue without being retaken: `forgettingRisk` keeps climbing while
+`gatePassed` stays false, so the two screens disagree about the same atom for
+as long as the gate stays unpassed.
+
+Found by a fresh-sweep agent reading `lib/progress/*.ts`, `lib/plan/*.ts` and
+`lib/library/rows.ts` in full (named on v3-D350's own "genuinely
+still-unswept" list) and independently re-verified by me against
+`scheduler.ts#isReviewDue`/`gate.ts#scheduleGate`/`applyGateResult`/
+`update.ts`'s S3 gain constants before any test was touched.
+
+**Why no test caught it.** `test/progress-retention.test.tsx`'s own
+`slippingFixture()` built every atom via the file's `put()` helper, which
+spreads over `initAtom(...)` — `gatePassed: false` on every fixture atom,
+never overridden anywhere in the file. The file's own "the engine agrees
+these three are due for review" test asserted only `forgettingRisk(a, NOW) >
+REVIEW_RISK_THRESHOLD`, not `isReviewDue(a, NOW)` — so it validated the
+production code against the SAME incomplete predicate rather than against
+the real scheduler decision its own title claimed to pin. The test's own
+comment even named "gate-passed" as part of the real rule ("`scheduler.ts`
+step 3 queues an encoded, gate-passed atom when...") without the fixture ever
+satisfying it — the gap was visible in the comment, never in the assertion.
+
+**Fixed.** `isSlipping` now calls `scheduler.ts#isReviewDue(atom, now, {
+day: cfg })` directly — no re-derivation at all; the per-kind `weight`
+computation it used to inline is already inside `isReviewDue`.
+`CONNECTION_WEIGHT` stays exported (still agreement-tested against
+`DEFAULT_CONN_WEIGHT` by `retention-config-agreement.test.ts`) but is no
+longer read inside the function body. The module header was corrected to
+describe the real three-conjunct rule instead of the half it used to quote.
+`slippingFixture()`'s three genuinely-slipping atoms now carry
+`gatePassed: true` (they represent atoms that have already passed their cold
+gate and are now decaying toward lapse, which is what the fixture's own
+docblock always claimed), and the "engine agrees" test now asserts against
+the real `isReviewDue` export instead of its own partial copy.
+
+RED confirmed directly: one new case in `test/progress-retention.test.tsx`
+— an encoded atom with `gatePassed: false` and forgetting risk well past the
+threshold — run against the unmodified source failed exactly as predicted,
+`expected 1 to be +0` on `summary.slippingCount` (34 pre-existing cases in
+the file untouched and unaffected). Mutation-verified: `git stash` of
+`retention.ts` alone reproduced the identical single failure; restored
+byte-identically (`git diff --stat` confirmed before re-applying), reran:
+`test/progress-retention.test.tsx` 35/35 green (was 34, +1), plus the
+pre-existing `retention-config-agreement.test.ts` 2/2 unchanged.
+
+`TZ=UTC make test`: 3135 passing (was 3134, +1 — exactly this one new test;
+apps/web 1746, was 1745; no other suite moved: 255 v2 vitest, 47 v2/api, 424
+v3/api, 120 corpus-compiler, 470 engine, 73 fold-runner). `check-test-
+floor.mjs`: OK, 3135 >= floor 1899 (+1236 margin, unmoved). `TZ=UTC make
+build`: exit 0, 30 routes, unchanged (the usual one-time `SecurityFatalError`
+Next.js CLI nudge on first invocation, not acted on, plain retry built
+clean). `npm run gates`: all green, 344 files, unchanged (one existing
+production file edited plus its one existing test file, no new production
+file). `npx tsc --noEmit` (apps/web): clean. No PHP file changed, so `pint`
+was not applicable. No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff produced by running the suite was reverted before
+committing — `git status --porcelain -- v1 v2` empty immediately before
+committing). No Arabic codepoint (both changed files swept programmatically
+over the Arabic/Arabic Supplement/Arabic Extended-A/Presentation-Forms
+blocks plus a `fromCharCode`/`fromCodePoint` check: CLEAN — every new string
+is a TypeScript identifier or a fixed English comment/assertion sentence,
+never corpus text). No oracle/golden-log/fixture/snapshot regenerated — this
+diff touches one existing production file and one existing test file only.
+
+**Two further candidates found this run, deliberately NOT fixed** — named
+here so a future run does not re-derive them from scratch:
+
+1. **HIGH SEVERITY, NEEDS A HUMAN DECISION.**
+   `packages/corpus-compiler/src/foilKernels.ts`'s `DISPLAY_STRIPPED` regex
+   (used by `displayKey()` to catch kernel-generated foils that are visually
+   indistinguishable at tile size — the exact defect class a prior Al-Mulk
+   incident, cited in the file's own docstring, was about) has a gap at
+   U+0653–U+066F that `normalize.ts`'s own `DIACRITICS` regex does not have,
+   so a maddah-above/hamza-above pair differing only by that mark is not
+   recognised as a display collision. Verified live in the shipped artifact:
+   `output/67/corpus.json` ayah 4 position 6 already carries two admitted
+   rank-1/rank-2 `src_type: "visual"` foils that collide once stripped the
+   way `normalize.ts` strips them. Re-running the real kernels
+   (`generateFoils`/`buildPool`) over all four vendored surahs found 305 such
+   admitted-pair violations total — 31 in surah 67, 4 in surah 103 (both ship
+   as-is, kernel-generated, no authored override); 270 in surah 12, which
+   never reaches production since 12 is 100% authored and never calls
+   `generateFoils`. `displayKey()` has zero dedicated test coverage anywhere
+   (confirmed by grep), and `validate.ts`'s "#9: no two foils grade
+   identical" check uses `gradeKey` — which deliberately keeps harakat
+   distinct — so it structurally cannot catch a display-only collision.
+   NOT fixed this run: the honest fix is a regex widen (covering the
+   continuous U+064B–U+0670 span as one range, matching `normalize.ts`'s own
+   continuous-range approach, rather than the narrower, gapped set
+   `foilKernels.ts` currently uses) plus a coordinate-based regression test,
+   but surahs 67/103's distractor sets are already under
+   the content-freeze/qari sign-off chain (`make content-freeze`,
+   `HANDOVER.md` §C1/C2) — regenerating them changes `corpusHash` and would
+   amber the existing, Firdaus-signed QA sample. NIGHTLY.md's absolute rule
+   ("never regenerate an oracle... to make your own tests pass — if one
+   legitimately needs regenerating, STOP... a human approves that") reserves
+   exactly this call for a human. A future run should put this to Firdaus
+   rather than silently fixing it: whether to patch the kernel now and accept
+   re-running distractor QA on 67/103 before the qari sessions, or defer.
+
+2. **MEDIUM CONFIDENCE, LOW CURRENT IMPACT.**
+   `packages/engine/src/placement.ts#nextProbe()`: for Act 1 (whose
+   `opening` is ayah 1), `Math.max(1, lm.opening - 1)` clamps `from` to 1
+   instead of handling "no prior ayah" explicitly, so the binary-search
+   placement probe for Act 1 builds a self-referential `from === to === 1`
+   junction — invariant #1's "per-connection n→n+1" violated in form, though
+   `junctionItem()` doesn't actually read `from` to build the MCQ content, so
+   the generated item still answers correctly today. `placement.ts`'s own
+   `nextProbe`/`initPlacement`/`answerProbe` have ZERO production callers
+   right now — `components/onboarding/OnboardingFlow.tsx`'s own comment says
+   this build asks a plain yes/no instead of running the real 3-probe binary
+   search, since neither shippable surah (103/112) has scene beats to probe
+   — so no learner currently observes this. Named for whichever future run
+   wires placement-based onboarding to a real screen; not worth fixing ahead
+   of that caller existing.

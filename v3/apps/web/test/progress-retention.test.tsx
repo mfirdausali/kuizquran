@@ -37,6 +37,7 @@ import type { Corpus } from "@engine/types.ts";
 import type { AtomState } from "@engine/atom.ts";
 import { atomKey, initAtom } from "@engine/atom.ts";
 import { currentBand, forgettingRisk } from "@engine/strength.ts";
+import { isReviewDue } from "@engine/scheduler.ts";
 
 import {
   buildRetentionSummary,
@@ -103,22 +104,25 @@ function bandsFixture(): Map<string, AtomState> {
 /**
  * Three atoms the SCHEDULER would queue for review, and two it would not.
  *
- * `scheduler.ts` step 3 queues an encoded, gate-passed atom when
- * `forgettingRisk * weight > 0.15`. These three are built to clear that bar by
- * having decayed well past their stability; the two "safe" atoms were retrieved
+ * `scheduler.ts#isReviewDue` queues an atom when it is encoded, its cold gate
+ * has been PASSED, and `forgettingRisk * weight > 0.15`. All three "slipping"
+ * atoms here have already passed their gate (`gatePassed: true`) — they are
+ * reviews, not pending gates — and are built to clear the risk bar by having
+ * decayed well past their stability; the two "safe" atoms were retrieved
  * moments ago and sit far below it. The test asserts the engine agrees before
- * asserting the UI does — so if the threshold ever moves, this fails loudly
- * rather than silently measuring nothing.
+ * asserting the UI does — so if the threshold (or the gate-passed
+ * requirement) ever moves, this fails loudly rather than silently measuring
+ * nothing.
  */
 function slippingFixture(): Map<string, AtomState> {
   const atoms = new Map<string, AtomState>();
-  // Slipping: encoded, retrieved long ago relative to stability.
-  put(atoms, "ayah", 1, { strength: 90, stability: 2, lastRetrieval: NOW - 10 * DAY, reps: 6, encoded: true });
-  put(atoms, "ayah", 2, { strength: 88, stability: 3, lastRetrieval: NOW - 12 * DAY, reps: 5, encoded: true });
-  put(atoms, "ayah", 3, { strength: 75, stability: 2, lastRetrieval: NOW - 9 * DAY, reps: 4, encoded: true });
+  // Slipping: encoded, gate passed, retrieved long ago relative to stability.
+  put(atoms, "ayah", 1, { strength: 90, stability: 2, lastRetrieval: NOW - 10 * DAY, reps: 6, encoded: true, gatePassed: true });
+  put(atoms, "ayah", 2, { strength: 88, stability: 3, lastRetrieval: NOW - 12 * DAY, reps: 5, encoded: true, gatePassed: true });
+  put(atoms, "ayah", 3, { strength: 75, stability: 2, lastRetrieval: NOW - 9 * DAY, reps: 4, encoded: true, gatePassed: true });
   // Safe: retrieved a minute ago.
-  put(atoms, "ayah", 4, { strength: 95, stability: 20, lastRetrieval: NOW - 60_000, reps: 12, encoded: true });
-  put(atoms, "ayah", 5, { strength: 90, stability: 18, lastRetrieval: NOW - 60_000, reps: 11, encoded: true });
+  put(atoms, "ayah", 4, { strength: 95, stability: 20, lastRetrieval: NOW - 60_000, reps: 12, encoded: true, gatePassed: true });
+  put(atoms, "ayah", 5, { strength: 90, stability: 18, lastRetrieval: NOW - 60_000, reps: 11, encoded: true, gatePassed: true });
   return atoms;
 }
 
@@ -217,13 +221,34 @@ describe("slippage is read from the scheduler's own signal, not from a band", ()
   });
 
   it("the engine agrees these three are due for review", () => {
-    // Asserted against the engine BEFORE the UI, so the fixture cannot drift
-    // into measuring nothing if the threshold changes.
+    // Asserted against the REAL scheduler predicate (`isReviewDue`), not a
+    // partial re-derivation of it — `forgettingRisk > threshold` alone is
+    // NOT the engine's rule (it also requires `gatePassed`), and asserting
+    // only that half is exactly how this fixture's own gap went unnoticed:
+    // see "excludes an atom whose cold gate has not been passed yet" below.
     const atoms = slippingFixture();
-    const due = [...atoms.values()].filter(
-      (a) => forgettingRisk(a, NOW) > REVIEW_RISK_THRESHOLD,
-    );
+    const due = [...atoms.values()].filter((a) => isReviewDue(a, NOW));
     expect(due.length).toBe(3);
+  });
+
+  it("excludes an atom whose cold gate has not been passed yet, even with high forgetting risk — a pending GATE is never a review (DEFECTS-class gap: `isSlipping` had silently dropped the `gatePassed` conjunct `isReviewDue` requires)", () => {
+    const atoms = new Map<string, AtomState>();
+    put(atoms, "ayah", 1, {
+      strength: 90, stability: 2, lastRetrieval: NOW - 10 * DAY, reps: 6,
+      encoded: true, gatePassed: false,
+    });
+    const atom = atoms.get(atomKey(SURAH, "ayah", 1))!;
+    // Sanity: forgettingRisk alone already clears the threshold — the
+    // INCOMPLETE check `isSlipping` used to run.
+    expect(forgettingRisk(atom, NOW)).toBeGreaterThan(REVIEW_RISK_THRESHOLD);
+    // But the real scheduler would never queue it: the cold gate has not
+    // been passed, so it is a pending gate, not a review.
+    expect(isReviewDue(atom, NOW)).toBe(false);
+
+    const summary = summarize(atoms, 1);
+    expect(summary.slippingCount).toBe(0);
+    render(<RetentionPanel summary={summary} />);
+    expect(screen.getByText(/Nothing is slipping/)).toBeTruthy();
   });
 
   it("reports exactly those three as slipping, in words and a number", () => {

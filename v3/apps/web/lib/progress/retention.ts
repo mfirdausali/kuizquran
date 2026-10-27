@@ -47,12 +47,22 @@
 //
 // So slipping is read from the signals the SCHEDULER itself acts on:
 //
-//   - FORGETTING RISK past the scheduler's own review threshold. `scheduler.ts`
-//     queues a review when `forgettingRisk(atom) * weight > 0.15`. That constant
-//     is imported from the engine rather than re-typed here, so the number shown
-//     to the learner and the number the scheduler acts on cannot drift apart.
+//   - DUE FOR REVIEW, per the scheduler's OWN admission rule
+//     (`scheduler.ts#isReviewDue`): encoded, cold gate PASSED, and
+//     `forgettingRisk(atom) * weight > 0.15`. Called directly rather than
+//     re-derived here — a prior version of this function inlined only the
+//     weighted-forgetting-risk half of that rule and silently dropped the
+//     `gatePassed` conjunct, so an atom whose cold gate had never been
+//     passed (still a pending GATE to the scheduler, never a review) could
+//     be reported as "slipping" the moment its risk crossed the threshold,
+//     sometimes within hours of first being encoded. `isReviewDue` is
+//     imported so the number shown to the learner and the number the
+//     scheduler acts on cannot drift apart — the same shared-source
+//     discipline `REVIEW_RISK_THRESHOLD`/`CONNECTION_WEIGHT` below already
+//     apply to the two constants that rule is built from.
 //   - RECORDED LAPSES. `update.ts:81` increments `atom.lapses` when an
-//     established atom is missed. That is a real, logged event, not a threshold.
+//     established atom is missed. That is a real, logged event, not a
+//     threshold, and is independent of gate status.
 //
 // An atom counts as slipping when it is encoded and either signal fires. That
 // is a claim the scheduler would agree with, which is the whole of §10.
@@ -60,10 +70,10 @@
 import type { AtomState, Stage } from "@engine/atom.ts";
 import type { Corpus, DrillEvent } from "@engine/types.ts";
 import type { DayConfig } from "@engine/daybound.ts";
-import { currentBand, currentStrength, forgettingRisk, halfLifeDays } from "@engine/strength.ts";
+import { currentBand, currentStrength, halfLifeDays } from "@engine/strength.ts";
 import { decaySince } from "@engine/decay.ts";
 import { expand, siteToAtomKey } from "@engine/site.ts";
-import { DEFAULT_CONN_WEIGHT, REVIEW_RISK_THRESHOLD } from "@engine/scheduler.ts";
+import { DEFAULT_CONN_WEIGHT, REVIEW_RISK_THRESHOLD, isReviewDue } from "@engine/scheduler.ts";
 import { stageLabelOf } from "@/components/macro/graphNodes.ts";
 
 /**
@@ -160,12 +170,19 @@ const BAND_ORDER: readonly Stage[] = ["carry", "reinforce", "learn", "lapsed"];
  * be slipping away. That distinction is the same one `rows.ts` draws between
  * "0%" and "—", and getting it wrong would report every untouched ayah of a
  * 111-ayah surah as slipping on a learner's first day.
+ *
+ * Equally, an atom whose cold gate has not been PASSED yet is never slipping
+ * either, however high its forgetting risk reads: the scheduler's own
+ * `isReviewDue` treats a gate-pending atom as a GATE, not a review, and
+ * `/plan`/`/session` would show it as an overdue gate while this panel is
+ * claiming it is quietly decaying — two different queues disagreeing about
+ * the same atom. `isReviewDue` is called directly (never re-derived) so this
+ * can't happen.
  */
 function isSlipping(atom: AtomState, now: number, cfg?: DayConfig): boolean {
   if (!atom.encoded) return false;
   if (atom.lapses > 0) return true;
-  const weight = atom.kind === "connection" ? CONNECTION_WEIGHT : 1;
-  return forgettingRisk(atom, now, cfg) * weight > REVIEW_RISK_THRESHOLD;
+  return isReviewDue(atom, now, { day: cfg });
 }
 
 /**
