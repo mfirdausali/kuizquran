@@ -36933,6 +36933,132 @@ Console Commands, Jobs and Notifications not yet individually verified;
 `packages/corpus-compiler/src/**` internals beyond what prior entries
 touched; `worker/fold-runner/src` files beyond `canonicalOrder.ts`.
 
+## v3-D352 (2026-10-27)
+
+**The fix this run.** `components/admin/BillingAuditPanel.tsx`'s own admin
+override form (v3-D147/v3-D279, BUILD-PLAN M7's "admin billing surface")
+shared one `overrideMessage` paragraph for every outcome of `onOverride` —
+a client-side validation refusal, the server's own genuine rejection
+(`submitBillingOverride()`'s real `{ok: false, message}` on a 404/409/422,
+a thrown network exception, or an unparseable body — all three already
+correctly distinguished and documented in `lib/admin/billingAudit.ts`'s own
+docblock), and an ordinary successful apply — all rendered in one hardcoded
+`<p role="status">`. The exact "role=status vs role=alert" shape
+v3-D241/v3-D329/v3-D330/v3-D333/v3-D334/v3-D335/v3-D336/v3-D337/v3-D338/
+v3-D345 each already closed on `PrivacyPanel.tsx`/`OverrideEditor.tsx`/
+`GlossDraftsPanel.tsx`/`FlagsPanel.tsx`/`StripeSettingsPanel.tsx`/
+`AccountAuthPanel.tsx`/`SystemHealthPanel.tsx`/`AdminGate.tsx` — found here
+on a file none of those entries ever named (`BillingAuditPanel.tsx` did not
+exist until v3-D147, after the earliest closures in that sweep, and was
+never revisited by a later one; `git log` on the file shows only v3-D306
+and v3-D316, neither about this shape). An admin whose override was
+genuinely rejected by the server — a validation 422, a stale snapshot's
+409, a dropped connection — read the server's own error text with the same
+passive, non-interrupting live-region priority as an ordinary success,
+exactly the failure mode this sweep exists to close.
+
+**Why nothing caught it:** `test/billing-audit-panel.test.tsx`'s own
+"a rejected override shows the server's own reason and never claims
+success" test asserted only `screen.getByText(...)`, never
+`getByRole("alert")` — the same gap every prior instance of this shape was
+found through. No test exercised a thrown network exception on this
+form at all.
+
+**Fixed on the identical template this sweep has used throughout:** a new
+`overrideFailed` boolean, set `true` on either client-side validation
+refusal and from the real outcome's own `!outcome.ok`, reset to `false`
+only on a genuine success; the message paragraph's `role` is now
+`overrideFailed ? "alert" : "status"` instead of the hardcoded `"status"`.
+
+**RED confirmed directly:** three cases run against the unmodified
+component — a real 422 rejection and a thrown `TypeError` network
+exception both failed exactly as predicted (`screen.findByRole("alert")`
+timing out, the message rendering `role="status"` instead); a third,
+strengthened case on the pre-existing successful-override test (asserting
+the rendered paragraph is `role="status"`) passed vacuously, correctly,
+proving the fix narrows `role="alert"` to the genuine-failure branch only,
+never an ordinary success. Mutation-verified: `git stash` of
+`BillingAuditPanel.tsx` alone (the new case and both strengthened
+assertions kept, the 12 pre-existing cases in the file touched only by
+the two strengthened assertions, not by new `it()` blocks) reproduced
+exactly the two predicted failures (the success-case assertion passed
+vacuously either way, as predicted); restored byte-identically (`git diff
+--stat components/admin/BillingAuditPanel.tsx` empty before committing),
+reran: `test/billing-audit-panel.test.tsx` 13/13 green (was 12, +1 — one
+genuinely new `it()` block; the other two new assertions strengthen
+existing cases rather than adding new ones).
+`npx vitest run test/billing-audit-panel.test.tsx lib/admin/billingAudit.test.ts`:
+29/29 green — no regression on the sibling consumer of the same outcome
+type.
+
+`TZ=UTC make test`: 3136 passing (was 3135, +1 — exactly this run's one
+net-new test; apps/web 1747, was 1746; no other suite moved: 255 v2
+vitest, 47 v2/api, 424 v3/api, 120 corpus-compiler, 470 engine, 73
+fold-runner). `check-test-floor.mjs`: OK, 3136 >= floor 1899 (+1237
+margin, unmoved, same discipline as every prior entry). `TZ=UTC make
+build`: exit 0, 30 routes, unchanged — this diff edits one existing
+component and its one existing test file, no new route or production
+file. `npm run gates`: all green — locked-css OK, 1 documented hunk, 294
+v1 lines byte-identical; boundaries OK, 345 files, unchanged count; fonts
+degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints across 4
+artifacts — all unchanged, this diff carries no corpus data. `npx tsc
+--noEmit` (apps/web): clean. No PHP file changed, so `pint` was not
+applicable. No `v1/**`/`v2/**` edit (`git status --porcelain -- v1 v2`
+empty immediately before committing — no stray build-cache diff this run).
+No Arabic codepoint (both changed files swept programmatically, in
+Python, over the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks, plus a `fromCharCode`/`fromCodePoint`/
+`\u`-escape mention check: CLEAN — every new string is a TypeScript
+identifier, a fixed English assertion/caption sentence, or a synthetic
+HTTP-status/error-message test fixture, never corpus text). No
+oracle/golden-log/fixture/snapshot regenerated — this diff touches one
+existing production file and one existing test file only.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1); per
+v3-D329's/v3-D347's own recorded shortcut, `composer install
+--ignore-platform-req=php` on stock PHP 8.3.6 was tried first for both
+`v2/api` and `v3/api` and worked cleanly for both — no PHP 8.4 install
+needed this run. `HEAD`, local `main` and `origin/main` all already
+agreed at `8de06a5` (v3-D351) — no stale-local-`main` trap this run,
+confirmed directly via `git fetch origin main` before any exploration.
+The five PHP-independent `npm install`s were run directly and in
+parallel; both composer installs were run with real network latency via
+the documented git-mirror-clone fallback (several `curl error 28`/`Proxy
+CONNECT aborted due to timeout` retries recovered automatically by
+composer's own "trying from source" fallback) — slow but no manual
+retry needed.
+
+**NOT addressed:** every item on v3-D351's own condensed exclusion list,
+unchanged — `foilKernels.ts`'s `DISPLAY_STRIPPED` regex gap (HIGH
+severity but human-decision-gated behind the content-freeze/qari
+sign-off chain — still needs Firdaus's call on sequencing); `placement.ts
+#nextProbe()`'s Act-1 self-referential junction (medium confidence, low
+impact, zero production callers); `rhymeClassOf()`;
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution`/
+`lib/pricing.ts#regionFromCountry()`; `PaywallGate` as a whole class;
+multi-surah enrollment as a product decision; the operational mailer/
+7-night launch window; PAY-1's Stripe fixtures; surah 67's scene beats;
+`worker/fold-runner/src/severity.ts`'s taxonomy naming;
+`MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero fold-side consumer;
+`selection_determinism_check` still replaying a committed fixture;
+`QueueItem.score`'s missing external reader; `acknowledgeReentry`'s
+"makeup" branch; `DrillPicker.tsx`'s unused `now` prop; the unused
+`atoms`/`corpus`/`sessions` IndexedDB object stores; `session_start`'s
+own latency metric; the streak/away-day day-space mismatch;
+`/workbench`'s own Pane 2/3; the deferred `vitest@5` bump;
+`laravel/framework`'s remaining advisory; `v2/api`'s own frozen
+advisories; the `trial_surah_source` column on `entitlements`; v3-D335
+through v3-D350's own missing DECISIONS.md backfill (named repeatedly,
+still not done — out of scope for this entry too) — all unchanged.
+`BillingAuditPanel.tsx`'s own role=status/role=alert gap is now CLOSED —
+remove it from future sweeps of this shape. A `grep -rln 'role="status"'
+components/` pass at session start, checked against each file's own
+write-action outcome type, found no other open instance of this exact
+shape; a future run should pick a different bug class or re-verify this
+claim rather than assume it is exhaustive.
+
 ## v3-D351 (2026-10-27)
 
 **Backfill note first.** v3-D335 through v3-D350 (16 nightly fixes) were

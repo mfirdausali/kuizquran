@@ -77,6 +77,10 @@ export function BillingAuditPanel() {
   const [overrideTier, setOverrideTier] = useState<BillingTierValue | "">("");
   const [overrideReason, setOverrideReason] = useState("");
   const [overrideMessage, setOverrideMessage] = useState<string | null>(null);
+  // v3-D352 — distinguishes a genuine failure (client validation or the
+  // server's own non-ok outcome) from an ordinary success, so the message
+  // below can be announced with the right live-region priority.
+  const [overrideFailed, setOverrideFailed] = useState(false);
   const [overrideBusy, setOverrideBusy] = useState(false);
 
   // v3-D279 — makes override()'s own 409 ("Re-read and retry") literally
@@ -100,6 +104,7 @@ export function BillingAuditPanel() {
       e.preventDefault();
       const parsed = Number.parseInt(overrideUserIdDraft.trim(), 10);
       if (!Number.isFinite(parsed) || parsed <= 0) {
+        setOverrideFailed(true);
         setOverrideMessage("enter a valid learner id");
         return;
       }
@@ -107,6 +112,7 @@ export function BillingAuditPanel() {
       // "at least one of state or tier is required") and its message would
       // render just as honestly; this check only saves a round trip.
       if (overrideState === "" && overrideTier === "") {
+        setOverrideFailed(true);
         setOverrideMessage("choose a state or a tier to override");
         return;
       }
@@ -119,6 +125,7 @@ export function BillingAuditPanel() {
           reason: overrideReason,
         });
         setOverrideBusy(false);
+        setOverrideFailed(!outcome.ok);
         setOverrideMessage(
           outcome.ok ? `applied — state: ${outcome.state}, tier: ${outcome.tier}` : outcome.message,
         );
@@ -317,7 +324,7 @@ export function BillingAuditPanel() {
           Apply override
         </button>
         {overrideMessage !== null ? (
-          <p className="caption" role="status">
+          <p className="caption" role={overrideFailed ? "alert" : "status"}>
             {overrideMessage}
           </p>
         ) : null}

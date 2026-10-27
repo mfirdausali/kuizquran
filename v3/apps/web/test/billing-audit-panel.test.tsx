@@ -200,6 +200,9 @@ describe("BillingAuditPanel — the admin override form", () => {
     // options, which reuse the same closed-set words.
     await waitFor(() => expect(screen.getByText("grace", { ignore: "script, style, option" })).toBeTruthy());
     await waitFor(() => expect(screen.getByText(/applied/i)).toBeTruthy());
+    // v3-D352 — narrows the fix: an ordinary success is still role="status",
+    // never upgraded to "alert".
+    expect(screen.getByRole("status").textContent).toMatch(/applied/i);
   });
 
   it("a rejected override shows the server's own reason and never claims success", async () => {
@@ -220,6 +223,32 @@ describe("BillingAuditPanel — the admin override form", () => {
     fireEvent.click(screen.getByRole("button", { name: /apply override/i }));
 
     await waitFor(() => expect(screen.getByText(/reason must be at least 10 characters/i)).toBeTruthy());
+    // v3-D352 — a genuine server rejection (422) must be an alert, not a
+    // passive status, the same convention killFlag/enableFlag/saveGlossDraft
+    // etc. already carry.
+    expect((await screen.findByRole("alert")).textContent).toMatch(/reason must be at least 10 characters/i);
+  });
+
+  it("a thrown network exception on override is also an alert, not a passive status", async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/override")) {
+        throw new TypeError("network down");
+      }
+      return jsonResponse({ entries: [], limit: 200 });
+    }) as unknown as typeof fetch;
+
+    render(<BillingAuditPanel />);
+    await waitFor(() => expect(screen.getByText(/no billing activity recorded yet/i)).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText(/target user id/i), { target: { value: "42" } });
+    fireEvent.change(screen.getByLabelText(/^state$/i), { target: { value: "active" } });
+    fireEvent.change(screen.getByLabelText(/^reason$/i), {
+      target: { value: "refund per support ticket 9911" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /apply override/i }));
+
+    expect((await screen.findByRole("alert")).textContent).toMatch(/request failed: network down/i);
   });
 
   it("submitting neither state nor tier is refused client-side before any request is sent", async () => {
