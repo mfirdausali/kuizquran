@@ -53,10 +53,104 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3136 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3138 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 424 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1747 apps/web. (v3-D352, 2026-10-27)
+             # + 470 engine + 73 fold-runner + 1749 apps/web. (v3-D353, 2026-10-27)
+             # NOTE (v3-D353, 2026-10-27): `apps/web/lib/corpus/client.ts`'s
+             # module-level `cache` keyed the whole caller-facing
+             # `EffectiveCorpus` — raw corpus bytes PLUS the overrides-resolved
+             # `disabled` list and gloss/distractor patches — by `surah`, for
+             # the life of the tab, with no eviction. The module's own header
+             # justifies caching on "the corpus is static content-addressed
+             # data" — true of the raw bytes, never of the override
+             # resolution layered on top, which this exact module exists to
+             # wire in (its own comment: "a qari/admin correction... never
+             # reached anyone actually being graded"). `SessionIsland.tsx`
+             # calls `fetchCorpus(surah)` on every session MOUNT, not once
+             # per page load — a learner finishing one session and starting a
+             # second for the same surah later in the same tab (an ordinary
+             # client-routed SPA flow, no full reload) hits the warm cache.
+             # If an admin disabled a broken question, or a qari corrected a
+             # gloss, between the two sessions, the second session silently
+             # served the stale pre-correction corpus — reopening the exact
+             # gap this module's header claims to have closed, one layer up,
+             # via the cache rather than via missing wiring. Found by a
+             # fresh-sweep sub-agent steered toward v3-D347's own "not yet
+             # reached" file list; independently re-verified against the real
+             # source and against every production call site (none compares
+             # the result by reference) before writing any test. Why nothing
+             # caught it: `test/corpus-client-overrides.test.ts`'s own
+             # `beforeEach`/`afterEach` both call `__resetCorpusCache()`, so
+             # no test ever called `fetchCorpus`/`fetchEffectiveCorpus` twice
+             # for the same surah with DIFFERENT override data in between —
+             # the one call pattern that exposes staleness. Fixed: the cache
+             # now stores only the raw, parsed `Corpus` (genuinely
+             # content-addressed and immutable); `fetchOverrides` +
+             # `applyOverrides` run on EVERY call to `fetchEffectiveCorpus`,
+             # never memoized. RED confirmed directly: a `disable` override
+             # installed between two `fetchEffectiveCorpus` calls, and a
+             # `gloss` override removed between two `fetchCorpus` calls, both
+             # failed exactly as predicted against the unmodified source (the
+             # second call returning the first call's stale data).
+             # Mutation-verified: `git stash` of `client.ts` alone reproduced
+             # both failures identically; restored byte-identically, reran:
+             # `test/corpus-client-overrides.test.ts` 10/10 green (was 8, +2).
+             # One pre-existing assertion needed CORRECTING, not weakening:
+             # a `toBe` (reference identity) check between two independent
+             # calls was only ever true as a side effect of the bug being
+             # fixed — no production caller relies on it (confirmed by grep)
+             # — so it is now `toEqual` (content equality), with a comment
+             # explaining why. A second test's bare fetch-call-count
+             # assertion was rewritten to distinguish `/corpus/` calls (still
+             # 1, across two calls — the raw corpus is still cached) from
+             # `/api/overrides` calls (now 2, one per call — the fix's whole
+             # point). `TZ=UTC make test`: 3138 passing (was 3136, +2 —
+             # exactly this run's two net-new cases; apps/web 1749, was 1747;
+             # no other suite moved: 255 v2 vitest, 47 v2/api, 424 v3/api,
+             # 120 corpus-compiler, 470 engine, 73 fold-runner).
+             # `check-test-floor.mjs`: OK, 3138 >= floor 1899 (+1239 margin,
+             # unmoved). `TZ=UTC make build`: exit 0, 30 routes, unchanged —
+             # this diff edits one existing production file and two existing
+             # test files, no new route or production file (first invocation
+             # hit Next.js's own one-time `SecurityFatalError` CLI nudge,
+             # same as several prior entries — not acted on, a plain retry
+             # built clean). `npm run gates`: all green — locked-css OK, 1
+             # documented hunk, 294 v1 lines byte-identical; boundaries OK,
+             # 345 files, unchanged count; fonts degraded-but-non-blocking,
+             # pre-existing, 2/6 UI fonts present; corpus-morphology OK, 362
+             # words; corpus-glyphs OK, 206 codepoints across 4 artifacts —
+             # all unchanged, this diff carries no corpus data. `npx tsc
+             # --noEmit` (apps/web): clean, `Version 5.9.3` confirmed. No PHP
+             # file changed, so `pint` was not applicable. No `v1/**`/`v2/**`
+             # edit (a stray `v2/tsconfig.tsbuildinfo` build-cache diff
+             # produced by running the v2 suite was reverted before
+             # committing — `git status --porcelain -- v1 v2` empty
+             # immediately before committing). No Arabic codepoint (all
+             # three changed files swept programmatically, in Python, over
+             # the Arabic, Arabic Supplement, Arabic Extended-A and both
+             # Presentation Forms Unicode blocks, plus a
+             # `fromCharCode`/`fromCodePoint`/`\u`-escape check: CLEAN — every
+             # new string is a TypeScript identifier, a fixed English
+             # assertion/comment sentence, or a synthetic HTTP-status/
+             # override-payload test fixture, never corpus text). No
+             # oracle/golden-log/fixture/snapshot regenerated — this diff
+             # touches one existing production file and two existing test
+             # files only. Session start: fresh container, no
+             # `node_modules`/`vendor`/compiled corpus anywhere; PHP defaulted
+             # to 8.3.6 (`v3/api` needs >=8.4.1); `composer install
+             # --ignore-platform-req=php` on stock PHP 8.3.6 worked cleanly
+             # for both `v2/api` and `v3/api`. `HEAD` was found detached
+             # exactly at `origin/main`'s own real tip (`7277f49`, v3-D352),
+             # on a stale LOCAL `main` branch ref three commits behind — the
+             # recurring stale-local-`main` trap this file has recorded
+             # roughly fifty times since v3-D77 — caught before any
+             # exploration via `git checkout -B main HEAD`, a clean reset, no
+             # work lost or at risk. NOT addressed: every item on v3-D352's
+             # own condensed "NOT addressed" list, unchanged (see
+             # DECISIONS.md v3-D353 for the full list). `lib/corpus/client.ts`'s
+             # own stale-override-cache gap is now CLOSED — remove it from
+             # future sweeps. See DECISIONS.md v3-D353.
              # NOTE (v3-D352, 2026-10-27): `components/admin/BillingAuditPanel.tsx`'s
              # own admin override form (v3-D147/v3-D279, BUILD-PLAN M7's "admin
              # billing surface") shared one `overrideMessage` paragraph for

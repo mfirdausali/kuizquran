@@ -37208,3 +37208,169 @@ here so a future run does not re-derive them from scratch:
    — so no learner currently observes this. Named for whichever future run
    wires placement-based onboarding to a real screen; not worth fixing ahead
    of that caller existing.
+
+## v3-D353 (2026-10-27)
+
+**The fix this run.** `lib/corpus/client.ts`'s module-level `cache` keyed
+only the caller-facing `EffectiveCorpus` — the raw corpus bytes PLUS the
+overrides-resolved `disabled` list and gloss/distractor patches — by
+`surah`, for the life of the tab, with no eviction and no cache-bust call
+anywhere in the app (`__resetCorpusCache` is test-only by its own
+docblock). The module's own header justifies caching on "the corpus is
+static content-addressed data" — true of the raw bytes, never claimed of
+the override resolution layered on top, which this exact module exists to
+wire in (its own comment: "a qari/admin correction... never reached
+anyone actually being graded" — the defect v3-D-era work before this
+fixed on the READ side). `components/session/SessionIsland.tsx` calls
+`fetchCorpus(surah)` on every session MOUNT, not once per page load — a
+learner finishing one session and starting a second for the same surah
+later in the same tab (an ordinary client-side-routed SPA flow, no full
+reload) hits the warm cache. If an admin disabled a broken question, or a
+qari corrected a gloss, between the two sessions, the second session
+silently served the stale pre-correction corpus — reopening the exact gap
+this module's own header claims to have closed, one layer up, via the
+cache rather than via missing wiring.
+
+**Found by** a fresh-sweep sub-agent explicitly steered away from the
+exhausted "role=status/alert", "cross-runtime constant duplication",
+"wrong window/subset" and "wrong event-type filter" shapes and toward
+files named "not yet reached" by v3-D347 (`lib/workbench/sign.ts`,
+`explain.ts`, `lib/onboarding/pass.ts`/`surahs.ts`, several small
+`engine/src` files, the IDB island implementation, `app/**` route
+handlers) — independently re-verified directly against the real source
+(`lib/corpus/client.ts`, `components/session/SessionIsland.tsx:236`,
+`components/home/TodaySession.tsx:80`) before writing any test. No
+production caller was found anywhere that relies on the two corpora being
+the *same object* across independent calls (`grep` over `app`/`components`/
+`lib` for both functions — every call site stores the result in local
+component state once per mount, never compares it by reference to a
+separately-fetched copy).
+
+**Why nothing caught it:** `test/corpus-client-overrides.test.ts`'s own
+`beforeEach` AND `afterEach` both call `__resetCorpusCache()`, so every
+test starts and ends with an empty cache and none ever calls
+`fetchCorpus`/`fetchEffectiveCorpus` twice for the same surah with
+*different* override data in between — the one call pattern that exposes
+staleness. The one pre-existing test that did chain two calls
+(`fetchCorpus` then `fetchEffectiveCorpus`) used identical override data
+for both, so it only proved the two functions agree with each other, not
+that a second call re-fetches anything.
+
+**Fixed:** the cache now stores only the raw, parsed `Corpus` (`Map<number,
+Corpus>`, not `Map<number, EffectiveCorpus>`) — genuinely justified,
+content-addressed and immutable. `fetchOverrides` + `applyOverrides` now
+run on *every* call to `fetchEffectiveCorpus`, against the cached raw
+corpus when present, never memoized alongside it. `fetchCorpus` is
+unchanged (still delegates to `fetchEffectiveCorpus`).
+
+**RED confirmed directly:** two new cases in
+`test/corpus-client-overrides.test.ts`'s new describe block, run against
+the unmodified source — a `disable` override installed between two
+`fetchEffectiveCorpus(SURAH)` calls failed exactly as predicted (`expected
+[] to deeply equal [{ayah: 2, ...}]`, the second call still returning the
+first call's stale empty `disabled` list); a `gloss` override removed
+between two `fetchCorpus(SURAH)` calls failed the same way (second call
+still returning the first call's stale patched gloss, `expected
+'TEST_OVERRIDE_GLOSS_MARKER' to be 'Say'`). Mutation-verified: `git stash`
+of `lib/corpus/client.ts` alone (both new cases and the one strengthened
+assertion below kept, the other 7 pre-existing cases in the file
+untouched) reproduced exactly the two predicted failures; restored
+byte-identically (`git diff --stat lib/corpus/client.ts` empty before
+committing), reran: `test/corpus-client-overrides.test.ts` 10/10 green
+(was 8, +2).
+
+**One pre-existing assertion needed correcting, not weakening:**
+`"fetchCorpus still returns exactly the patched corpus — existing callers
+unchanged"` asserted `expect(viaCorpus).toBe(viaEffective!.corpus)` —
+reference identity — between a `fetchCorpus` call and an immediately
+following `fetchEffectiveCorpus` call, both with the same (non-empty)
+override data. Under the old full-object cache this was trivially true
+(the second call just returned the first call's literal cached object);
+under the fix each call independently re-runs `applyOverrides` against
+the shared cached *raw* corpus, producing two distinct but
+content-identical patched objects. No production caller anywhere compares
+these two functions' results by reference (confirmed by the `grep` above)
+— the test's own title is about content ("still returns exactly the
+patched corpus"), not identity, so the assertion is now `toEqual`, with a
+comment stating why identity no longer holds. This narrows what the test
+checks to what it already claimed to check; it does not remove coverage.
+
+A second, independent test in `test/onboarding.test.tsx`
+(`"serves the real corpus on a 200, and caches it"`) asserted a bare
+`fetch` call count of exactly 2 for two `fetchCorpus` calls — true only
+because the old cache skipped the second call's overrides fetch entirely.
+Rewritten to distinguish `/corpus/` calls (now 1, across both — the raw
+corpus is still cached) from `/api/overrides` calls (now 2, one per call —
+the fix's whole point) for a total of 3, with the comment explaining why.
+
+`TZ=UTC make test`: 3138 passing (was 3136, +2 — exactly this run's two
+net-new cases; apps/web 1749, was 1747; no other suite moved: 255 v2
+vitest, 47 v2/api, 424 v3/api, 120 corpus-compiler, 470 engine, 73
+fold-runner). `check-test-floor.mjs`: OK, 3138 >= floor 1899 (+1239
+margin, unmoved, same discipline as every prior entry). `TZ=UTC make
+build`: exit 0, 30 routes, unchanged — this diff edits one existing
+production file and two existing test files, no new route or production
+file (the build's first invocation hit Next.js's own one-time
+`SecurityFatalError` CLI security-advisory nudge, same as several prior
+entries — not acted on, a plain retry built clean). `npm run gates`: all
+green — locked-css OK, 1 documented hunk, 294 v1 lines byte-identical;
+boundaries OK, 345 files, unchanged count; fonts degraded-but-non-
+blocking, pre-existing, 2/6 UI fonts present; corpus-morphology OK, 362
+words; corpus-glyphs OK, 206 codepoints across 4 artifacts — all
+unchanged, this diff carries no corpus data. `npx tsc --noEmit` (apps/web):
+clean, `Version 5.9.3` confirmed. No PHP file changed, so `pint` was not
+applicable. No `v1/**`/`v2/**` edit (a stray `v2/tsconfig.tsbuildinfo`
+build-cache diff produced by running the v2 suite was reverted before
+committing, same discipline as every prior entry — `git status
+--porcelain -- v1 v2` empty immediately before committing). No Arabic
+codepoint (all three changed files swept programmatically, in Python,
+over the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks, plus a `fromCharCode`/`fromCodePoint`/
+`\u`-escape check: CLEAN — every new string is a TypeScript identifier, a
+fixed English assertion/comment sentence, or a synthetic HTTP-status/
+override-payload test fixture, never corpus text). No oracle/golden-log/
+fixture/snapshot regenerated — this diff touches one existing production
+file and two existing test files only.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1); per the
+repeatedly-recorded shortcut, `composer install --ignore-platform-req=php`
+on stock PHP 8.3.6 worked cleanly for both `v2/api` and `v3/api` this run
+too, no PHP 8.4 install needed. `HEAD` was found detached exactly at
+`origin/main`'s own real tip (`7277f49`, v3-D352), on a stale LOCAL `main`
+branch ref three commits behind (`71e8018`, v3-D349) — the recurring
+stale-local-`main` trap this file has recorded roughly fifty times since
+v3-D77 — caught before any exploration via `git checkout -B main HEAD`, a
+clean reset to the real tip, no work lost or at risk. The five
+PHP-independent `npm install`s were run directly and in parallel; both
+composer installs were run sequentially (not in parallel) per v3-D332's
+own recorded shared-git-mirror-cache collision risk, and both completed
+cleanly on the second attempt (the first backgrounded run of each
+produced no readable output and left `v3/api/vendor/autoload.php`
+missing — recovered by re-running `v3/api`'s composer install in the
+foreground, which reported "Nothing to install, update or remove" and
+regenerated the autoloader cleanly; `v2/api`'s background run had in fact
+completed correctly).
+
+**NOT addressed:** every item on v3-D352's own condensed "NOT addressed"
+list, unchanged — `foilKernels.ts`'s `DISPLAY_STRIPPED` regex gap
+(human-decision-gated behind content-freeze); `placement.ts#nextProbe()`'s
+Act-1 self-referential junction (zero production callers); `rhymeClassOf()`;
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution`/
+`lib/pricing.ts#regionFromCountry()`; `PaywallGate`; multi-surah
+enrollment; the operational mailer; PAY-1's Stripe fixtures; surah 67's
+scene beats; `worker/fold-runner/src/severity.ts`'s taxonomy;
+`MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero fold-side consumer;
+`selection_determinism_check` replaying a committed fixture;
+`QueueItem.score`'s missing external reader; `acknowledgeReentry`'s
+"makeup" branch; `DrillPicker.tsx`'s unused `now` prop; the unused
+IndexedDB object stores; `session_start`'s own latency metric; the
+streak/away-day day-space mismatch; `/workbench`'s own Pane 2/3; the
+deferred `vitest@5` bump; `laravel/framework`'s remaining advisory;
+`v2/api`'s own frozen advisories; the `trial_surah_source` column;
+v3-D335..D350's own missing DECISIONS.md backfill — all unchanged.
+`lib/corpus/client.ts`'s own stale-override-cache gap is now CLOSED —
+remove it from future sweeps. A `grep -rn "fetchCorpus\|fetchEffectiveCorpus"`
+pass over `app`/`components`/`lib` at session start, checked against each
+call site's own lifecycle (mount-scoped, never a long-lived comparison),
+found no other caller exposed to this exact staleness.

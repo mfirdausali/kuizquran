@@ -585,19 +585,31 @@ describe("fetchCorpus", () => {
     expect(await fetchCorpus(DEMO_SURAH)).toBeNull();
   });
 
-  it("serves the real corpus on a 200, and caches it", async () => {
-    const spy = vi.fn(async () => ({ ok: true, json: async () => corpus }));
+  it("serves the real corpus on a 200, and caches the RAW corpus only", async () => {
+    const spy = vi.fn(async (url: string) =>
+      String(url).startsWith("/corpus/")
+        ? { ok: true, json: async () => corpus }
+        : new Response(JSON.stringify({ overrides: [] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+    );
     vi.stubGlobal("fetch", spy);
     const { fetchCorpus, __resetCorpusCache } = await import("@/lib/corpus/client");
     __resetCorpusCache();
     const first = await fetchCorpus(DEMO_SURAH);
     expect(first?.meta.surah).toBe(112);
-    // 2, not 1: fetchCorpus now also fetches /api/overrides (the wiring
-    // this run's sweep found missing — see test/corpus-client-overrides.test.ts)
-    // before caching. A second call must still add ZERO further fetches —
-    // that is the property this test actually pins.
     await fetchCorpus(DEMO_SURAH);
-    expect(spy).toHaveBeenCalledTimes(2);
+    // The raw corpus is cached — fetched once across both calls. Overrides
+    // are NOT cached (see test/corpus-client-overrides.test.ts's own
+    // describe block on exactly this) — fetched once per call, so 2 across
+    // both. 3 total, never the 4 a naive re-fetch-everything approach would
+    // cost, and never the 2 the old full-object cache produced by also
+    // caching the (changeable) override resolution.
+    const calls = spy.mock.calls.map((c) => String(c[0]));
+    expect(calls.filter((c) => c.startsWith("/corpus/")).length).toBe(1);
+    expect(calls.filter((c) => c.includes("/api/overrides")).length).toBe(2);
+    expect(spy).toHaveBeenCalledTimes(3);
   });
 });
 

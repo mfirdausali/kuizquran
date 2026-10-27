@@ -225,7 +225,11 @@ describe("fetchCorpus applies overrides — the unwired read half of the overrid
     const { fetchCorpus, fetchEffectiveCorpus } = await import("@/lib/corpus/client");
     const viaCorpus = await fetchCorpus(SURAH);
     const viaEffective = await fetchEffectiveCorpus(SURAH);
-    expect(viaCorpus).toBe(viaEffective!.corpus);
+    // Content equality, not object identity: each call re-applies overrides
+    // against the cached RAW corpus (see the cache-staleness describe block
+    // below), so two independent calls now produce two distinct
+    // override-patched objects with the same content, by design.
+    expect(viaCorpus).toEqual(viaEffective!.corpus);
   });
 
   it("leaves an unrelated word's gloss untouched", async () => {
@@ -248,5 +252,116 @@ describe("fetchCorpus applies overrides — the unwired read half of the overrid
     const other = patched!.words.find((w) => w.ayah === 1 && w.position === 2);
     const originalOther = corpus.words.find((w) => w.ayah === 1 && w.position === 2);
     expect(other?.gloss.en).toBe(originalOther?.gloss.en);
+  });
+});
+
+describe("fetchEffectiveCorpus's module-level cache does not stale the OVERRIDE half", () => {
+  // The module header justifies caching on "the corpus is static
+  // content-addressed data" — true of the raw bytes, never claimed of
+  // overrides. `SessionIsland` calls `fetchCorpus` fresh on every session
+  // start (not once per page load), so two session starts for the same
+  // surah in one tab — the ordinary case, no full reload in between — must
+  // not let the second one serve the first's stale `disabled`/patched gloss
+  // forever. This is the exact defect this file's own header names
+  // ("a qari/admin correction... never reached anyone actually being
+  // graded"), reopened one layer up by the cache.
+  it("a later override reaches the NEXT call for the same surah, not just the next tab", async () => {
+    let overridesNow: unknown[] = [];
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = String(url);
+        calls.push(path);
+        if (path.startsWith("/corpus/")) {
+          return { ok: true, json: async () => corpus } as Response;
+        }
+        if (path.includes("/api/overrides")) {
+          return new Response(JSON.stringify({ overrides: overridesNow }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response("{}", { status: 200 });
+      }),
+    );
+
+    const { fetchEffectiveCorpus } = await import("@/lib/corpus/client");
+
+    const first = await fetchEffectiveCorpus(SURAH);
+    expect(first!.disabled).toEqual([]);
+
+    // An admin disables ayah 2's `locate` question between the two calls —
+    // no cache reset, exactly as a learner's tab would see it.
+    overridesNow = [
+      {
+        id: 1,
+        surah: SURAH,
+        ayah: 2,
+        position: null,
+        questionType: "locate",
+        field: "disable",
+        payload: { disabled: true },
+        editorId: null,
+        note: null,
+        createdAt: 1,
+      },
+    ];
+
+    const second = await fetchEffectiveCorpus(SURAH);
+    expect(second!.disabled).toEqual([{ ayah: 2, position: null, questionType: "locate" }]);
+
+    // The raw corpus bytes ARE still the thing worth caching — only one
+    // fetch of the 16KB asset across both calls.
+    expect(calls.filter((c) => c.startsWith("/corpus/")).length).toBe(1);
+    expect(calls.filter((c) => c.includes("/api/overrides")).length).toBe(2);
+  });
+
+  it("a later re-ENABLE also reaches the next call, not just a later tab", async () => {
+    let overridesNow: unknown[] = [
+      {
+        id: 1,
+        surah: SURAH,
+        ayah: 1,
+        position: 1,
+        questionType: "s1",
+        field: "gloss",
+        payload: { lang: "en", text: MARKER },
+        editorId: null,
+        note: null,
+        createdAt: 1,
+      },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = String(url);
+        if (path.startsWith("/corpus/")) {
+          return { ok: true, json: async () => corpus } as Response;
+        }
+        if (path.includes("/api/overrides")) {
+          return new Response(JSON.stringify({ overrides: overridesNow }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response("{}", { status: 200 });
+      }),
+    );
+
+    const { fetchCorpus } = await import("@/lib/corpus/client");
+
+    const first = await fetchCorpus(SURAH);
+    const firstWord = first!.words.find((w) => w.ayah === 1 && w.position === 1);
+    expect(firstWord?.gloss.en).toBe(MARKER);
+
+    // The qari reverts the correction before the next session starts.
+    overridesNow = [];
+
+    const second = await fetchCorpus(SURAH);
+    const secondWord = second!.words.find((w) => w.ayah === 1 && w.position === 1);
+    expect(secondWord?.gloss.en).toBe(
+      corpus.words.find((w) => w.ayah === 1 && w.position === 1)?.gloss.en,
+    );
   });
 });

@@ -64,10 +64,17 @@ export const DEMO_SURAH = 112;
 /** The ayah those surfaces reconstruct. 112:1. */
 export const DEMO_AYAH = 1;
 
-/** Parsed once per page load. The corpus is static content-addressed data, so
- *  a second surface asking for the same surah re-uses the parse rather than
- *  re-fetching 16 KB and re-parsing it. */
-const cache = new Map<number, EffectiveCorpus>();
+/** Parsed once per page load. The RAW corpus is static content-addressed
+ *  data, so a second surface asking for the same surah re-uses the parse
+ *  rather than re-fetching 16 KB and re-parsing it. Overrides are NOT
+ *  cached here — they are exactly the opposite of static (an admin/qari can
+ *  change them at any time via `POST /api/overrides`), so every call below
+ *  re-fetches and re-applies them against this cached raw corpus rather than
+ *  memoizing the resolved `EffectiveCorpus`. A `SessionIsland` mount — i.e.
+ *  every session start, not merely every page load — must see the latest
+ *  override state, or a correction made between two sessions in the same tab
+ *  never reaches the second one. */
+const cache = new Map<number, Corpus>();
 
 /**
  * A corpus AND the override decisions a caller cannot get from the corpus
@@ -130,23 +137,32 @@ function usable(value: unknown): value is Corpus {
  * different resources, not in tension.
  */
 export async function fetchEffectiveCorpus(surah: number): Promise<EffectiveCorpus | null> {
-  const cached = cache.get(surah);
-  if (cached) return cached;
   if (!CLIENT_SURAHS.includes(surah)) return null;
 
   let raw: Corpus;
-  try {
-    const res = await fetch(`/corpus/${surah}.json`, { cache: "force-cache" });
-    if (!res.ok) return null;
-    const parsed: unknown = await res.json();
-    if (!usable(parsed)) return null;
-    raw = parsed;
-  } catch {
-    // Offline, blocked, or malformed. All three mean the same thing to a
-    // caller: there is no corpus to reconstruct, say so honestly.
-    return null;
+  const cached = cache.get(surah);
+  if (cached) {
+    raw = cached;
+  } else {
+    try {
+      const res = await fetch(`/corpus/${surah}.json`, { cache: "force-cache" });
+      if (!res.ok) return null;
+      const parsed: unknown = await res.json();
+      if (!usable(parsed)) return null;
+      raw = parsed;
+    } catch {
+      // Offline, blocked, or malformed. All three mean the same thing to a
+      // caller: there is no corpus to reconstruct, say so honestly.
+      return null;
+    }
+    cache.set(surah, raw);
   }
 
+  // Re-fetched on EVERY call, never cached alongside `raw` above: overrides
+  // can change between two calls for the same surah (two session starts in
+  // one tab, no reload in between), and the raw corpus bytes being static
+  // does not make the override resolution static too.
+  //
   // Never blocks and never throws (fetchOverrides's own discipline): a
   // corrections fetch that fails leaves the raw corpus in place — and an
   // EMPTY disabled list — rather than failing the whole session. Degrading
@@ -154,15 +170,12 @@ export async function fetchEffectiveCorpus(surah: number): Promise<EffectiveCorp
   // makes: a learner drilling a question a qari has since disabled is a
   // smaller harm than a learner who cannot drill at all.
   const overrides = await fetchOverrides(surah);
-  const effective: EffectiveCorpus =
-    overrides.length > 0
-      ? (() => {
-          const resolved = applyOverrides(raw, overrides);
-          return { corpus: resolved.corpus, disabled: resolved.disabled };
-        })()
-      : { corpus: raw, disabled: [] };
-  cache.set(surah, effective);
-  return effective;
+  return overrides.length > 0
+    ? (() => {
+        const resolved = applyOverrides(raw, overrides);
+        return { corpus: resolved.corpus, disabled: resolved.disabled };
+      })()
+    : { corpus: raw, disabled: [] };
 }
 
 /**
