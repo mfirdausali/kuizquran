@@ -285,4 +285,24 @@ describe("#103 — it NEVER blocks and never flushes", () => {
     await waitFor(() => expect(screen.getByText(/sync status unavailable/i)).toBeTruthy());
     expect(screen.getByText(/your work is saved on this device/i)).toBeTruthy();
   });
+
+  // The header is explicit: "The escalations are independent of the pending
+  // count's own state: a divergence — or a dead token — is worth saying even
+  // while the count is still loading." `countPending()`'s own IDB read and
+  // `useSyncSummary()`'s live store are two independent sources — a dead
+  // token discovered on an earlier completed cycle does not stop being true
+  // just because THIS device's outbox happens to be unreadable right now.
+  it("still shows a live escalation even when the log cannot be read — the two sources are independent", async () => {
+    syncSummary.report({ quarantined: [], divergences: [] }, true);
+    vi.stubGlobal("indexedDB", {
+      open: () => {
+        throw new DOMException("nope", "InvalidStateError");
+      },
+    });
+    resetDbForTests();
+    const { container } = render(<SyncStatus />);
+    const scoped = within(container);
+    await waitFor(() => expect(scoped.getByText(/sync status unavailable/i)).toBeTruthy());
+    expect(scoped.getByText(/sync paused, reconnecting/i)).toBeTruthy();
+  });
 });

@@ -165,10 +165,17 @@ export function SyncStatus({
     case "broken":
       // The log could not be read. This says so without alarm: the local log
       // is truth and nothing has been lost — only the count is unavailable.
+      // The escalations still render: they come from the independent
+      // `useSyncSummary()` store, never from this `countPending()` read, so
+      // a dead token or a divergence discovered on an earlier completed
+      // cycle does not stop being true just because the outbox is
+      // unreadable right now (same "independent of the pending count's own
+      // state" rule the `pending` branch above already follows).
       return (
         <p className="caption">
           Sync status unavailable (<code>{state.reason}</code>). Your work is
           saved on this device.
+          {escalation ? <> {escalation}</> : null}
         </p>
       );
   }

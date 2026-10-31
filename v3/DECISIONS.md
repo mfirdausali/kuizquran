@@ -38001,6 +38001,134 @@ components in their own right).
   event of any kind on this surface before the real commit at screen 7,
   confirmed by reading the whole file rather than trusting the header.
 
+### v3-D358 (2026-10-31, nightly) — `SyncStatus`'s "broken" branch dropped every live escalation, not only the pending count
+
+A fresh-sweep night pointed at v3-D357's own closing list — the
+admin-console `lib/admin/*.ts` modules, `components/quiz/**`, and the
+Playwright e2e suite. `components/quiz/QuizCard.tsx` and its four shape
+children (`ChoiceCard`, `SequenceFillCard`, `OrderTilesCard`,
+`LocateChoiceCard`) plus `FaceText.tsx`/`reveal.ts` were read in full and
+found correct — the #81 logical-index discipline holds in every shape
+(including `OrderTilesCard`'s own documented non-mirroring identity
+function), grading is nowhere re-derived in a component, and
+`optionStateClass` is the sole, correctly-reasoned mapping from
+`(index, correctIndex, reveal)` to a display class. Thirteen of the
+`lib/admin/*.ts` loaders (`session`, `roles`, `users`, `audit`,
+`billingAudit`, `billingEvents`, `contentFreeze`, `nightlyWindow`,
+`purgeLedger`, `reveal`) were also read in full and found correct — each
+follows the identical "never throw, degrade to a named `unavailable`
+state with a reason" template with no logic drift between them.
+
+The genuine find was one layer over, in `components/shell/SyncStatus.tsx`
+— a file named only as a caller-context in prior sweeps, never itself
+read end to end for this shape. The component's own header is explicit:
+"The escalations are independent of the pending count's own state: a
+divergence — or a dead token — is worth saying even while the count is
+still loading." That sentence is backed by fact: `effectiveAuthDead`/
+`effectiveCannotSync`/`effectiveDivergences`/`effectiveFutureTs`/
+`effectiveClockSkewMs` come from `useSyncSummary()`, a module-level store
+`SyncTrigger` reports into on every completed sync cycle
+(`lib/sync/summary.ts`) — entirely independent of `countPending()`, the
+IndexedDB read that drives this component's own `pending`/`empty`/
+`ready`/`broken` state. The `pending`, `empty` and `ready` render
+branches all correctly include `{escalation}` — but the `broken` branch
+(the outbox IDB read itself failing: quota, private mode, a concurrent
+tab mid-upgrade) rendered only "Sync status unavailable (…)" with no
+escalation at all. A device whose token had already died, or which
+already had quarantined/divergent/future-dated events from an earlier
+completed cycle, lost ALL of that live information the moment the local
+outbox happened to be unreadable on one particular render — even though
+none of those facts have anything to do with whether `countPending()`
+can run right now.
+
+**Why nothing caught it:** `test/sync-status.test.tsx`'s own "renders a
+calm, non-blocking message when the log cannot be read" test stubs
+`indexedDB.open` to throw but asserts nothing about any escalation prop —
+it never combines the `broken` state with a live `authDead`/`cannotSync`/
+etc. fact, which is the one combination that exposes the gap. Every
+other test in the file that exercises an escalation does so with the
+outbox read working normally.
+
+**Fixed:** the `broken` branch's message paragraph now appends
+`{escalation ? <> {escalation}</> : null}`, identical to the other three
+branches — no new state, no new prop, just the one branch brought into
+line with the component's own stated invariant.
+
+**Verified:** RED confirmed directly — a new case renders `<SyncStatus />`
+with `syncSummary.report({...}, true)` (a live `authDead`) and a stubbed
+`indexedDB.open` that throws; against the unmodified component it failed
+exactly as predicted (`scoped.getByText(/sync paused, reconnecting/i)`
+not found, only "Sync status unavailable" in the DOM). Mutation-verified:
+`git stash` of `SyncStatus.tsx` alone (the new case kept, the 21
+pre-existing cases untouched) reproduced the identical single failure;
+restored byte-identically, reran: `test/sync-status.test.tsx` 22/22 green
+(was 21, +1).
+
+`TZ=UTC make test`: 3141 passing (was 3140, +1 — exactly this run's one
+new case; apps/web 1752, was 1751; no other suite moved: 255 v2 vitest,
+47 v2/api, 424 v3/api, 120 corpus-compiler, 470 engine, 73 fold-runner).
+`check-test-floor.mjs`: OK, 3141 >= floor 1899 (+1242 margin). `TZ=UTC
+make build`: exit 0, 30 routes, unchanged (the usual one-time
+`SecurityFatalError` CLI nudge on first invocation, not acted on, plain
+retry built clean). `npm run gates`: all green — locked-css OK, 1
+documented hunk, 294 v1 lines byte-identical; boundaries OK, 344 files;
+fonts degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints across 4
+artifacts — all unchanged, this diff carries no corpus data. `npx tsc
+--noEmit`: clean, `Version 5.9.3`. No PHP file changed, so `pint` was not
+applicable. No `v1/**`/`v2/**` edit (the usual stray
+`v2/tsconfig.tsbuildinfo` build-cache diff reverted before committing —
+`git status --porcelain -- v1 v2` empty immediately before committing).
+No Arabic codepoint (both changed files swept programmatically over the
+Arabic/Arabic Supplement/Arabic Extended-A/Presentation-Forms blocks plus
+a `fromCharCode`/`fromCodePoint`/`\u`-escape check: CLEAN — every new
+string is a TypeScript identifier or a fixed English comment/assertion
+sentence, never corpus text). No oracle/golden-log/fixture/snapshot
+regenerated — this diff touches one existing production file and one
+existing test file only.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1); per the
+repeatedly-recorded shortcut, `composer install --ignore-platform-req=php`
+on stock PHP 8.3.6 worked for both `v2/api` and `v3/api`, recovering via
+the documented git-mirror fallback after the usual proxy timeouts (slow —
+several minutes — but no retry flag needed). Both API projects needed a
+fresh `.env` + `database.sqlite` + `key:generate`; `php artisan migrate
+--force` ran cleanly for both (7 migrations for `v2/api`, 20 for
+`v3/api`). `HEAD` was found detached exactly at `origin/main`'s own real
+tip (`d2905fe`, v3-D357), on a stale LOCAL `main` branch ref three commits
+behind — the recurring stale-local-`main` trap this file has recorded
+roughly fifty times since v3-D77 — caught before any exploration via `git
+checkout -B main HEAD`, a clean reset, no work lost or at risk.
+
+**NOT addressed:** every item on v3-D357's own condensed "NOT addressed"
+list, unchanged (foilKernels.ts's DISPLAY_STRIPPED regex gap;
+placement.ts#nextProbe()'s Act-1 self-referential junction;
+rhymeClassOf(); EntitlementMachine::merge(); App\Billing\TrialAttribution/
+lib/pricing.ts#regionFromCountry(); PaywallGate; multi-surah enrollment;
+the operational mailer's missing SMTP transport/host; PAY-1's Stripe
+fixtures; surah 67's scene beats; severity.ts's taxonomy naming;
+MacroFacts.litany.rhymeLabel; corpusHash's zero fold-side consumer;
+selection_determinism_check replaying a committed fixture; QueueItem
+.score's missing external reader; acknowledgeReentry's "makeup" branch;
+DrillPicker.tsx's unused `now` prop; the unused IndexedDB object stores;
+session_start's own latency metric; the streak/away-day day-space
+mismatch; `/workbench`'s own Pane 2/3; the deferred vitest@5 bump;
+laravel/framework's remaining advisory; v2/api's own frozen advisories;
+the trial_surah_source column; check-test-floor.mjs's own floor number —
+all unchanged.
+
+`components/shell/SyncStatus.tsx`'s own escalation-dropped-on-`broken` gap
+is now CLOSED. `components/quiz/**` and ten of the fourteen
+`lib/admin/*.ts` loaders are now confirmed clean and can be removed from
+future sweeps; the four not yet individually read this run
+(`lib/admin/flags.ts`, `glossDrafts.ts`, `health.ts`, `flagAudit.ts`) were
+already covered by the role=status/alert sweep (v3-D241..D338) but not
+re-checked for a logic-level defect, so they stay on the list. Genuinely
+unswept, named for next time: the Playwright e2e suite (`e2e/**`), which
+no recent nightly entry has re-run since the original build-out; and the
+four `lib/admin/*.ts` loaders named above.
+
 One candidate considered and ruled not a bug: `WorkbenchIsland.tsx`'s
 `ayah` state defaults to `1` and carries no `useEffect` resetting it when
 `surah` changes, which would in principle let a stale `ayah` from a larger

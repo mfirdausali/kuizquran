@@ -53,10 +53,70 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3140 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3141 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 424 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1751 apps/web. (v3-D354, 2026-10-27)
+             # + 470 engine + 73 fold-runner + 1752 apps/web. (v3-D358, 2026-10-31)
+             # NOTE (v3-D358, 2026-10-31): a fresh-sweep night found and fixed
+             # one real defect, closing v3-D357's own closing list for
+             # `components/quiz/**` and ten of fourteen `lib/admin/*.ts`
+             # loaders completely (both read in full and found correct —
+             # no logic drift in the quiz shapes' #81 logical-index
+             # discipline, no drift across the admin loaders' identical
+             # never-throw/degrade-to-unavailable template).
+             # `components/shell/SyncStatus.tsx`'s own `broken` branch
+             # (the local outbox IDB read itself failing) rendered only
+             # "Sync status unavailable" with NO escalation at all — even
+             # though the component's own header says escalations
+             # (`authDead`/`cannotSync`/`divergences`/`futureTs`/
+             # `clockSkewMs`) are independent of the pending count's own
+             # state, and in fact they come from a wholly separate store
+             # (`useSyncSummary()`/`lib/sync/summary.ts`, fed by
+             # `SyncTrigger` on every completed cycle) that has nothing to
+             # do with whether `countPending()`'s own IDB read succeeds on
+             # a given render. A device whose token had already died, or
+             # which already had quarantined/divergent/future-dated
+             # events from an earlier completed cycle, silently lost all
+             # of that live information the moment the local outbox
+             # happened to be unreadable (quota, private mode, a
+             # concurrent tab mid-upgrade) — the `pending`/`empty`/`ready`
+             # branches all correctly render `{escalation}`; only
+             # `broken` omitted it. Why nothing caught it: the file's own
+             # "renders a calm message when the log cannot be read" test
+             # stubs the IDB failure but sets no escalation prop, so the
+             # one combination that exposes the gap was never exercised.
+             # Fixed: the `broken` branch now appends `{escalation}`,
+             # identical to the other three branches. RED confirmed
+             # directly (a live `authDead` reported via `syncSummary
+             # .report()` plus a stubbed IDB-open failure, run against
+             # the unmodified component, failed to find the escalation
+             # text) and mutation-verified (`git stash` of
+             # `SyncStatus.tsx` alone reproduced the identical single
+             # failure; restored byte-identically, reran:
+             # `test/sync-status.test.tsx` 22/22 green, was 21).
+             # `TZ=UTC make test`: 3141 passing (was 3140, +1 — exactly
+             # this run's one new test; apps/web 1752, was 1751; no
+             # other suite moved). `check-test-floor.mjs`: OK, 3141 >=
+             # floor 1899 (+1242 margin). `TZ=UTC make build`: exit 0, 30
+             # routes, unchanged (the usual one-time `SecurityFatalError`
+             # CLI nudge on first invocation, not acted on, plain retry
+             # built clean). `npm run gates`: all green, unchanged (344
+             # files, 294 v1 lines, 362 words, 206 codepoints, 2/6 UI
+             # fonts present, degraded-but-non-blocking). `npx tsc
+             # --noEmit`: clean, `Version 5.9.3`. No `v1/**`/`v2/**` edit
+             # (the usual stray `v2/tsconfig.tsbuildinfo` build-cache
+             # diff reverted before committing). No Arabic codepoint
+             # introduced (both changed files swept programmatically).
+             # No oracle/golden-log/fixture/snapshot regenerated — one
+             # existing production file and one existing test file only.
+             # Genuinely unswept, named for next time: the Playwright e2e
+             # suite (`e2e/**`), not re-run by any recent nightly entry;
+             # and four `lib/admin/*.ts` loaders not individually read for
+             # a logic-level defect this run (`flags.ts`, `glossDrafts.ts`,
+             # `health.ts`, `flagAudit.ts` — each already covered by the
+             # now-exhausted role=status/alert sweep, v3-D241..D338, but
+             # not re-checked for anything beyond that shape). Full
+             # detail: DECISIONS.md v3-D358.
              # NOTE (v3-D357, 2026-10-31): a FOURTH consecutive fresh-sweep
              # night (after v3-D347, v3-D355, v3-D356) found NO confirmed
              # defect — closing v3-D356's own "still genuinely unswept"
