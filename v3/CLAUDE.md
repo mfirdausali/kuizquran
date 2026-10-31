@@ -57,6 +57,53 @@ make test    # 3140 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 424 v3/api + 120 corpus-compiler
              # + 470 engine + 73 fold-runner + 1751 apps/web. (v3-D354, 2026-10-27)
+             # NOTE (v3-D357, 2026-10-31): a FOURTH consecutive fresh-sweep
+             # night (after v3-D347, v3-D355, v3-D356) found NO confirmed
+             # defect — closing v3-D356's own "still genuinely unswept"
+             # `app/**` page-component list completely. Read in full this
+             # run: `app/(app)/drill/page.tsx` + `DrillPicker.tsx`;
+             # `app/(app)/progress/page.tsx` and `progress/list/page.tsx`;
+             # `app/(app)/test/page.tsx` + `TestGate.tsx` + `TestIsland.tsx`
+             # (795 lines); `app/(app)/settings/page.tsx` + its four panels
+             # (`AccountDeletionPanel`, `AnchorHourPanel`, `PlanPanel`,
+             # `AccountExportPanel`); `app/attribution/page.tsx`; all nine
+             # `app/(admin)/settings/*/page.tsx` screens; `app/(admin)
+             # /workbench/page.tsx` + `WorkbenchIsland.tsx` + eight child
+             # panes (`MacroClassificationPanel`, `DistractorYieldPanel`,
+             # `MentalModelPanel`, `GeneratedFromPanel`,
+             # `DroppedCollisionsPanel`, `LookAlikesPanel`,
+             # `SceneBeatsPanel`, `QariMode`, `ExplainTrace`,
+             # `FrontierNavigator`, `OverrideEditor` — 692 lines); and
+             # `app/(onboarding)/start/page.tsx` + `OnboardingFlow.tsx` (679
+             # lines) + `FirstRecall.tsx` (312 lines). All correct — every
+             # role=status/alert site already scoped to its real outcome,
+             # every write handler's own failure boolean independent of its
+             # siblings', no write/append/event anywhere on the pre-recall
+             # onboarding surface before screen 7's real commit. One
+             # candidate considered and ruled not a bug:
+             # `WorkbenchIsland.tsx`'s `ayah` state has no reset on a surah
+             # change, but nothing in `apps/web` links between two
+             # `?surah=` values on `/workbench` today, so the only way to
+             # change it is a full browser navigation, which remounts the
+             # component fresh — not reachable, named for if a surah-switch
+             # link is ever added without also adding the reset. `TZ=UTC
+             # make test`: 3140 passing, unchanged (255 v2 vitest, 47
+             # v2/api, 424 v3/api, 120 corpus-compiler, 470 engine, 73
+             # fold-runner, 1751 apps/web). `check-test-floor.mjs`: OK, 3140
+             # >= floor 1899 (+1241 margin, unmoved). `TZ=UTC make build`:
+             # exit 0, 30 routes, unchanged (the usual one-time
+             # `SecurityFatalError` CLI nudge on first invocation — not
+             # acted on; plain retry built clean). `npm run gates`: all
+             # green, unchanged (345 files, 294 v1 lines, 362 words, 206
+             # codepoints). No `v1/**`/`v2/**` edit (the usual stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted before
+             # committing). No production file was touched — documentation
+             # only. Genuinely unswept, named for next time: the admin
+             # `lib/admin/*.ts` modules behind this run's panels, read only
+             # as components, never end to end in their own right; the
+             # Playwright e2e suite; `components/quiz/**` (`QuizCard` and
+             # its per-shape children), not individually re-read since the
+             # original B2/B10 closures. Full detail: DECISIONS.md v3-D357.
              # NOTE (v3-D356, 2026-10-31): a THIRD consecutive fresh-sweep
              # night (after v3-D347, v3-D355) found NO confirmed defect —
              # closing v3-D355's own "genuinely unswept" list for `v3/api`

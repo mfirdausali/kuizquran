@@ -37917,3 +37917,159 @@ unswept:** `app/(app)/drill/page.tsx`, `app/(app)/progress/page.tsx`,
 /page.tsx`, and `app/(onboarding)/start/page.tsx` — none of these were
 read end to end this run, only (for several of them) their underlying
 `lib/`/component logic via other entries' own sweeps.
+
+### v3-D357 (2026-10-31, nightly) — A fourth consecutive fresh-sweep night found no confirmed defect; closes v3-D356's own "still genuinely unswept" `app/**` page-component list completely
+
+A fourth consecutive fresh-sweep night (after v3-D347, v3-D355, v3-D356)
+with no genuine, previously-unreported, fixable defect found. This run
+was pointed at v3-D356's own closing list — the nine `app/**` page
+components it named as "none of these were read end to end" — and read
+every one of them in full, plus the substantial client components each
+one renders that had not individually been read end to end before
+(several had only been swept as `lib/` callers from other entries, not as
+components in their own right).
+
+**Read in full and found correct, closing v3-D356's list completely:**
+
+- `app/(app)/drill/page.tsx` + `components/drill/DrillPicker.tsx`: the
+  shared `resolveSurah()` priority (query param → enrolled-surah cookie →
+  build default, `lib/enrollment/surahCookie.ts`, re-read directly) is
+  correctly wired; the range/page selection clamping (`clampFrom`'s
+  symmetric from/to bounds) and the three-state log discipline
+  (pending/broken/ready, never a zero) both hold against the real source.
+- `app/(app)/progress/page.tsx` and `app/(app)/progress/list/page.tsx`:
+  both correctly use the shared `resolveSurah()` resolver (never a second,
+  independently-fallible copy); the `now`/`since` instants are resolved
+  once server-side and threaded down, never re-read per row.
+- `app/(app)/test/page.tsx` + `components/test/TestGate.tsx` +
+  `components/test/TestIsland.tsx` (795 lines, read in full — the densest
+  file this run touched): the writer-lock gate, the nested nested
+  reconstruct pass that never appends a per-tap event (only one
+  `test_answer` for the whole "produce" pass, matching invariant #5's
+  read-only-mirror rule), the `rcSlipped` tracking across a multi-blank
+  pass, and every `mcqDisplay`/`locateDisplay`/`reorderDisplay`/
+  `produceCurrent` permutation (seeded display order, never reshuffling a
+  bank under the learner's finger) all checked directly against
+  `test.ts`/`reconstruct.ts` and found to agree.
+- `app/(app)/settings/page.tsx` + the four panels it had not previously
+  been read as components in their own right: `components/settings
+  /AccountDeletionPanel.tsx` (the enumerate-before-destroy confirm step,
+  the restore-token flow, the three-state "a failed read never paints a
+  false default" discipline), `AnchorHourPanel.tsx`, `PlanPanel.tsx`
+  (live-refresh-first, cached-fallback-second, unavailable-only-when-
+  neither posture, matching `cache.ts`/`gate.ts`'s own "cache absent/stale
+  never denies" convention), and `AccountExportPanel.tsx` — all four
+  correctly scope `role="alert"` to a genuine failure and `role="status"`
+  to a genuine success, the identical discipline the now-exhausted
+  role=status/alert sweep (v3-D241..D345) established everywhere else.
+- `app/attribution/page.tsx`: the semantic `<table>`/`scope="row"`
+  construction and the "prose is data, from `lib/legal/attribution.ts`"
+  discipline both hold; no Arabic, no colour-alone signal, nothing to flag.
+- All nine `app/(admin)/settings/*/page.tsx` screens (`audit`, `billing`,
+  `content-freeze`, `flags`, `gloss-drafts`, `health`, `privacy`, `roles`,
+  `stripe`): every one is a thin wrapper over an already-named-and-tested
+  panel component; none adds its own logic. `app/(admin)/workbench
+  /page.tsx` + `components/workbench/WorkbenchIsland.tsx` (the lane/ayah
+  navigation state, `specFor()`'s per-lane Spec construction, the
+  server/client corpus split) and eight of its child panes not previously
+  read as components — `MacroClassificationPanel.tsx`,
+  `DistractorYieldPanel.tsx`, `MentalModelPanel.tsx`,
+  `GeneratedFromPanel.tsx`, `DroppedCollisionsPanel.tsx`,
+  `LookAlikesPanel.tsx`, `SceneBeatsPanel.tsx` (all seven are small,
+  read-only diagnostic panes — every rendered string is an integer, a
+  fixture coordinate, or the compiler's own fixed English text, never
+  Arabic) — plus `QariMode.tsx` (the `canSignQariTier` disable-not-reject
+  discipline, the `signed`/`signed-but-stale`/`failed` three-way
+  `SignOutcome` role mapping, all already correct), `ExplainTrace.tsx`
+  (the `check-boundaries.mjs` clause-5-compliant strength-vs-angle-bracket
+  phrasing workaround, the `QuizCard`-not-a-preview-renderer discipline),
+  `FrontierNavigator.tsx` (the loading/unavailable/ready three-state
+  discipline, the colour-plus-text chip convention), and
+  `OverrideEditor.tsx` (692 lines — all four override fields' submit
+  handlers, each correctly scoping its own `{name}Failed` boolean and its
+  own `hashRecomputeWarning()` suffix, never conflating one field's outcome
+  with a sibling's).
+- `app/(onboarding)/start/page.tsx` + `components/onboarding
+  /OnboardingFlow.tsx` (679 lines) + `components/onboarding
+  /FirstRecall.tsx` (312 lines, screen 2's live tap-to-reconstruct demo):
+  the seven-screen state machine's own "captures nothing until screen 7"
+  discipline, the `ENROLLABLE_SURAHS`-not-`OFFERED_SURAHS` rendering
+  choice (screen 5), the `paceConfig()`-read-not-restated numbers (screen
+  6), and `FirstRecall`'s three-pass show/one/whole structure (pass 1
+  genuinely asks nothing, matching §17's stated mitigation) all checked
+  directly against the engine and found correct. No write, no append, no
+  event of any kind on this surface before the real commit at screen 7,
+  confirmed by reading the whole file rather than trusting the header.
+
+One candidate considered and ruled not a bug: `WorkbenchIsland.tsx`'s
+`ayah` state defaults to `1` and carries no `useEffect` resetting it when
+`surah` changes, which would in principle let a stale `ayah` from a larger
+surah outlive a navigation to a smaller one (e.g. `ayah=10` surviving a
+switch from surah 12 to surah 112's 4 ayat) and reach `specFor()`/
+`explain()` out of range. Checked directly: nothing in `apps/web` links
+between two different `?surah=` values on `/workbench` (`grep -rn
+"workbench?surah\|/workbench?" app components lib` returns nothing), so
+the only way to change surah on this route is a direct URL edit — always a
+full browser navigation, never a client-side route transition — which
+remounts `WorkbenchIsland` fresh with `ayah` back at its initial `1`. Not
+reachable today; named here so a future run does not re-derive the same
+dead end if a surah-switch link is ever added to this page without also
+adding the reset.
+
+**Full verification** (nothing changed, so this is a baseline
+confirmation, not a regression check): `TZ=UTC make test`: 3140 passing,
+unchanged from v3-D356 (255 v2 vitest, 47 v2/api, 424 v3/api, 120
+corpus-compiler, 470 engine, 73 fold-runner, 1751 apps/web).
+`check-test-floor.mjs`: OK, 3140 >= floor 1899 (+1241 margin, unmoved).
+`TZ=UTC make build`: exit 0, 30 routes, unchanged (the usual one-time
+`SecurityFatalError` CLI nudge on first invocation — not acted on, per
+every prior entry's own discipline; a plain retry built clean). `npm run
+gates`: all green, unchanged (345 files, 294 v1 lines, 362 words, 206
+codepoints, 2/6 UI fonts present, degraded-but-non-blocking). `npx tsc
+--noEmit`: clean. No `v1/**`/`v2/**` edit (the usual stray
+`v2/tsconfig.tsbuildinfo` build-cache diff reverted before committing — `git
+status --porcelain -- v1 v2` empty immediately before committing). No
+production file was touched — documentation only.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1); per the
+repeatedly-recorded shortcut, `composer install --ignore-platform-req=php`
+on stock PHP 8.3.6 worked for both `v2/api` and `v3/api`, recovering via
+the documented git-mirror fallback after the usual proxy timeouts on the
+dist zipball downloads (slow — roughly ten minutes total — but no retry
+flag needed). Both API projects needed a fresh `.env` + `database.sqlite`
++ `key:generate`; `php artisan migrate --force` ran cleanly for both (7
+migrations for `v2/api`, 20 for `v3/api`). `HEAD`, local `main` and
+`origin/main` all already agreed exactly at `48cacc5` (v3-D356) — no
+stale-local-`main` trap this run, confirmed via `git fetch origin main`
+before any exploration.
+
+**NOT addressed:** every item on v3-D356's own condensed "NOT addressed"
+list, unchanged (foilKernels.ts's DISPLAY_STRIPPED regex gap;
+placement.ts#nextProbe()'s Act-1 self-referential junction;
+rhymeClassOf(); EntitlementMachine::merge(); App\Billing\TrialAttribution/
+lib/pricing.ts#regionFromCountry(); PaywallGate; multi-surah enrollment;
+the operational mailer's missing SMTP transport/host; PAY-1's Stripe
+fixtures; surah 67's scene beats; severity.ts's taxonomy naming;
+MacroFacts.litany.rhymeLabel; corpusHash's zero fold-side consumer;
+selection_determinism_check replaying a committed fixture; QueueItem
+.score's missing external reader; acknowledgeReentry's "makeup" branch;
+DrillPicker.tsx's unused `now` prop (re-confirmed still unused, still
+harmless); the unused IndexedDB object stores; session_start's own
+latency metric; the streak/away-day day-space mismatch; `/workbench`'s own
+Pane 2/3; the deferred vitest@5 bump; laravel/framework's remaining
+advisory; v2/api's own frozen advisories; the trial_surah_source column;
+check-test-floor.mjs's own floor number — all unchanged.
+
+**Genuinely unswept, named for next time, now that every named `app/**`
+page component has been read end to end at least once:** the admin-console
+`lib/admin/*.ts` modules behind the panels this run only read as
+components (`lib/admin/{flags,health,reveal,roles,billingAudit,
+purgeLedger,glossDrafts,stripe}.ts` and their siblings) — read before only
+as the thing a component calls, never end to end in their own right; the
+Playwright e2e suite itself (`e2e/**`), which no recent nightly entry has
+re-run since the original build-out; and `components/quiz/**` — `QuizCard`
+and its per-shape children are the one surface nearly every other
+component in this run delegates rendering to, and have themselves not been
+named as individually re-read by any entry since the original B2/B10
+closures.
