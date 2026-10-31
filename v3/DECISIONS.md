@@ -37691,3 +37691,229 @@ NightlyWindowController,StripeSettingsController,SystemHealthController}`,
 `AuthController`, `Billing\StripeWebhookController` as distinct from
 `WebhookHandler`); `worker/fold-runner/src/severity.ts` itself (only its
 taxonomy-naming gap is recorded, not a fresh read of the file).
+
+### v3-D356 — A fresh-sweep night found no confirmed defect; closes v3-D355's `v3/api` controller list and `severity.ts` itself completely
+
+A third consecutive fresh-sweep night (after v3-D347, v3-D355) with no
+genuine, previously-unreported, fixable defect found. This run's own sweep
+was pointed at v3-D355's own "genuinely unswept" list — the `v3/api`
+controllers it individually named, `worker/fold-runner/src/severity.ts`
+itself, and `app/**` page components read end to end — plus a direct
+re-derivation of the repo's real state (`git log`/`git fetch`), since this
+file's own running commentary ("Phase 0 is complete as of `283dab8`") is
+explicitly stale per NIGHTLY.md's own warning.
+
+**`v3/api` controllers not previously individually named, each read in
+full, found correct — v3-D355's own list is now CLOSED completely:**
+
+- `SettingsController` (the one persisted `anchorHour` preference — a plain
+  numeric-range validation, session-gated via Sanctum, no logic to drift).
+- `SpecsController` (the recursive `FORBIDDEN_PAYLOAD_KEYS` check correctly
+  walks nested arrays at any depth; tombstone-as-flip via latest-row-per-
+  `spec_id` is consistent with `OverridesController`'s own `(createdAt, id)`
+  B4 ordering elsewhere).
+- `ContentFreezeController` (M9's server-side freeze criteria — the
+  frontier predicate is RESTATED from `VerificationsController`'s own
+  any-row-matches-current rule, never re-derived differently, which is
+  exactly the discipline B3's original bug violated; `LAUNCH_SURAHS =
+  [12, 67, 103, 112]` already correct, matching `scripts/content-
+  freeze.mjs`'s own enumeration post-v3-D59).
+- `OverridesController` (the closed-set `field` validation that is B1's
+  actual closing gate; `editorEmail` resolved off an eager-loaded relation,
+  never N+1).
+- `AuthController` (`register()`'s email-change-always-resets-
+  `email_verified_at` rule, `login()`/`me()`'s real `hasHistory` read —
+  both correctly no longer the permanent stub their own docblocks once
+  warned about).
+- `Billing\StripeWebhookController` + `App\Billing\StripeSignature` (fails
+  closed on an unconfigured secret; HMAC-SHA256 over `"{t}.{body}"` with
+  `hash_equals`, never `===`; a 300s replay-tolerance window; every
+  outcome, including a duplicate or a stale event, returns 200 so Stripe
+  does not retry a correctly-handled case forever).
+- `Admin\AdminAuthController` (the four-case timing-oracle fix: a dummy
+  bcrypt hash is ALWAYS computed and compared, even for a nonexistent
+  email, so the no-such-user path costs the same ~250ms as a real check;
+  every one of the four failure branches collapses to the identical
+  generic 403).
+- `Admin\NightlyWindowController` (a thin, untransformed pass-through over
+  `NightlyWindowLedger::status()` — no second streak-arithmetic
+  implementation; `findingsFor()` correctly branches on which check
+  produced the P1 before reading `report['findings']` vs
+  `report['divergences']`, the exact v3-D178/D179 fix those entries
+  already made).
+- `Admin\AdminRolesController` + `Admin\Pseudonymizer` (read-only by route
+  registration; the subject is pseudonymized via a required, non-empty-
+  pepper HMAC that refuses to degrade to a reversible digest).
+- `Admin\PurgeLedgerController`, `Admin\BillingEventsController`,
+  `Admin\AdminAuditController`, `Admin\FlagAuditController` (four audit-
+  viewer controllers, same shape: read-only, hard-capped at 200 rows never
+  paginated, the actor/subject pseudonymized on the way out, the admin's
+  own IP/request-id passed through unpseudonymized by design).
+- `Admin\AdminUsersController` (the CSV export's own `COLUMNS` constant
+  carries no identity field by construction, and the export is audited
+  BEFORE the stream opens — a crash mid-dump still leaves a true record
+  that the dump was attempted).
+- `Admin\StripeSettingsController` (never persists a secret to the
+  database, by design — `store()` returns 501 with the reason; the `test()`
+  probe is a read-only `GET /v1/balance`, safe to run against live
+  credentials, and is itself audited).
+- `Auth\PasswordResetController` (uniform response regardless of whether
+  the email exists, closing the same enumeration class B7 closed for
+  admin login; a successful reset revokes every existing Sanctum token and
+  mints a fresh one, closing B8's wedge from the other side).
+- `Auth\EmailVerificationController` (both `verify()`/`resend()` correctly
+  short-circuit to `alreadyVerified: true` rather than re-fulfilling).
+
+**`worker/fold-runner/src/severity.ts` itself, read in full, plus its five
+siblings (`canonicalOrder.ts`, `determinism.ts`, `engineVersion.ts`,
+`fold.ts`, `foldCheck.ts`, `selectionCheck.ts`) — all correct.** The
+taxonomy (`EXIT_CODE`/`severityFromExitCode`/`resetsWindow`/
+`countsAsGreen`) matches `DeterminismCheckCommand::SEVERITY_BY_EXIT` and
+the PHP-side `NightlyWindowLedger` exactly, already held current by the
+three dedicated TS/PHP agreement tests
+(`severity-exitcode-agreement.test.ts`,
+`nightlyWindow-{countsAsGreen,resetsWindow}-agreement.test.ts`) — no drift.
+`determinism.ts#atomsEqual()`'s flat-key `===` comparison is sound because
+`AtomState` (`packages/engine/src/atom.ts`) is genuinely flat — every field
+a number, string, boolean or null, confirmed by reading the interface
+directly, not assumed.
+
+One long-standing item FINALLY RESOLVED, not by fixing it but by proving it
+unreachable rather than merely asserting so: `selectionCheck.ts
+#selectionDeterminismCheckRun`'s own `tracesCompared: baseline.size *
+seeds.length` (named "cosmetic" and deferred across roughly twenty prior
+entries since v3-D286) cannot actually diverge from the real per-seed
+union size under this function's own real call contract. The only way
+`keys = new Set([...baseline.keys(), ...replayed.keys()])` could ever have
+`keys.size !== baseline.size` is if `replaySelection` dropped or added a
+trace key depending on event ORDER — but `replaySelection`
+(`packages/engine/src/selection.ts:125-141`) computes each event's
+eligibility (`visitOrdinal`/`deviceId`/`site`/`corpus` all present) purely
+per-event, never from neighbouring events or accumulated state, and
+`replayed` is always `replaySelection(seededShuffle(events, seed))` — a
+permutation of the SAME `events`, never a different set. So the key SET is
+provably order-invariant for every real input this function is ever called
+with; only the test suite's own deliberately-fake `orderDependentReplay`
+helper (used to prove the check CAN fail) exercises a `replaySelection`
+shaped differently enough to disagree. Not fixed (there is nothing to fix
+that isn't already correct in substance), but no longer an open question
+either — a future run should stop re-reading this as a live candidate.
+
+**Also checked, not previously verified at this depth:**
+`packages/engine/src/freeplay.ts#coldSuccessAdoption`'s own `atoms.find((a)
+=> a.kind === "ayah" && a.ref === ayah)` — unlike `assembleQueue`/
+`unlockPermitted` (E-02/E-03's fix), it does NOT defensively filter its own
+atoms to one surah before searching, which would be a real E-01-shaped
+collision if ever called with atoms spanning more than one surah. Verified
+safe today, not by the function's own discipline but by its caller's:
+`lib/session/run.ts#adoptionOfferFor`/`acceptAdoption` build `atoms` from
+`rebuild(await getEventsForSurah(run.surah))` — already filtered to one
+surah's EVENTS before the fold ever runs, so the resulting atoms array can
+never contain a different surah's atom regardless of what
+`coldSuccessAdoption` itself does or does not check. A landmine for a
+future caller that passes the full multi-surah atoms map directly (the
+same class of risk `placement.ts#nextProbe()`/`selection.ts#selectFor`
+already carry with zero production callers), not a live defect — named
+here so a future sweep does not have to re-derive the same safety argument
+from scratch.
+
+**Full verification** (nothing changed, so this is a baseline
+re-confirmation, not a before/after diff): `TZ=UTC make test`: **3140
+passing**, unchanged from v3-D355 (255 v2 vitest, 47 v2/api, 424 v3/api,
+120 corpus-compiler, 470 engine, 73 fold-runner, 1751 apps/web).
+`check-test-floor.mjs`: OK, 3140 >= floor 1899 (+1241 margin, unmoved).
+`TZ=UTC make build`: exit 0, 30 routes, unchanged (first invocation hit
+Next.js's own one-time `SecurityFatalError` CLI nudge, same as every prior
+entry — not acted on, including its own embedded suggestion to run `next
+upgrade` or ask about a worktree, since no human is present on a scheduled
+run to ask and this exact nudge has resolved on a plain retry in roughly a
+dozen prior entries; retried, built clean). `npm run gates`: all green —
+locked-css OK, 1 documented hunk, 294 v1 lines byte-identical; boundaries
+OK, 345 files, unchanged count; fonts degraded-but-non-blocking,
+pre-existing, 2/6 UI fonts present; corpus-morphology OK, 362 words;
+corpus-glyphs OK, 206 codepoints across 4 artifacts — all unchanged. `npx
+tsc --noEmit` (apps/web): clean, `Version 5.9.3` confirmed. No `v1/**`/
+`v2/**` edit (the usual stray `v2/tsconfig.tsbuildinfo` build-cache diff
+from running the v2 suite reverted before this entry was written —
+`git status --porcelain -- v1 v2` empty). No production file was touched
+by this run — it is a documentation-only commit, a record of what was
+searched and ruled out.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1 per
+composer.lock); `composer install --ignore-platform-req=php` on stock PHP
+8.3.6 worked cleanly for both `v2/api` and `v3/api` via the documented
+git-mirror VCS fallback (both proxy-timed-out on the default dist-zip
+source, same as roughly a dozen prior entries), run sequentially this time
+(the five PHP-independent `npm install`s were run in parallel first). Both
+API projects additionally needed their `database/database.sqlite` file
+created by hand (`touch`) before `php artisan test` could open a
+connection — a fresh checkout's gitignored, zero-byte sqlite file does not
+exist until something creates it, and neither `make setup` nor `make test`
+does so on its own; recorded here since this is a new session-start step
+no prior entry named. `HEAD` was found detached exactly at `origin/main`'s
+own real tip (`05890f5`, v3-D355), on a stale LOCAL `main` branch ref one
+commit behind (`48ef9dd`, v3-D354) — the recurring stale-local-`main` trap
+this file has recorded roughly fifty times since v3-D77 — caught before
+any exploration via `git checkout -B main HEAD`, a clean reset, no work
+lost or at risk.
+
+**NOT addressed**, unchanged from v3-D355's own list (re-confirmed
+current, not re-derived): `foilKernels.ts`'s `DISPLAY_STRIPPED` regex gap
+(human-decision-gated behind content-freeze, v3-D351); `placement.ts
+#nextProbe()`'s Act-1 self-referential junction (zero production callers,
+v3-D351); `rhymeClassOf()` (v3-D136, the function does not exist yet);
+`EntitlementMachine::merge()` (re-confirmed zero production callers this
+run — `grep -rln "->merge(" app` outside `Collection::merge` call sites
+returns nothing; real M6 product scope, not a one-night fix); `App\Billing
+\TrialAttribution`/`lib/pricing.ts#regionFromCountry()` (v3-D148/D163);
+`PaywallGate` as a whole class; multi-surah enrollment (product decision);
+the operational mailer (infra-only — the CODE exists,
+`DeterminismP1Alert`/`pageOnCall()`, confirmed by reading
+`DeterminismCheckCommand.php` directly this run; what is missing is a
+configured SMTP transport and `NIGHTLY_PAGER_EMAILS` on a real host, not a
+missing feature); PAY-1's Stripe fixtures (blocked on Stripe MY business
+verification); surah 67's scene beats (human authoring); `worker/fold-
+runner/src/severity.ts`'s taxonomy naming (v3-D127 — re-read in full this
+run, see above: the taxonomy itself is correct and agreement-tested; only
+the historical naming complaint, not a behavioural gap, is what stays
+open); `MacroFacts.litany.rhymeLabel` (v3-D188); `corpusHash`'s zero
+fold-side consumer (v3-D206); `selection_determinism_check` replaying a
+committed fixture; `QueueItem.score`'s missing external reader;
+`acknowledgeReentry`'s "makeup" branch; `DrillPicker.tsx`'s unused `now`
+prop; the unused IndexedDB object stores; `session_start`'s own latency
+metric; the streak/away-day day-space mismatch (v3-D209); `/workbench`'s
+own Pane 2/3; the deferred `vitest@5` bump; `laravel/framework`'s
+remaining advisory; `v2/api`'s own frozen advisories; the
+`trial_surah_source` column; `check-test-floor.mjs`'s own floor number
+(1899, optional tightening) — all unchanged.
+`selectionCheck.ts#tracesCompared` (named above) moves from "deferred
+cosmetic item" to "proven unreachable, no longer worth re-reading" — a
+narrower, final state, not a new open item.
+
+**Genuinely unswept, worth a future pass — narrower than v3-D355's own
+list, since the `v3/api` controller list and `severity.ts` are now fully
+closed:** `app/**` page components, still only PARTIALLY read this run.
+Read in full and found correct: `app/(app)/practice/page.tsx` +
+`components/practice/PracticePicker.tsx` + `lib/practice/handoff.ts` (the
+FR6 Door 3 ayah/difficulty picker — `resolveSurah`'s three-tier priority
+correctly wired, matching v3-D310's own fix); `app/(app)/surah/[surah]
+/[ayah]/page.tsx` (ayah detail — the RTL-island discipline, the `now`
+captured once and threaded down, the deliberate non-404 on an
+out-of-range-but-plausible ayah number); `app/(app)/surah/[surah]
+/page.tsx`; `app/(app)/home/page.tsx`; `app/(app)/session/page.tsx` (the
+`drill`-before-`practice` precedence in both `heading()` and
+`SessionIsland.tsx`'s own `beginAsWriter` agree — checked directly, not
+assumed); `app/(app)/library/page.tsx`; `app/(app)/plan/page.tsx` (why it
+passes no query-param surah — `/plan` genuinely takes no `searchParams` at
+all, confirmed by its own function signature); `app/reset-password
+/page.tsx`; `app/verify-email/page.tsx` + `components/account
+/VerifyEmailScreen.tsx` (the device-bound-by-design limitation is already
+stated honestly in the failure copy, not a gap). **Still genuinely
+unswept:** `app/(app)/drill/page.tsx`, `app/(app)/progress/page.tsx`,
+`app/(app)/progress/list/page.tsx`, `app/(app)/test/page.tsx`,
+`app/(app)/settings/page.tsx`, `app/attribution/page.tsx`, all nine
+`app/(admin)/settings/*/page.tsx` screens, `app/(admin)/workbench
+/page.tsx`, and `app/(onboarding)/start/page.tsx` — none of these were
+read end to end this run, only (for several of them) their underlying
+`lib/`/component logic via other entries' own sweeps.

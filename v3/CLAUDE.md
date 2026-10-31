@@ -57,6 +57,74 @@ make test    # 3140 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 424 v3/api + 120 corpus-compiler
              # + 470 engine + 73 fold-runner + 1751 apps/web. (v3-D354, 2026-10-27)
+             # NOTE (v3-D356, 2026-10-31): a THIRD consecutive fresh-sweep
+             # night (after v3-D347, v3-D355) found NO confirmed defect —
+             # closing v3-D355's own "genuinely unswept" list for `v3/api`
+             # controllers and `worker/fold-runner/src/severity.ts`
+             # completely. Read in full and found correct: every
+             # previously-not-individually-named `v3/api` controller
+             # (`SettingsController`, `SpecsController`,
+             # `ContentFreezeController`, `OverridesController`,
+             # `AuthController`, `Billing\StripeWebhookController` +
+             # `App\Billing\StripeSignature`, `Admin\{AdminAuthController,
+             # NightlyWindowController,AdminRolesController,Pseudonymizer,
+             # PurgeLedgerController,BillingEventsController,
+             # AdminAuditController,FlagAuditController,AdminUsersController,
+             # StripeSettingsController}`, `Auth\{PasswordResetController,
+             # EmailVerificationController}`); `severity.ts` itself plus its
+             # five siblings (`canonicalOrder`/`determinism`/`engineVersion`/
+             # `fold`/`foldCheck`/`selectionCheck.ts`) — the taxonomy already
+             # held current by its own TS/PHP agreement tests, no drift.
+             # One long-deferred "cosmetic" item (named across ~20 prior
+             # entries since v3-D286) PROVEN unreachable rather than merely
+             # re-deferred: `selectionCheck.ts#selectionDeterminismCheckRun`'s
+             # `tracesCompared: baseline.size * seeds.length` can never
+             # actually diverge from the real per-seed union size, because
+             # `replaySelection` (`packages/engine/src/selection.ts`)
+             # computes each event's trace key purely per-event, never from
+             # neighbouring events — so `replayed` (always a shuffle of the
+             # SAME `events`) is provably key-set-identical to `baseline` for
+             # every real call this function is ever made with; only the
+             # test suite's own deliberately-fake `orderDependentReplay`
+             # helper can disagree. Also checked: `freeplay.ts
+             # #coldSuccessAdoption`'s own lack of defensive surah-filtering
+             # (unlike `assembleQueue`/`unlockPermitted`) — verified SAFE
+             # today only because its one caller
+             # (`run.ts#adoptionOfferFor`/`acceptAdoption`) already builds
+             # `atoms` from `getEventsForSurah(run.surah)`-filtered events, a
+             # landmine for a future caller rather than a live defect, same
+             # class as `placement.ts#nextProbe()`'s zero-caller gap.
+             # `TZ=UTC make test`: 3140 passing, unchanged (255 v2 vitest, 47
+             # v2/api, 424 v3/api, 120 corpus-compiler, 470 engine, 73
+             # fold-runner, 1751 apps/web). `check-test-floor.mjs`: OK, 3140
+             # >= floor 1899 (+1241 margin, unmoved). `TZ=UTC make build`:
+             # exit 0, 30 routes, unchanged (the usual one-time
+             # `SecurityFatalError` CLI nudge on first invocation — NOT acted
+             # on, including its own embedded suggestion to run `next
+             # upgrade` or ask about a worktree, since no human is present on
+             # a scheduled run to ask; plain retry built clean). `npm run
+             # gates`: all green, unchanged (345 files, 294 v1 lines, 362
+             # words, 206 codepoints). `npx tsc --noEmit`: clean, `Version
+             # 5.9.3`. No `v1/**`/`v2/**` edit (the usual stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted before
+             # committing). No production file was touched — documentation
+             # only. Session start needed a new step no prior entry named:
+             # both API projects' gitignored `database/database.sqlite` does
+             # not exist on a fresh checkout and neither `make setup` nor
+             # `make test` creates it — `touch`ed by hand before PHPUnit
+             # could open a connection. `HEAD` was found detached exactly at
+             # `origin/main`'s own real tip (`05890f5`, v3-D355), on a stale
+             # LOCAL `main` branch ref one commit behind — the recurring
+             # stale-local-`main` trap this file has recorded roughly fifty
+             # times since v3-D77 — caught via `git checkout -B main HEAD`
+             # before any exploration. Genuinely unswept, narrower now and
+             # named for next time: `app/**` page components — read in full
+             # this run: `practice`, `surah/[surah]/[ayah]`, `surah/[surah]`,
+             # `home`, `session`, `library`, `plan`, `reset-password`,
+             # `verify-email`; still unread end to end: `drill`, `progress`,
+             # `progress/list`, `test`, `settings` (app), `attribution`, all
+             # nine `(admin)/settings/*` screens, `(admin)/workbench`,
+             # `(onboarding)/start`. Full detail: DECISIONS.md v3-D356.
              # NOTE (v3-D355, 2026-10-31): a fresh-sweep night found NO
              # confirmed defect, closing v3-D347's own "not reached this run"
              # list completely. Read in full: `lib/workbench/{sign,explain}
