@@ -57,6 +57,66 @@ make test    # 3140 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 424 v3/api + 120 corpus-compiler
              # + 470 engine + 73 fold-runner + 1751 apps/web. (v3-D354, 2026-10-27)
+             # NOTE (v3-D355, 2026-10-31): a fresh-sweep night found NO
+             # confirmed defect, closing v3-D347's own "not reached this run"
+             # list completely. Read in full: `lib/workbench/{sign,explain}
+             # .ts`; `lib/onboarding/{pass,surahs}.ts`; `packages/engine/src
+             # /{freeplay,bridge,canonicalOrder,corpusRef,faces,heatmap,
+             # options,render,sessionSummary,variant}.ts` (all ten); the IDB
+             # `append.ts`/`writeLock.ts` implementation itself (previously
+             # only its callers had been read). Also swept, adjacent to that
+             # list: `packages/engine/src/{resume,streak,awayDays,capacity,
+             # ladder,chain,strength,update,gate,scheduler,site,rotation,
+             # selection}.ts`; `apps/web/lib/entitlement/{types,sync,cache,
+             # gate}.ts` cross-checked field-by-field against
+             # `App\Billing\PaywallGate`/`EntitlementController` (agree on
+             # every branch); a full `grep -rln 'role="status"'
+             # components/` re-sweep of the nine-times-closed role=status/
+             # role=alert shape (two new files checked directly —
+             # `VerifyEmailScreen.tsx`/`ResetPasswordForm.tsx` — both
+             # already correct); and several `v3/api` controllers not
+             # previously named in this file's own record
+             # (`VerificationsController`, `Admin\PurgeLedgerController`,
+             # `Admin\Pseudonymizer`, `GlossDraftsController`,
+             # `Billing\{EntitlementController,PaywallGate,
+             # EntitlementMachine,WebhookHandler}`). One wording-only
+             # discrepancy found and ruled NOT a bug: `WebhookHandler.php`'s
+             # own transition-table comment says dispute-won "restore[s]
+             # prior" state, but `onDisputeClosed()` unconditionally sets
+             # `Active` — `test_dispute_won_reinstates` deliberately starts
+             # from `LapsedReviewOnly` and asserts `Active`, so the simpler
+             # behavior is the tested, intended one; the comment is loose
+             # paraphrase, not an unmet spec. Two genuine "zero production
+             # caller" shapes confirmed (not bugs, not new — the same
+             # already-accepted M4-wiring-not-yet-reached class as
+             # `placement.ts#nextProbe()`, v3-D351): `sessionSummary.ts
+             # #summarizeSession` never branches on `junction_result`/
+             # `chain_step`/`rung_complete` because `lib/session/run.ts`
+             # never emits them (grep-confirmed directly); `selection.ts
+             # #selectFor`/`replaySelection` have no caller in `apps/web` —
+             # the real Test route (`lib/test/build.ts#itemSite`)
+             # deliberately stamps a `siteKey` with no `visitOrdinal`
+             # rather than calling `selectFor`, by its own header's
+             # explicit design. `TZ=UTC make test`: 3140 passing, unchanged
+             # from v3-D354 (255 v2 vitest, 47 v2/api, 424 v3/api, 120
+             # corpus-compiler, 470 engine, 73 fold-runner, 1751 apps/web).
+             # `check-test-floor.mjs`: OK, 3140 >= floor 1899 (+1241
+             # margin, unmoved). `TZ=UTC make build`: exit 0, 30 routes,
+             # unchanged (the usual one-time `SecurityFatalError` CLI
+             # nudge on first invocation, not acted on, plain retry built
+             # clean). `npm run gates`: all green, unchanged (345 files,
+             # 294 v1 lines, 362 words, 206 codepoints). No `v1/**`/
+             # `v2/**` edit (the usual stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff reverted before committing). No file was
+             # touched by this run — documentation only. Genuinely
+             # unswept, named for next time: `app/**` page components read
+             # end to end (not merely as callers of already-checked `lib/`
+             # functions); `v3/api`'s remaining not-yet-individually-named
+             # controllers (`SettingsController`, `SpecsController`,
+             # `OverridesController`, `ContentFreezeController`, most of
+             # `Admin\*`, `Auth\*`, `AuthController`,
+             # `Billing\StripeWebhookController`); `worker/fold-runner/src
+             # /severity.ts` itself. Full detail: DECISIONS.md v3-D355.
              # NOTE (v3-D354, 2026-10-27): `apps/web/lib/session/run.ts
              # #sameDay()` — used by `startFromQueue` to decide RESUME-vs-NEW
              # for every session entry point — carried the docstring "Same

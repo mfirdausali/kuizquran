@@ -37527,3 +37527,167 @@ backfill — all unchanged. `lib/session/run.ts#sameDay()`'s own tz-blind gap
 is now CLOSED — remove it from future sweeps; `lib/session/run.ts`
 (2191 lines) and the `app/**` route handlers are now both fully read at
 least once and may be struck from future "too large to reach" lists.
+
+### v3-D355 — A fresh-sweep night found no confirmed defect; closes v3-D347's entire "not reached" list
+
+Like v3-D347, this entry closes nothing new. This run's own sweep was
+pointed first at v3-D347's own "not reached this run" list (the one
+genuinely-unswept set that file named and no later entry had picked up
+since), read every file on it in full, and found no genuine,
+previously-unreported, fixable defect in any of them. **What was read and
+found correct, closing v3-D347's list completely:**
+
+- `lib/workbench/sign.ts` (the TOCTOU-safe signing module — no hash ever
+  sent, the consent re-read correctly distinguishes `signed`/
+  `signed-but-stale`/`failed`) and `lib/workbench/explain.ts` (the tracer —
+  every fact in a trace is a return value from `admit()`/`variants()`/
+  `buildResourceLedger()`, never re-derived; `attributeRejection`'s
+  singleton-fibre technique for distinguishing clause 1/2/3 is sound).
+- `lib/onboarding/pass.ts` (`displayOrder`'s seeded Fisher-Yates, the
+  position-vs-index remapping between `blankPositions` and
+  `ayahWords`/render-contract indices, the correct-index inversion via
+  `order.indexOf(engineCorrectIndex)` rather than a direct lookup) and
+  `lib/onboarding/surahs.ts` (`OFFERED_SURAHS`/`ENROLLABLE_SURAHS`'s
+  biconditional-with-`CLIENT_SURAHS` construction, matching its own test's
+  claim).
+- `packages/engine/src/{freeplay,bridge,canonicalOrder,corpusRef,faces,
+  heatmap,options,render,sessionSummary,variant}.ts` — all ten, in full.
+  Nothing wrong found; `sessionSummary.ts#summarizeSession` does not branch
+  on `junction_result`/`chain_step`/`rung_complete` at all, which LOOKS like
+  a gap against the seven retrieval types INVARIANTS.md's property pack
+  names, but `lib/session/run.ts` (grep-confirmed directly: `grep -n 'type:
+  "' lib/session/run.ts`) never emits any of those three event types — the
+  real session loop only ever commits `reconstruct_tap`, `ayah_produced`,
+  `gate_result`, `interruption`, `gate_demote`, `adoption`, `session_start`.
+  The gap has no reachable input today, the same "zero production caller"
+  shape `placement.ts#nextProbe()` (v3-D351) and `ladder.ts`/`chain.ts`
+  (v3-D25, attic'd) already carry — not a live bug, named here so a future
+  run does not re-derive the same dead end.
+- The IDB append/writeLock island implementation itself (previously only
+  its callers — `merge.ts`, `choices.ts` — had been read): `lib/idb
+  /append.ts` (the one-transaction read-increment-write deviceSeq
+  allocation, the idempotent-retry-reuses-the-same-row contract,
+  the by_ts-index-cannot-index-undefined guard) and `lib/idb/writeLock.ts`
+  (the Web Locks acquire/grace-timer/fallback-heartbeat machinery, already
+  carrying v3-D67's own documented history of a prior real defect in this
+  exact file — the current source matches that fix).
+- Also swept, not on v3-D347's list but adjacent: `packages/engine/src
+  /{resume,streak,awayDays,capacity,ladder,chain,strength,update,gate,
+  scheduler,site,rotation,selection}.ts` — all correct, including a close
+  read of `scheduler.ts#assembleQueue`'s five FR3 steps a second time
+  (independently of v3-D347's own pass) and `selection.ts#selectFor`/
+  `replaySelection`, which — like `freeplay`/`bridge`/`ladder`/`chain` above
+  — have zero production callers in `apps/web` today (`grep -rln
+  "replaySelection\|selectFor(" .` returns only the fold-runner's own
+  determinism-check tooling and `scripts/gen-selection-log.ts`; the real
+  Test route, `lib/test/build.ts#itemSite`, deliberately stamps a `siteKey`
+  with NO `visitOrdinal` rather than calling `selectFor`, by its own
+  header's explicit design, not an oversight).
+- `apps/web/lib/entitlement/{types,sync,cache,gate}.ts` cross-checked
+  field-by-field against `App\Billing\PaywallGate`/`EntitlementController`:
+  the client's `permitsIssuance` and the server's agree on every branch
+  (trial/active/grace/lapsed, the 14-day trial-started clock, the
+  stale-cache-never-locks-owned-content TTL degrade). One wording-only
+  discrepancy checked and ruled NOT a bug: `WebhookHandler.php`'s own
+  transition-table comment says dispute-won "restore[s] prior" state, but
+  `onDisputeClosed()` unconditionally sets `Active` — `
+  test_dispute_won_reinstates` deliberately starts the fixture from
+  `LapsedReviewOnly` and asserts the result is `Active`, not a restored
+  `LapsedReviewOnly`, so the simpler, unconditional behavior is the tested,
+  intended one; the comment's phrase is loose paraphrase ("restore paid
+  access"), not a spec the code fails to meet.
+- A full `grep -rln 'role="status"' components/` re-sweep (the "role=status
+  vs role=alert" shape closed nine times over, v3-D241..D345): every
+  surviving hit is either already correctly conditional (`FlagsPanel.tsx`,
+  `AccountAuthPanel.tsx`, `StripeSettingsPanel.tsx`, `SystemHealthPanel.tsx`,
+  `GlossDraftsPanel.tsx`, `BillingAuditPanel.tsx`, `QariMode.tsx`'s
+  `SignOutcome`), a read-only/display surface with no write action to
+  misreport (`ProgressTable.tsx`, `MacroPanelIsland.tsx`, `TestIsland.tsx`'s
+  status line, `ExplainTrace.tsx`), or a deliberately-passive-by-design
+  surface whose own header states the "never alarming" intent directly
+  (`SyncStatus.tsx`'s escalation line; `MySurahs.tsx`'s long-absence
+  banner). Two new files checked directly against this shape and found
+  correct: `VerifyEmailScreen.tsx`/`ResetPasswordForm.tsx` (both correctly
+  use `role="alert"` for a real server/network failure, `role="status"`
+  only for success).
+- `v3/api` controllers not previously named checked in this file's own
+  record: `VerificationsController` (the any-row-matches-current frontier,
+  the qari-role gate on tier=qari, TOCTOU-safe server-side hash read),
+  `Admin\PurgeLedgerController` (read-only by route registration,
+  pseudonymized on the way out), `Admin\Pseudonymizer` (HMAC with a
+  required pepper, refuses to degrade to a reversible digest),
+  `GlossDraftsController` (the two structural guarantees — a draft cannot
+  reach a learner, a draft cannot amber a qari signature — both hold
+  against the real code, not just the docblock's claim), `Billing
+  \EntitlementController`, `Billing\PaywallGate`, `Billing
+  \EntitlementMachine` (both guards — ordering precedence and the
+  optimistic lock — correct), and `Billing\WebhookHandler` (the full
+  transition table, every one of its eight handlers, re-read end to end).
+
+**Full verification** (nothing changed, so this is a baseline
+re-confirmation, not a before/after diff): `TZ=UTC make test`: **3140
+passing**, unchanged from v3-D354 (255 v2 vitest, 47 v2/api, 424 v3/api, 120
+corpus-compiler, 470 engine, 73 fold-runner, 1751 apps/web).
+`check-test-floor.mjs`: OK, 3140 >= floor 1899 (+1241 margin, unmoved).
+`TZ=UTC make build`: exit 0, 30 routes, unchanged (first invocation hit
+Next.js's own one-time `SecurityFatalError` CLI nudge, same as every prior
+entry — not acted on, a plain retry built clean). `npm run gates`: all
+green — locked-css OK, 1 documented hunk, 294 v1 lines byte-identical;
+boundaries OK, 345 files, unchanged count; fonts degraded-but-non-blocking,
+pre-existing, 2/6 UI fonts present; corpus-morphology OK, 362 words;
+corpus-glyphs OK, 206 codepoints across 4 artifacts — all unchanged. No
+`v1/**`/`v2/**` edit (the usual stray `v2/tsconfig.tsbuildinfo` build-cache
+diff from running the v2 suite reverted before this entry was written —
+`git status --porcelain -- v1 v2` empty). No file was touched by this run
+— it is a documentation-only commit, a record of what was searched and
+ruled out.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1 per
+composer.lock); `composer install --ignore-platform-req=php` on stock PHP
+8.3.6 worked cleanly for both `v2/api` and `v3/api`, via the documented
+git-mirror VCS fallback (both proxy-timed-out on the default dist-zip
+source, same as roughly a dozen prior entries), run in parallel,
+~15 minutes total. `HEAD`, local `main` and `origin/main` all already
+agreed at `48ef9dd` (v3-D354) — no stale-local-`main` trap this run.
+
+**NOT addressed**, unchanged from v3-D354's own list (re-confirmed current,
+not re-derived): `foilKernels.ts`'s `DISPLAY_STRIPPED` regex gap
+(human-decision-gated behind content-freeze, v3-D351); `placement.ts
+#nextProbe()`'s Act-1 self-referential junction (zero production callers,
+v3-D351); `rhymeClassOf()` (v3-D136, the function does not exist yet);
+`EntitlementMachine::merge()` (v3-D88..D94/D144/D145 — real M6 product
+scope, not a one-night fix: account adoption has no UI, no checkout
+surface, no client contract for which anonymous entitlement to merge);
+`App\Billing\TrialAttribution`/`lib/pricing.ts#regionFromCountry()`
+(v3-D148/D163); `PaywallGate` as a whole class (re-verified correct this
+run, see above — not a gap, just previously unconfirmed); multi-surah
+enrollment (product decision); the operational mailer (infra-only); PAY-1's
+Stripe fixtures (blocked on Stripe MY business verification); surah 67's
+scene beats (human authoring); `worker/fold-runner/src/severity.ts`'s
+taxonomy naming (v3-D127); `MacroFacts.litany.rhymeLabel` (v3-D188);
+`corpusHash`'s zero fold-side consumer (v3-D206);
+`selection_determinism_check` replaying a committed fixture;
+`QueueItem.score`'s missing external reader; `acknowledgeReentry`'s
+"makeup" branch; `DrillPicker.tsx`'s unused `now` prop; the unused
+IndexedDB object stores; `session_start`'s own latency metric; the
+streak/away-day day-space mismatch (v3-D209); `/workbench`'s own Pane 2/3;
+the deferred `vitest@5` bump; `laravel/framework`'s remaining advisory;
+`v2/api`'s own frozen advisories; the `trial_surah_source` column;
+`check-test-floor.mjs`'s own floor number (1899, optional tightening) — all
+unchanged. `selectFor`/`replaySelection` having zero production callers
+(named above) is the same already-accepted M4-wiring-not-yet-reached shape
+as `freeplay.ts`/`placement.ts`, not a new finding to act on.
+
+**Genuinely unswept, worth a future pass:** `app/**` page components
+(`app/(app)/**/page.tsx` etc.) read as consumers of the `lib/` functions
+already checked, rather than read end to end themselves; `v3/api`'s
+remaining not-yet-individually-named controllers (`SettingsController`,
+`SpecsController`, `OverridesController`, `ContentFreezeController`,
+`Admin\{AdminAuditController,AdminAuthController,AdminRolesController,
+AdminUsersController,BillingEventsController,FlagAuditController,
+NightlyWindowController,StripeSettingsController,SystemHealthController}`,
+`Auth\{EmailVerificationController,PasswordResetController}`,
+`AuthController`, `Billing\StripeWebhookController` as distinct from
+`WebhookHandler`); `worker/fold-runner/src/severity.ts` itself (only its
+taxonomy-naming gap is recorded, not a fresh read of the file).
