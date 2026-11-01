@@ -38669,3 +38669,190 @@ v3-D358 closed components-first rather than end to end in their own right;
 candidate — static landing-page copy already covered by 57 tests, still
 unexamined). Nothing new was noticed this run outside the fixed defect
 that is worth chasing further.
+
+### v3-D362 (2026-11-01, nightly) — A fresh-sweep night found no confirmed defect; closes v3-D359's own "second pass on the ten `lib/admin/*.ts` loaders" item completely
+
+Picked up v3-D361's own "genuinely unswept" lead: a second pass on the ten
+`lib/admin/*.ts` loaders v3-D358 had closed "components-first" (reading
+each only as the thing a panel calls) rather than end to end against its
+own backend contract — the discipline v3-D359 applied to the remaining
+four (`flags.ts`/`glossDrafts.ts`/`health.ts`/`flagAudit.ts`) but left
+open for these ten, and which v3-D360/D361 both deferred again while
+chasing the fold-runner/nightly-window lead instead.
+
+**All ten read in full this run, each cross-checked field-by-field
+against its real backend controller — all correct, no defect found:**
+
+- `audit.ts` (`loadAudit`) against `AdminAuditController::index()` — the
+  `?subject=` query param, and the full eight-field wire shape
+  (`actor`/`action`/`subjectPseudonym`/`reasonCode`/`reasonText`/`at`/
+  `ip`/`requestId`, the last two landed by v3-D164) all agree.
+- `billingAudit.ts` (`loadBillingAudit`/`loadBillingSnapshot`/
+  `submitBillingOverride`) against `AdminBillingController::index()`/
+  `show()`/`override()` — all three response shapes
+  (`BillingAuditEntry`/`BillingSnapshot`/the override outcome), the
+  `exists:false` no-row defaults, and every status-code branch (422 short
+  reason, 422 bad state/tier, 404 no entitlement row, 409 version
+  conflict) agree.
+- `billingEvents.ts` (`loadBillingEvents`) against
+  `BillingEventsController::index()` — the `?userId=`/`?outcome=`
+  filters and the nine-field raw-webhook-journal shape agree, including
+  the deliberate absence of the raw `payload` column from the contract.
+- `contentFreeze.ts` (`loadContentFreeze`) against
+  `ContentFreezeController::index()` — the `?surahs=` query param, the
+  `allMet`/`bookable`/`criteria`/`note` shape, and (cross-checked one
+  layer further) `frontierCriterion()`'s own per-tier "any row's
+  `content_hash` matches the CURRENT tier hash" predicate against
+  `VerificationsController::index()`'s own, independently-written copy
+  of the same B3 rule — both compute the identical verdict from the
+  same two tables, no drift between them.
+- `nightlyWindow.ts` (`loadNightlyWindow`) against
+  `NightlyWindowController::index()` (already touched by v3-D360/D361,
+  but not previously read end to end from the TS side) — every field
+  including the two typed-union finding shapes (`NightlyWindowFoldFinding`/
+  `NightlyWindowSelectionFinding`, v3-D178/D179) and `lastQuarantine`
+  (v3-D230) agree with `findingsFor()`/`lastQuarantine()`'s own output.
+- `purgeLedger.ts` (`loadPurgeLedger`) against
+  `PurgeLedgerController::index()` — the `?userId=` filter and the
+  three-field shape agree.
+- `reveal.ts` (`revealIdentity`/`checkRevealToken`) against
+  `AdminRevealController::reveal()`/`check()` — all five response states
+  (`revealed`/`anonymous`/`not-found`/`pii-warning`/`rejected`) map onto
+  the server's own status codes and body shapes correctly, including the
+  404-vs-200-with-`identity:null` distinction between "no such account"
+  and "anonymous account" (edge case #148) and the M10 security-review
+  token-bound-to-its-minter fix.
+- `roles.ts` (`loadAdminRoles`) against `AdminRolesController::index()`
+  — the `?role=`/`?userId=` filters and the four-field shape
+  (`subjectPseudonym`/`role`/`grantedAt`/`grantedBy`) agree, including
+  `grantedBy` deliberately NOT being pseudonymized (a free-text operator
+  string, never a `users` id).
+- `session.ts` (`checkAdminSession`/`adminLogin`/`adminLogout`) against
+  `AdminAuthController`'s login/whoami routes and the shared `/api/auth
+  /logout` revoke endpoint — the 401/403-vs-other-non-2xx distinction
+  that separates `signed-out` from a real `denied`, and the generic-
+  error oracle discipline (`GENERIC_ERROR` echoed only as a client-side
+  fallback, never invented over the server's own message), both hold.
+- `users.ts` (`downloadUsersCsv`) against
+  `AdminUsersController::exportCsv()` — a Bearer-authenticated blob
+  download has no URL for a plain anchor to hit, which is exactly why
+  the module drives `apiFetch` + an object-URL + a detached anchor by
+  hand; the five exported columns (`pseudonym`/`created_at`/
+  `is_anonymous`/`anchor_hour`/`event_count`) match `COLUMNS` exactly,
+  with no identity column on either side, matching the controller's own
+  "no include-emails option, and that is the design" header.
+
+**Along the way, also read beyond the ten loaders themselves** (the
+services and a sibling controller these loaders' own panels exercise,
+not previously read end to end in their own right): `App\Flags
+\FlagService` (`kill`/`ramp`/`acknowledgeKill`/`autoWaiveDueKills`) and
+`Admin\FlagController` — re-confirmed v3-D348's ack-clearing fix still
+holds and found no further defect in the kill/ramp optimistic-lock
+split (#126) or the `killed_by`/`ack_by` empty-string-means-null
+convention; `Admin\StripeSettingsController` (`index`/`store`/`test`) —
+the credential-presence/prefix/fingerprint computation, the deliberate
+501 refusal to persist secrets, and the live `GET /v1/balance` probe's
+three failure branches (`unreachable`/`unauthorized`/`error`) all agree
+with `StripeSettingsPanel.tsx`'s own rendering; `DeterminismCheckCommand`
+(503 lines, read in full for a second time independent of v3-D360's own
+pass, this time end to end rather than only at its `NightlyWindowLedger`
+call site) — the exit-code taxonomy, the dead-letter-upgrades-green-to-
+warn-never-downgrades-p1 merge, and the per-user advisory-lock snapshot
+discipline all hold.
+
+**Also re-checked the ten loaders' own panels** (`NightlyWindowPanel.tsx`,
+`BillingEventsPanel.tsx`, `AuditLogPanel.tsx`, `AdminRolesPanel.tsx`,
+`PurgeLedgerPanel.tsx`, `ContentFreezePanel.tsx`, `BillingAuditPanel.tsx`,
+`FlagsPanel.tsx`, `StripeSettingsPanel.tsx`) to confirm the wiring itself
+is correct, not only the module in isolation — each renders its loader's
+fields in the order and shape the loader actually produces, and none
+re-derives a value its own loader already carries verbatim.
+
+**With this, all fourteen `lib/admin/*.ts` files have now been read end
+to end at least twice — once components-first (v3-D358/D359), once
+purely against their own backend contract (this entry and v3-D359's
+four) — with no outstanding "read only as a callee" caveat left on any
+of them. Remove the phrase "second pass on the ten lib/admin/*.ts
+loaders" from future sweep lists entirely.**
+
+**One environment-only finding, not a repo defect:** the full `TZ=UTC
+make test` run that opened this session hit one flake —
+`test/session-island.test.tsx`'s "v3-D217 — ... the notice clears on the
+learner's next interaction" case failed once under full-suite load
+(`Unable to find an element by: [data-testid="reentry-notice"]`).
+Re-run in isolation (`npx vitest run test/session-island.test.tsx -t
+"the notice clears..."`) three times: green every time. Not chased
+further — a single-run, load-dependent timing flake in a test file
+already covered by 40 sibling passing cases in the same run, not a
+reproducible defect; named here so a future run does not mistake a
+repeat of this exact failure for new evidence of one.
+
+**Full verification** (nothing in the repo changed except this entry
+and the CLAUDE.md running note, so this is a baseline confirmation, not
+a regression check): `TZ=UTC make test`: **3145 passing**, unchanged
+from v3-D361 (255 v2 vitest, 47 v2/api, 428 v3/api, 120 corpus-compiler,
+470 engine, 73 fold-runner, 1752 apps/web — the full re-run, not the
+flaky one above, which was a separate earlier invocation).
+`check-test-floor.mjs`: OK, 3145 >= floor 1899 (+1246 margin, unmoved).
+`TZ=UTC make build`: exit 0, routes unchanged (the usual one-time
+`SecurityFatalError` CLI nudge on first invocation — not acted on, per
+every prior entry's own discipline; a plain retry built clean). `npm
+run gates` (apps/web): all green — locked-css OK, 1 documented hunk, 294
+v1 lines byte-identical; boundaries OK, 345 files; fonts
+degraded-but-non-blocking, 2/6 present (pre-existing); corpus-morphology
+OK, 362 words; corpus-glyphs OK, 206 codepoints across 4 artifacts — all
+unchanged, this entry carries no corpus data. `npx tsc --noEmit`
+(apps/web): clean, exit 0. No `v1/**`/`v2/**` edit (the usual stray
+`v2/tsconfig.tsbuildinfo` build-cache diff produced by running the v2
+suite was reverted before committing — `git status --porcelain -- v1
+v2` empty immediately before committing). No production file was
+touched — documentation only, same as v3-D355/D356/D357/D359.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; PHP defaulted to 8.3.6 (`v3/api` needs the Symfony
+minor-version floor of >=8.4.1 per `composer.lock`, not the real
+`composer.json` floor of `^8.2`); `composer install
+--ignore-platform-req=php` (with `COMPOSER_ALLOW_SUPERUSER=1`, since this
+container runs as root) worked cleanly for both `v2/api` and `v3/api`,
+the same repeatedly-recorded shortcut. Both API projects needed a fresh
+`.env` from `.env.example`, `key:generate`, and (`v3/api` only) a
+`touch`ed `database/database.sqlite` before `migrate --force` could run.
+**`HEAD` was found detached exactly at `origin/main`'s own real tip**
+(`8c6f58f`, v3-D361), on a stale LOCAL `main` branch ref seven commits
+behind (`48ef9dd`, v3-D354) — the recurring stale-local-`main` trap this
+file has recorded roughly fifty times since v3-D77 — caught before any
+exploration via `git fetch origin main` + `git checkout main && git
+reset --hard origin/main`, a clean fast-forward, no work lost or at
+risk.
+
+**NOT addressed:** every item on v3-D361's own condensed "genuinely
+unswept" list beyond the one closed above, unchanged — `worker
+/fold-runner/src/*`'s PHP-side callers beyond `AtomCacheRebuilder`/
+`PerUserFoldLock`/`FoldRunnerProcess` (already closed by v3-D361) and
+`DeterminismCheckCommand` (closed by this entry, above) — none remain
+outstanding from that specific list; `components/sections/Mechanism.tsx`/
+`Proof.tsx` (still the same weak candidate, still unexamined); every
+longer-standing item on the condensed "NOT addressed" lists running
+since v3-D332 — `foilKernels.ts`'s `DISPLAY_STRIPPED` regex gap
+(human-decision-gated behind content-freeze); `placement.ts#nextProbe()`'s
+Act-1 self-referential junction (zero production callers);
+`rhymeClassOf()`; `EntitlementMachine::merge()`; `App\Billing
+\TrialAttribution`/`lib/pricing.ts#regionFromCountry()`; `PaywallGate`;
+multi-surah enrollment (product decision); the operational mailer's
+missing SMTP transport/host; PAY-1's Stripe fixtures (blocked on Stripe
+MY business verification); surah 67's scene beats (human-only);
+`severity.ts`'s taxonomy naming; `MacroFacts.litany.rhymeLabel`;
+`corpusHash`'s zero fold-side consumer; `selection_determinism_check`
+replaying a committed fixture; `QueueItem.score`'s missing external
+reader; `acknowledgeReentry`'s "makeup" branch; `DrillPicker.tsx`'s
+unused `now` prop; the unused IndexedDB object stores; `session_start`'s
+own latency metric; the streak/away-day day-space mismatch;
+`/workbench`'s own Pane 2/3; the deferred `vitest@5` bump;
+`laravel/framework`'s remaining advisory; `v2/api`'s own frozen
+advisories; the `trial_surah_source` column — all unchanged.
+
+Genuinely unswept, named for next time: `components/sections
+/Mechanism.tsx`/`Proof.tsx` (weak); a fresh, non-admin-surface sweep —
+`lib/admin/**` and its panels have now been read exhaustively across
+five consecutive nights (v3-D358 onward) and are a poor use of a future
+run's time until a new write path is added there.

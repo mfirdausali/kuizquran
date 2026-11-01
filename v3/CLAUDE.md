@@ -56,7 +56,62 @@ make dev     # SPA :5273, API :8000
 make test    # 3145 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 428 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1752 apps/web. (v3-D361, 2026-11-01)
+             # + 470 engine + 73 fold-runner + 1752 apps/web. (v3-D362, 2026-11-01)
+             # NOTE (v3-D362, 2026-11-01): a fresh-sweep night found NO
+             # confirmed defect — closing v3-D359's own "second pass on the
+             # ten lib/admin/*.ts loaders" item completely. All ten
+             # (audit.ts, billingAudit.ts, billingEvents.ts, contentFreeze.ts,
+             # nightlyWindow.ts, purgeLedger.ts, reveal.ts, roles.ts,
+             # session.ts, users.ts) read in full this run and cross-checked
+             # field-by-field against their real backend controllers
+             # (AdminAuditController, AdminBillingController,
+             # BillingEventsController, ContentFreezeController +
+             # VerificationsController, NightlyWindowController,
+             # PurgeLedgerController, AdminRevealController,
+             # AdminRolesController, AdminAuthController,
+             # AdminUsersController) — every wire field name, status-code
+             # branch and predicate agrees; no defect found. Also read beyond
+             # the ten loaders themselves: `App\Flags\FlagService` +
+             # `Admin\FlagController` (re-confirmed v3-D348's fix still
+             # holds), `Admin\StripeSettingsController`, and
+             # `DeterminismCheckCommand` (503 lines, read end to end for a
+             # second time, independent of v3-D360's own narrower pass) —
+             # all correct. Also re-checked the ten loaders' own panels
+             # (NightlyWindowPanel.tsx, BillingEventsPanel.tsx,
+             # AuditLogPanel.tsx, AdminRolesPanel.tsx, PurgeLedgerPanel.tsx,
+             # ContentFreezePanel.tsx, BillingAuditPanel.tsx, FlagsPanel.tsx,
+             # StripeSettingsPanel.tsx) for correct wiring — all correct.
+             # With this, all fourteen `lib/admin/*.ts` files have now been
+             # read end to end at least twice (components-first, then
+             # against their own backend contract) with no outstanding
+             # "read only as a callee" caveat on any of them — remove
+             # "second pass on the ten lib/admin/*.ts loaders" from future
+             # sweep lists entirely. One environment-only finding, not a
+             # repo defect: `test/session-island.test.tsx`'s v3-D217 re-entry
+             # case failed once under full-suite load
+             # (`[data-testid="reentry-notice"]` not found), green on three
+             # isolated re-runs — a load-dependent timing flake, not chased
+             # further, named so a future run does not mistake a repeat of
+             # this exact failure for new evidence of one. `TZ=UTC make
+             # test`: 3145 passing, unchanged from v3-D361 (255 v2 vitest, 47
+             # v2/api, 428 v3/api, 120 corpus-compiler, 470 engine, 73
+             # fold-runner, 1752 apps/web). `check-test-floor.mjs`: OK, 3145
+             # >= floor 1899 (+1246 margin, unmoved). `TZ=UTC make build`:
+             # exit 0, routes unchanged (the usual one-time
+             # `SecurityFatalError` CLI nudge on first invocation, not acted
+             # on, plain retry built clean). `npm run gates`: all green,
+             # unchanged (345 files, 294 v1 lines, 362 words, 206 codepoints,
+             # 2/6 UI fonts present, degraded-but-non-blocking). `npx tsc
+             # --noEmit`: clean. No `v1/**`/`v2/**` edit (the usual stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted before
+             # committing). No production file was touched — documentation
+             # only. Genuinely unswept, named for next time:
+             # `components/sections/Mechanism.tsx`/`Proof.tsx` (weak); a
+             # fresh, non-admin-surface sweep, since `lib/admin/**` and its
+             # panels have now been read exhaustively across five
+             # consecutive nights (v3-D358 onward) and are a poor use of a
+             # future run's time until a new write path is added there. Full
+             # detail: DECISIONS.md v3-D362.
              # NOTE (v3-D361, 2026-11-01): a real, previously-unreported
              # defect in `SystemHealthController::index()`'s own
              # `rebuildRunning` mutex probe — `Cache::lock(REBUILD_LOCK,
