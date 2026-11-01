@@ -77,7 +77,12 @@ class SystemHealthController extends Controller
                 $this->reading('selection_determinism_check', fn () => $this->selectionDeterminism()),
                 $this->reading('dead_letter_depth', fn () => $this->deadLetterDepth()),
             ],
-            'rebuildRunning' => Cache::lock(self::REBUILD_LOCK, 0)->get() === false,
+            // v3-D361: `->get()` with NO callback ACQUIRES the lock (and
+            // leaves it held) whenever nobody else holds it — it is not a
+            // peek. Passing a callback acquires-runs-releases atomically, so
+            // this read-only status check can never itself seize or extend
+            // the real `rebuildAtomCache()` mutex below.
+            'rebuildRunning' => Cache::lock(self::REBUILD_LOCK, 600)->get(fn () => true) === false,
             'atomCacheLastComputedAt' => $this->atomCacheLastComputedAt(),
         ]);
     }

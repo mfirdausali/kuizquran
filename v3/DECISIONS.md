@@ -38515,3 +38515,157 @@ via their existing passing tests. Every item v3-D359 itself left open and
 did not re-touch this run: a second pass on the ten `lib/admin/*.ts` loaders
 v3-D358 closed components-first; `components/sections/Mechanism.tsx`/
 `Proof.tsx` (named a weak candidate by that entry, still not chased).
+
+### v3-D361 (2026-11-01, nightly) — The admin health dashboard's own status check silently seized the rebuild mutex it was only supposed to read
+
+**What was read and checked.** Per v3-D360's own "still genuinely unswept"
+list, item 1: `worker/fold-runner/src/*`'s PHP-side callers beyond what
+v3-D360 itself read. Read in full: `App\Support\AtomCacheRebuilder` (and
+every one of its callers — `App\Http\Controllers\EventsController::store()`'s
+`rebuildOne()` call on the ingest path, `App\Http\Controllers\Admin
+\SystemHealthController::rebuildAtomCache()`/`index()`'s `rebuild()` and
+mutex-probe calls), `App\Support\PerUserFoldLock`, and `App\Support
+\FoldRunnerProcess`. Cross-checked `PerUserFoldLock`'s batch-acquire
+discipline against its two real call sites (`AtomCacheRebuilder::rebuildUsers()`
+locking its whole candidate batch; `DeterminismCheckCommand::sampleFromDatabase()`
+locking one learner at a time) and `FoldRunnerProcess`'s JSON-report contract
+against both its callers. `PerUserFoldLock` and `FoldRunnerProcess` are both
+correct — no defect in either.
+
+**What was found.** `SystemHealthController::index()`'s own `rebuildRunning`
+field — the admin dashboard's read-only "is a rebuild currently running"
+indicator — computed itself as:
+
+```php
+'rebuildRunning' => Cache::lock(self::REBUILD_LOCK, 0)->get() === false,
+```
+
+`Illuminate\Cache\Lock::get()` called with **no callback** is "attempt to
+ACQUIRE the lock", not "peek at whether it is held" — if nobody else holds
+it, this call itself wins it, and nothing here ever calls `->release()`.
+Worse, `seconds=0` does not mean "no TTL" or "expires immediately":
+`DatabaseLock::expiresAt()` (this deployment's cache driver is `database`,
+confirmed via `.env`/`config/cache.php`) is `$this->seconds > 0 ? $this->seconds
+: $this->defaultTimeoutInSeconds` — with `seconds=0` that condition is
+false, so it falls through to `$defaultTimeoutInSeconds`, which defaults to
+**86400 seconds (24 hours)**.
+
+So an ordinary, read-only visit to the System Health page — no rebuild
+requested, nobody else holding `admin:atom-cache-rebuild` — silently
+acquires that exact mutex for a full day, under a fresh random owner token
+(`Lock`'s constructor mints `Str::random()` when none is passed) that
+nothing will ever call `release()` on. The very next genuine "Rebuild atom
+cache" click (`rebuildAtomCache()`, which correctly acquires with a real
+600s TTL and releases in `finally`) then finds the lock held by a stranger
+owner with an expiration far in the future, fails to acquire it, and
+responds `202 {started:false, queued:true, reason:"a rebuild is already
+running"}` — even though nothing is, or ever was, running. Every later
+health-page load repeats the same failed-acquire check and keeps reporting
+`rebuildRunning: true` for the rest of that 24-hour window, so the
+dashboard itself lies about why the button is disabled. This is the exact
+defect class `AtomCacheRebuilder`'s own header already documents as
+history ("the acquired lock was never released, so it simply sat held for
+its full 600s TTL after every real click") — reintroduced in a sibling
+method on the same class's own mutex, at a shorter-looking but actually
+*longer* duration (the old bug's lock held 600s; this one holds 86400s,
+because `0` does not mean what it looks like it means).
+
+**Why nothing caught it.** `SystemHealthTest.php` had eleven tests before
+this run and asserted on every field of `index()`'s response
+*except* `rebuildRunning` — never read, never asserted, in any test. No
+test ever called `GET /api/admin/health` and then checked whether the real
+mutex was still free afterward, and no test called it twice in a row with
+nothing else happening in between — the one call pattern that exposes a
+self-seizing probe.
+
+**Fixed.** One line, in `SystemHealthController::index()`:
+
+```php
+'rebuildRunning' => Cache::lock(self::REBUILD_LOCK, 600)->get(fn () => true) === false,
+```
+
+The callback form of `Lock::get()` acquires, runs the callback, and
+releases in a `finally` — atomically, with no window for this read-only
+check to leave anything held. `600` (matching the real rebuild lock's own
+TTL in `rebuildAtomCache()`) replaces the dangerous `0`, as defense in
+depth even though the callback path makes the TTL moot on the acquire-and-
+release branch.
+
+**RED confirmed directly**, two new cases added to `SystemHealthTest.php`:
+(1) `test_checking_rebuild_status_does_not_itself_seize_the_mutex` — a bare
+GET of the health endpoint with nothing running, followed by an attempt to
+genuinely acquire `REBUILD_LOCK` directly, and a real POST to
+`rebuild-atom-cache` — against the unmodified source, the direct acquire
+attempt failed (`Failed asserting that false is true`) and would have gone
+on to fail the POST assertion too; (2) `test_two_consecutive_status_checks_both_report_not_running`
+— two back-to-back GETs with nothing running, the second of which must
+still report `false` — against the unmodified source this failed with
+`Failed asserting that true is false` (the second GET correctly saw the
+first GET's self-acquired lock as "held" and reported `rebuildRunning:
+true`). Both failed for exactly the predicted reason.
+
+**Mutation-verified.** `git stash` of `SystemHealthController.php` alone
+(both new tests kept in the test file) reproduced the identical two
+failures; restored byte-identically, reran: `SystemHealthTest.php` 13/13
+green, was 11.
+
+**Before/after counts.** `TZ=UTC make test`: 3145 passing (was 3143, +2 —
+exactly this run's two new cases; `v3/api` PHPUnit 428, was 426; every other
+suite unchanged: 255 v2 vitest, 47 v2/api, 120 corpus-compiler, 470 engine,
+73 fold-runner, 1752 apps/web). `check-test-floor.mjs`: OK, 3145 >= floor
+1899 (+1246 margin). `TZ=UTC make build`: exit 0, 30 routes, unchanged —
+hit the usual one-time `SecurityFatalError` CLI nudge on the first
+invocation (Next.js's security-advisory notice), not acted on; a plain
+retry built clean. `npm run gates` (apps/web): all green and unchanged —
+locked-css OK (1 documented hunk, 294 v1 lines byte-identical); boundaries
+OK (345 files); fonts degraded-but-non-blocking (2/6 UI fonts present,
+pre-existing); corpus-morphology OK (362 words); corpus-glyphs OK (206
+codepoints across 4 artifacts). `npx tsc --noEmit`: clean across all four
+v3 node packages (apps/web, engine, corpus-compiler, fold-runner).
+`./vendor/bin/pint --test` (`v3/api`): identical finding list before and
+after this diff, confirmed by stashing the diff and re-running pint on the
+unstashed vs. stashed tree — no new style issue on either touched file (the
+pre-existing findings on ~18 unrelated files are environment/PHP-CS-Fixer
+version drift, not introduced here).
+
+**No `v1/**`/`v2/**` edit** — `git status --porcelain -- v1 v2` empty
+immediately before committing (the usual stray build-cache `.gitignore`
+file-mode diffs and `v2/tsconfig.tsbuildinfo`, produced by running the
+suites and by this session's own `chmod -R 775` during environment setup,
+were reverted first). **No Arabic codepoint** — both changed files swept
+programmatically (Python, over the Arabic/Arabic Supplement/Arabic
+Extended-A/Presentation-Forms-A/Presentation-Forms-B Unicode blocks, plus a
+`\u`-escape and `fromCharCode`/`fromCodePoint` check) against only the
+diff's added lines: CLEAN — every new string is a PHP identifier, an HTTP
+status/JSON-field assertion, or a fixed English comment/doc-string
+sentence. **No oracle/golden-log/fixture/snapshot regenerated** — this diff
+touches one existing production file and one existing test file only.
+
+**Session start.** Fresh container: no `node_modules`/`vendor`/compiled
+corpus anywhere. PHP defaulted to 8.3.6 (`v3/api`'s `composer.lock` wants
+`>=8.4.1`); `composer install --ignore-platform-req=php` on stock PHP 8.3.6
+worked cleanly for both `v2/api` and `v3/api`, no PHP 8.4 install needed.
+Two environment gaps not previously named for THIS exact shape: (1)
+`v2/api`'s `package:discover` post-autoload-dump step failed outright on a
+fresh clone because `bootstrap/cache` did not exist yet — the `Makefile`'s
+own `setup` target creates it before `composer install`, but a bare
+`composer install --ignore-platform-req=php` run directly (this run's own
+shortcut, per several prior entries' precedent) skips that `mkdir` — fixed
+by creating `bootstrap/cache` and `storage/framework/{cache,sessions,views}`
+by hand before re-running `package:discover`; (2) `v2/api`'s PHPUnit run
+failed on `InvalidArgumentException: Please provide a valid cache path`
+(the Blade view compiler) for the identical reason — `storage/framework/views`
+did not exist — fixed the same way, and mirrored onto `v3/api` pre-emptively
+before its own suite ran. `HEAD`, local `main` and `origin/main` all already
+agreed at `a5a97d7` (v3-D360) — no stale-local-`main` trap this run.
+
+**Genuinely unswept, named for next time.** Item 1 from v3-D360's list is
+now CLOSED — `AtomCacheRebuilder`'s own scheduling path (including both its
+real callers), `PerUserFoldLock`, and `FoldRunnerProcess` have all been read
+end to end and either fixed or found correct. Still open, unchanged from
+v3-D360/v3-D359: (2) a second pass on the ten `lib/admin/*.ts` loaders
+v3-D358 closed components-first rather than end to end in their own right;
+(3) `components/sections/Mechanism.tsx`/`Proof.tsx` (named a weak
+candidate — static landing-page copy already covered by 57 tests, still
+unexamined). Nothing new was noticed this run outside the fixed defect
+that is worth chasing further.

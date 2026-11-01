@@ -287,6 +287,81 @@ class SystemHealthTest extends TestCase
         Cache::lock(SystemHealthController::REBUILD_LOCK)->forceRelease();
     }
 
+    /**
+     * EDGE CASE #168, the probe half: `index()`'s own `rebuildRunning` field
+     * peeks at `REBUILD_LOCK` via `Cache::lock(REBUILD_LOCK, 0)->get()` with
+     * NO callback and NO matching `release()`. `Illuminate\Cache\Lock::get()`
+     * with no callback is "attempt to ACQUIRE", not "peek" — when nobody
+     * else holds the lock this call itself WINS it. Worse, `seconds=0` does
+     * not mean "no TTL" or "expire immediately": `DatabaseLock::expiresAt()`
+     * falls back to `$defaultTimeoutInSeconds` (24 HOURS) whenever
+     * `$this->seconds > 0` is false — so a single, ordinary GET of the
+     * health dashboard (no rebuild requested, nobody else holding anything)
+     * silently seizes the real admin mutex for a day, with an owner token
+     * nothing will ever call `release()` on.
+     *
+     * Consequence: the NEXT genuine "Rebuild atom cache" click — even
+     * though no rebuild was ever actually running — finds the mutex held
+     * by a stranger owner and queues forever (202, `started:false`), and
+     * every later health-page load reports `rebuildRunning:true` for the
+     * next 24h even though nothing is running. A health dashboard that is
+     * supposed to be read-only disables the one write action on the page
+     * just by being viewed.
+     *
+     * MUTATION: this is the bug AS WRITTEN — no mutation needed to see it
+     * fail; the fix is proven by reverting it (see DECISIONS.md v3-D361).
+     */
+    public function test_checking_rebuild_status_does_not_itself_seize_the_mutex(): void
+    {
+        Cache::lock(SystemHealthController::REBUILD_LOCK)->forceRelease();
+
+        // An ordinary, read-only visit to the health dashboard — no rebuild
+        // requested, nobody else holding the lock.
+        $first = $this->getJson('/api/admin/health');
+        $first->assertOk();
+        $this->assertFalse($first->json('rebuildRunning'), 'nothing is running yet — must report false');
+
+        // The probe above must NOT have left the real mutex held: a genuine
+        // admin click right afterwards must still be able to acquire it.
+        $this->assertTrue(
+            Cache::lock(SystemHealthController::REBUILD_LOCK, 600)->get(),
+            'a read-only health-check GET must never itself seize the rebuild mutex',
+        );
+        Cache::lock(SystemHealthController::REBUILD_LOCK)->forceRelease();
+
+        // And the real admin action must actually run, not queue, right
+        // after an ordinary health-page load.
+        $response = $this->postJson('/api/admin/health/rebuild-atom-cache');
+        $this->assertTrue(
+            $response->json('started'),
+            'a prior health-check GET must never cause a genuine rebuild click to queue as "already running"',
+        );
+
+        Cache::lock(SystemHealthController::REBUILD_LOCK)->forceRelease();
+    }
+
+    /**
+     * The same leak compounds: TWO consecutive health-page loads, with no
+     * rebuild ever requested in between, must BOTH report `rebuildRunning:
+     * false` — proving the first GET did not wedge the mutex for the
+     * second one to see as "held".
+     */
+    public function test_two_consecutive_status_checks_both_report_not_running(): void
+    {
+        Cache::lock(SystemHealthController::REBUILD_LOCK)->forceRelease();
+
+        $first = $this->getJson('/api/admin/health');
+        $this->assertFalse($first->json('rebuildRunning'), 'first check: nothing running');
+
+        $second = $this->getJson('/api/admin/health');
+        $this->assertFalse(
+            $second->json('rebuildRunning'),
+            'second check: still nothing running — the first check must not have self-acquired the mutex',
+        );
+
+        Cache::lock(SystemHealthController::REBUILD_LOCK)->forceRelease();
+    }
+
     /** The rebuild is audited — it is the only mutating action on this surface. */
     public function test_the_rebuild_is_audited(): void
     {

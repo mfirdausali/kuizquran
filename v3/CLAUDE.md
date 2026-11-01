@@ -53,10 +53,73 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3143 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3145 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 426 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1752 apps/web. (v3-D360, 2026-11-01)
+             # 255 v2 vitest + 47 v2/api + 428 v3/api + 120 corpus-compiler
+             # + 470 engine + 73 fold-runner + 1752 apps/web. (v3-D361, 2026-11-01)
+             # NOTE (v3-D361, 2026-11-01): a real, previously-unreported
+             # defect in `SystemHealthController::index()`'s own
+             # `rebuildRunning` mutex probe — `Cache::lock(REBUILD_LOCK,
+             # 0)->get()` with no callback and no matching `release()`.
+             # `Illuminate\Cache\Lock::get()` with no callback ACQUIRES the
+             # lock, it does not peek; and `seconds=0` does not mean "no
+             # TTL" — `DatabaseLock::expiresAt()` falls back to
+             # `defaultTimeoutInSeconds` (24 HOURS) whenever `seconds > 0`
+             # is false. So an ordinary, read-only GET of `/api/admin/health`
+             # — no rebuild requested, nobody else holding the mutex —
+             # silently SEIZED the real `admin:atom-cache-rebuild` lock for
+             # a day, under an owner token nothing would ever release. The
+             # very next genuine "Rebuild atom cache" click then found the
+             # mutex held by a stranger and queued forever (`started:
+             # false`), and every later health-page load kept reporting
+             # `rebuildRunning: true` for the next 24h even though nothing
+             # was running — a read-only admin dashboard disabling the one
+             # write action on its own page just by being viewed. Found by
+             # reading `worker/fold-runner/src/*`'s PHP-side callers named
+             # unswept by v3-D360 (`AtomCacheRebuilder`'s own scheduling
+             # path via `SystemHealthController`, `PerUserFoldLock`,
+             # `FoldRunnerProcess` — all three read in full; `PerUserFoldLock`
+             # and `FoldRunnerProcess` themselves found correct, no defect).
+             # `SystemHealthTest.php` never asserted on `rebuildRunning` at
+             # all before this run, and no test called the health endpoint
+             # twice to see the probe wedge itself. Fixed: `->get(fn () =>
+             # true)` — the callback form acquires, runs, and releases
+             # atomically, so the status check can never leave the mutex
+             # held; `600` (matching the real rebuild lock's own TTL)
+             # replaces the dangerous `0`. RED confirmed directly (two new
+             # cases: a bare GET must not itself block a genuine rebuild
+             # click right after, and two consecutive GETs with nothing
+             # running must both report `false` — both failed against the
+             # unmodified source exactly as predicted) and mutation-verified
+             # (`git stash` of the one production file alone reproduced both
+             # failures identically; restored byte-identically, reran:
+             # `SystemHealthTest.php` 13/13 green, was 11, +2). `TZ=UTC make
+             # test`: 3145 passing (was 3143, +2 — exactly this run's two new
+             # cases; v3/api 428, was 426; no other suite moved: 255 v2
+             # vitest, 47 v2/api, 120 corpus-compiler, 470 engine, 73
+             # fold-runner, 1752 apps/web). `check-test-floor.mjs`: OK, 3145
+             # >= floor 1899 (+1246 margin). `TZ=UTC make build`: exit 0, 30
+             # routes, unchanged (the usual one-time `SecurityFatalError` CLI
+             # nudge on first invocation, not acted on, plain retry built
+             # clean). `npm run gates`: all green, unchanged (345 files, 294
+             # v1 lines, 362 words, 206 codepoints, 2/6 UI fonts present,
+             # degraded-but-non-blocking). `npx tsc --noEmit`: clean across
+             # all four v3 node packages. `./vendor/bin/pint --test`:
+             # identical findings before and after this diff (confirmed by
+             # stashing the diff and re-running) — no new style issue on
+             # either touched file. No `v1/**`/`v2/**` edit (the usual stray
+             # build-cache/.gitignore-mode diffs from running the suites
+             # reverted before committing). No Arabic codepoint (both
+             # changed files swept programmatically — every added line is a
+             # PHP identifier, an HTTP assertion, or a fixed English comment/
+             # doc-string sentence). No oracle/golden-log/fixture/snapshot
+             # regenerated — one existing production file and one existing
+             # test file only. Genuinely unswept, named for next time: a
+             # second pass on the ten `lib/admin/*.ts` loaders (still open
+             # per v3-D359's own closing note); `components/sections
+             # /Mechanism.tsx`/`Proof.tsx` (weak candidate, static copy
+             # already covered by 57 tests). Full detail: DECISIONS.md
+             # v3-D361.
              # NOTE (v3-D360, 2026-11-01): a real, previously-unreported
              # defect on BUILD-PLAN M10's own launch gate — the
              # 7-consecutive-green-nights window. Both real callers of
