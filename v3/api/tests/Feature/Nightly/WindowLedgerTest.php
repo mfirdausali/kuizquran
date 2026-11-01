@@ -61,6 +61,18 @@ class WindowLedgerTest extends TestCase
         return array_map(fn (int $i) => date('Y-m-d', strtotime("2026-09-01 +{$i} day")), range(0, 6));
     }
 
+    /** @return list<string> seven consecutive dates ENDING TODAY (UTC) — for
+     *  any test that exercises `nightly:window`/the HTTP endpoint rather than
+     *  calling `NightlyWindowLedger::status()` directly, since v3-D360 made
+     *  those two real callers pass today's date as `status()`'s own `$today`
+     *  — a fixed past week would otherwise read as a scheduler that stopped
+     *  running the day after its last recorded night, regardless of how
+     *  green that week actually was. */
+    private function recentWeek(): array
+    {
+        return array_map(fn (int $i) => gmdate('Y-m-d', strtotime("-{$i} day")), range(6, 0, -1));
+    }
+
     public function test_seven_green_nights_satisfies_the_window(): void
     {
         $this->window();
@@ -347,14 +359,46 @@ class WindowLedgerTest extends TestCase
 
     public function test_the_window_command_exit_code_is_the_gate(): void
     {
-        $this->window();
-        foreach (array_slice($this->week(), 0, 6) as $d) {
+        // v3-D360: this exercises the real `nightly:window` command, which
+        // now passes today's date into `status()` — so the week must END
+        // TODAY, not at a fixed past date, or the seventh night would read
+        // as a gap no matter how green the recorded nights were.
+        $days = $this->recentWeek();
+        $this->window($days[0]);
+        foreach (array_slice($days, 0, 6) as $d) {
             $this->night($d, 'green');
         }
         $this->artisan('nightly:window')->assertExitCode(1);
 
-        $this->night($this->week()[6], 'green');
+        $this->night($days[6], 'green');
         $this->artisan('nightly:window')->assertExitCode(0);
+    }
+
+    /**
+     * v3-D360: `NightlyWindowLedger::status()`'s own `$today` parameter is
+     * what turns a gap AFTER the last recorded run into an unobserved,
+     * non-green night — the ledger's own header names exactly this scenario
+     * ("a scheduler that silently stopped running... the check has not run
+     * since Tuesday"). `NightlyWindowCommand::handle()` never passed it, so
+     * the streak was only ever checked against the LAST RECORDED run, never
+     * against the clock: a scheduler that reached 7 green nights and then
+     * died outright — host decommissioned, cron disabled, box crashed — left
+     * `satisfied: true` standing forever after. This is the load-bearing
+     * case: 7 consecutive green nights, the most recent one 10 days ago, no
+     * run since. The gate must NOT read satisfied.
+     */
+    public function test_a_scheduler_dead_since_the_last_green_night_does_not_stay_satisfied(): void
+    {
+        $this->window(gmdate('Y-m-d', strtotime('-30 day')));
+        foreach (range(0, 6) as $i) {
+            $this->night(gmdate('Y-m-d', strtotime(sprintf('-%d day', 10 + $i))), 'green');
+        }
+
+        $status = NightlyWindowLedger::status(gmdate('Y-m-d'));
+        $this->assertSame(0, $status['streak']);
+        $this->assertFalse($status['satisfied']);
+
+        $this->artisan('nightly:window')->assertExitCode(1);
     }
 
     /**

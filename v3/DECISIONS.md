@@ -38342,3 +38342,176 @@ sweep; a second pass reading each of those ten purely against its own
 backend contract, the same discipline this entry applied to the remaining
 four, has not been done and could still find something the
 components-first framing missed).
+
+### v3-D360 (2026-11-01, nightly) — The 7-consecutive-green-nights launch gate could report `satisfied: true` forever after the scheduler that feeds it died outright
+
+Picked up v3-D359's own "for next time" lead — `worker/fold-runner/src/*`
+beyond `severity.ts`, read for a genuine logic defect rather than the
+taxonomy-naming check v3-D356 already closed — and followed it outward into
+the PHP-side code that actually consumes the fold-runner's verdicts.
+
+**The fold-runner TS core itself is clean.** Read `fold.ts`,
+`canonicalOrder.ts` (a thin re-export, v3-D261), `engineVersion.ts`,
+`severity.ts`, `determinism.ts`, `foldCheck.ts` and `selectionCheck.ts` in
+full. `AtomState` is entirely flat (`atom.ts`), so `determinism.ts`'s
+`atomsEqual()` plain `===` field compare is safe, not a missed-deep-equality
+bug. `foldCheck.ts`'s per-row skew/divergence classification matches its own
+header exactly. `selectionCheck.ts`'s `tracesCompared` cosmetic mismatch is
+the same already-named, provably-unreachable item v3-D356 recorded — not a
+new finding.
+
+**The real defect is one layer up, in `v3/api`.** `NightlyWindowLedger
+::status(?string $today = null)` has a documented purpose for its `$today`
+parameter: `nights()` extends the materialized night range through `$today`
+so a gap AFTER the last recorded run reads as an unobserved, non-green night
+— the class's own header names exactly this scenario: *"the failure mode it
+guards against is a scheduler that silently stopped running for three days,
+leaving four green rows that a naive `count(green)` would happily call '4
+nights and counting' when the true state is 'the check has not run since
+Tuesday'."*
+
+Grepped every real call site of `NightlyWindowLedger::status(`. There are
+exactly two, and **both pass no argument**:
+
+- `NightlyWindowCommand::handle()` — `php artisan nightly:window`, the "one
+  command and seven dated rows" surface HANDOVER.md C5 names as the human's
+  daily check.
+- `NightlyWindowController::index()` — `GET /api/admin/nightly-window`, the
+  admin panel's read surface.
+
+So in the actually-deployed system, `$today` is never anything but `null`,
+and the gap-after-the-last-run detection the class exists to provide **never
+fires**. `nights()`'s own `$last` variable — the end of the materialized
+range — is clamped to whichever night the last recorded `NightlyCheckRun` row
+names, and nothing else. A scheduler that reaches 7 consecutive green nights
+and then **dies outright** — the host is decommissioned, the cron entry is
+removed, the box crashes and is never replaced — leaves exactly 7 green rows
+in the table forever. Every subsequent call to either surface recomputes the
+identical backward scan over those same 7 rows, finds no gap (because none is
+ever materialized), and reports `streak: 7`, `satisfied: true`, exit 0 — for
+as long as nobody happens to notice that the "night" column's dates stopped
+advancing. This is the single human safety net BUILD-PLAN's own words assign
+to this gate ("a human watching this number by hand is the ENTIRE safety net
+for the gate that blocks public launch," `NightlyWindowController`'s own
+docblock) silently failing at the one job it has.
+
+**Why no test caught it.** `WindowLedgerTest.php`'s direct calls to
+`NightlyWindowLedger::status()` never pass `$today` either — by design, per
+that file's own docblock, "these tests assert the OUTPUT... never the
+ingredient," testing the pure arithmetic independent of wall-clock time. That
+is correct and untouched by this fix. But the file's **one** test that goes
+through the real `nightly:window` command
+(`test_the_window_command_exit_code_is_the_gate`) and `NightlyWindowTest
+.php`'s five tests that go through the real `/api/admin/nightly-window`
+endpoint all used a **fixed historical week** (`2026-09-01` through
+`2026-09-07`, or similar hand-picked dates) — which only ever passed because
+`$today` was never wired to anything. A fixed week is indistinguishable from
+a live one until the wiring is fixed; that is exactly the "shipped vacuous
+verification" shape this build's own history already names roughly a dozen
+instances of (B6, v3-D338's `SystemHealthPanel.tsx`, etc.) — a passing test
+whose pass does not depend on the property it claims to check.
+
+**Fixed:** both real callers now pass `gmdate('Y-m-d')` (the same UTC
+calendar-night convention `DeterminismCheckCommand::record()` and
+`config/nightly.php` already use) as `$today`:
+
+```php
+// NightlyWindowCommand::handle()
+$status = NightlyWindowLedger::status(gmdate('Y-m-d'));
+
+// NightlyWindowController::index()
+$status = NightlyWindowLedger::status(gmdate('Y-m-d'));
+```
+
+`NightlyWindowLedger::status()`/`nights()` themselves are untouched — the bug
+was never in the gap-materialization logic, only in nobody ever asking for
+it.
+
+**RED confirmed directly, in both callers**, before restoring the fix
+(`git stash` of the two one-line production changes, new tests left in
+place): a window declared 30 days ago, 7 consecutive green nights the most
+recent of which is 10 days in the past, nothing recorded since —
+
+- `php artisan nightly:window` exited **0** (should be 1 — not satisfied).
+- `GET /api/admin/nightly-window` returned `streak: 7, satisfied: true`
+  (should be `streak: 0, satisfied: false`).
+
+Both failed exactly as predicted. Restored the two lines byte-identically
+(`git diff` empty before re-applying); reran — both green again.
+
+**Five pre-existing tests needed their fixture dates re-anchored, not their
+assertions weakened**, because a fixed 2026-09-01..07 week is now correctly
+read as "a scheduler dead since 2026-09-08" under the live wiring:
+`NightlyWindowTest.php`'s `test_it_reports_a_real_seven_night_streak_with_evidence`,
+`test_a_confirmed_p1_is_visible_and_resets_the_streak`,
+`test_a_confirmed_p1_carries_its_pseudonymized_findings`,
+`test_a_selection_confirmed_p1_carries_its_divergence_findings`,
+`test_a_quarantined_learner_is_named_on_a_warn_night_that_still_counts_green`;
+`WindowLedgerTest.php`'s `test_the_window_command_exit_code_is_the_gate`. Each
+now uses a new `recentWeek()` helper (one per file) building dates relative to
+`gmdate('Y-m-d')` ending TODAY, so the "last recorded night" in each fixture
+is genuinely the most recent one and no spurious trailing gap is introduced —
+the exact same property each test always claimed to check, now actually
+exercised rather than accidentally satisfied. No assertion was removed,
+loosened, or had its expected value changed to match broken behavior; only
+the calendar anchor moved.
+
+**Two new regression tests added, one per real caller**, both failing
+against the unmodified code per the RED paragraph above:
+`WindowLedgerTest::test_a_scheduler_dead_since_the_last_green_night_does_not_stay_satisfied`
+(the CLI command) and
+`NightlyWindowTest::test_a_dead_scheduler_after_seven_green_nights_does_not_stay_satisfied`
+(the HTTP endpoint).
+
+**Verification, from a clean checkout (`composer install
+--ignore-platform-req=php` worked on stock PHP 8.3.6 for both `v2/api` and
+`v3/api`, same shortcut v3-D329 onward have recorded; `v2/api` additionally
+needed `storage/framework/{cache,sessions,views}`, `storage/logs` and
+`bootstrap/cache` created by hand — `artisan test` otherwise fails
+`PackageManifest.php: bootstrap/cache must be present and writable` — not
+something `make setup` currently does on a bare checkout; both APIs needed
+`.env` from `.env.example`, `key:generate` and a touched `database.sqlite`
+before `migrate`; named here so a future run does not re-diagnose it):
+
+- `php artisan test --filter=Nightly`: 62 passed, 2 skipped (unrelated,
+  Postgres/pcntl-gated), unchanged skip set.
+- `TZ=UTC make test`: **3143 passing** (was 3141, +2 — exactly this run's two
+  new regression tests; `v3/api` 426, was 424; every other suite unchanged:
+  255 v2 vitest, 47 v2/api, 120 corpus-compiler, 470 engine, 73 fold-runner,
+  1752 apps/web).
+- `check-test-floor.mjs`: OK, 3143 >= floor 1899 (+1244 margin).
+- `TZ=UTC make build`: exit 0, 30 routes, unchanged (the usual one-time
+  `SecurityFatalError` CLI nudge on first invocation — not acted on, a plain
+  retry built clean).
+- `./vendor/bin/pint --test` (v3/api): identical finding set before and after
+  this diff, confirmed by stashing the diff and re-running — every flagged
+  file and fixer is pre-existing and untouched by this change.
+- `npm run gates` (apps/web): all green, unchanged — locked-css OK, 1
+  documented hunk, 294 v1 lines byte-identical; boundaries OK, 345 files;
+  fonts degraded-but-non-blocking, 2/6 present; corpus-morphology OK, 362
+  words; corpus-glyphs OK, 206 codepoints across 4 artifacts. This diff
+  touches no TypeScript or corpus file, so none of this was expected to move.
+- No `v1/**`/`v2/**` edit (the usual stray `v2/tsconfig.tsbuildinfo` and
+  `v2/api/storage/**/.gitignore` build-cache diffs reverted before
+  committing — `git status --porcelain -- v1 v2` empty immediately before
+  committing).
+- No Arabic codepoint — all four changed files (two production, two test)
+  swept programmatically over the Arabic, Arabic Supplement, Arabic
+  Extended-A and both Presentation Forms Unicode blocks: CLEAN. Every new
+  string is a PHP identifier, a `Y-m-d` date format, or a fixed English
+  comment/assertion sentence; no corpus text, no `\u`-escape, no
+  `fromCharCode`/`fromCodePoint`.
+- No oracle/golden-log/fixture/snapshot regenerated — this diff touches two
+  existing production files (`NightlyWindowCommand.php`,
+  `NightlyWindowController.php`) and two existing test files
+  (`NightlyWindowTest.php`, `WindowLedgerTest.php`) only.
+
+**NOT addressed, named for next time:** `worker/fold-runner/src/*`'s own PHP
+callers beyond `DeterminismCheckCommand` and the nightly-window pair read
+this run — `AtomCacheRebuilder`'s scheduling path, `PerUserFoldLock`,
+`FoldRunnerProcess` itself (the process-invocation plumbing shared by both
+runners) were not independently re-read for a logic defect, only relied upon
+via their existing passing tests. Every item v3-D359 itself left open and
+did not re-touch this run: a second pass on the ten `lib/admin/*.ts` loaders
+v3-D358 closed components-first; `components/sections/Mechanism.tsx`/
+`Proof.tsx` (named a weak candidate by that entry, still not chased).

@@ -60,7 +60,16 @@ class NightlyWindowCommand extends Command
             $this->line('Nights before this date will NOT count toward the streak, however green.');
         }
 
-        $status = NightlyWindowLedger::status();
+        // v3-D360: `status()`'s own `$today` parameter is what turns a gap
+        // AFTER the last recorded run into an unobserved (non-green) night —
+        // the ledger's own header names exactly this scenario ("a scheduler
+        // that silently stopped running... the check has not run since
+        // Tuesday"). Omitting it, as this call used to, means the streak is
+        // only ever checked against the LAST RECORDED run, never against the
+        // clock: a scheduler that reached 7 green nights and then died
+        // outright left `satisfied: true` standing forever after. See
+        // DECISIONS.md v3-D360.
+        $status = NightlyWindowLedger::status(gmdate('Y-m-d'));
 
         if ($this->option('json')) {
             $this->line((string) json_encode($status, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));

@@ -72,6 +72,16 @@ class NightlyWindowTest extends TestCase
         }
     }
 
+    /** @return list<string> seven consecutive dates ENDING TODAY (UTC) — for
+     *  any test hitting this controller, since v3-D360 made it pass today's
+     *  date into `NightlyWindowLedger::status()`'s own `$today`. A fixed past
+     *  week reads as a scheduler dead since the day after its last recorded
+     *  night, regardless of how green that week actually was. */
+    private function recentWeek(): array
+    {
+        return array_map(fn (int $i) => gmdate('Y-m-d', strtotime("-{$i} day")), range(6, 0, -1));
+    }
+
     public function test_the_route_requires_admin(): void
     {
         $this->getJson('/api/admin/nightly-window')->assertStatus(401);
@@ -97,18 +107,19 @@ class NightlyWindowTest extends TestCase
     public function test_it_reports_a_real_seven_night_streak_with_evidence(): void
     {
         $this->admin();
-        $this->window();
-        foreach (range(0, 6) as $i) {
-            $this->night(date('Y-m-d', strtotime("2026-09-01 +{$i} day")), 'green');
+        $days = $this->recentWeek();
+        $this->window($days[0]);
+        foreach ($days as $d) {
+            $this->night($d, 'green');
         }
 
         $response = $this->getJson('/api/admin/nightly-window')->assertOk();
 
         $this->assertSame(7, $response->json('streak'));
         $this->assertTrue($response->json('satisfied'));
-        $this->assertSame('2026-09-01', $response->json('windowStartedAt'));
+        $this->assertSame($days[0], $response->json('windowStartedAt'));
         $this->assertCount(7, $response->json('nights'));
-        $this->assertSame('2026-09-07', $response->json('nights.6.night'));
+        $this->assertSame($days[6], $response->json('nights.6.night'));
         $this->assertTrue($response->json('nights.6.green'));
     }
 
@@ -121,18 +132,24 @@ class NightlyWindowTest extends TestCase
     public function test_a_confirmed_p1_is_visible_and_resets_the_streak(): void
     {
         $this->admin();
-        $this->window();
-        $this->night('2026-09-01', 'green');
-        $this->night('2026-09-02', 'green');
-        $this->appendRun('2026-09-03', 'fold_determinism_check', 'p1');
-        $this->appendRun('2026-09-03', 'selection_determinism_check', 'green');
-        $this->night('2026-09-04', 'green');
+        [$d1, $d2, $d3, $d4] = [
+            gmdate('Y-m-d', strtotime('-3 day')),
+            gmdate('Y-m-d', strtotime('-2 day')),
+            gmdate('Y-m-d', strtotime('-1 day')),
+            gmdate('Y-m-d'),
+        ];
+        $this->window($d1);
+        $this->night($d1, 'green');
+        $this->night($d2, 'green');
+        $this->appendRun($d3, 'fold_determinism_check', 'p1');
+        $this->appendRun($d3, 'selection_determinism_check', 'green');
+        $this->night($d4, 'green');
 
         $response = $this->getJson('/api/admin/nightly-window')->assertOk();
 
         $this->assertSame(1, $response->json('streak'));
         $this->assertFalse($response->json('satisfied'));
-        $this->assertSame('2026-09-03', $response->json('lastP1.night'));
+        $this->assertSame($d3, $response->json('lastP1.night'));
         $this->assertSame('fold_determinism_check', $response->json('lastP1.check'));
     }
 
@@ -151,18 +168,24 @@ class NightlyWindowTest extends TestCase
     {
         config(['admin.pseudonym_pepper' => 'test-pepper']);
         $this->admin();
-        $this->window();
-        $this->night('2026-09-01', 'green');
-        $this->night('2026-09-02', 'green');
-        $this->appendRun('2026-09-03', 'fold_determinism_check', 'p1', [
+        [$d1, $d2, $d3, $d4] = [
+            gmdate('Y-m-d', strtotime('-3 day')),
+            gmdate('Y-m-d', strtotime('-2 day')),
+            gmdate('Y-m-d', strtotime('-1 day')),
+            gmdate('Y-m-d'),
+        ];
+        $this->window($d1);
+        $this->night($d1, 'green');
+        $this->night($d2, 'green');
+        $this->appendRun($d3, 'fold_determinism_check', 'p1', [
             'atomsCompared' => 4,
             'findings' => [
                 ['userId' => 42, 'key' => '12:ayah:5', 'kind' => 'divergence', 'cachedVersion' => null],
                 ['userId' => 43, 'key' => '12:ayah:9', 'kind' => 'skew', 'cachedVersion' => '2026.08.01'],
             ],
         ]);
-        $this->appendRun('2026-09-03', 'selection_determinism_check', 'green');
-        $this->night('2026-09-04', 'green');
+        $this->appendRun($d3, 'selection_determinism_check', 'green');
+        $this->night($d4, 'green');
 
         $response = $this->getJson('/api/admin/nightly-window')->assertOk();
 
@@ -202,11 +225,17 @@ class NightlyWindowTest extends TestCase
     public function test_a_selection_confirmed_p1_carries_its_divergence_findings(): void
     {
         $this->admin();
-        $this->window();
-        $this->night('2026-09-01', 'green');
-        $this->night('2026-09-02', 'green');
-        $this->appendRun('2026-09-03', 'fold_determinism_check', 'green');
-        $this->appendRun('2026-09-03', 'selection_determinism_check', 'p1', [
+        [$d1, $d2, $d3, $d4] = [
+            gmdate('Y-m-d', strtotime('-3 day')),
+            gmdate('Y-m-d', strtotime('-2 day')),
+            gmdate('Y-m-d', strtotime('-1 day')),
+            gmdate('Y-m-d'),
+        ];
+        $this->window($d1);
+        $this->night($d1, 'green');
+        $this->night($d2, 'green');
+        $this->appendRun($d3, 'fold_determinism_check', 'green');
+        $this->appendRun($d3, 'selection_determinism_check', 'p1', [
             'seeds' => [7, 42],
             'divergences' => [
                 [
@@ -223,7 +252,7 @@ class NightlyWindowTest extends TestCase
                 ],
             ],
         ]);
-        $this->night('2026-09-04', 'green');
+        $this->night($d4, 'green');
 
         $response = $this->getJson('/api/admin/nightly-window')->assertOk();
 
@@ -317,16 +346,18 @@ class NightlyWindowTest extends TestCase
     {
         config(['admin.pseudonym_pepper' => 'test-pepper']);
         $this->admin();
-        $this->window();
-        $this->night('2026-09-01', 'green');
-        $this->appendRun('2026-09-02', 'fold_determinism_check', 'warn', [
+        $d1 = gmdate('Y-m-d', strtotime('-1 day'));
+        $d2 = gmdate('Y-m-d');
+        $this->window($d1);
+        $this->night($d1, 'green');
+        $this->appendRun($d2, 'fold_determinism_check', 'warn', [
             'atomsCompared' => 6,
             'deadLetters' => [
                 ['userId' => 42, 'error' => 'Malformed UTF-8 characters in device_id'],
                 ['userId' => 43, 'error' => 'Inf and NaN cannot be JSON encoded'],
             ],
         ], trigger: 'schedule');
-        $this->appendRun('2026-09-02', 'selection_determinism_check', 'green');
+        $this->appendRun($d2, 'selection_determinism_check', 'green');
 
         $response = $this->getJson('/api/admin/nightly-window')->assertOk();
 
@@ -336,7 +367,7 @@ class NightlyWindowTest extends TestCase
         $this->assertTrue($response->json('nights.1.green'));
         $this->assertSame(2, $response->json('streak'));
 
-        $this->assertSame('2026-09-02', $response->json('lastQuarantine.night'));
+        $this->assertSame($d2, $response->json('lastQuarantine.night'));
         $this->assertSame('fold_determinism_check', $response->json('lastQuarantine.check'));
         $this->assertCount(2, $response->json('lastQuarantine.entries'));
         $this->assertSame(
@@ -392,6 +423,30 @@ class NightlyWindowTest extends TestCase
         $this->getJson('/api/admin/nightly-window')
             ->assertOk()
             ->assertJsonPath('lastQuarantine', null);
+    }
+
+    /**
+     * v3-D360: this controller used to call `NightlyWindowLedger::status()`
+     * with no `$today`, so a gap AFTER the last recorded run never
+     * materialized — the streak was only ever checked against the last row
+     * in the table, never against the clock. A scheduler that produced 7
+     * green nights and then died outright (host decommissioned, cron
+     * disabled) left this endpoint reporting `satisfied: true` forever
+     * after. This is the load-bearing case: 7 consecutive green nights, the
+     * most recent one 10 days ago, nothing since.
+     */
+    public function test_a_dead_scheduler_after_seven_green_nights_does_not_stay_satisfied(): void
+    {
+        $this->admin();
+        $this->window(gmdate('Y-m-d', strtotime('-30 day')));
+        foreach (range(0, 6) as $i) {
+            $this->night(gmdate('Y-m-d', strtotime(sprintf('-%d day', 10 + $i))), 'green');
+        }
+
+        $response = $this->getJson('/api/admin/nightly-window')->assertOk();
+
+        $this->assertSame(0, $response->json('streak'));
+        $this->assertFalse($response->json('satisfied'));
     }
 
     /** READ-ONLY BY CONSTRUCTION — this screen may never declare or reset

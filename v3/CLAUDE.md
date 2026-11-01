@@ -53,10 +53,89 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3141 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3143 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 424 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1752 apps/web. (v3-D359, 2026-11-01)
+             # 255 v2 vitest + 47 v2/api + 426 v3/api + 120 corpus-compiler
+             # + 470 engine + 73 fold-runner + 1752 apps/web. (v3-D360, 2026-11-01)
+             # NOTE (v3-D360, 2026-11-01): a real, previously-unreported
+             # defect on BUILD-PLAN M10's own launch gate — the
+             # 7-consecutive-green-nights window. Both real callers of
+             # `NightlyWindowLedger::status()` (`NightlyWindowCommand
+             # ::handle()`, the `nightly:window` CLI; `NightlyWindowController
+             # ::index()`, the `/api/admin/nightly-window` admin screen)
+             # passed no `$today` — the one parameter that lets
+             # `nights()` materialize a gap AFTER the last recorded run,
+             # exactly the scenario the ledger's own header names as its
+             # reason to exist ("a scheduler that silently stopped
+             # running... the check has not run since Tuesday"). Without
+             # it, the streak was checked only against the LAST RECORDED
+             # row, never against the clock: a scheduler that reached 7
+             # green nights and then died outright — host decommissioned,
+             # cron disabled, box crashed — left both surfaces reporting
+             # `satisfied: true` forever after, with no gap ever
+             # materializing, because nothing ever told the ledger what
+             # day it actually was. No test anywhere exercised this
+             # (`WindowLedgerTest.php`'s direct `status()` calls never
+             # pass `$today` either, by design — they test pure
+             # arithmetic — and the five existing HTTP/CLI tests that DO
+             # exercise the real callers all used a fixed historical week,
+             # which only ever worked because `$today` was never wired to
+             # anything). Found by reading `worker/fold-runner/src/*`
+             # (named by v3-D359 as "beyond severity.ts, for a genuine
+             # logic defect") outward into its PHP-side consumers
+             # (`DeterminismCheckCommand`, `NightlyWindowLedger`,
+             # `NightlyWindowCommand`, `NightlyWindowController`) — the
+             # fold-runner TS core itself (`fold.ts`, `canonicalOrder.ts`,
+             # `engineVersion.ts`, `severity.ts`, `determinism.ts`,
+             # `foldCheck.ts`, `selectionCheck.ts`) read in full and found
+             # correct, no defect there. Fixed: both callers now pass
+             # `gmdate('Y-m-d')` as `$today`. RED confirmed directly in
+             # BOTH callers (reverted the two one-line changes, left the
+             # new tests in place): a window with 7 consecutive green
+             # nights ending 10 days ago, nothing recorded since, reported
+             # `streak: 7`/`satisfied: true`/exit 0 through the CLI
+             # command and the HTTP endpoint both — exactly the stale
+             # "still green" lie this fix closes. Mutation-verified:
+             # restored the two lines byte-identically, reran — green
+             # again. Five pre-existing tests (`NightlyWindowTest.php`'s
+             # seven-night-streak, p1-resets-streak, both P1-findings
+             # cases, and the quarantine-streak case; `WindowLedgerTest
+             # .php`'s command-exit-code case) used a fixed
+             # 2026-09-01..07 week that the fix would otherwise read as a
+             # scheduler dead since 2026-09-08 — re-anchored to dates
+             # ending TODAY (a new `recentWeek()` helper in each file) so
+             # they keep testing the same property under the now-live
+             # wiring, no assertion weakened. `TZ=UTC make test`: 3143
+             # passing (was 3141, +2 — exactly this run's two new cases;
+             # v3/api 426, was 424; no other suite moved: 255 v2 vitest,
+             # 47 v2/api, 120 corpus-compiler, 470 engine, 73 fold-runner,
+             # 1752 apps/web). `check-test-floor.mjs`: OK, 3143 >= floor
+             # 1899 (+1244 margin). `TZ=UTC make build`: exit 0, 30
+             # routes, unchanged (the usual one-time `SecurityFatalError`
+             # CLI nudge on first invocation, not acted on, plain retry
+             # built clean). `./vendor/bin/pint --test`: identical
+             # findings before and after this diff (confirmed by stashing
+             # the diff and re-running) — no new style issue on any
+             # touched file. `npm run gates`: all green, unchanged (345
+             # files, 294 v1 lines, 362 words, 206 codepoints, 2/6 UI
+             # fonts present, degraded-but-non-blocking). No `v1/**`/
+             # `v2/**` edit (the usual stray `v2/tsconfig.tsbuildinfo`/
+             # storage `.gitignore` build-cache diffs reverted before
+             # committing). No Arabic codepoint (all four changed files
+             # swept programmatically over the Arabic/Arabic Supplement/
+             # Arabic Extended-A/Presentation-Forms blocks: CLEAN — every
+             # new string is a PHP identifier, a date format string, or a
+             # fixed English comment/assertion sentence). No oracle/
+             # golden-log/fixture/snapshot regenerated — two production
+             # files and two existing test files only. Genuinely unswept,
+             # named for next time: `worker/fold-runner/src/*`'s PHP-side
+             # callers beyond the ones this entry read
+             # (`AtomCacheRebuilder`'s own scheduling path,
+             # `PerUserFoldLock`, `FoldRunnerProcess`); a second pass on
+             # the ten `lib/admin/*.ts` loaders v3-D358 closed
+             # components-first (still open per v3-D359);
+             # `components/sections/Mechanism.tsx`/`Proof.tsx` (weak).
+             # Full detail: DECISIONS.md v3-D360.
              # NOTE (v3-D359, 2026-11-01): a fifth consecutive fresh-sweep
              # night found NO confirmed defect — closing v3-D358's own
              # "genuinely unswept" `lib/admin/*.ts` list completely (the

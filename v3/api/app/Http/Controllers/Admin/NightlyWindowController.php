@@ -108,7 +108,13 @@ class NightlyWindowController extends Controller
 
     public function index(): JsonResponse
     {
-        $status = NightlyWindowLedger::status();
+        // v3-D360: pass today's date so a gap AFTER the last recorded run —
+        // the scheduler dying outright, not merely a night missing one check
+        // — reads as an unobserved night instead of leaving `satisfied` true
+        // forever at whatever the last recorded run happened to show. See
+        // `NightlyWindowLedger::nights()`'s own header and DECISIONS.md
+        // v3-D360.
+        $status = NightlyWindowLedger::status(gmdate('Y-m-d'));
         $status['lastP1Findings'] = $this->findingsFor($status['lastP1']);
         $status['lastQuarantine'] = $this->lastQuarantine($status['windowStartedAt']);
 
