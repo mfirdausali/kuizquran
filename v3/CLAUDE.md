@@ -56,7 +56,59 @@ make dev     # SPA :5273, API :8000
 make test    # 3141 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 424 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1752 apps/web. (v3-D358, 2026-10-31)
+             # + 470 engine + 73 fold-runner + 1752 apps/web. (v3-D359, 2026-11-01)
+             # NOTE (v3-D359, 2026-11-01): a fifth consecutive fresh-sweep
+             # night found NO confirmed defect — closing v3-D358's own
+             # "genuinely unswept" `lib/admin/*.ts` list completely (the
+             # remaining four: `flags.ts`, `glossDrafts.ts`, `health.ts`,
+             # `flagAudit.ts`, each read in full and cross-checked
+             # field-by-field against its real backend controller —
+             # `Admin\FlagController`, `GlossDraftsController` +
+             # `GlossDraft`/`GlossDraftReview`, `SystemHealthController` +
+             # `AtomCacheRebuilder`, `FlagAuditController` — all correct,
+             # including the `killedAt`/`ackAt` integer-epoch typing
+             # v3-D331 once found broken on this exact table, now
+             # re-confirmed still correct) and re-running the Playwright
+             # e2e suite for the first time since the original M5
+             # build-out: 42/42 passed (chromium + mobile), up from the 34
+             # HANDOVER.md recorded at build-out as a11y-geometry and
+             # `/plan` request-time cases were added since — the CI `e2e`
+             # job (v3-D78) is still correctly wired. One environment-only
+             # snag, not a repo defect: this sandbox's pre-installed
+             # Chromium revision didn't match `@playwright/test`'s pinned
+             # expectation, worked around with an uncommitted local config
+             # pointing `launchOptions.executablePath` at the pre-installed
+             # binary — named in DECISIONS.md so a future run does not
+             # re-diagnose the same "Executable doesn't exist" error as a
+             # real defect. `TZ=UTC make test`: 3141 passing, unchanged
+             # from v3-D358 (255 v2 vitest, 47 v2/api, 424 v3/api, 120
+             # corpus-compiler, 470 engine, 73 fold-runner, 1752 apps/web).
+             # `check-test-floor.mjs`: OK, 3141 >= floor 1899 (+1242
+             # margin, unmoved). `TZ=UTC make build`: exit 0, 30 routes,
+             # unchanged (the usual one-time `SecurityFatalError` CLI
+             # nudge on first invocation, not acted on, plain retry built
+             # clean). No `v1/**`/`v2/**` edit (the usual stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted before
+             # committing). No production file was touched —
+             # documentation only. Session start found `HEAD` detached 4
+             # commits ahead of a stale local `main` and the session's
+             # own initially-cached `origin/main` ref (both at `48ef9dd`,
+             # v3-D354, vs. the real tip `f803f59`, v3-D358) — the
+             # recurring stale-local-`main`/stale-cached-ref trap this
+             # file has recorded roughly fifty times since v3-D77; unlike
+             # most prior instances, the real `origin/main` already had
+             # all four commits, so this was a stale cache, not unpushed
+             # work at risk. Genuinely unswept, named for next time: a
+             # second pass reading each of the ten `lib/admin/*.ts` files
+             # v3-D358 already closed purely against its own backend
+             # contract (the discipline this entry applied to the
+             # remaining four), since that earlier closure read them as
+             # components' callees rather than end to end in their own
+             # right; `worker/fold-runner/src/*` beyond `severity.ts` for
+             # a genuine logic defect; `components/sections/Mechanism.tsx`
+             # and `Proof.tsx` (a weak candidate — static landing copy
+             # already covered by 57 tests). Full detail: DECISIONS.md
+             # v3-D359.
              # NOTE (v3-D358, 2026-10-31): a fresh-sweep night found and fixed
              # one real defect, closing v3-D357's own closing list for
              # `components/quiz/**` and ten of fourteen `lib/admin/*.ts`

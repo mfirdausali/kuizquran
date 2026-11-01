@@ -38201,3 +38201,144 @@ and its per-shape children are the one surface nearly every other
 component in this run delegates rendering to, and have themselves not been
 named as individually re-read by any entry since the original B2/B10
 closures.
+
+### v3-D359 (2026-11-01, nightly) — A fifth consecutive fresh-sweep night found no confirmed defect; closes v3-D358's own "genuinely unswept" `lib/admin/*.ts` list completely and re-runs the Playwright e2e suite for the first time since original build-out
+
+Picked up both items v3-D358 named "for next time": the four remaining
+`lib/admin/*.ts` loaders not yet individually read end to end (`flags.ts`,
+`glossDrafts.ts`, `health.ts`, `flagAudit.ts` — ten of the fourteen files in
+that directory were already closed by that entry), and the Playwright e2e
+suite (`e2e/**`), which no nightly entry since the original M5 build-out had
+re-run.
+
+**The four loaders, read in full and cross-checked field-by-field against
+their real backend counterparts — all correct, no defect found:**
+
+- `flags.ts` (`loadFlags`/`killFlag`/`enableFlag`/`acknowledgeFlag`) against
+  `Admin\FlagController` — every wire field name, status-code branch (404
+  unknown flag, 422 ceremony-incomplete with `errors`, 409 version conflict)
+  and the `killedAt`/`ackAt` integer-epoch typing (the exact shape v3-D331
+  found broken on this same table, now re-confirmed still correct) all agree.
+- `glossDrafts.ts` (`loadGlossDrafts`/`saveGlossDraft`/`reviewGlossDraft`)
+  against `GlossDraftsController` + the `GlossDraft`/`GlossDraftReview`
+  models — the upsert-on-(surah,ayah,position,lang) semantics, the
+  auto-un-review-on-text-edit branch, the `toStatus: "merged"` hard refusal
+  (v3-D15), and both models' `created_at`/`updated_at`/`reviewed_at`
+  `integer` casts (with `$timestamps = false`, so Eloquent never substitutes
+  its own datetime format) all agree with the TS client's `number` typing.
+- `health.ts` (`loadHealth`/`rebuildAtomCache`) against
+  `SystemHealthController` + `AtomCacheRebuilder` — the #167
+  unknown-vs-zero discipline, the #168 queued-vs-failed distinction, and
+  the client's own `deadLetterCount: b.deadLetters.length` (computed from
+  the raw array before the `isDeadLetterEntry` validity filter) checked
+  against the server, which sends only a `deadLetters` array and no
+  separate count field — the client's derivation is the only total that
+  could exist, not a second, possibly-divergent one.
+- `flagAudit.ts` (`loadFlagAudit`) against `FlagAuditController` — the
+  `?flag=` query param name, the nullable-actor-for-the-unattended-scheduler
+  case, and the 200-row hard cap (`limit`) all agree.
+
+Also grepped every production call site of these four modules
+(`FlagsPanel.tsx`, `GlossDraftsPanel.tsx`, `SystemHealthPanel.tsx`,
+`FlagAuditPanel.tsx`) to confirm the wiring itself, not only the module in
+isolation, is correct — each calls its loader/action functions with the
+right argument shapes and already carries the role=status/alert fix this
+sweep closed on each of them in earlier entries (v3-D334/D335/D338).
+
+**With this, `lib/admin/*.ts` — all fourteen files — has now been read end
+to end at least once in its own right, not merely as the thing a component
+calls. Remove it from future "not yet individually read" lists.**
+
+**The Playwright e2e suite: re-run for the first time since the original
+M5 build-out — 42/42 passed, across `chromium` and `mobile` projects.**
+Grew from the 34 HANDOVER.md recorded at build-out (2026-08-11) to 42 as
+the a11y-geometry table-semantics cases and the `/plan` request-time-
+rendering file were added since — this run is the first confirmation any
+of that growth still passes together, end to end, against a real browser
+and the current production build. No test file was touched; this is a
+re-run, not new coverage. `.github/workflows/ci.yml`'s own `e2e` job
+(v3-D78's E9 closure) is still wired in — `playwright.config.ts`,
+`npm run e2e`, and the job's "Build + run the e2e suite" step all still
+agree; not a stale claim.
+
+**Environment-only finding, not a repo change:** this sandbox's
+pre-installed Chromium (`/opt/pw-browsers`, revision 1243) did not match
+the headless-shell revision (1234) `@playwright/test@^1.62.1` expects, so
+the suite's own `npx playwright test` failed every test with "Executable
+doesn't exist" until run through a local-only config
+(`/tmp/.../pw.local.config.ts`, never committed) that re-exports
+`playwright.config.ts` with `use.launchOptions.executablePath` pointed at
+the pre-installed binary and `webServer.cwd` pinned back to
+`v3/apps/web` (importing the real config from outside that directory
+otherwise runs `next start` from the wrong cwd, which then fails to find
+`node_modules`). Named here so a future run does not re-diagnose the same
+"Executable doesn't exist" error as a real defect.
+
+**Full verification** (nothing in the repo changed, so this is a baseline
+confirmation, not a regression check): `TZ=UTC make test`: 3141 passing,
+unchanged from v3-D358 (255 v2 vitest, 47 v2/api, 424 v3/api, 120
+corpus-compiler, 470 engine, 73 fold-runner, 1752 apps/web).
+`check-test-floor.mjs`: OK, 3141 >= floor 1899 (+1242 margin, unmoved).
+`TZ=UTC make build`: exit 0, 30 routes, unchanged (the usual one-time
+`SecurityFatalError` CLI nudge on first invocation — not acted on, per
+every prior entry's own discipline; a plain retry built clean). The e2e
+suite itself (see above): 42/42, first re-run since build-out. No
+`v1/**`/`v2/**` edit (the usual stray `v2/tsconfig.tsbuildinfo` build-cache
+diff reverted before committing — `git status --porcelain -- v1 v2` empty
+immediately before committing). No production file was touched — this
+entry and the CLAUDE.md running note are the only changes.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; PHP defaulted to 8.3.6 (`v3/api` needs >=8.4.1); per the
+repeatedly-recorded shortcut, `composer install --ignore-platform-req=php`
+on stock PHP 8.3.6 worked cleanly for both `v2/api` and `v3/api`. Both API
+projects needed a fresh `.env` + `database.sqlite` + `key:generate`;
+`php artisan migrate --force` ran cleanly for both. **`HEAD` was found
+detached 4 commits ahead of a stale local `main`** (`f803f59`, v3-D358,
+vs. local `main` and the session's own initially-cached `origin/main` both
+at `48ef9dd`, v3-D354) — the recurring stale-local-`main`/stale-cached-ref
+trap this file has recorded roughly fifty times since v3-D77. Unlike most
+prior instances, though, the real `origin/main` already carried all four
+commits (`git push origin main` after `git checkout -B main HEAD`
+answered "Everything up-to-date"; confirmed again with `git fetch origin
+main`) — so this was purely a stale cached ref inside the container, not
+unpushed work at risk, and nothing needed re-sending to the remote.
+
+**NOT addressed:** every item on v3-D358's own condensed "NOT addressed"
+list, unchanged — `foilKernels.ts`'s `DISPLAY_STRIPPED` regex gap (human-
+decision-gated behind content-freeze); `placement.ts#nextProbe()`'s Act-1
+self-referential junction (zero production callers); `rhymeClassOf()`;
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution`/
+`lib/pricing.ts#regionFromCountry()`; `PaywallGate`; multi-surah
+enrollment (product decision); the operational mailer's missing SMTP
+transport/host; PAY-1's Stripe fixtures (blocked on Stripe MY business
+verification); surah 67's scene beats (human-only); `severity.ts`'s
+taxonomy naming; `MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero
+fold-side consumer; `selection_determinism_check` replaying a committed
+fixture; `QueueItem.score`'s missing external reader;
+`acknowledgeReentry`'s "makeup" branch; `DrillPicker.tsx`'s unused `now`
+prop; the unused IndexedDB object stores; `session_start`'s own latency
+metric; the streak/away-day day-space mismatch; `/workbench`'s own Pane
+2/3; the deferred `vitest@5` bump; `laravel/framework`'s remaining
+advisory; `v2/api`'s own frozen advisories; the `trial_surah_source`
+column; `check-test-floor.mjs`'s own floor number — all unchanged.
+
+**Genuinely unswept, named for next time, now that `lib/admin/*.ts` and
+the e2e suite are both closed:** a `grep` across every `components/*/*.tsx`
+file for a name never mentioned anywhere in this file found exactly two —
+`components/sections/Mechanism.tsx` and `components/sections/Proof.tsx`,
+both static landing-page copy sections already exercised by
+`test/landing-claims.test.ts`/`test/landing-page.test.ts` (57 tests
+between them) — a weak candidate, named honestly rather than chased under
+time pressure. Stronger candidates for a future run: re-read
+`worker/fold-runner/src/*` beyond `severity.ts` (closed at v3-D356) for a
+genuine logic defect rather than a taxonomy-naming one; and the admin
+console's write paths this sweep did NOT re-open (`roles.ts`, `users.ts`,
+`reveal.ts`, `purgeLedger.ts`, `billingAudit.ts`, `billingEvents.ts`,
+`audit.ts`, `nightlyWindow.ts`, `session.ts`, `contentFreeze.ts` — all
+fourteen `lib/admin/*.ts` files have now been READ, per this entry, but
+the ten v3-D358 already closed were read as part of a components-first
+sweep; a second pass reading each of those ten purely against its own
+backend contract, the same discipline this entry applied to the remaining
+four, has not been done and could still find something the
+components-first framing missed).
