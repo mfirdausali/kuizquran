@@ -39021,3 +39021,180 @@ remove it from future "genuinely unswept" lists. `SessionGate.tsx`'s and
 unswept, named for next time: `components/plan/PlanIsland.tsx`'s own
 weaker instance of this same shape (above); `components/sections
 /Mechanism.tsx`/`Proof.tsx` (still the same weak candidate).
+
+### v3-D364 (2026-11-03, nightly): a fresh-sweep night found no confirmed defect — `PlanIsland.tsx`'s own `readChoices()` gap disproven as exploitable, closing v3-D363's own two-item list completely
+
+v3-D363 named two candidates for this run: `components/plan
+/PlanIsland.tsx`'s own weaker instance of `SessionGate`/`TestGate`'s
+no-try/catch shape, and `components/sections/Mechanism.tsx`/`Proof.tsx`.
+Both are closed this run — the first by disproof, the second by direct
+read.
+
+**`PlanIsland.tsx`, investigated in full, NOT a genuine defect.** The
+candidate: `PlanIsland`'s own pace-read effect does `const choices =
+await readChoices();` with no try/catch, identical in shape to the
+`SessionGate`/`TestGate` gap v3-D363 fixed. The question v3-D363 itself
+posed was whether this silently shows WRONG data rather than merely
+falling back — so this run traced the actual failure path end to end
+instead of assuming the shapes are equivalent, and they are not, for a
+structural reason specific to this component:
+
+1. `lib/idb/db.ts#openDb()` memoizes its connection in ONE module-level
+   `dbPromise`. Every caller in the same tick before it settles shares
+   the exact same attempt — success or failure together, not
+   independently. `PlanIsland` calls `useLogState(...)` (which itself
+   calls `openDb()` first) and declares the pace-reading `useEffect`
+   (which calls `readChoices()` → `openDb()`) right after it, in the
+   same component, both firing on mount. Both effects' async bodies
+   start in the same synchronous flush, before either has awaited
+   anything, so both share the identical `openDb()` attempt: a real
+   `IdbOpenError` fails them TOGETHER, never the pace read alone.
+2. When that shared failure happens, `useLogState`'s own `state.status`
+   independently becomes `"broken"`, and `PlanIsland`'s `switch
+   (state.status)` renders the `role="alert"` banner at line 175 —
+   already correct, already covered. The pace effect's own silent
+   catch-less rejection never surfaces, because nothing downstream
+   reads `minutesPerDay`/`paceMode` in the `"broken"` branch at all —
+   they are read only inside `case "ready"`, which this failure mode
+   never reaches.
+3. The only way `readChoices()` could fail WITHOUT `useLogState` also
+   failing is for `openDb()` itself to succeed (shared, cached, so both
+   effects get the same live connection) while the SEPARATE `db.get
+   ("meta", CHOICES)` read specifically fails — a narrower, rarer case
+   (an IDB transaction aborting independently of a sibling transaction
+   on a different store, same connection) that was not reproducible by
+   any technique available (the real-open-failure technique
+   `lib/idb/state.test.ts`/v3-D363 use blocks `openDb()` itself, which
+   is exactly case 1-2 above, not case 3).
+4. Even granting case 3 as theoretically possible, the resulting
+   behaviour — `minutesPerDay`/`paceMode` staying at the SAME Steady
+   defaults the page's own server component already passes as
+   `FALLBACK_MINUTES_PER_DAY` (`app/(app)/plan/page.tsx:90`) — is
+   byte-identical to the already-tested, already-accepted, DOCUMENTED
+   behaviour for "this device has no onboarding choice at all"
+   (`test/plan-island.test.tsx`'s own "falls back to the Steady default"
+   case, v3-D221). A learner on Sprint/Maintain whose pace genuinely
+   fails to load sees exactly what a learner who never onboarded a pace
+   choice sees today, by design — not a new, distinguishably-wrong
+   number, just the pre-existing, accepted fallback staying in place one
+   render cycle longer than usual.
+
+So the gap is real as an unhandled-rejection hygiene fact (confirmed by
+reading `lib/onboarding/choices.ts#readChoices` and `lib/idb/db.ts
+#openDb` directly — there is a genuine code path with no catch), but it
+is not an EXPLOITABLE defect: the one case where it could fire
+independently of the already-handled `"broken"` screen produces output
+indistinguishable from an existing, intentional, tested fallback.
+Per NIGHTLY.md's own instruction ("only fix it if you find a genuine
+failure scenario, not just 'could be more defensive'"), no fix was made.
+No test was added — adding one would need to assert on a code path this
+entry just showed does not change any observable behaviour, which is
+not a regression test, it is a tautology.
+
+**`components/sections/Mechanism.tsx`/`Proof.tsx`, read in full, NOT a
+genuine defect.** Both are exactly what v3-D362 already characterized
+them as: 25 and 38 lines, pure presentational components that render a
+`LandingDictionary` prop's own strings through `.map()` with no
+conditionals, no state, no computation, and no event handler — `dict
+.mechanism.points.map(...)`/`dict.proof.citations.map(...)`. There is no
+logic surface for a code defect to occupy; the only thing that could be
+"wrong" is the copy itself, which is a content decision (`lib/landing
+/copy.ts`), not a bug. Closing this candidate for good, not merely
+deferring it again.
+
+**Additional spot-checks this run** (none produced a finding; named so
+a future sweep does not re-read them as fresh ground): `lib/i18n
+/dictionaries.ts` (104 lines, a pure lookup table — the English
+dictionary is the existing copy module re-exported, by design, never a
+second copy); `lib/progress/growth.ts` + `wordAccuracy.ts` (the two
+least-mentioned files under `lib/progress/`; `buildGrowthSummary`'s
+`max = curve[curve.length-1].cumulativeEncoded` relies on
+`heatmap.ts#growthCurve` always emitting a monotonically increasing,
+never-zero cumulative count, confirmed directly by reading
+`growthCurve`'s own body — every point in `perDay` is keyed by at least
+one real first-encode, so the reliance holds); `lib/sync/clockSkew.ts` +
+`digest.ts` + `cursor.ts` + `token.ts` (the four least-mentioned files
+under `lib/sync/`, all four read in full — `token.ts`'s cross-tab
+staleness, where Tab B's in-memory `memoryToken` mirror can briefly
+outlive Tab A's `clearToken()` because `tokenIsDead` is a per-tab
+module-level flag never shared via `localStorage`, was traced through
+`apiFetch.ts`'s own 401 interceptor and confirmed SELF-HEALING: any
+stale token Tab B attaches still 401s on its own next real request,
+which re-triggers the identical `clearToken()`+re-mint path regardless
+of whether `tokenIsDead` was already true — not a defect, a harmless
+extra round-trip, not named as a future candidate); `lib/drill
+/handoff.ts` + `lib/practice/handoff.ts` (both pure, strict URL-param
+parsers, re-verified correct — `to < from` rejected, `Number.isInteger`
+guards every coordinate, an unknown `grade`/`drill` value degrades to
+the documented safe default, never a throw).
+
+**`TZ=UTC make test`: 3150 passing, unchanged from v3-D363** (255 v2
+vitest, 47 v2/api, 428 v3/api, 120 corpus-compiler, 470 engine, 73
+fold-runner, 1757 apps/web — independently re-run from a fresh
+container this session, not merely quoted from the prior entry).
+`check-test-floor.mjs`: OK, 3150 >= floor 1899 (+1251 margin, unmoved).
+`TZ=UTC make build`: exit 0, 30 routes, unchanged (the usual one-time
+`SecurityFatalError` CLI nudge on first invocation, not acted on, plain
+retry built clean). `npm run gates` (apps/web): all green — locked-css
+OK, 1 documented hunk, 294 v1 lines byte-identical; boundaries OK, 347
+files, unchanged; fonts degraded-but-non-blocking, pre-existing, 2/6 UI
+fonts present; corpus-morphology OK, 362 words; corpus-glyphs OK, 206
+codepoints across 4 artifacts. `npx tsc --noEmit` (apps/web): clean. No
+PHP file changed, so `pint` was not applicable. No `v1/**`/`v2/**` edit
+(the usual stray `v2/tsconfig.tsbuildinfo` build-cache diff from running
+the v2 suite during setup was reverted before committing — `git status
+--porcelain -- v1 v2` empty immediately before committing). No Arabic
+codepoint, no `\u` escape, no `fromCharCode`/`fromCodePoint` — this
+entry introduces no new line of production or test code at all, only
+documentation. No oracle/golden-log/fixture/snapshot regenerated. No
+production file was touched this run.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; PHP defaulted to 8.3.6 (`v3/api` needs the
+`composer.lock`-pinned Symfony floor of >=8.4.1, not the real
+`composer.json` floor of ^8.2); `composer install
+--ignore-platform-req=php` worked cleanly for `v3/api` on stock PHP
+8.3.6, the same repeatedly-recorded shortcut (`v2/api`'s own plain
+`composer install`, run by `make setup` itself, needed no such flag).
+`HEAD` was found already at `origin/main`'s own real tip (`2191b22`,
+v3-D363) but DETACHED, with local `main` three commits behind
+(`48ef9dd`) — the recurring stale-local-`main` trap this file has
+recorded roughly fifty times since v3-D77 — caught before any
+exploration via `git checkout -B main HEAD`.
+
+**Every item on v3-D363's own condensed "NOT addressed" list is
+unchanged**, except the two closed above — `foilKernels.ts`'s
+`DISPLAY_STRIPPED` regex gap (human-decision-gated); `placement.ts
+#nextProbe()`'s Act-1 self-referential junction (zero production
+callers); `rhymeClassOf()`; `EntitlementMachine::merge()`; `App\Billing
+\TrialAttribution`/`lib/pricing.ts#regionFromCountry()`; `PaywallGate`;
+multi-surah enrollment (product decision); the operational mailer's
+missing SMTP transport/host; PAY-1's Stripe fixtures; surah 67's scene
+beats (human-only); `severity.ts`'s taxonomy naming; `MacroFacts.litany
+.rhymeLabel`; `corpusHash`'s zero fold-side consumer;
+`selection_determinism_check` replaying a committed fixture;
+`QueueItem.score`'s missing external reader; `acknowledgeReentry`'s
+"makeup" branch; `DrillPicker.tsx`'s unused `now` prop; the unused
+IndexedDB object stores; `session_start`'s own latency metric; the
+streak/away-day day-space mismatch; `/workbench`'s own Pane 2/3; the
+deferred `vitest@5` bump; `laravel/framework`'s remaining advisory;
+`v2/api`'s own frozen advisories; the `trial_surah_source` column — all
+unchanged.
+
+`components/plan/PlanIsland.tsx`'s `readChoices()` gap and
+`components/sections/Mechanism.tsx`/`Proof.tsx` are both now CLOSED as
+candidates — remove them from future "genuinely unswept" lists; neither
+should be re-opened without a materially new angle, since both were
+disproven/read on their own merits here, not merely skipped again.
+Genuinely unswept, named for next time: the Playwright e2e suite
+(`e2e/**`, last run at v3-D359, several commits/fixes ago — worth a
+fresh run to confirm nothing regressed since); `lib/sync/sync.ts`'s own
+`pullFromServer`/`pushToServer` bodies end-to-end (its satellite modules
+— `merge.ts`, `outbox.ts`, `cursor.ts`, `digest.ts`, `clockSkew.ts`,
+`token.ts`, `summary.ts` — are all individually well-trodden, but the
+orchestrating function itself, 374 lines, has mostly been read as a
+caller of those, not audited start to finish in its own right);
+`lib/drill/preview.ts`/`lib/drill/sites.ts` (both real, both the site of
+several PAST defects — v3-D199 and others — so a fresh read might find
+a sibling gap the same way v3-D338 found `SystemHealthPanel.tsx`'s gap
+after `AdminGate.tsx` et al. were already "closed").

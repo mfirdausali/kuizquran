@@ -57,6 +57,53 @@ make test    # 3150 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 428 v3/api + 120 corpus-compiler
              # + 470 engine + 73 fold-runner + 1757 apps/web. (v3-D363, 2026-11-02)
+             # NOTE (v3-D364, 2026-11-03): a fresh-sweep night found no
+             # confirmed defect — closed both items v3-D363 named next.
+             # `PlanIsland.tsx`'s own no-try/catch `readChoices()` call
+             # (same shape as the SessionGate/TestGate bug v3-D363 fixed)
+             # was traced end to end and DISPROVEN as exploitable:
+             # `openDb()` memoizes one connection, so a real open failure
+             # fails PlanIsland's log-read effect and its pace-read effect
+             # TOGETHER (both fire in the same mount tick, before either
+             # awaits) — and when that happens, `useLogState`'s own
+             # `state.status` independently becomes "broken" and the
+             # component already renders the correct `role="alert"`
+             # banner, never reaching the branch that reads
+             # `minutesPerDay`/`paceMode` at all. The one theoretical case
+             # where `readChoices()` could fail alone (openDb() succeeds,
+             # but the separate `meta` store read fails) was not
+             # reproducible, and even granting it, the resulting fallback
+             # is byte-identical to the already-tested, already-accepted
+             # "no onboarding choice committed" behavior (v3-D221) — not
+             # a new, distinguishably-wrong number. No fix made; a test
+             # asserting "no observable behavior changes" would be a
+             # tautology, not a regression test.
+             # `components/sections/Mechanism.tsx`/`Proof.tsx`: read in
+             # full, confirmed pure presentational (`.map()` over a dict
+             # prop, no logic surface for a code defect at all) — closed
+             # for good. Additional spot-checks, all clean: `lib/i18n
+             # /dictionaries.ts`; `lib/progress/growth.ts`+`wordAccuracy
+             # .ts`; `lib/sync/clockSkew.ts`+`digest.ts`+`cursor.ts`
+             # +`token.ts` (token.ts's cross-tab stale-memory-mirror
+             # question traced through apiFetch.ts's 401 interceptor and
+             # confirmed self-healing, not a defect); `lib/drill
+             # /handoff.ts`+`lib/practice/handoff.ts`. `TZ=UTC make test`:
+             # 3150 passing, unchanged (independently re-run from a fresh
+             # container this session: 255 v2 vitest, 47 v2/api, 428
+             # v3/api, 120 corpus-compiler, 470 engine, 73 fold-runner,
+             # 1757 apps/web). `check-test-floor.mjs`: OK, +1251 margin,
+             # unmoved. `TZ=UTC make build`: exit 0, 30 routes, unchanged
+             # (usual one-time SecurityFatalError CLI nudge, plain retry
+             # built clean). `npm run gates`: all green, 347 files,
+             # unchanged. `npx tsc --noEmit`: clean. No `v1/**`/`v2/**`
+             # edit (usual stray `v2/tsconfig.tsbuildinfo` reverted). No
+             # production file touched this run — documentation only.
+             # Genuinely unswept, named for next time: the Playwright e2e
+             # suite (`e2e/**`, last run v3-D359); `lib/sync/sync.ts`'s
+             # own orchestrating functions end-to-end (its satellite
+             # modules are all well-trodden individually); `lib/drill
+             # /preview.ts`/`sites.ts` (past defect site, worth a fresh
+             # look). Full detail: DECISIONS.md v3-D364.
              # NOTE (v3-D363, 2026-11-02): a fresh, non-admin-surface sweep
              # (per v3-D362's own closing note) read `components/quiz/**`
              # (QuizCard + its four shape children, FaceText, reveal.ts) and
