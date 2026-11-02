@@ -214,6 +214,29 @@ export async function advanceLowWaterIfProven(
   await writeOutboxLowWater(throughSeq);
 }
 
+/**
+ * Read-only discovery of every currently-quarantined row, with NO writer
+ * requirement — unlike `pushOutbox`, this never sends, never calls
+ * `markSynced`, and never advances the low-water hint. `selectPending`
+ * itself is already just a readonly IDB scan (the writer-only part of
+ * draining the outbox is the POST + `markSynced` that `pushOutbox` wraps
+ * around it), so any tab — writer or reader — can safely call this to
+ * answer "is a #110 poison event stuck right now" without ever attempting
+ * to send anything.
+ *
+ * A single unbounded call, not a chunked loop like `pushOutbox`'s: chunking
+ * exists there to bound memory while actually sending a large backlog, but
+ * this never holds `rows` for longer than one function call and never
+ * accumulates sendable rows across iterations — a second bounded call would
+ * re-scan the SAME window (nothing here ever advances the low-water hint)
+ * and loop forever. Mirrors `countPending()`'s own unbounded full-scan
+ * precedent one function above.
+ */
+export async function scanQuarantined(): Promise<QuarantinedEvent[]> {
+  const { quarantined } = await selectPending(Number.MAX_SAFE_INTEGER);
+  return quarantined;
+}
+
 /** Split a list into batches of at most `size`, preserving order. */
 export function chunk<T>(items: readonly T[], size = OUTBOX_BATCH_MAX): T[][] {
   const out: T[][] = [];

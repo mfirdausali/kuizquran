@@ -181,6 +181,49 @@ describe("v3-D161 — every completed cycle reports to lib/sync/summary.ts", () 
       authDead: false,
     });
   });
+
+  it("still carries a real #110 oversize quarantine into syncSummary from a READER tab — selectPending's discovery is a readonly IDB scan with no writer requirement, unlike the send/mark-synced half of pushOutbox", async () => {
+    installFetch();
+    // Appended while genuinely the writer (beforeEach's default) — a real
+    // device always writes through SOME tab first. This tab then becomes a
+    // reader BEFORE SyncTrigger ever mounts, the ordinary "second tab is
+    // read-only" shape (edge case #75), not a contrived state: the write
+    // lock is held by exactly one tab for the life of a multi-tab session,
+    // so a learner checking /progress or /home in a second tab while
+    // /session stays open (and writer) elsewhere is this exact scenario.
+    await append(
+      {
+        type: "tap",
+        ts: 1_700_000_000_000,
+        surah: 112,
+        ayah: 1,
+        rung: "S1",
+        id: "oversize-reader-1",
+        specSnapshot: { pad: "x".repeat(20_000) },
+      },
+      { now: 1_700_000_000_000, tz: "UTC" },
+    );
+    writeLock.forceForTests({ role: "reader", reason: "another-tab" });
+
+    expect(syncSummary.current.cannotSync).toBe(0);
+
+    render(<SyncTrigger />);
+
+    // The reader tab's own cycle never attempts to send anything (pushOutbox
+    // throws NotWriterError before it ever calls selectPending), but the
+    // quarantined row is already sitting in the SHARED IndexedDB log — it
+    // does not depend on which tab wrote it. A learner on this tab must
+    // still see the #110 escalation; it must never read as "all synced"
+    // just because this tab happens not to hold the write lock right now.
+    await waitFor(() => expect(syncSummary.current.cannotSync).toBeGreaterThan(0));
+    expect(syncSummary.current).toEqual({
+      cannotSync: 1,
+      divergences: 0,
+      futureTs: 0,
+      clockSkewMs: null,
+      authDead: false,
+    });
+  });
 });
 
 describe("v3-D240 — every completed cycle also reports #111 far-future timestamps into syncSummary", () => {

@@ -50,6 +50,7 @@ export {
   EVENT_BYTE_MAX,
   markSynced,
   OUTBOX_BATCH_MAX,
+  scanQuarantined,
   selectPending,
   wireBytes,
 } from "./outbox.ts";

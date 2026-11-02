@@ -42,6 +42,7 @@ import {
   countPending,
   markSynced,
   OUTBOX_BATCH_MAX,
+  scanQuarantined,
   selectPending,
   type QuarantinedEvent,
 } from "./outbox.ts";
@@ -348,12 +349,33 @@ export async function syncCycle(ctx: SyncContext): Promise<CycleResult> {
     pending = 0;
   }
 
+  // `push` is `null` whenever this tab never got to drain the outbox — in
+  // practice almost always `NotWriterError`, since `pushOutbox` calls
+  // `assertWriter()` before it ever calls `selectPending()` (the function
+  // that actually discovers a quarantined row). But #110's quarantine is a
+  // fact about the SHARED, IndexedDB-backed log, not about this tab's own
+  // write-lock status — the row was already stuck before this cycle ran,
+  // regardless of which tab wrote it. A reader tab (edge case #75's
+  // ordinary "second tab is read-only" shape) must still be able to answer
+  // "is something stuck", via the one discovery path that needs no writer
+  // lock at all (`scanQuarantined`, a readonly scan).
+  let quarantined: QuarantinedEvent[];
+  if (push) {
+    quarantined = push.quarantined;
+  } else {
+    try {
+      quarantined = await scanQuarantined();
+    } catch {
+      quarantined = [];
+    }
+  }
+
   return {
     push,
     pull,
     pending,
     divergences: pull?.divergences ?? [],
-    quarantined: push?.quarantined ?? [],
+    quarantined,
     futureTs: pull?.futureTs ?? [],
     clockSkewMs: pull?.clockSkewMs ?? null,
   };

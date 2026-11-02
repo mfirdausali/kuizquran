@@ -39339,3 +39339,175 @@ v3-D344, but the page-level wiring itself was not); the browser-
 provisioning mismatch behind the e2e workaround above, if anyone wants
 to fix it at the infrastructure level instead of re-working around it
 each time.
+
+### v3-D366 (2026-11-03, nightly): the #110 "cannot sync" escalation was invisible on every tab except the one holding the write lock
+
+v3-D365 named `lib/sync/summary.ts` (read only as a type-shape dependency
+by other sweeps) as genuinely unswept. Reading it in full led straight
+to its one real caller, `components/shell/SyncTrigger.tsx`, and from
+there to `lib/sync/sync.ts#syncCycle()` — a real, previously-unreported
+defect, on the exact #110/#75 escalation this sweep has repeatedly
+closed instances of on the ADMIN side (v3-D329..D338) but never checked
+on the sync side itself.
+
+**The defect.** `syncCycle()`'s `CycleResult.quarantined` — which
+`lib/sync/summary.ts#SyncSummaryStore.report()` turns into
+`SyncStatus.tsx`'s own `cannotSync` escalation, the #110 "a poison event
+can never sync" fact the component's own header names as one of "the
+two cases that genuinely need a human" — was sourced exclusively from
+`push?.quarantined`. But `push` is `null` on EVERY tab that is not the
+current write-lock holder: `pushOutbox()` calls `assertWriter()` as its
+very first statement, before it ever calls `selectPending()` — the
+function that actually discovers a quarantined row by scanning
+IndexedDB. The write lock is held by exactly one tab for the life of a
+multi-tab session (edge case #75's own ordinary "second tab is
+read-only" shape, not a contrived state) — `lib/sync/summary.ts`'s
+`syncSummary` store is a per-tab module singleton, so a reader tab's own
+`SyncTrigger` effect ran a real cycle, got `push: null`
+(`NotWriterError`, caught and swallowed exactly as its own comment
+describes: "in practice always `NotWriterError`"), and reported
+`quarantined: []` — ALWAYS, regardless of what was actually stuck in
+the shared, on-disk log. A learner with `/session` open in one tab (the
+writer) and `/progress` or `/home` open in a second tab (the ordinary
+reader) would see "All synced" in that second tab forever, even while a
+genuine #110 poison event sat permanently wedged — the exact scenario
+this component's own header says it exists to escalate, invisible on
+every surface but one.
+
+Divergences (#50) and the far-future-timestamp/clock-skew facts (#111)
+do not share this gap: `pullFromServer` carries no writer requirement at
+all, so those three fields were already computed correctly on every
+tab. Only the quarantine count — discovered solely inside the
+writer-gated half of `pushOutbox` — was affected.
+
+**Why nothing caught it.** `test/sync-trigger.test.tsx`'s own
+`beforeEach` forces `writeLock.forceForTests({ role: "writer" })`
+globally, for every test in the file, including the existing v3-D161
+"carries a real #110 oversize quarantine into syncSummary" case — so
+that test, the one piece of coverage closest to this exact fact, has
+never once run as a reader tab. `lib/sync/outbox.test.ts`'s own
+`beforeEach` does the same. No test anywhere combined "a genuinely
+quarantined row already sits in the log" with "this tab is a reader."
+
+**Fixed.** `outbox.ts` gained `scanQuarantined()`: a single unbounded
+`selectPending(Number.MAX_SAFE_INTEGER)` call, read-only, with no writer
+requirement — `selectPending` itself was already just an IDB scan; the
+writer-only part of draining the outbox is the POST + `markSynced` that
+`pushOutbox` wraps around it, never the discovery itself. One call, not
+a chunked loop like `pushOutbox`'s own: chunking there bounds memory
+while actually sending a large backlog, but nothing here ever advances
+the low-water hint, so a second bounded call would re-scan the exact
+same window and loop forever — mirrors `countPending()`'s own existing
+unbounded full-scan precedent instead. `syncCycle()` now falls back to
+`scanQuarantined()` whenever `push` is `null` (never touching the
+writer's own already-correct `push.quarantined` path when `push`
+succeeded), so a reader tab answers "is something stuck" from the same
+shared log every other tab reads, without ever attempting to send
+anything itself.
+
+**Verified:**
+- RED confirmed directly: a new case in `test/sync-trigger.test.tsx`
+  seeds a genuinely oversize row while this tab is the writer (matching
+  the existing v3-D161 case exactly), switches the tab to
+  `{role: "reader", reason: "another-tab"}` — the ordinary #75
+  shape — mounts `SyncTrigger`, and asserts `cannotSync` becomes `1`.
+  Run against the unmodified source it failed exactly as predicted:
+  `expected 0 to be greater than 0`, timing out in `waitFor`. Three
+  further unit cases in `lib/sync/outbox.test.ts` pinned
+  `scanQuarantined()` itself directly: it fails the same way before the
+  function exists (`scanQuarantined is not a function`), then (fixed)
+  finds a poison row from a reader tab without sending or marking
+  anything synced, re-reports the same still-quarantined row on every
+  call (never accumulating, never forgetting it — the same contract
+  v3-D349 already pinned for `selectPending` itself), and reports
+  nothing when nothing is quarantined.
+- Mutation-verified: `git stash` of the three production files alone
+  (`outbox.ts`, `sync.ts`, `index.ts` — all five new tests kept)
+  reproduced all four predicted failures identically; restored
+  byte-identically (`git stash pop`), reran: all four green again.
+- `TZ=UTC make test`: **3154 passing** (was 3150, +4 — exactly these
+  four new cases; apps/web 1761, was 1757; no other suite moved: 255 v2
+  vitest, 47 v2/api, 428 v3/api, 120 corpus-compiler, 470 engine, 73
+  fold-runner). `check-test-floor.mjs`: OK, 3154 >= floor 1899 (+1255
+  margin). `TZ=UTC make build`: exit 0, 30 routes, unchanged (the usual
+  one-time `SecurityFatalError` CLI nudge on first invocation, not acted
+  on, plain retry built clean). `npm run gates`: all green — locked-css
+  OK, 1 documented hunk, 294 v1 lines byte-identical; boundaries OK, 347
+  files, unchanged (no new production file — `scanQuarantined` is a new
+  export inside an existing file); fonts degraded-but-non-blocking,
+  pre-existing, 2/6 UI fonts present; corpus-morphology OK, 362 words;
+  corpus-glyphs OK, 206 codepoints across 4 artifacts. `npx tsc
+  --noEmit`, run separately across all four v3 node packages: clean in
+  all four. No PHP file changed, so `pint` was not applicable. No
+  `v1/**`/`v2/**` edit (the usual stray `v2/tsconfig.tsbuildinfo`
+  build-cache diff from running the suites during setup reverted before
+  committing — `git status --porcelain -- v1 v2` empty immediately
+  before committing). No Arabic codepoint, no `\u` escape, no
+  `fromCharCode`/`fromCodePoint` introduced by this diff (checked
+  directly against the diff's own added lines via a Unicode-block sweep
+  over U+0600–06FF, U+0750+, and both presentation-forms blocks: clean —
+  every new string is a TypeScript identifier or a fixed English
+  comment/assertion sentence). No oracle/golden-log/fixture/snapshot
+  regenerated — three existing production files and two existing test
+  files only.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus/sqlite databases anywhere; PHP defaulted to 8.3.6 (`v3/api` needs
+the `composer.lock`-pinned Symfony floor of >=8.4.1, not the real
+`composer.json` floor of ^8.2); `composer install
+--ignore-platform-req=php` worked cleanly for `v3/api` on stock PHP
+8.3.6, the same repeatedly-recorded shortcut — `make setup` itself fails
+on this exact platform-req mismatch (exit 2, Problems 1-7 all "requires
+php >=8.4.1"), so the ignore-flag install had to be run as a separate
+step after `make setup` failed partway through, with the remaining `npm
+install`s across `corpus-compiler`/`engine`/`fold-runner`/`apps/web` run
+directly and in parallel afterward — all completed cleanly, just a
+longer wall-clock than a single `make setup` run would suggest.
+`HEAD`, local `main` and `origin/main` all already agreed at `59ff464`
+(v3-D365) but `HEAD` was DETACHED — the recurring stale-local-`main`
+trap this file has recorded roughly fifty times since v3-D77 — caught
+via `git checkout -B main HEAD` before any exploration, a clean reset,
+no work lost or at risk.
+
+**NOT addressed, named for next run:** every item on v3-D365's own
+condensed "NOT addressed" list, unchanged — `foilKernels.ts`'s
+`DISPLAY_STRIPPED` regex gap (human-decision-gated); `placement.ts
+#nextProbe()`'s Act-1 self-referential junction (zero production
+callers); `rhymeClassOf()`; `EntitlementMachine::merge()`; `App\Billing
+\TrialAttribution`/`lib/pricing.ts#regionFromCountry()`; `PaywallGate`;
+multi-surah enrollment (product decision); the operational mailer's
+missing SMTP transport/host; PAY-1's Stripe fixtures; surah 67's scene
+beats (human-only); `severity.ts`'s taxonomy naming; `MacroFacts.litany
+.rhymeLabel`; `corpusHash`'s zero fold-side consumer;
+`selection_determinism_check` replaying a committed fixture;
+`QueueItem.score`'s missing external reader; `acknowledgeReentry`'s
+"makeup" branch; `DrillPicker.tsx`'s unused `now` prop; the unused
+IndexedDB object stores; `session_start`'s own latency metric; the
+streak/away-day day-space mismatch; `/workbench`'s own Pane 2/3; the
+deferred `vitest@5` bump; `laravel/framework`'s remaining advisory;
+`v2/api`'s own frozen advisories; the `trial_surah_source` column — all
+unchanged. `app/(app)/surah/[surah]/[ayah]/page.tsx`'s own data-fetching
+glue (named by v3-D365) WAS read this run, directly, before the
+`summary.ts` thread was followed instead: `parseSurah`/`parseAyah`'s
+deliberate out-of-range-is-not-404 design (documented in the file's own
+comment), `loadEffectiveCorpus`'s per-request override refetch (no
+v3-D353-shaped staleness — only the raw corpus is process-cached),
+`buildFace`/`resolveRef`'s safe-null degradation for an out-of-range
+ayah or word position (traced directly in `corpusRef.ts`), and
+`AyahStatsIsland`'s own surah-scoped event selector were all checked
+and found correct — no defect there. Removing it from future sweep
+lists as closed, not merely deferred again.
+
+`lib/sync/summary.ts`'s own gap is now CLOSED — remove it from future
+"genuinely unswept" lists. Genuinely unswept, named for next time:
+`lib/sync/outbox.ts`'s own `advanceLowWaterIfProven`/`writeOutboxLowWater`
+interaction with the new `scanQuarantined` read path (the read path
+never calls either, by design, but a future change to one should be
+checked against the other); the Playwright e2e suite's own interaction
+with multi-tab write-lock transitions (`e2e/**` has never driven a
+genuine two-tab scenario — only `lib/idb/writeLock.test.ts` and
+`test/sync-trigger.test.tsx` exercise the reader/writer transition, both
+unit/component level, never a real second browser context); the
+browser-provisioning mismatch behind the e2e workaround (still
+unaddressed at the infrastructure level, carried forward from v3-D365
+and several entries before it).

@@ -24,7 +24,14 @@ import type { DrillEvent } from "@engine/types.ts";
 import { append } from "@/lib/idb/append";
 import { openDb, resetDbForTests } from "@/lib/idb/db";
 import { writeLock } from "@/lib/idb/writeLock";
-import { countPending, EVENT_BYTE_MAX, OUTBOX_BATCH_MAX, selectPending, wireBytes } from "./outbox.ts";
+import {
+  countPending,
+  EVENT_BYTE_MAX,
+  OUTBOX_BATCH_MAX,
+  scanQuarantined,
+  selectPending,
+  wireBytes,
+} from "./outbox.ts";
 import { pushOutbox } from "./sync.ts";
 import { resetApiFetchForTests } from "./apiFetch.ts";
 import { resetTokenForTests, setToken } from "./token.ts";
@@ -325,6 +332,40 @@ describe("#110 — oversize quarantine", () => {
     const second = await pushOutbox({ now: CTX.now });
     expect(second.quarantined.map((q) => q.id)).toEqual(["poison"]);
     expect(await countPending()).toBe(1);
+  });
+
+  describe("scanQuarantined — the same discovery, with no writer lock at all", () => {
+    it("finds a poison row from a READER tab, where pushOutbox could never even attempt to run", async () => {
+      // Appended while genuinely the writer — a real device always writes
+      // through SOME tab first.
+      await append(ev({ id: "poison", specSnapshot: bigSnapshot }), CTX);
+      await append(ev({ id: "after-1" }), CTX);
+
+      // This tab is now a reader — `pushOutbox`'s own `assertWriter()` would
+      // throw before ever reaching `selectPending`, so it is not even called
+      // here. `scanQuarantined` is the one discovery path that does not care.
+      writeLock.forceForTests({ role: "reader", reason: "another-tab" });
+
+      const quarantined = await scanQuarantined();
+      expect(quarantined.map((q) => q.id)).toEqual(["poison"]);
+
+      // Readonly: nothing was sent, nothing was marked synced, and the
+      // sendable row behind the poison one is still pending — a reader tab's
+      // discovery must never masquerade as a drain.
+      expect(await countPending()).toBe(2);
+    });
+
+    it("re-reports the same still-quarantined row on every call, never accumulating or forgetting it", async () => {
+      await append(ev({ id: "poison", specSnapshot: bigSnapshot }), CTX);
+
+      expect((await scanQuarantined()).map((q) => q.id)).toEqual(["poison"]);
+      expect((await scanQuarantined()).map((q) => q.id)).toEqual(["poison"]);
+    });
+
+    it("finds nothing when nothing is quarantined", async () => {
+      await appendMany(3);
+      expect(await scanQuarantined()).toEqual([]);
+    });
   });
 });
 

@@ -53,10 +53,69 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3150 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3154 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 428 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1757 apps/web. (v3-D363, 2026-11-02)
+             # + 470 engine + 73 fold-runner + 1761 apps/web. (v3-D366, 2026-11-03)
+             # NOTE (v3-D366, 2026-11-03): the #110 "cannot sync" escalation
+             # (lib/sync/summary.ts's own `cannotSync`, surfaced by
+             # SyncStatus.tsx) was invisible on every tab except the one
+             # holding the write lock — `syncCycle()`'s `CycleResult
+             # .quarantined` came only from `push?.quarantined`, and `push`
+             # is unconditionally `null` on a reader tab (`pushOutbox`'s
+             # `assertWriter()` throws before it ever calls `selectPending`,
+             # the function that actually discovers a quarantined row). Edge
+             # case #75's ordinary "second tab is read-only" shape meant a
+             # learner with `/session` open as the writer and `/progress` or
+             # `/home` open as a reader elsewhere would see "All synced" in
+             # the reader tab forever, even with a genuine #110 poison event
+             # permanently wedged in the shared, on-disk log. Fixed: a new
+             # `outbox.ts#scanQuarantined()` — a single unbounded, read-only
+             # `selectPending` scan with no writer requirement — is what
+             # `syncCycle()` falls back to whenever `push` is `null`, so a
+             # reader tab answers "is something stuck" from the same shared
+             # log every tab reads, without ever attempting to send
+             # anything. `test/sync-trigger.test.tsx`'s own `beforeEach`
+             # forces writer role for every test in the file (including the
+             # one case closest to this exact fact, v3-D161's own quarantine
+             # test), so no test had ever combined "a row is already
+             # quarantined" with "this tab is a reader" before now. RED
+             # confirmed directly (the new reader-tab case, run against the
+             # unmodified source, failed exactly as predicted — `expected 0
+             # to be greater than 0`) and mutation-verified (`git stash` of
+             # the three production files alone, all five new tests kept,
+             # reproduced all four predicted failures identically; restored
+             # byte-identically, reran green). `TZ=UTC make test`: 3154
+             # passing (was 3150, +4 — exactly these four new cases; apps/web
+             # 1761, was 1757; no other suite moved). `check-test-floor.mjs`:
+             # OK, 3154 >= floor 1899 (+1255 margin). `TZ=UTC make build`:
+             # exit 0, 30 routes, unchanged (the usual one-time
+             # `SecurityFatalError` CLI nudge on first invocation, not acted
+             # on, plain retry built clean). `npm run gates`: all green, 347
+             # files, unchanged (no new production file). `npx tsc --noEmit`,
+             # run separately across all four v3 node packages: clean in all
+             # four. No `v1/**`/`v2/**` edit (the usual stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted before
+             # committing). No Arabic codepoint, no `\u` escape, no
+             # `fromCharCode`/`fromCodePoint` introduced. No oracle/
+             # golden-log/fixture/snapshot regenerated — three existing
+             # production files and two existing test files only.
+             # `app/(app)/surah/[surah]/[ayah]/page.tsx`'s own data-fetching
+             # glue (named by v3-D365 as genuinely unswept) WAS read this
+             # run, directly: `parseSurah`/`parseAyah`'s deliberate
+             # out-of-range-is-not-404 design, `loadEffectiveCorpus`'s
+             # per-request override refetch (no v3-D353-shaped staleness),
+             # `buildFace`/`resolveRef`'s safe-null degradation for an
+             # out-of-range ayah/word, and `AyahStatsIsland`'s surah-scoped
+             # event selector were all checked and found correct — closing
+             # it, not merely deferring it again. `lib/sync/summary.ts`'s own
+             # gap is now CLOSED. Genuinely unswept, named for next time:
+             # `outbox.ts#advanceLowWaterIfProven`/`writeOutboxLowWater`'s
+             # interaction with the new `scanQuarantined` read path; the
+             # Playwright e2e suite's own lack of a genuine two-tab
+             # write-lock scenario; the browser-provisioning mismatch behind
+             # the e2e workaround (still unaddressed at the infrastructure
+             # level). Full detail: DECISIONS.md v3-D366.
              # NOTE (v3-D365, 2026-11-03): a SIXTH consecutive fresh-sweep
              # night found no confirmed defect — closed all three items
              # v3-D364 named next: the Playwright e2e suite, `lib/sync
