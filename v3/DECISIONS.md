@@ -38856,3 +38856,168 @@ Genuinely unswept, named for next time: `components/sections
 `lib/admin/**` and its panels have now been read exhaustively across
 five consecutive nights (v3-D358 onward) and are a poor use of a future
 run's time until a new write path is added there.
+
+### v3-D363 (2026-11-02, nightly): `SessionGate`'s own enrollment read had no try/catch, so a real IndexedDB open failure left `/session` stuck on "Loading your enrollment…" forever
+
+A fresh, non-admin-surface sweep (per v3-D362's own closing note) was
+dispatched to the one surface that still had zero mentions anywhere in
+this file despite being, in its own header's words, "the one surface
+nearly every other component in this run delegates rendering to":
+`components/quiz/**` (`QuizCard` and its four shape children,
+`FaceText`, `reveal.ts`) plus `lib/demo/reconstruct.ts`,
+`lib/demo/loadClientCorpus.ts` and `components/demo/InlineDemo.tsx`.
+Read in full, cross-checked against `render.ts`/`buildQuestion.ts`/
+`reconstruct.ts` and the existing 49-case `test/quiz.test.tsx` — all
+correct, including a direct re-derivation of `#81`'s RTL tap-mapping
+property and `OrderTilesCard`'s own previously-rewritten reveal
+expression. One architectural fact confirmed, not a defect: `ChoiceCard`/
+`OrderTilesCard`/`LocateChoiceCard` have no LIVE tap-accepting caller in
+the shipped product (`ExplainTrace.tsx`'s workbench preview is the only
+non-`sequenceFill` consumer, and it wires `onAnswer` to a deliberate
+no-op) — already the ratified RC-only session-loop architecture
+(v3-D37/D83, re-confirmed at v3-D94), not re-opened here.
+
+That whole directory coming back clean, a second dispatch was sent after
+`EnrolledMarker.tsx`/`lib/enrollment/*`/`lib/library/rows.ts`/
+`lib/pricing.ts`/`components/sections/{Objections,Plan,Pricing}.tsx`/
+`lib/overrides/{fetch,fetchServer}.ts`/`lib/corpus/{wordReference,
+staged}.ts`/`lib/legal/attribution.ts` — all read in full and found
+correct — and landed on `components/session/SessionGate.tsx`, named on
+the original candidate list as "not SessionIsland — the route guard
+before the session starts."
+
+**The defect.** `SessionGate`'s `State` union is `loading | not-enrolled
+| ready` — no `broken` member at all. Its effect does `const choices =
+await readChoices();` with **no try/catch**. `readChoices()`
+(`lib/onboarding/choices.ts`) awaits `openDb()` directly, and `openDb()`
+(`lib/idb/db.ts`) genuinely THROWS a real `IdbOpenError` on a real,
+reachable failure: a blocked version upgrade (another tab already
+mid-upgrade), a quota error, or a locked-down/private-mode environment.
+On any such failure the effect's own promise rejects with nothing to
+catch it, `setState` is never called, and the component is stuck on
+`{kind:"loading"}` — "Loading your enrollment…" — FOREVER, with no
+retry and no escalation, on `/session`, the one graded drilling route.
+
+Three siblings reading the IDENTICAL `readChoices()` call already get
+this right: `components/home/TodaySession.tsx`, `components/library
+/EnrolledMarker.tsx` and `components/shell/EnrollmentSteer.tsx` all wrap
+the call in try/catch and render a dedicated `broken` state with
+`role="alert"`. `SessionGate` is the one gate on the graded path itself
+that omits it — and its structural twin, `components/test/TestGate.tsx`
+(the `/test` route guard), carries the byte-for-byte identical gap on
+the identical call, confirmed directly and fixed in the same commit
+since it is the same four-line omission in a sibling file of the same
+shape, not a different area of the codebase.
+
+**Why nothing caught it:** there was no test file for `SessionGate` or
+`TestGate` at all — `test/session-island.test.tsx`'s own comment already
+says so explicitly ("`SessionGate` itself has no database to read from
+in a plain component test"). Nothing ever drove a real `readChoices()`
+rejection through either gate.
+
+**Fixed:** both gates gain a `broken: {kind:"broken"; message:string}`
+state, the `readChoices()` call is wrapped in try/catch, and the catch
+renders the identical `role="alert"` banner template `TodaySession.tsx`
+already established — no new UI language invented.
+
+**RED confirmed directly**, with a REAL open failure, never a hand-mocked
+rejection: a new `test/session-gate.test.tsx` and `test/test-gate.test.tsx`
+each open the real on-disk IndexedDB database at version 99 first (the
+identical technique `lib/idb/state.test.ts` already uses for its own "a
+real VersionError reaches the log state" case), so the component's own
+next `openDb()` call genuinely rejects with `IdbOpenError: open-blocked`.
+Run against the unmodified components, both failed exactly as predicted:
+the real, uncaught `IdbOpenError` surfaced as an unhandled rejection in
+the test run and the DOM stayed on "Loading your enrollment…" forever —
+`screen.getByRole("alert")` never found. **Mutation-verified:** `git
+stash` of the two production files alone (both new tests kept)
+reproduced both failures identically; restored byte-identically, reran:
+both green.
+
+**A second, smaller fix was needed to ship the first.** The real-failure
+test technique calls `indexedDB.open` directly, which
+`check-boundaries.mjs` clause 3 ("indexedDB.open appears ONLY in
+lib/idb/db.ts") already exempts for `*.test.ts` — the exact exemption
+`lib/idb/state.test.ts` relies on — but NOT for `*.test.tsx`, so the
+first build attempt failed the boundaries gate on both new files
+(`.tsx` is forced by JSX). Widened clause 3's exemption to cover
+`*.test.tsx` too — a test-only exemption extended to the extension
+component tests actually use, never a relaxation of the production-code
+rule the clause exists to enforce. Added 3 new cases to
+`test/check-boundaries-gate.test.ts` pinning exactly this (a production
+`.ts` file is still caught; both `.test.ts` and the newly-exempted
+`.test.tsx` are not), RED-confirmed directly against the un-widened
+clause (failed on exactly the predicted assertion) and restored.
+
+**`TZ=UTC make test`: 3150 passing** (was 3145 at v3-D362, +5 — exactly
+2 new gate-component tests plus 3 new boundaries-clause-3 tests; apps/web
+1757, was 1752; no other suite moved: 255 v2 vitest, 47 v2/api, 428
+v3/api, 120 corpus-compiler, 470 engine, 73 fold-runner). `check-test-
+floor.mjs`: OK, 3150 >= floor 1899 (+1251 margin). `TZ=UTC make build`:
+exit 0, 30 routes, unchanged (the usual one-time `SecurityFatalError` CLI
+nudge on first invocation, not acted on, plain retry built clean). `npm
+run gates` (apps/web): all green — locked-css OK, 1 documented hunk, 294
+v1 lines byte-identical; boundaries OK, 346 files (+2 for the two new
+test files); fonts degraded-but-non-blocking, 2/6 present (pre-existing);
+corpus-morphology OK; corpus-glyphs OK — this entry carries no corpus
+data. `npx tsc --noEmit` (apps/web): clean, `Version 5.9.3`. No
+`v1/**`/`v2/**` edit (the usual stray `v2/tsconfig.tsbuildinfo`
+build-cache diff reverted before committing — `git status --porcelain --
+v1 v2` empty immediately before committing). No Arabic codepoint, no
+`\u` escape, no `fromCharCode`/`fromCodePoint` introduced by this diff's
+own changed lines (checked directly against each diff hunk, not the
+whole file — `check-boundaries.mjs` and its test file both legitimately
+contain pre-existing escape-detection regex/`fromCodePoint` text as part
+of clause 4's own implementation, unrelated to and untouched by this
+entry's clause-3 change). No oracle/golden-log/fixture/snapshot
+regenerated — four existing production/script files edited, two new
+test files added.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; PHP defaulted to 8.3.6 (`v3/api` needs the
+`composer.lock`-pinned Symfony floor of >=8.4.1, not the real
+`composer.json` floor); `composer install --ignore-platform-req=php`
+worked cleanly for `v3/api` on stock PHP 8.3.6, the same repeatedly-
+recorded shortcut. **`HEAD` was found detached exactly at `origin/main`'s
+own real tip** (`b8f4dd8`, v3-D362), on a stale LOCAL `main` branch ref
+eight commits behind (`48ef9dd`) — the recurring stale-local-`main` trap
+this file has recorded roughly fifty times since v3-D77 — caught before
+any exploration via `git checkout -B main HEAD`, a clean reset to the
+real tip, no work lost or at risk.
+
+**NOT addressed, named for next run:** `components/plan/PlanIsland.tsx`
+(line ~71) and `components/test/TestGate.tsx`'s own sibling read in
+`lib/plan/*` — correction, `PlanIsland.tsx` itself — carries the
+IDENTICAL bare `await readChoices()` with no try/catch, found directly
+during this investigation but deliberately NOT fixed here: unlike
+`SessionGate`/`TestGate`, a rejection there does not visibly hang the UI
+(the two pieces of state it sets, `minutesPerDay`/`paceMode`, already
+start from a sane fallback default and nothing downstream gates render
+on them), so it is a real but lower-severity unhandled-rejection hygiene
+gap rather than an eternal loading screen — a different fix shape (no
+full-page gate state to add) left for a future run rather than bolted on
+here. Every item on v3-D362's own condensed "NOT addressed" list,
+unchanged — `components/sections/Mechanism.tsx`/`Proof.tsx`;
+`foilKernels.ts`'s `DISPLAY_STRIPPED` regex gap (human-decision-gated);
+`placement.ts#nextProbe()`'s Act-1 self-referential junction (zero
+production callers); `rhymeClassOf()`; `EntitlementMachine::merge()`;
+`App\Billing\TrialAttribution`/`lib/pricing.ts#regionFromCountry()`;
+`PaywallGate`; multi-surah enrollment (product decision); the
+operational mailer's missing SMTP transport/host; PAY-1's Stripe
+fixtures; surah 67's scene beats (human-only); `severity.ts`'s taxonomy
+naming; `MacroFacts.litany.rhymeLabel`; `corpusHash`'s zero fold-side
+consumer; `selection_determinism_check` replaying a committed fixture;
+`QueueItem.score`'s missing external reader; `acknowledgeReentry`'s
+"makeup" branch; `DrillPicker.tsx`'s unused `now` prop; the unused
+IndexedDB object stores; `session_start`'s own latency metric; the
+streak/away-day day-space mismatch; `/workbench`'s own Pane 2/3; the
+deferred `vitest@5` bump; `laravel/framework`'s remaining advisory;
+`v2/api`'s own frozen advisories; the `trial_surah_source` column — all
+unchanged.
+
+`components/quiz/**` is now fully re-read and re-confirmed correct —
+remove it from future "genuinely unswept" lists. `SessionGate.tsx`'s and
+`TestGate.tsx`'s own missing-`broken`-state gap is now CLOSED. Genuinely
+unswept, named for next time: `components/plan/PlanIsland.tsx`'s own
+weaker instance of this same shape (above); `components/sections
+/Mechanism.tsx`/`Proof.tsx` (still the same weak candidate).

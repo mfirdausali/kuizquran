@@ -74,7 +74,11 @@ for (const f of files.filter((f) => rel(f).startsWith("app/"))) {
 // --- Clause 3: indexedDB.open appears ONLY in lib/idb/db.ts. ---
 for (const f of files) {
   const r = rel(f);
-  if (r === "lib/idb/db.ts" || r.endsWith(".test.ts")) continue;
+  // `.test.tsx` exempted alongside `.test.ts`: a component-test file (e.g. a
+  // route-gate's own "a real open failure" case) needs the identical real
+  // failure lib/idb/state.test.ts already produces this way, and JSX forces
+  // the `.tsx` extension on it.
+  if (r === "lib/idb/db.ts" || r.endsWith(".test.ts") || r.endsWith(".test.tsx")) continue;
   if (/indexedDB\.open\s*\(/.test(stripComments(read(f)))) {
     violations.push(`${r}: calls indexedDB.open directly. All access goes through lib/idb/db.ts.`);
   }

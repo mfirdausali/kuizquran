@@ -53,10 +53,83 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3145 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3150 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 428 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1752 apps/web. (v3-D362, 2026-11-01)
+             # + 470 engine + 73 fold-runner + 1757 apps/web. (v3-D363, 2026-11-02)
+             # NOTE (v3-D363, 2026-11-02): a fresh, non-admin-surface sweep
+             # (per v3-D362's own closing note) read `components/quiz/**`
+             # (QuizCard + its four shape children, FaceText, reveal.ts) and
+             # `lib/demo/{reconstruct,loadClientCorpus}.ts` +
+             # `components/demo/InlineDemo.tsx` in full — all correct,
+             # including a direct re-derivation of #81's RTL tap-mapping
+             # property. Confirmed, not reopened: ChoiceCard/OrderTilesCard/
+             # LocateChoiceCard have no live tap-accepting caller in the
+             # shipped product (only ExplainTrace.tsx's inert workbench
+             # preview renders them) — the already-ratified RC-only
+             # session-loop architecture (v3-D37/D83/D94). A second dispatch
+             # over lib/enrollment/*, lib/library/rows.ts, lib/pricing.ts,
+             # components/sections/{Objections,Plan,Pricing}.tsx,
+             # lib/overrides/{fetch,fetchServer}.ts,
+             # lib/corpus/{wordReference,staged}.ts, lib/legal/attribution.ts
+             # also came back clean, and landed on a real, previously-
+             # unreported defect in `components/session/SessionGate.tsx`:
+             # its `State` union has no `broken` member and its
+             # `readChoices()` call has NO try/catch, so a genuine
+             # `IdbOpenError` (blocked version upgrade, quota, private mode)
+             # left `/session` — the one graded drilling route — stuck on
+             # "Loading your enrollment…" FOREVER, no retry, no escalation.
+             # Three siblings reading the identical call
+             # (TodaySession.tsx, EnrolledMarker.tsx, EnrollmentSteer.tsx)
+             # already wrap it in try/catch and render a `broken`
+             # `role="alert"` state; `TestGate.tsx` (`/test`'s identical
+             # route-guard twin) carried the byte-for-byte identical gap and
+             # was fixed in the same commit. No test file existed for either
+             # gate. RED confirmed with a REAL open failure (opening the
+             # on-disk DB at version 99 first, `lib/idb/state.test.ts`'s own
+             # technique, not a hand-mocked rejection) against both
+             # unmodified components — both hung on the loading line with an
+             # unhandled `IdbOpenError: open-blocked`; mutation-verified by
+             # reverting the two production files alone and reproducing both
+             # failures identically. Fixed on TodaySession's own template:
+             # both gates gain try/catch and a `broken` state. A second, small
+             # fix was needed to ship it: `check-boundaries.mjs` clause 3
+             # ("indexedDB.open only in lib/idb/db.ts") already exempted
+             # `*.test.ts` (state.test.ts's own precedent) but not
+             # `*.test.tsx`, which JSX forces on a component test — widened
+             # the exemption (test-only, not a production relaxation),
+             # RED/GREEN-confirmed with 3 new cases in
+             # `test/check-boundaries-gate.test.ts`. `TZ=UTC make test`: 3150
+             # passing (was 3145, +5 — 2 gate tests + 3 clause-3 tests; apps/web
+             # 1757, was 1752; no other suite moved). `check-test-floor.mjs`:
+             # OK, 3150 >= floor 1899 (+1251 margin). `TZ=UTC make build`:
+             # exit 0, 30 routes, unchanged (the usual one-time
+             # `SecurityFatalError` CLI nudge on first invocation, not acted
+             # on, plain retry built clean). `npm run gates`: all green, 346
+             # files (+2, the two new test files), fonts
+             # degraded-but-non-blocking (pre-existing). `npx tsc --noEmit`:
+             # clean, `Version 5.9.3`. No `v1/**`/`v2/**` edit (the usual
+             # stray `v2/tsconfig.tsbuildinfo` build-cache diff reverted
+             # before committing). No Arabic codepoint/`\u` escape/
+             # `fromCharCode`/`fromCodePoint` introduced by this diff's own
+             # changed lines (checked against each diff hunk directly, not
+             # whole files — check-boundaries.mjs/its test file both
+             # pre-existingly contain clause-4's own escape-detection
+             # text, untouched here). No oracle/golden-log/fixture/snapshot
+             # regenerated. Session start: `HEAD` detached exactly at
+             # `origin/main`'s real tip (`b8f4dd8`, v3-D362), stale LOCAL
+             # `main` eight commits behind — the recurring stale-local-`main`
+             # trap this file has recorded roughly fifty times since v3-D77 —
+             # caught via `git checkout -B main HEAD` before any exploration.
+             # NOT addressed, named for next run: `components/plan
+             # /PlanIsland.tsx`'s own weaker instance of this same
+             # no-try/catch shape (a rejection there does not hang the UI —
+             # its two derived values already start from a sane fallback —
+             # so it is a lower-severity hygiene gap, a different fix shape,
+             # deliberately left); `components/sections/Mechanism.tsx`/
+             # `Proof.tsx` (still the same weak candidate). Full detail,
+             # including the complete "NOT addressed" carry-forward list:
+             # DECISIONS.md v3-D363.
              # NOTE (v3-D362, 2026-11-01): a fresh-sweep night found NO
              # confirmed defect — closing v3-D359's own "second pass on the
              # ten lib/admin/*.ts loaders" item completely. All ten

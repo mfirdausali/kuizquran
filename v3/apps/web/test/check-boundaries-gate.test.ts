@@ -156,3 +156,31 @@ describe("check-boundaries.mjs clause 4 — the sacred-text escape-hatch check",
     expect(out).not.toContain("String.fromCodePoint");
   });
 });
+
+describe("check-boundaries.mjs clause 3 — indexedDB.open appears only in lib/idb/db.ts", () => {
+  it("still catches a direct indexedDB.open call in an ordinary production file", () => {
+    const root = fixtureRoot({
+      "lib/probe.ts": "export const x = () => indexedDB.open('x', 1);\n",
+    });
+    const { out, code } = run(root);
+    expect(code).toBe(1);
+    expect(out).toContain("lib/probe.ts");
+    expect(out).toContain("calls indexedDB.open directly");
+  });
+
+  it("does NOT flag a direct indexedDB.open call in a *.test.ts file — the established exemption (lib/idb/state.test.ts's own real-VersionError case)", () => {
+    const root = fixtureRoot({
+      "lib/probe.test.ts": "export const x = () => indexedDB.open('x', 1);\n",
+    });
+    const { out } = run(root);
+    expect(out).not.toContain("calls indexedDB.open directly");
+  });
+
+  it("does NOT flag a direct indexedDB.open call in a *.test.tsx file — a component-test gate case (e.g. a route gate's own real-open-failure test) needs the identical exemption *.test.ts already has; JSX forces the .tsx extension on it", () => {
+    const root = fixtureRoot({
+      "test/probe.test.tsx": "export const x = () => indexedDB.open('x', 1);\n",
+    });
+    const { out } = run(root);
+    expect(out).not.toContain("calls indexedDB.open directly");
+  });
+});

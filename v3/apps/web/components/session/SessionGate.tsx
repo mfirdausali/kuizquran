@@ -27,6 +27,7 @@ import type { GlossLang } from "@engine/types.ts";
 type State =
   | { kind: "loading" }
   | { kind: "not-enrolled" }
+  | { kind: "broken"; message: string }
   | { kind: "ready"; surah: number; pace: PaceMode; glossLang: GlossLang };
 
 export interface SessionGateProps {
@@ -52,18 +53,31 @@ export function SessionGate({ mode = "full", drill = null, practice = null }: Se
   useEffect(() => {
     let alive = true;
     void (async () => {
-      const choices = await readChoices();
-      if (!alive) return;
-      setState(
-        choices && typeof choices.surah === "number"
-          ? {
-              kind: "ready",
-              surah: choices.surah,
-              pace: choices.pace ?? DEFAULT_PACE_MODE,
-              glossLang: choices.glossLang,
-            }
-          : { kind: "not-enrolled" },
-      );
+      try {
+        const choices = await readChoices();
+        if (!alive) return;
+        setState(
+          choices && typeof choices.surah === "number"
+            ? {
+                kind: "ready",
+                surah: choices.surah,
+                pace: choices.pace ?? DEFAULT_PACE_MODE,
+                glossLang: choices.glossLang,
+              }
+            : { kind: "not-enrolled" },
+        );
+      } catch (err) {
+        // A thrown read (a genuine IndexedDB open failure — blocked version
+        // upgrade, quota, private mode) must show a state, never leave the
+        // learner on the loading line forever. Mirrors TodaySession.tsx's
+        // own `broken` state for the identical `readChoices()` call.
+        if (!alive) return;
+        setState({
+          kind: "broken",
+          message:
+            err instanceof Error ? err.message : "Your enrollment could not be read.",
+        });
+      }
     })();
     return () => {
       alive = false;
@@ -72,6 +86,18 @@ export function SessionGate({ mode = "full", drill = null, practice = null }: Se
 
   if (state.kind === "loading") {
     return <p className="caption">Loading your enrollment…</p>;
+  }
+
+  if (state.kind === "broken") {
+    return (
+      <div className="banner banner--warn" role="alert">
+        <p>Your enrollment could not be read on this device.</p>
+        <p className="sub">
+          Reason: <code>{state.message}</code>. Nothing has been lost — the log
+          is append-only and your enrollment is re-read from it every time.
+        </p>
+      </div>
+    );
   }
 
   if (state.kind === "not-enrolled") {
