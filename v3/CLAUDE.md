@@ -57,6 +57,58 @@ make test    # 3150 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 428 v3/api + 120 corpus-compiler
              # + 470 engine + 73 fold-runner + 1757 apps/web. (v3-D363, 2026-11-02)
+             # NOTE (v3-D365, 2026-11-03): a SIXTH consecutive fresh-sweep
+             # night found no confirmed defect — closed all three items
+             # v3-D364 named next: the Playwright e2e suite, `lib/sync
+             # /sync.ts`'s own orchestrating functions, and `lib/drill
+             # /preview.ts`/`lib/drill/sites.ts`. `sites.ts` (295 lines) and
+             # `preview.ts` (239 lines) were each read in full against their
+             # own header claims and found correct — `sitesForPage`'s E-08
+             # boundary-seam guard, `pagesForSurah`'s single-page-surah
+             # fallback (`pageCapacity` null ⇒ `closesSurah` tautology, the
+             # documented degrade, not a gap), `ayatForSelection`'s
+             # empty-array-never-throw contract on bad input, and
+             # `buildDrillPreview`'s skip-reason split and `estMinutes`
+             # argument mapping all matched their own documentation exactly.
+             # `sync.ts` (374 lines) was read end to end rather than merely
+             # as a caller of its already-well-trodden satellites
+             # (`outbox.ts`, `merge.ts`, `cursor.ts`, `digest.ts`, each
+             # re-read in full alongside it) — `pushOutbox`'s drain loop was
+             # traced against `advanceLowWaterIfProven`'s own v3-D349 proof
+             # and confirmed sound (the `quarantined` array passed to it is
+             # always scoped to the SAME `selectPending` call that produced
+             # the batch being sent), and `syncCycle`'s three independent
+             # try/catch blocks (push/pull/`countPending`) were confirmed to
+             # degrade independently, exactly as `CycleResult`'s own field
+             # comments claim. The Playwright e2e suite was re-run for the
+             # first time since v3-D359: `npx playwright test` 42/42 passed
+             # (chromium + mobile), matching that count exactly — no
+             # regression across the intervening commits. Same
+             # environment-only snag as v3-D359, not a repo defect: this
+             # sandbox's pre-installed Chromium (1243) still doesn't match
+             # `@playwright/test`'s pinned expectation (1234); worked around
+             # identically with an uncommitted local `playwright.config.ts`
+             # `executablePath` edit, reverted via `git checkout --` before
+             # committing. `TZ=UTC make test`: 3150 passing, unchanged (255
+             # v2 vitest, 47 v2/api, 428 v3/api, 120 corpus-compiler, 470
+             # engine, 73 fold-runner, 1757 apps/web). `check-test-floor.mjs`:
+             # OK, 3150 >= floor 1899 (+1251 margin, unmoved). `TZ=UTC make
+             # build`: exit 0, 30 routes, unchanged (the usual one-time
+             # `SecurityFatalError` CLI nudge on first invocation, not acted
+             # on, plain retry built clean). `npm run gates`: all green, 347
+             # files, unchanged. `npx tsc --noEmit`: clean across all four
+             # v3 node packages. No `v1/**`/`v2/**` edit (the usual stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff, plus the e2e
+             # workaround above, both reverted before committing). No
+             # production file touched this run — documentation only.
+             # Genuinely unswept, named for next time: `lib/sync/summary.ts`
+             # (read only as a type-shape dependency by other sweeps, never
+             # audited in its own right); `app/(app)/surah/[surah]/[ayah]
+             # /page.tsx`'s own data-fetching glue (the component beneath it,
+             # `heatmap.ts`, was checked at v3-D344, but the page-level
+             # wiring itself was not); the browser-provisioning mismatch
+             # behind the e2e workaround, if anyone wants to fix it at the
+             # infrastructure level. Full detail: DECISIONS.md v3-D365.
              # NOTE (v3-D364, 2026-11-03): a fresh-sweep night found no
              # confirmed defect — closed both items v3-D363 named next.
              # `PlanIsland.tsx`'s own no-try/catch `readChoices()` call

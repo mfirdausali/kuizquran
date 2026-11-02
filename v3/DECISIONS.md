@@ -39198,3 +39198,144 @@ caller of those, not audited start to finish in its own right);
 several PAST defects — v3-D199 and others — so a fresh read might find
 a sibling gap the same way v3-D338 found `SystemHealthPanel.tsx`'s gap
 after `AdminGate.tsx` et al. were already "closed").
+
+### v3-D365 (2026-11-03, nightly): a sixth consecutive fresh-sweep night found no confirmed defect — closing v3-D364's own full "genuinely unswept" list
+
+v3-D364 named three items left over from its own sweep: the Playwright
+e2e suite (`e2e/**`, not re-run since v3-D359); `lib/sync/sync.ts`'s own
+`pushOutbox`/`pullFromServer`/`syncCycle` bodies end-to-end, as opposed
+to merely as callers of their already-well-trodden satellite modules;
+and `lib/drill/preview.ts`/`lib/drill/sites.ts`, both past defect sites
+(v3-D199 et al.). All three closed this run, with no confirmed defect in
+any of them.
+
+**`lib/drill/sites.ts`** (295 lines) read in full against its own
+header's worked example (#38's 13-orphaned-seam arithmetic, the
+page-vs-range `expand()` asymmetry) and re-derived independently:
+`sitesForPage`'s boundary-seam clause (`span.lastAyah < ayahCount`) is
+exactly E-08-safe; `pagesForSurah`'s opening/closing-line refinement
+(v3-D286) was re-checked arithmetically for the single-page-surah case
+(103/112 in the real launch corpus) — `pageCapacity` comes back `null`
+for a surah with no non-closing page, so `closesSurah` falls back to the
+pre-refinement tautology and is unconditionally `true`, which is why a
+single-page surah is still flagged `sharedWithOtherSurah` even without
+usable line data; this is the documented fallback, not a gap.
+`ayatForSelection`'s bad-input handling (`lo<1`, `hi>ayahCount`, an
+unknown page number) was traced to confirm every branch returns `[]`
+rather than throwing, matching edge case #78's own requirement. No
+defect found.
+
+**`lib/drill/preview.ts`** (239 lines) read in full: `buildDrillPreview`'s
+ayah/seam skip-reason split, the `estMinutes` call's argument mapping
+(`chains: ayahCount, junctions: seamCount`, never a local formula), and
+the `partialNotice` sentence-joining were each checked against the
+file's own header claims and found to match exactly. No defect found.
+
+**`lib/sync/sync.ts`** (374 lines) read end to end, not merely as a
+caller of `outbox.ts`/`merge.ts`/`cursor.ts`/`digest.ts` (each already
+individually well-trodden). Traced in particular: `pushOutbox`'s outer
+drain loop against `advanceLowWaterIfProven`'s own v3-D349 fix — the
+`quarantined` array passed to it on each batch is scoped to the SAME
+`selectPending` call that produced the batch being sent, so the
+"everything below `throughSeq` was sent or quarantined" proof holds by
+construction, not by coincidence; the inner `if (!progressed) break`
+guard is dead code in every reachable case (`rows.length > 0` always
+implies at least one chunk, and completing a chunk without an early
+`return` always sets `progressed = true`) but is defensive, not wrong.
+`pullFromServer`'s `hasMore`/cursor-advance loop, and `syncCycle`'s
+three independent try/catch blocks (push, pull, `countPending`) were
+each traced for a case where one failing silently corrupts another's
+result — none found; the three fields degrade independently exactly as
+`CycleResult`'s own field comments claim. `cursor.ts`,
+`lib/sync/merge.ts` (`mergeFromServer`'s all-or-nothing transaction abort
+path, and its `ts`/`deviceId`/`deviceSeq` concreteness defaults applied
+BEFORE the digest comparison, so a repeatedly-merged pre-selection-era
+event digests identically on every pass) and `lib/sync/digest.ts`
+(`canonicalJson`'s null/undefined-collapse and recursive key-sort) were
+also read in full as the direct dependencies this sweep needed to
+verify `sync.ts`'s own claims against. No defect found in any of them.
+
+**The Playwright e2e suite** (`e2e/**`) re-run for the first time since
+v3-D359, several commits/fixes after that run: `npx playwright test`
+(chromium + mobile projects): **42/42 passed**, matching v3-D359's own
+count exactly — no regression since. This sandbox's pre-installed
+Chromium revision (1243) again did not match `@playwright/test`'s
+pinned expectation (1234), the same environment-only snag v3-D359
+recorded; worked around identically, with an UNCOMMITTED local
+`playwright.config.ts` edit pointing `use.launchOptions.executablePath`
+at `/opt/pw-browsers/chromium`, reverted via `git checkout --` before
+any commit (`git status --porcelain -- v3/apps/web/playwright.config.ts`
+empty immediately after). Named again for whoever eventually fixes the
+browser-provisioning mismatch at the infrastructure level rather than
+re-discovering the same local workaround each sweep.
+
+**`TZ=UTC make test`: 3150 passing, unchanged from v3-D364** (255 v2
+vitest, 47 v2/api, 428 v3/api, 120 corpus-compiler, 470 engine, 73
+fold-runner, 1757 apps/web — independently re-run from a fresh
+container this session). `check-test-floor.mjs`: OK, 3150 >= floor 1899
+(+1251 margin, unmoved). `TZ=UTC make build`: exit 0, 30 routes,
+unchanged (the usual one-time `SecurityFatalError` CLI nudge on first
+invocation, not acted on, plain retry built clean). `npm run gates`
+(apps/web): all green — locked-css OK, 1 documented hunk, 294 v1 lines
+byte-identical; boundaries OK, 347 files, unchanged; fonts
+degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints across
+4 artifacts. `npx tsc --noEmit`, run separately across all four v3 node
+packages: clean in all four. No PHP file changed, so `pint` was not
+applicable. No `v1/**`/`v2/**` edit (the usual stray
+`v2/tsconfig.tsbuildinfo` build-cache diff from running the suites
+during setup, plus the e2e workaround above, both reverted before
+committing — `git status --porcelain -- v1 v2` empty, and
+`playwright.config.ts` clean, immediately before committing). No Arabic
+codepoint, no `\u` escape, no `fromCharCode`/`fromCodePoint` — this
+entry introduces no new line of production or test code at all, only
+documentation. No oracle/golden-log/fixture/snapshot regenerated. No
+production file was touched this run.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus/sqlite databases anywhere; PHP defaulted to 8.3.6 (`v3/api` needs
+the `composer.lock`-pinned Symfony floor of >=8.4.1, not the real
+`composer.json` floor of ^8.2); `composer install
+--ignore-platform-req=php` worked cleanly for both `v2/api` and `v3/api`
+on stock PHP 8.3.6, the same repeatedly-recorded shortcut, this time via
+the slower `packages.sury.org`-adjacent git-mirror VCS fallback for a
+handful of dev dependencies rather than a direct Packagist hit — no
+human intervention needed, just longer wall-clock. `HEAD` was found
+detached exactly at `origin/main`'s own real tip (`15fe7c7`, v3-D364),
+on a stale LOCAL `main` branch ref ten commits behind — the recurring
+stale-local-`main` trap this file has recorded roughly fifty times
+since v3-D77 — caught via `git checkout main && git merge --ff-only
+origin/main` before any exploration, a clean fast-forward, no work lost
+or at risk.
+
+**Every item on v3-D364's own condensed "NOT addressed" list is
+unchanged** — `foilKernels.ts`'s `DISPLAY_STRIPPED` regex gap
+(human-decision-gated); `placement.ts#nextProbe()`'s Act-1
+self-referential junction (zero production callers); `rhymeClassOf()`;
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution`/
+`lib/pricing.ts#regionFromCountry()`; `PaywallGate`; multi-surah
+enrollment (product decision); the operational mailer's missing SMTP
+transport/host; PAY-1's Stripe fixtures; surah 67's scene beats
+(human-only); `severity.ts`'s taxonomy naming; `MacroFacts.litany
+.rhymeLabel`; `corpusHash`'s zero fold-side consumer;
+`selection_determinism_check` replaying a committed fixture;
+`QueueItem.score`'s missing external reader; `acknowledgeReentry`'s
+"makeup" branch; `DrillPicker.tsx`'s unused `now` prop; the unused
+IndexedDB object stores; `session_start`'s own latency metric; the
+streak/away-day day-space mismatch; `/workbench`'s own Pane 2/3; the
+deferred `vitest@5` bump; `laravel/framework`'s remaining advisory;
+`v2/api`'s own frozen advisories; the `trial_surah_source` column — all
+unchanged.
+
+The Playwright e2e suite, `lib/sync/sync.ts`'s own orchestrating
+functions, and `lib/drill/preview.ts`/`lib/drill/sites.ts` are all now
+CLOSED as candidates from this exact sweep — remove them from future
+"genuinely unswept" lists; none should be re-opened without a materially
+new angle. Genuinely unswept, named for next time: `lib/sync/summary.ts`
+(read only as a type-shape dependency by other sweeps, never audited in
+its own right); `app/(app)/surah/[surah]/[ayah]/page.tsx`'s own data-
+fetching glue (the component beneath it, `heatmap.ts`, was checked at
+v3-D344, but the page-level wiring itself was not); the browser-
+provisioning mismatch behind the e2e workaround above, if anyone wants
+to fix it at the infrastructure level instead of re-working around it
+each time.
