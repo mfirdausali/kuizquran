@@ -40005,3 +40005,148 @@ still genuinely absent, confirmed by `find worker/fold-runner -maxdepth 2
 -type d` this run (only `src`/`test`/`bin`, no adapter/scheduler code at
 all), though that item is infrastructure/deployment work an agent cannot
 complete alone (no host, no DB, no credentials), not a sweep candidate.
+
+### v3-D370 (2026-11-03, nightly): `EnrolledMarker.tsx`'s own `"broken"` state had no ARIA role at all, and a sibling test file's own header comment claiming otherwise was wrong
+
+`components/library/EnrolledMarker.tsx` reads `lib/onboarding/choices.ts
+#readChoices()` in a try/catch, the same real failure
+`test/session-gate.test.tsx`'s own header documents: a genuine, reachable
+`IdbOpenError` (a blocked version upgrade from another tab, a quota error,
+a locked-down/private-mode environment) — never a hypothetical. The
+`"broken"` branch rendered:
+
+```tsx
+case "broken":
+  return (
+    <p className="caption">
+      Your enrollment could not be read on this device. Nothing has been
+      lost — the log is append-only and re-readable once storage recovers.
+    </p>
+  );
+```
+
+No `role` attribute at all — not even `role="status"`. This is the same
+"role=status vs role=alert" shape this build has closed roughly 15 times
+(v3-D241, D329 through D345, D363), but one notch worse here: nothing an
+assistive technology has any reason to announce at all, for a genuine
+device-local failure on the one island that tells a learner which surah
+they are already enrolled in.
+
+**Why this one escaped notice longer than the others:** `test/session-gate
+.test.tsx`'s own header comment (written at v3-D363, when `SessionGate`'s
+and `TestGate`'s identical gap was fixed) states: *"Three siblings reading
+the SAME `readChoices()` call already get this right:
+`components/home/TodaySession.tsx`, `components/library/EnrolledMarker.tsx`
+and `components/shell/EnrollmentSteer.tsx` all wrap the call in try/catch
+and render a `broken` state."* `CLAUDE.md`'s own v3-D363 running-log note
+goes further and specifically claims `role="alert"` for all three. Checked
+each directly this run:
+
+- `TodaySession.tsx`'s broken case: `<div className="banner banner--warn"
+  role="alert">` — **true**, matches the claim exactly.
+- `EnrollmentSteer.tsx`: returns `null` unconditionally on a read failure —
+  it has **no visible broken state at all**. Its own comment reasons this
+  is deliberate and safe (a lost cookie refresh costs at most one later
+  render; the real enrollment stays safe in IndexedDB regardless, since
+  this component only refreshes a display cookie, never the source of
+  truth). The claim doesn't meaningfully apply to it either way — there is
+  no state to carry a role.
+- `EnrolledMarker.tsx` itself: the try/catch is real and the `broken` state
+  exists, but the render carried **no role** — the claim was **false** for
+  the one file the surrounding prose is actually about.
+
+No test ever exercised the `broken` case on this component to catch the
+false claim: `test/library.test.tsx`'s own describe block
+("the library names the surah you are already learning") had three cases —
+`pending`, `none`, `enrolled` — and none forced a real read failure.
+
+**Fixed:** one attribute. `role="alert"` on the `broken` case's `<p>`,
+identical to `TodaySession.tsx`'s own convention; no other branch touched.
+
+**RED confirmed directly, with a REAL failure, never a hand-mocked
+rejection:** a new case in `test/library.test.tsx`, using the exact
+`indexedDB.open(DB_NAME, 99)`-then-reopen-at-the-real-version technique
+`test/session-gate.test.tsx` and `lib/idb/state.test.ts` already use to
+produce a genuine `VersionError` ("another tab already upgraded the
+schema", `db.ts`'s own `open-blocked` classification) — run against the
+unmodified component, it failed exactly as predicted:
+`TestingLibraryElementError: Unable to find role="alert"` (the broken
+text itself was present and correct; nothing was there to announce it).
+
+**Mutation-verified:** isolated the one-line production fix with `git diff
+… > /tmp/fix.patch && git checkout -- EnrolledMarker.tsx` (the new test
+kept), reran — reproduced the identical single failure; reapplied the
+patch (`git apply /tmp/fix.patch`), reran: `test/library.test.tsx` 12/12
+green (was 11, +1).
+
+**Verified:**
+
+- `npx vitest run` (apps/web, full suite): **1765 passing** (was 1764,
+  +1 — exactly this one new case; no other file moved).
+- `npx tsc --noEmit` (apps/web): clean.
+- `npm run gates`: all green — locked-css OK (294 v1 lines
+  byte-identical); boundaries OK, 348 files, unchanged; fonts
+  degraded-but-non-blocking, pre-existing, 2/6 UI fonts present;
+  corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints across
+  4 artifacts — all unchanged, this diff carries no corpus data.
+- `TZ=UTC npm run build` (apps/web): exit 0, 30 routes, unchanged (the
+  usual one-time `SecurityFatalError` CLI nudge on first invocation — not
+  acted on, upgrading Next.js needs a human decision; a plain retry built
+  clean).
+- `engine` (470/470), `corpus-compiler` (120/120), `fold-runner` (73/73):
+  re-run directly, unchanged, as expected — this diff touches none of
+  those packages.
+- `v2/api`/`v3/api` PHPUnit (47 / 428): unaffected by construction — this
+  diff touches no PHP file at all (`git diff --stat` shows two existing
+  `apps/web` TypeScript files only). This session's `make setup` hit the
+  same slow proxy git-mirror fallback for `v2/api`'s composer install
+  several prior entries document (~25+ minutes); both suites were re-run
+  independently once it finished, both green at their documented counts,
+  no regression.
+- `TZ=UTC make test`: **3158 passing** (was 3157, +1 — exactly this run's
+  one new case; 255 v2 vitest, 47 v2/api, 428 v3/api, 120 corpus-compiler,
+  470 engine, 73 fold-runner, 1765 apps/web). `check-test-floor.mjs`: OK,
+  3158 >= floor 1899 (+1259 margin, unmoved).
+- No `v1/**`/`v2/**` edit (`git status --porcelain -- v1 v2` empty
+  throughout).
+- No Arabic codepoint, no `\u` escape, no `fromCharCode`/`fromCodePoint`
+  introduced — both changed files swept directly over the Arabic, Arabic
+  Supplement, Arabic Extended-A and both Presentation Forms Unicode
+  blocks: CLEAN, every new string is a TypeScript identifier or a fixed
+  English comment/assertion sentence.
+- No oracle/golden-log/fixture/snapshot regenerated — one existing
+  production file and one existing test file only.
+
+**Found by:** a fresh-sweep fork, dispatched after the main session
+independently confirmed two larger candidate classes were dead ends —
+every low-DECISIONS.md-mention-count file under `apps/web/lib/**` (copy.ts,
+wordReference.ts, surahCookie.ts, writeSurahCookie.ts, resetLink.ts,
+verifyLink.ts, loadClientCorpus.ts, planSummary.ts, staged.ts, growth.ts,
+wordAccuracy.ts, both `handoff.ts` files, contentFreeze.ts, and all
+fourteen `lib/admin/*.ts` files) was already fixed or explicitly examined
+and ruled correct in this file; and the engine's "connection atom never
+born in production" fact (`isReviewDue`/`reviewScore`'s connection
+weighting, `birthConnection`, `chain_step`/`junction_result` never emitted
+anywhere in `lib/session/run.ts`) is the deliberately ratified "`bridge.ts`
+atticked, DEFECTS.md#E-08" architecture — `run.ts`'s own comments name this
+in three separate places — not a fresh defect, and should not be re-chased.
+
+**Session start:** `HEAD` detached exactly at `origin/main`'s own real tip
+(`e80b473`, v3-D369); `git checkout -B main HEAD` before any exploration —
+matched origin exactly, no stale-local-`main` trap this run.
+
+**NOT addressed, named for next run:** every item on v3-D369's own
+condensed list, unchanged — the browser-provisioning mismatch behind the
+e2e Chromium-version workaround (confirmed on both `chromium` and `mobile`
+projects); a genuine two-DEVICE (not two-tab) determinism e2e scenario —
+BUILD-PLAN M5's own exit criterion, and `mergeFromServer`'s
+deviceSeq-preserving merge (B5) still has unit coverage only, no
+browser-level one — it needs a live `v3/api` server booted alongside the
+e2e Next.js server (CORS, a second `webServer` entry, CI wiring), which
+this run deliberately set aside as too large and too risky to attempt
+half-done in one step, rather than leaving CI or the build half-wired;
+`worker/fold-runner`'s own DB adapter + staging deploy (still absent — no
+host, no DB, no credentials; not an agent-completable item). `EnrolledMarker
+.tsx`'s own role=status/role=alert gap is now CLOSED, and
+`test/session-gate.test.tsx`'s header comment's claim about it is now
+actually true — remove it from future sweeps.

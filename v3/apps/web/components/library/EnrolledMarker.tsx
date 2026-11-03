@@ -107,7 +107,7 @@ export function EnrolledMarker() {
 
     case "broken":
       return (
-        <p className="caption">
+        <p className="caption" role="alert">
           Your enrollment could not be read on this device. Nothing has been
           lost — the log is append-only and re-readable once storage recovers.
         </p>

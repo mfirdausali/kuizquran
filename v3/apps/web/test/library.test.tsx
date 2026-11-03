@@ -239,4 +239,29 @@ describe("the library names the surah you are already learning", () => {
     expect(container.querySelector(".skel")).toBeTruthy();
     expect(container.textContent).not.toMatch(/have not started/i);
   });
+
+  // `test/session-gate.test.tsx`'s own header names EnrolledMarker as one of
+  // three siblings that "already get this right" on a real readChoices()
+  // failure — but "right" there only ever meant "renders a broken state",
+  // never "with role=alert". A real, reachable failure (the SAME
+  // version-99-then-reopen technique session-gate.test.tsx and
+  // lib/idb/state.test.ts use to produce a genuine VersionError, never a
+  // hand-mocked rejection) must reach an INTERRUPTING announcement on this
+  // island too, the same convention every other broken/failed state in this
+  // build already follows (v3-D241, D329..D345, D363).
+  it("a genuine readChoices() failure reaches role=alert, never a passive caption", async () => {
+    await new Promise<void>((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, 99);
+      req.onsuccess = () => {
+        req.result.close();
+        resolve();
+      };
+      req.onerror = () => reject(req.error);
+    });
+
+    render(<EnrolledMarker />);
+
+    const alert = await waitFor(() => screen.getByRole("alert"), { timeout: 2000 });
+    expect(alert.textContent).toMatch(/could not be read/i);
+  });
 });
