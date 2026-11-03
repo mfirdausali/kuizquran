@@ -39850,3 +39850,158 @@ The onboarding-commit flake named by v3-D367 is now CLOSED — it was
 never a timing flake in the test; it was this real, reproducible defect,
 and it should not be re-queued as "still unswept" or re-diagnosed as
 environment timing by a future run.
+
+### v3-D369 (2026-11-03, nightly): a genuine two-tab write-lock e2e test (no defect found)
+
+v3-D365/D366/D367 each named the same gap on their own "genuinely unswept"
+list without anyone taking it on: "the Playwright e2e suite's own lack of a
+genuine two-tab write-lock scenario." `lib/idb/writeLock.ts`'s own history
+(v3-D70) is the reason this matters — the fallback-vs-Web-Locks race that
+made writing STRUCTURALLY IMPOSSIBLE for eight build-plan steps went
+unnoticed precisely because nothing exercised `acquire()` against a real
+Web Locks grant. `lib/idb/writeLock.test.ts`'s own "acquire() against a
+real Web Locks implementation (v3-D70)" `describe` block closed half of
+that gap with an in-process STUB of `navigator.locks` (`held: true` means
+the callback never runs — it proves a tab can settle as reader without
+hanging, but it can never prove promotion, since nothing in that stub ever
+releases). `test/sync-trigger.test.tsx`'s own `beforeEach` forces writer
+role for every test in the file. `components/session/SessionIsland.tsx`'s
+own subscribe-for-later-promotion effect (v3-D93 — "a queued tab is
+promoted without a reload") had never been driven by two actual tabs of
+the actual app, in a real browser, against a real `navigator.locks`
+manager.
+
+**What this run did.** A new `e2e/two-tab-write-lock.test.ts`: two real
+`Page`s opened from the SAME `BrowserContext` (genuinely shared storage and
+Web Locks, exactly like two tabs of one browser profile — not a second
+mock). Tab 1 onboards, opens `/session`, and becomes writer (uncontended).
+Tab 2 opens `/session` next and is asserted to render the real `"not-writer"`
+copy (`SessionIsland.tsx`'s own "This session is open in another tab…"
+text) and to mount no drill — and, read directly off disk, to have
+committed zero `reconstruct_tap` events while it was a reader. Tab 1 is
+then CLOSED (not navigated, not reloaded) — the real trigger for a Web
+Lock release. Tab 2 is asserted to be promoted to writer and show the
+drill WITHOUT ever calling `second.reload()` — the whole point, since a
+reload would only prove a fresh, uncontended `acquire()` works, not that
+the promotion path does. The strongest assertion is not the UI text but
+the commit path actually opening: tab 2 taps an option and the tap is read
+back from its own real IndexedDB.
+
+**Result: the real two-tab scenario already works.** Four isolated runs,
+all green. This is a legitimate "fresh sweep, no confirmed defect" outcome
+— the v3-D93 fix holds under conditions no existing test could exercise,
+and that absence of a defect is now actually verified rather than merely
+assumed.
+
+**The test is not vacuous.** Mutation-verified directly: temporarily
+disabled the v3-D93 promotion subscription in `SessionIsland.tsx` (the
+`writeLock.subscribe` callback kept its cleanup call but no longer invoked
+`beginAsWriter()`), rebuilt, and reran — the new test failed exactly as
+predicted (`toBeVisible` on `session-drill` timed out at 10s, tab 2 never
+promoted). Restored `SessionIsland.tsx` byte-identically (`diff` confirmed
+empty), rebuilt, reran: green again.
+
+**Verified:**
+- `npx playwright test two-tab-write-lock --project=chromium`: green on 4
+  separate runs (~5.5s each), no flake in the new case itself.
+- Full e2e suite, both projects: **44 passing** (was 43 — exactly this one
+  new case; 33 chromium, was 32; 11 mobile, unchanged). One run hit a
+  single failure in `airplane-mode.test.ts`'s pre-existing "IndexedDB is
+  fully available offline" case under full-suite parallel load; reran in
+  isolation (green) and reran the full suite a second time (44/44, no
+  failure) — the same load-dependent timing flake class v3-D362/v3-D367
+  already recorded for other files, not a regression from this diff (it
+  touches no production file at all).
+- `TZ=UTC make test`: **3157 passing**, unchanged (255 v2 vitest, 47
+  v2/api, 428 v3/api, 120 corpus-compiler, 470 engine, 73 fold-runner,
+  1764 apps/web) — this diff adds one e2e file only, outside every
+  vitest/PHPUnit include glob, so no unit-suite count moves. `check-test-
+  floor.mjs`: OK, 3157 >= floor 1899 (+1258 margin, unmoved). `TZ=UTC make
+  build`: exit 0, 30 routes, unchanged (the usual one-time
+  `SecurityFatalError` CLI nudge on first invocation, not acted on, plain
+  retry built clean). `npm run gates`: all green, 348 files (+1, the new
+  e2e test; 294 v1 lines byte-identical; 2/6 UI fonts present, degraded-
+  but-non-blocking, pre-existing; 362 words; 206 codepoints). `npx tsc
+  --noEmit`, run separately across all four v3 node packages: clean in
+  all four. No PHP file changed, so `pint` was not applicable. No
+  `v1/**`/`v2/**` edit (the usual stray `v2/tsconfig.tsbuildinfo`
+  build-cache diff reverted before committing — `git status --porcelain
+  -- v1 v2` empty immediately before committing). No Arabic codepoint, no
+  `\u` escape, no `fromCharCode`/`fromCodePoint` introduced (the new
+  file's own strings swept directly: every one is a TypeScript identifier,
+  a fixed English comment/assertion sentence, or a DOM selector — no
+  corpus text). No oracle/golden-log/fixture/snapshot regenerated — one
+  new test file only, no production file touched.
+
+**A temporary, uncommitted environment workaround was needed and
+reverted**, same as several prior entries: this sandbox's pre-installed
+Chromium (1243) still doesn't match `@playwright/test`'s pinned
+expectation (1234) on EITHER project this run actually exercised —
+`chromium` (patched previously) and, newly, `mobile` (`devices["Pixel 7"]`
+wants its own `chromium_headless_shell`, which hit the identical "doesn't
+exist" error the moment the full suite was run rather than just the new
+file). Worked around with an uncommitted local `playwright.config.ts`
+`launchOptions.executablePath` edit on BOTH projects; reverted via `git
+checkout --` before committing — confirmed clean in the final `git status
+--porcelain` alongside the `v1`/`v2` check above.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus/sqlite databases anywhere. `HEAD` was DETACHED exactly at
+`origin/main`'s own real tip (`d552b37`, v3-D368), on a stale LOCAL `main`
+branch ref 20 commits behind (`48ef9dd`, v3-D354) — the recurring
+stale-local-`main` trap this file has recorded roughly fifty times since
+v3-D77 — caught via `git checkout -B main HEAD` before any exploration, a
+clean reset, no work lost or at risk. PHP defaulted to 8.3.6 (`v3/api`
+needs the `composer.lock`-pinned Symfony floor of >=8.4.1, not the real
+`composer.json` floor of ^8.2). `make setup`'s own `v2/api` composer
+install, going through the proxy's documented slow git-mirror fallback for
+most of its 111 packages, took roughly 25 minutes end to end (several
+curl-timeout retries along the way, all eventually served from source) —
+slower than several recent entries but it completed without the
+300-second-process-timeout abort v3-D368 hit, so `make setup` itself
+reached `v3/api`'s own composer step and failed there exactly as every
+prior entry predicts (`symfony/clock`/`css-selector`/`event-dispatcher`/
+`string`/`translation`/`yaml` all locked to versions needing >=8.4.1,
+`nesbot/carbon` transitively the same) — recovered with the
+now-repeatedly-documented `COMPOSER_PROCESS_TIMEOUT=900 composer install
+--ignore-platform-req=php` for `v3/api` alone, which completed cleanly and
+quickly, served mostly from the now-warm git-mirror cache the `v2/api`
+install had just populated. The five PHP-independent `npm install`s were
+run directly and in parallel while the composer install ran in the
+background; all five completed cleanly on the first attempt.
+
+**NOT addressed, named for next run:** every item on v3-D368's own
+condensed list, unchanged — `foilKernels.ts`'s `DISPLAY_STRIPPED` regex
+gap (human-decision-gated); `placement.ts#nextProbe()`'s Act-1
+self-referential junction (zero production callers); `rhymeClassOf()`;
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution`/
+`lib/pricing.ts#regionFromCountry()`; `PaywallGate`; multi-surah
+enrollment (product decision); the operational mailer's missing SMTP
+transport/host; PAY-1's Stripe fixtures; surah 67's scene beats
+(human-only); `severity.ts`'s taxonomy naming; `MacroFacts.litany
+.rhymeLabel`; `corpusHash`'s zero fold-side consumer;
+`selection_determinism_check` replaying a committed fixture;
+`QueueItem.score`'s missing external reader; `acknowledgeReentry`'s
+"makeup" branch; `DrillPicker.tsx`'s unused `now` prop; the unused
+IndexedDB object stores; `session_start`'s own latency metric; the
+streak/away-day day-space mismatch; `/workbench`'s own Pane 2/3; the
+deferred `vitest@5` bump; `laravel/framework`'s remaining advisory;
+`v2/api`'s own frozen advisories; the `trial_surah_source` column — all
+unchanged.
+
+The Playwright e2e suite's own lack of a genuine two-tab write-lock
+scenario is now CLOSED — remove it from future "genuinely unswept" lists.
+Genuinely unswept, named for next time: the browser-provisioning mismatch
+behind the e2e workaround, still unaddressed at the infrastructure level
+(now confirmed to affect the `mobile` project too, not just `chromium`);
+a genuine two-DEVICE (as opposed to two-tab) determinism e2e scenario —
+BUILD-PLAN M5's own exit criterion names "two-device determinism" and
+"full-Yusuf offline session e2e" and this suite still only ever runs
+against the 112/103/12/67 launch set in one browser profile at a time, so
+`mergeFromServer`'s own deviceSeq-preserving merge (B5, closed in
+`lib/sync/merge.ts`) has unit coverage but no browser-level one; and
+`worker/fold-runner`'s own DB adapter + staging deploy (HANDOVER.md E6) —
+still genuinely absent, confirmed by `find worker/fold-runner -maxdepth 2
+-type d` this run (only `src`/`test`/`bin`, no adapter/scheduler code at
+all), though that item is infrastructure/deployment work an agent cannot
+complete alone (no host, no DB, no credentials), not a sweep candidate.

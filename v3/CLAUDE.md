@@ -56,7 +56,71 @@ make dev     # SPA :5273, API :8000
 make test    # 3157 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 428 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1764 apps/web. (v3-D368, 2026-11-03)
+             # + 470 engine + 73 fold-runner + 1764 apps/web. (v3-D369, 2026-11-03)
+             # NOTE (v3-D369, 2026-11-03): v3-D365/D366/D367 each named the
+             # same gap as genuinely unswept without anyone taking it on: the
+             # Playwright e2e suite had never driven a genuine two-tab
+             # write-lock scenario. `lib/idb/writeLock.test.ts`'s own
+             # "acquire() against a real Web Locks implementation (v3-D70)"
+             # block proves a tab can settle as reader without hanging, via
+             # a STUB `navigator.locks` whose `held: true` case never
+             # resolves — it can never prove the OTHER half of the contract,
+             # `WriteLock.release()`'s "a queued tab is promoted without a
+             # reload" (v3-D93), which depends on a second, independently
+             # queued `navigator.locks.request()` from a genuinely separate
+             # execution context still being outstanding when the first
+             # releases. A new `e2e/two-tab-write-lock.test.ts` opens two
+             # real `Page`s from the SAME `BrowserContext` (shared storage
+             # and Web Locks, exactly like two tabs): tab 1 becomes writer,
+             # tab 2 reads as reader with the real "another tab" copy and
+             # commits nothing, tab 1 is CLOSED (the real release trigger),
+             # and tab 2 is asserted to be promoted and able to commit a tap
+             # — all WITHOUT a `second.reload()` anywhere, since a reload
+             # would only prove a fresh acquire works, not that promotion
+             # does. RESULT: no defect — green on 4 isolated runs, and on
+             # the full e2e suite (44/44, was 43/43). Mutation-verified: the
+             # v3-D93 promotion subscription in `SessionIsland.tsx` was
+             # temporarily disabled (kept the cleanup call, dropped the
+             # `beginAsWriter()` call), rebuilt, and the new test failed
+             # exactly as predicted (`session-drill` never became visible,
+             # 10s timeout); `SessionIsland.tsx` restored byte-identically
+             # (`diff` confirmed empty), rebuilt, reran green. One
+             # pre-existing flake observed once under full-suite parallel
+             # load, not a regression (this diff touches no production
+             # file): `airplane-mode.test.ts`'s "IndexedDB is fully
+             # available offline" case, green in isolation and on a second
+             # full run — the same load-dependent-timing class v3-D362/
+             # v3-D367 already recorded for other files. `TZ=UTC make
+             # test`: 3157 passing, unchanged (255 v2 vitest, 47 v2/api,
+             # 428 v3/api, 120 corpus-compiler, 470 engine, 73 fold-runner,
+             # 1764 apps/web) — this diff adds one e2e file only, outside
+             # every vitest/PHPUnit include glob, so no unit-suite count
+             # moves. `check-test-floor.mjs`: OK, 3157 >= floor 1899 (+1258
+             # margin, unmoved). `TZ=UTC make build`: exit 0, 30 routes,
+             # unchanged (the usual one-time `SecurityFatalError` CLI nudge
+             # on first invocation, not acted on, plain retry built clean).
+             # `npm run gates`: all green, 348 files (+1, the new e2e test;
+             # 294 v1 lines byte-identical; 2/6 UI fonts present, degraded-
+             # but-non-blocking, pre-existing; 362 words; 206 codepoints).
+             # `npx tsc --noEmit`, run separately across all four v3 node
+             # packages: clean in all four. No PHP file changed, so `pint`
+             # was not applicable. No `v1/**`/`v2/**` edit (the usual stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted before
+             # committing — `git status --porcelain -- v1 v2` empty
+             # immediately before committing). No Arabic codepoint, no `\u`
+             # escape, no `fromCharCode`/`fromCodePoint` introduced — the
+             # new file's own strings are all TypeScript identifiers, fixed
+             # English comment/assertion sentences, or DOM selectors. No
+             # oracle/golden-log/fixture/snapshot regenerated — one new
+             # test file only, no production file touched. A temporary,
+             # uncommitted `playwright.config.ts` `executablePath` edit
+             # (this sandbox's Chromium 1243 vs the pinned 1234, on BOTH
+             # the `chromium` and, newly discovered this run, `mobile`
+             # project) was reverted via `git checkout --` before
+             # committing. The Playwright e2e suite's own lack of a genuine
+             # two-tab write-lock scenario is now CLOSED. Full detail,
+             # including session-start notes and the unchanged "NOT
+             # addressed" list: DECISIONS.md v3-D369.
              # NOTE (v3-D368, 2026-11-03): `lib/sync/outbox.ts#selectPending()`
              # called `getDeviceId()` — the lazy-CREATE device-id accessor —
              # unconditionally, including when reached read-only through
