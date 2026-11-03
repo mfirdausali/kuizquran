@@ -56,7 +56,83 @@ make dev     # SPA :5273, API :8000
 make test    # 3154 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 428 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1761 apps/web. (v3-D366, 2026-11-03)
+             # + 470 engine + 73 fold-runner + 1761 apps/web. (v3-D367, 2026-11-03)
+             # NOTE (v3-D367, 2026-11-03): `public/sw.js`'s navigate branch
+             # cached a navigation ERROR response as if it were the real
+             # page — `cache.put(request, fresh.clone())` in the
+             # network-first navigate branch had no `.ok` guard, unlike
+             # this exact file's own install handler (`if (!res.ok)
+             # return;`) and its own static-asset branch three lines below
+             # (`if (fresh.ok) cache.put(...)`, with a comment stating the
+             # reason: "Caching a 404 would make it permanent for the life
+             # of the cache version"). A page that genuinely 404s/500s
+             # while online got stored under that exact URL, and the catch
+             # branch's "this exact route first" fallback would then serve
+             # that stale error forever on the next offline visit to the
+             # identical URL instead of falling through to the shell.
+             # `public/sw.js` (335 lines) is skipped entirely by
+             # `check-boundaries.mjs` and had never been read end to end
+             # since M5 — only 3 mentions in DECISIONS.md, all from the
+             # original build-out, none a re-audit. Fixed: the navigate
+             # branch's `cache.put` is now guarded by `if (fresh.ok)`,
+             # mirroring the static-asset branch's own template; `fresh`
+             # is still returned unconditionally either way. RED confirmed
+             # directly in a real browser (a new `airplane-mode.test.ts`
+             # case `page.goto`s `/surah/999` — a genuine, deliberate 404,
+             # edge case #78's `notFound()`, reached via a real navigation
+             # rather than a page-script `fetch()`, since only a true
+             # navigation ever has `request.mode === "navigate"` — against
+             # the unmodified worker: `expected null, received 404`, the
+             # 404 sitting in `iq3-shell-v1`) and mutation-verified
+             # (`git stash` of `sw.js` alone reproduced the identical
+             # failure; restored byte-identically, reran green, stable
+             # across 3 repeated isolated runs). Full `airplane-mode
+             # .test.ts` (21 cases) and the full chromium e2e project (32
+             # cases) green with the fix, confirmed across multiple runs.
+             # `TZ=UTC make test`: 3154 passing, unchanged (this fix
+             # touches only `public/sw.js`, outside every vitest/PHPUnit
+             # include glob, and an e2e spec — no unit-suite count moves:
+             # 255 v2 vitest, 47 v2/api, 428 v3/api, 120 corpus-compiler,
+             # 470 engine, 73 fold-runner, 1761 apps/web).
+             # `check-test-floor.mjs`: OK, 3154 >= floor 1899 (+1255
+             # margin, unmoved). `TZ=UTC make build`: exit 0, 30 routes,
+             # unchanged (the usual one-time `SecurityFatalError` CLI
+             # nudge on first invocation, not acted on, plain retry built
+             # clean). `npm run gates`: all green, 347 files, unchanged.
+             # `npx tsc --noEmit`: clean. No PHP file changed, so `pint`
+             # was not applicable. No `v1/**`/`v2/**` edit (the usual
+             # stray `v2/tsconfig.tsbuildinfo` build-cache diff reverted
+             # before committing). No Arabic codepoint, no `\u` escape, no
+             # `fromCharCode`/`fromCodePoint` introduced. No oracle/
+             # golden-log/fixture/snapshot regenerated — one existing
+             # production file and one existing e2e test file only. Also
+             # read in full this run and found correct, no defect:
+             # `lib/sync/outbox.ts`'s own `advanceLowWaterIfProven`
+             # /`scanQuarantined` interaction (v3-D366 had already
+             # correctly documented why none exists — CLOSED, do not
+             # re-queue), `lib/idb/writeLock.ts`, `lib/idb/append.ts`,
+             # `components/macro/geometry.ts`/`graphNodes.ts`/
+             # `RingDiagram.tsx`, `components/progress/RetentionIsland
+             # .tsx`/`ProgressListIsland.tsx`/`StageBadge.tsx`,
+             # `components/quiz/OrderTilesCard.tsx` — none named by basename
+             # in this file, DECISIONS.md or HANDOVER.md before this run.
+             # One pre-existing flake observed, NOT a regression from this
+             # diff and not chased further (reproduced identically with
+             # both changed files fully reverted): `first-session
+             # .test.ts`'s "onboarding completes all seven screens and
+             # commits the device" case (and once, `commit-before-paint
+             # .test.ts`'s onboarding-durability sibling) intermittently
+             # found an unexpected `deviceId` key in `meta` — the same
+             # "load-dependent timing flake" class v3-D362 already
+             # recorded once. Session start: `HEAD`, local `main` and
+             # `origin/main` already agreed at `a31c2a2` — no
+             # stale-local-`main` trap this run, a genuine exception to
+             # the roughly-fifty-times-recorded pattern. Genuinely
+             # unswept, named for next time: the onboarding-commit flake
+             # above; the Playwright e2e suite's own lack of a genuine
+             # two-tab write-lock scenario (still open, carried from
+             # v3-D366); the browser-provisioning mismatch behind the e2e
+             # workaround. Full detail: DECISIONS.md v3-D367.
              # NOTE (v3-D366, 2026-11-03): the #110 "cannot sync" escalation
              # (lib/sync/summary.ts's own `cannotSync`, surfaced by
              # SyncStatus.tsx) was invisible on every tab except the one

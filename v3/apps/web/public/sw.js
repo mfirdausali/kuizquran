@@ -277,8 +277,19 @@ self.addEventListener("fetch", (event) => {
       (async () => {
         try {
           const fresh = await fetch(request);
-          const cache = await caches.open(CACHE);
-          cache.put(request, fresh.clone());
+          // Only a successful response may stand in for this route when the
+          // learner is offline. The same guard the static-asset branch below
+          // already states explicitly ("Caching a 404 would make it permanent
+          // for the life of the cache version") was missing here — a page
+          // that genuinely 404s/500s while online (a bad link, a transient
+          // server error) was cached as if it were the real page, and the
+          // catch branch's "this exact route first" lookup would then serve
+          // that stale error forever on the next offline visit to the exact
+          // same URL, instead of falling through to the shell fallback below.
+          if (fresh.ok) {
+            const cache = await caches.open(CACHE);
+            cache.put(request, fresh.clone());
+          }
           return fresh;
         } catch {
           const cache = await caches.open(CACHE);

@@ -404,6 +404,57 @@ test.describe("B · airplane mode", () => {
     ).toBe("REJECTED");
   });
 
+  test("a navigation error response is never cached — it must not outlive the request that produced it", async ({
+    page,
+  }) => {
+    // -----------------------------------------------------------------------
+    // THE NAVIGATE BRANCH USED TO CACHE UNCONDITIONALLY.
+    // -----------------------------------------------------------------------
+    // Unlike the install handler (`if (!res.ok) return;`, above) and the
+    // static-asset branch below it (`if (fresh.ok) cache.put(...)`), the
+    // network-first navigate branch's `cache.put(request, fresh.clone())` had
+    // no `ok` guard at all. A page that genuinely 404s/500s while online — a
+    // bad link, a transient server error on a route that is fine a moment
+    // later — got stored as if it were the real page. The next time that
+    // EXACT url was requested OFFLINE, the catch branch's "this exact route
+    // first" lookup (`cache.match(request, ...)`) would serve the stale error
+    // forever, instead of falling through to the honest shell fallback a
+    // learner is supposed to get.
+    //
+    // `/surah/999` is a genuine, deliberate 404 — surah 999 does not exist,
+    // `parseSurah` returns null and the page calls `notFound()` (edge case
+    // #78) — not a fixture built for this test. It must be reached via
+    // `page.goto`, not a page-script `fetch()`: only a browser-initiated
+    // navigation ever has `request.mode === "navigate"` in the fetch handler,
+    // so a `fetch()` call from inside the page would never exercise this
+    // branch at all.
+    await page.goto("/drill");
+    await page.evaluate(() => navigator.serviceWorker.ready);
+    // `ready` resolving is not the same as CONTROLLING (see "the service
+    // worker registers and takes control" above) — the fetch handler only
+    // runs once `controller` is set.
+    await expect
+      .poll(() => page.evaluate(() => !!navigator.serviceWorker.controller), {
+        timeout: 15_000,
+      })
+      .toBe(true);
+
+    const response = await page.goto("/surah/999");
+    expect(response?.status(), "the precondition: a genuine 404 navigation").toBe(404);
+
+    const cachedStatus = await page.evaluate(async () => {
+      const cache = await caches.open("iq3-shell-v1");
+      const hit = await cache.match("/surah/999", { ignoreSearch: true });
+      return hit ? hit.status : null;
+    });
+    expect(
+      cachedStatus,
+      "a non-ok navigation response must never enter the shell cache — only a " +
+        "page that actually loaded may stand in for itself when the learner " +
+        "goes offline",
+    ).toBeNull();
+  });
+
   test("offline, an onboarded learner opening '/' still lands on /home", async ({
     page,
     context,

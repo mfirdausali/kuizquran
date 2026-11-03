@@ -39511,3 +39511,177 @@ unit/component level, never a real second browser context); the
 browser-provisioning mismatch behind the e2e workaround (still
 unaddressed at the infrastructure level, carried forward from v3-D365
 and several entries before it).
+
+### v3-D367 (2026-11-03, nightly): `public/sw.js`'s navigate branch cached a navigation error response as if it were the real page
+
+v3-D366 named `lib/sync/outbox.ts`'s own `advanceLowWaterIfProven`/
+`writeOutboxLowWater` interaction with `scanQuarantined()` as genuinely
+unswept. Read in full this run, together with `sync.ts` and `cursor.ts`
+again end to end: the interaction holds exactly as v3-D366 already
+documented — `scanQuarantined()` never calls either low-water function,
+by design, so there is no live interaction to find a defect in. Also
+read in full and found correct, no defect: `lib/idb/writeLock.ts`
+(the Web Locks/heartbeat-fallback writer election itself, including its
+own already-documented v3-D67 history — `SessionIsland.tsx`'s and
+`TestIsland.tsx`'s subscribe-for-later-promotion handling (v3-D93) is
+identical in both, and `PlanIsland.tsx`'s own idempotent third
+`acquire()` call (v3-D304) is correctly redundant, not a race);
+`lib/idb/append.ts` (the deviceSeq read-increment-write transaction and
+its retry path — a transaction abort rolls back the counter write
+atomically with the event write, so a retry's reused `deviceSeq` can
+never collide); `components/macro/geometry.ts` and `graphNodes.ts` (the
+ring/strip placement math — `buildGraphNodes` always hands `placeArc`/
+`placeStrip` the FULL dense 1..ayahCount graph, so the `ayahIndex.get(i
++ 1)` adjacency assumption documented in `geometry.ts` always holds; no
+partial-range caller exists); `components/macro/RingDiagram.tsx`;
+`components/progress/RetentionIsland.tsx`, `ProgressListIsland.tsx` and
+`StageBadge.tsx`; `components/quiz/OrderTilesCard.tsx`. None of these
+eleven files appears by name anywhere in this file, CLAUDE.md or
+HANDOVER.md before this run — a `grep` for each basename across all
+three confirmed it — so this was a genuinely fresh pass, not a re-walk.
+
+**The defect**, found by extending that same "never named before" sweep
+to non-`.ts`/`.tsx` production files, since `scripts/check-boundaries
+.mjs` skips `public/` entirely (this file's own header says so) and
+`public/sw.js` (335 lines) had never been read end to end since the
+day it was created (M5, v3-D67-adjacent) — only 3 mentions in this
+file, all from that original build-out, none a re-audit. The
+network-first NAVIGATE branch —
+
+```js
+const fresh = await fetch(request);
+const cache = await caches.open(CACHE);
+cache.put(request, fresh.clone());
+return fresh;
+```
+
+— cached `fresh` unconditionally, with no `.ok` guard. Every other
+cache-write in this exact file has one: the install handler's own
+corpus/shell precache (`if (!res.ok) return;`) and the static-asset
+branch three lines below the navigate branch (`if (fresh.ok)
+cache.put(...)`, with its own comment stating the reason — "Caching a
+404 would make it permanent for the life of the cache version"). The
+navigate branch silently violated the one rule its own sibling branches
+state explicitly.
+
+Consequence: a page that genuinely 404s/500s while online — a bad
+link, or a transient server error on a route that would be fine a
+moment later — got stored in `iq3-shell-v1` keyed by that exact URL.
+The catch branch's own "this exact route first" fallback
+(`cache.match(request, {ignoreSearch:true})`) would then serve that
+stale error FOREVER on the next offline visit to the identical URL,
+instead of falling through to `SHELL_DOCUMENT` — the honest fallback a
+learner going offline is supposed to get. Online recovery is
+self-healing on every OTHER url (network-first means the next good
+fetch overwrites a bad cache entry), but the one visit that lands
+between a transient error and the learner going offline is exactly the
+window this bug opens.
+
+**Why nothing caught it.** Every existing `airplane-mode.test.ts` case
+either primes the cache with a genuinely successful navigation (`/`,
+`/drill`, `/home`) or exercises the catch branch from a clean slate — no
+test had ever produced a non-ok navigation response AT ALL, so the
+missing guard had no observable consequence in the suite. The file's
+own header names this suite as the ONLY enforcement `sw.js` has (no
+static gate can see `public/`), and that enforcement had a genuine gap.
+
+**Fixed:** the navigate branch's `cache.put` is now guarded by `if
+(fresh.ok)`, mirroring the static-asset branch's own template exactly —
+`fresh` itself is still returned unconditionally either way, so an
+online learner still sees the real error; only the CACHING of it is
+skipped.
+
+**Verified:**
+- RED confirmed directly, in a real browser against the unmodified
+  worker: a new case in `airplane-mode.test.ts` registers the worker,
+  confirms it is controlling, then `page.goto`s `/surah/999` — a real,
+  deliberate 404 (surah 999 does not exist; `parseSurah` returns null
+  and the page calls `notFound()`, edge case #78 — not a fixture built
+  for this test) reached via an actual browser navigation rather than a
+  page-script `fetch()` (only a true navigation ever has `request.mode
+  === "navigate"` in the fetch handler). Run against the unmodified
+  worker it failed exactly as predicted: `expected null, received 404`
+  — the 404 response was sitting in `iq3-shell-v1` under that exact URL.
+- Mutation-verified: `git stash` of `sw.js` alone (the new test kept)
+  reproduced the identical single failure; restored byte-identically,
+  reran: green, and stable across 3 repeated isolated runs (no flake in
+  the new case itself).
+- Full `airplane-mode.test.ts` (21 cases) and the full chromium e2e
+  project (32 cases) both green with the fix, confirmed across multiple
+  runs — `--workers=1` and the default parallel config both.
+- `TZ=UTC make test`: **3154 passing**, unchanged (255 v2 vitest, 47
+  v2/api, 428 v3/api, 120 corpus-compiler, 470 engine, 73 fold-runner,
+  1761 apps/web) — this fix touches only `public/sw.js` (outside every
+  vitest/PHPUnit include glob) and an e2e spec, so no unit-suite count
+  moves. `check-test-floor.mjs`: OK, 3154 >= floor 1899 (+1255 margin).
+  `TZ=UTC make build`: exit 0, 30 routes, unchanged (the usual one-time
+  `SecurityFatalError` CLI nudge on first invocation, not acted on,
+  plain retry built clean). `npm run gates`: all green, 347 files,
+  unchanged (294 v1 lines byte-identical; 2/6 UI fonts present,
+  degraded-but-non-blocking, pre-existing; 362 words; 206 codepoints).
+  `npx tsc --noEmit` (apps/web): clean. No PHP file changed, so `pint`
+  was not applicable. No `v1/**`/`v2/**` edit (the usual stray
+  `v2/tsconfig.tsbuildinfo` build-cache diff reverted before committing
+  — `git status --porcelain -- v1 v2` empty immediately before
+  committing). No Arabic codepoint, no `\u` escape, no
+  `fromCharCode`/`fromCodePoint` introduced (the diff's own added lines
+  swept directly over the Arabic/Arabic Supplement/Arabic Extended-A/
+  both Presentation-Forms Unicode blocks: clean — every new string is a
+  JavaScript/TypeScript identifier or a fixed English comment/assertion
+  sentence). No oracle/golden-log/fixture/snapshot regenerated — one
+  existing production file and one existing e2e test file only.
+
+**One pre-existing flake observed, not a regression from this diff and
+not chased further:** `first-session.test.ts`'s "onboarding completes
+all seven screens and commits the device" case (and, once,
+`commit-before-paint.test.ts`'s sibling onboarding-durability case)
+intermittently found an unexpected `deviceId` key in the `meta` store
+alongside `onboardedAt`/`onboardingChoices` — reproduced identically
+with this diff's two files fully reverted (`git stash` of `sw.js` and
+the new test, three repeated runs, 1-2 failures each time, never the
+same test twice), so this is a pre-existing, load/timing-dependent flake
+in the onboarding-commit assertion, the same class v3-D362 already
+recorded once for a different file ("a load-dependent timing flake, not
+chased further"). Worth a future run's attention — the proximate cause
+is presumably `completeFirstRecall`'s tap loop occasionally reaching a
+code path that allocates a `deviceId` (any `append()` call does, via
+`getDeviceId()`) before the onboarding commit fires — but it is a
+separate, unrelated gap from tonight's own scope and chasing it here
+would have meant starting a second step in one run, which NIGHTLY.md's
+"one step per run" rule exists to prevent.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus/sqlite databases anywhere; `HEAD`, local `main` and `origin/main`
+already agreed at `a31c2a2` (v3-D366) — no stale-local-`main` trap this
+run, confirmed via `git branch -vv` before any exploration, a genuine
+exception to the roughly-fifty-times-recorded pattern. PHP defaulted to
+8.3.6 (`v3/api` needs the `composer.lock`-pinned Symfony floor of
+>=8.4.1); `make setup` itself failed partway through on that exact
+platform-req mismatch (exit 2, as every prior run records), recovered
+with the same repeatedly-documented `composer install
+--ignore-platform-req=php` for `v3/api` alone — `v2/api`'s own composer
+install inside `make setup` succeeded on its own via the proxy's
+git-mirror fallback (slow — many per-package `curl error 28`/`Could not
+authenticate` retries — but it completed without intervention this
+time, unlike some prior runs that needed a PHP 8.4 install). The e2e
+browser-provisioning mismatch (Chromium 1243 installed vs
+`@playwright/test`'s pinned 1234) recurred exactly as every prior entry
+describes; worked around identically with an uncommitted local
+`playwright.config.ts` `launchOptions.executablePath` edit, reverted via
+`git checkout --` before committing — confirmed clean in the final
+`git status --porcelain` alongside the `v1`/`v2` check above.
+
+`public/sw.js`'s own never-independently-audited status is now CLOSED —
+it has been read end to end once, outside its original build-out, and
+the one gap found is fixed. Genuinely unswept, named for next time: the
+`first-session.test.ts`/`commit-before-paint.test.ts` onboarding-commit
+flake documented above; the Playwright e2e suite's own lack of a genuine
+two-tab write-lock scenario (named again by v3-D366, not addressed this
+run — this run's `sw.js` finding came from reading a file v3-D366 had
+not named, not from pursuing the two-tab item itself); the
+browser-provisioning mismatch behind the e2e workaround, still
+unaddressed at the infrastructure level. `lib/sync/outbox.ts`'s
+`advanceLowWaterIfProven`/`scanQuarantined` item is now CLOSED — v3-D366
+had already correctly documented why no interaction exists; this run's
+re-read found nothing further to add, and it should not be re-queued
+again.
