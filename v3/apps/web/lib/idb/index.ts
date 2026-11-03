@@ -41,6 +41,7 @@ export {
   append,
   currentTz,
   getDeviceId,
+  getExistingDeviceId,
   retryAppend,
   RetryableAppendError,
 } from "./append.ts";

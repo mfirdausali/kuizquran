@@ -53,10 +53,82 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3154 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3157 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 428 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1761 apps/web. (v3-D367, 2026-11-03)
+             # + 470 engine + 73 fold-runner + 1764 apps/web. (v3-D368, 2026-11-03)
+             # NOTE (v3-D368, 2026-11-03): `lib/sync/outbox.ts#selectPending()`
+             # called `getDeviceId()` — the lazy-CREATE device-id accessor —
+             # unconditionally, including when reached read-only through
+             # `scanQuarantined()` (v3-D366's own fix, earlier the same
+             # night) from every tab's automatic background sync cycle on
+             # mount (`SyncTrigger`, root layout, fires on every route). A
+             # tab that is not the write-lock holder — the ordinary case for
+             # the very first `/home` render right after onboarding, before
+             # any session has ever started — got `push: null` from
+             # `pushOutbox`'s `assertWriter()` throw, then fell through to
+             # `scanQuarantined`, which minted a brand-new, PERMANENT device
+             # identity into IndexedDB `meta` as a side effect of a passive
+             # "is anything stuck" check, on a device that had not appended
+             # a single event yet. v3-D367 had already observed the SYMPTOM
+             # (`first-session.test.ts`'s onboarding-commit case
+             # intermittently finding an unexpected `deviceId` key) and
+             # misdiagnosed it as a pre-existing, load-dependent test flake;
+             # it is a real, reproducible regression from v3-D366's own fix,
+             # one layer down — a READ reaching a function built for a
+             # WRITE. Fixed: a new `getExistingDeviceId()` (reads without
+             # creating, `null` on a device that has never called
+             # `append()`) replaces `getDeviceId()` inside `selectPending()`,
+             # which now short-circuits to empty on `null` — correct by
+             # construction, since a device with no id has, by definition,
+             # never written a row under one. RED confirmed directly (three
+             # new `lib/sync/outbox.test.ts` cases — `selectPending()`/
+             # `scanQuarantined()` on a never-appended device must leave
+             # `meta` without a `deviceId` row; a third re-confirms no
+             # regression once a device genuinely has appended something —
+             # both failure cases failed exactly as predicted against the
+             # unmodified source, a freshly-minted UUID present where none
+             # should be) and mutation-verified (`git stash` of the three
+             # production files alone, all three new tests kept, reproduced
+             # both failures identically; restored byte-identically, reran:
+             # `lib/sync/outbox.test.ts` 23/23 green, was 20).
+             # `npx vitest run lib/sync lib/idb`: 159/159 green, no
+             # regression on any sibling consumer. `TZ=UTC make test`: 3157
+             # passing (was 3154, +3 — exactly these three new cases;
+             # apps/web 1764, was 1761; no other suite moved: 255 v2 vitest,
+             # 47 v2/api, 428 v3/api, 120 corpus-compiler, 470 engine, 73
+             # fold-runner). `check-test-floor.mjs`: OK, 3157 >= floor 1899
+             # (+1258 margin). `TZ=UTC make build`: exit 0, 30 routes,
+             # unchanged (the usual one-time `SecurityFatalError` CLI nudge
+             # on first invocation, not acted on, plain retry built clean).
+             # `npm run gates`: all green, 347 files, unchanged (294 v1
+             # lines byte-identical; 2/6 UI fonts present,
+             # degraded-but-non-blocking, pre-existing; 362 words; 206
+             # codepoints). `npx tsc --noEmit`, run separately across all
+             # four v3 node packages: clean in all four. No PHP file
+             # changed, so `pint` was not applicable. No `v1/**`/`v2/**`
+             # edit (the usual stray `v2/tsconfig.tsbuildinfo` build-cache
+             # diff from running the suites reverted before committing —
+             # `git status --porcelain -- v1 v2` empty immediately before
+             # committing). No Arabic codepoint, no `\u` escape, no
+             # `fromCharCode`/`fromCodePoint` introduced. No oracle/
+             # golden-log/fixture/snapshot regenerated — three existing
+             # production files and one existing test file only. Session
+             # start: `HEAD` detached exactly at `origin/main`'s own real
+             # tip (`22a2beb`, v3-D367), on a stale LOCAL `main` branch ref
+             # many commits behind (`48ef9dd`, v3-D354) — the recurring
+             # stale-local-`main` trap this file has recorded roughly fifty
+             # times since v3-D77 — caught via `git checkout -B main HEAD`
+             # before any exploration. A NEW friction this run: `make
+             # setup`'s own `v2/api` composer install hit composer's
+             # default 300-second process timeout on one package's mirror
+             # clone (`laravel/pint`) after already reaching 100% of the
+             # download phase; recovered with
+             # `COMPOSER_PROCESS_TIMEOUT=900` on a direct retry rather than
+             # re-running all of `make setup` — see DECISIONS.md v3-D368 for
+             # the full recovery sequence. The onboarding-commit flake
+             # v3-D367 named is now CLOSED — it was this real defect, not
+             # test timing; do not re-queue it as unswept.
              # NOTE (v3-D367, 2026-11-03): `public/sw.js`'s navigate branch
              # cached a navigation ERROR response as if it were the real
              # page — `cache.put(request, fresh.clone())` in the

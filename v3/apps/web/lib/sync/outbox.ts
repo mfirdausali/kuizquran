@@ -38,7 +38,7 @@
 
 import { openDb } from "@/lib/idb/db";
 import { toWire, type LocalEventRow } from "@/lib/idb/schema";
-import { getDeviceId } from "@/lib/idb/append";
+import { getExistingDeviceId } from "@/lib/idb/append";
 import { readOutboxLowWater, writeOutboxLowWater } from "./cursor.ts";
 
 /**
@@ -90,10 +90,22 @@ export function wireBytes(row: LocalEventRow): number {
  * ever advanced to a value proven to have nothing pending below it, and a full
  * scan is the fallback whenever it is absent. It can be wrong-LOW (costing
  * time) but never wrong-HIGH (costing an event).
+ *
+ * v3-D368: this is a READ, called from `scanQuarantined()` by every reader
+ * tab's own background sync cycle on mount (`SyncTrigger`, root layout) and
+ * from `pushOutbox` by the writer's. A device that has never called
+ * `append()` has no device id yet and, by construction, cannot have a single
+ * row filed under one — so this returns empty WITHOUT minting one via
+ * `getDeviceId()`'s lazy-create. Calling that instead would stamp a fresh,
+ * permanent device identity onto a device that has done nothing, as a side
+ * effect of a passive "is anything stuck" check — exactly what happened on
+ * every `/home` mount before a learner ever started a session.
  */
 export async function selectPending(limit = OUTBOX_BATCH_MAX): Promise<PendingSelection> {
+  const deviceId = await getExistingDeviceId();
+  if (deviceId === null) return { rows: [], quarantined: [] };
+
   const db = await openDb();
-  const deviceId = await getDeviceId();
   const lowWater = await readOutboxLowWater();
 
   const rows: LocalEventRow[] = [];

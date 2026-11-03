@@ -39685,3 +39685,168 @@ unaddressed at the infrastructure level. `lib/sync/outbox.ts`'s
 had already correctly documented why no interaction exists; this run's
 re-read found nothing further to add, and it should not be re-queued
 again.
+
+### v3-D368 (2026-11-03, nightly): a passive sync-status check minted a permanent device identity on a device that had done nothing
+
+v3-D367 named a flake it chose not to chase: `first-session.test.ts`'s
+onboarding-commit case intermittently found an unexpected `deviceId` key
+in `meta` alongside `onboardedAt`/`onboardingChoices`, and guessed the
+proximate cause was `completeFirstRecall`'s tap loop reaching an
+`append()` path before the commit fired. That guess was wrong in a way
+worth recording: `components/onboarding/FirstRecall.tsx`'s own header is
+explicit and, on inspection, correct — the component "writes NOTHING AT
+ALL" during onboarding screen 2. Tracing the real source instead found a
+genuine, previously-unreported defect, and one that is a REGRESSION from
+v3-D366's own fix landed earlier this same night, not a pre-existing
+flake.
+
+**The defect.** `lib/sync/outbox.ts#selectPending()` called
+`getDeviceId()` — the lazy-create accessor (`lib/idb/append.ts`) whose
+own header already warns "regenerating forks the per-device ordinal
+namespace" but says nothing about MINTING one from a read — on every
+call, unconditionally. `selectPending` has two callers: `pushOutbox`
+(gated behind `assertWriter()`, so only the write-lock holder ever
+reaches it) and, since tonight's earlier v3-D366 fix,
+`scanQuarantined()` — which deliberately has NO writer requirement, so
+it runs from `syncCycle()`'s fallback branch on EVERY tab whenever
+`push` is `null`, which is the ordinary case for any tab that has not
+acquired the write lock. `components/shell/SyncTrigger.tsx` mounts in
+the root layout and fires `syncCycle()` on mount, on every route — so
+the very first `/home` render after `completeOnboarding()` redirects
+there (no `/session`/`/test` write-lock acquisition has happened yet)
+ran a passive "is anything stuck" check that, as a side effect, stamped
+a brand-new, permanent device identity into `meta` — on a device that
+had not yet appended a single event. v3-D366's own fix is correct on
+its own terms (a reader tab must be able to discover a stuck
+quarantined row); the defect is one layer down, in a READ calling a
+function built for a WRITE.
+
+Consequence beyond this one test's own narrow assertion: any visit to
+`/home` — even by a learner who onboards and then abandons without ever
+starting a session — now permanently commits this device to a device
+identity it has no other reason to hold yet. Harmless to sync
+correctness (the id is never regenerated, so no namespace fork), but it
+breaks the real invariant `first-session.test.ts` encodes: onboarding
+commits exactly two keys, in one transaction, and nothing else should
+exist on the device until it has actually done something.
+
+**Why nothing caught it.** Every existing `selectPending`/
+`scanQuarantined`/`countPending` test in `lib/sync/outbox.test.ts`
+appends at least one event first (`appendMany`/`append`), which already
+mints a device id as a side effect of the append itself — so no test
+had ever called a read-only pending/quarantine check on a device that
+had genuinely never written anything.
+
+**Fixed.** `lib/idb/append.ts` gains `getExistingDeviceId()`: reads the
+`deviceId` meta key WITHOUT creating one, returning `null` on a device
+that has never called `append()`. `selectPending()` now calls that
+instead of `getDeviceId()`, and short-circuits to `{rows: [],
+quarantined: []}` when it is `null` — correct by construction, since a
+device with no id has, by definition, never written a row under one (no
+`events` row of this device's own could exist to miss). A device that
+HAS appended something is completely unaffected: `getExistingDeviceId()`
+returns the same, already-minted id `getDeviceId()` would have, so the
+rest of `selectPending`'s scan runs identically.
+
+**Verified:**
+- RED confirmed directly: three new cases in `lib/sync/outbox.test.ts`
+  (a new `describe` block) — `selectPending()` and `scanQuarantined()`
+  on a device that has never appended anything must return empty AND
+  leave `meta` without a `deviceId` row; a third case re-confirms no
+  regression once a device genuinely has appended something (the same
+  id survives, nothing is regenerated). Run against the unmodified
+  source, the first two failed exactly as predicted —
+  `expected { key: 'deviceId', … } to be undefined`, a freshly-minted
+  UUID present where none should be — and the third passed vacuously,
+  correctly.
+- Mutation-verified: `git stash` of the three production files alone
+  (`append.ts`, `index.ts`, `outbox.ts` — all three new tests kept)
+  reproduced both predicted failures identically; restored
+  byte-identically, reran: `lib/sync/outbox.test.ts` 23/23 green, was
+  20.
+- `npx vitest run lib/sync lib/idb`: 159/159 green — no regression on
+  any sibling consumer (`merge.ts`, `pull.ts`, `summary.ts`, `auth.ts`,
+  `append.test.ts`, `writeLock.test.ts`, `state.test.ts`, and the
+  three schema-agreement suites).
+- `TZ=UTC make test`: **3157 passing** (was 3154, +3 — exactly these
+  three new cases; apps/web 1764, was 1761; no other suite moved: 255
+  v2 vitest, 47 v2/api, 428 v3/api, 120 corpus-compiler, 470 engine, 73
+  fold-runner). `check-test-floor.mjs`: OK, 3157 >= floor 1899 (+1258
+  margin). `TZ=UTC make build`: exit 0, 30 routes, unchanged (the usual
+  one-time `SecurityFatalError` CLI nudge on first invocation, not
+  acted on, plain retry built clean). `npm run gates`: all green, 347
+  files, unchanged (294 v1 lines byte-identical; 2/6 UI fonts present,
+  degraded-but-non-blocking, pre-existing; 362 words; 206 codepoints).
+  `npx tsc --noEmit`, run separately across all four v3 node packages:
+  clean in all four. No PHP file changed, so `pint` was not applicable.
+  No `v1/**`/`v2/**` edit (the usual stray `v2/tsconfig.tsbuildinfo`
+  build-cache diff from running the suites reverted before committing —
+  `git status --porcelain -- v1 v2` empty immediately before
+  committing). No Arabic codepoint, no `\u` escape, no
+  `fromCharCode`/`fromCodePoint` introduced (the diff's own added lines
+  swept directly over the Arabic/Arabic Supplement/Arabic Extended-A/
+  both Presentation-Forms Unicode blocks: clean — every new string is a
+  TypeScript identifier or a fixed English comment/assertion sentence).
+  No oracle/golden-log/fixture/snapshot regenerated — three existing
+  production files and one existing test file only.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus/sqlite databases anywhere. `HEAD` was DETACHED exactly at
+`origin/main`'s own real tip (`22a2beb`, v3-D367), on a stale LOCAL
+`main` branch ref many commits behind (`48ef9dd`, v3-D354) — the
+recurring stale-local-`main` trap this file has recorded roughly fifty
+times since v3-D77 — caught via `git checkout -B main HEAD` before any
+exploration, a clean reset, no work lost or at risk. PHP defaulted to
+8.3.6 (`v3/api` needs the `composer.lock`-pinned Symfony floor of
+>=8.4.1, not the real `composer.json` floor of ^8.2). A NEW friction
+this run, worth recording for next time: `make setup`'s own `v2/api`
+composer install, going through the proxy's slow git-mirror fallback
+for most of its 111 packages (same as every recent entry), hit
+composer's default 300-second PROCESS TIMEOUT on one package's mirror
+clone (`laravel/pint`) after already reaching 100% of the download
+phase — composer exited 1 and `make setup` aborted there, having never
+reached `v2/api`'s own `.env`/key/migrate steps or `v2/api`'s own `npm
+install`, `v3/api`'s composer install, or any of the v3 node packages'
+installs. Recovered by re-running each remaining step directly rather
+than re-running all of `make setup` from scratch (which would have
+redone the already-cached `v2/api` download phase too):
+`COMPOSER_PROCESS_TIMEOUT=900 composer install` for `v2/api` (clean
+second attempt, mostly served from the now-warm git-mirror cache); the
+already-documented `composer install --ignore-platform-req=php` for
+`v3/api`, also with `COMPOSER_PROCESS_TIMEOUT=900`; the `.env`/key/
+`database.sqlite`/migrate steps and the five `npm install`s run by hand
+for both API projects and all four v3 node packages. Worth raising
+`process-timeout` in a committed `composer.json`/global config if this
+recurs — a future run hitting the identical "100% downloaded, then one
+mirror clone exceeds 300s" failure should reach straight for
+`COMPOSER_PROCESS_TIMEOUT` rather than re-diagnosing it.
+
+**NOT addressed, named for next run:** every item on v3-D367's own
+condensed list, unchanged — `foilKernels.ts`'s `DISPLAY_STRIPPED` regex
+gap (human-decision-gated); `placement.ts#nextProbe()`'s Act-1
+self-referential junction (zero production callers); `rhymeClassOf()`;
+`EntitlementMachine::merge()`; `App\Billing\TrialAttribution`/
+`lib/pricing.ts#regionFromCountry()`; `PaywallGate`; multi-surah
+enrollment (product decision); the operational mailer's missing SMTP
+transport/host; PAY-1's Stripe fixtures; surah 67's scene beats
+(human-only); `severity.ts`'s taxonomy naming; `MacroFacts.litany
+.rhymeLabel`; `corpusHash`'s zero fold-side consumer;
+`selection_determinism_check` replaying a committed fixture;
+`QueueItem.score`'s missing external reader; `acknowledgeReentry`'s
+"makeup" branch; `DrillPicker.tsx`'s unused `now` prop; the unused
+IndexedDB object stores; `session_start`'s own latency metric; the
+streak/away-day day-space mismatch; `/workbench`'s own Pane 2/3; the
+deferred `vitest@5` bump; `laravel/framework`'s remaining advisory;
+`v2/api`'s own frozen advisories; the `trial_surah_source` column — all
+unchanged. Also unchanged: the Playwright e2e suite's own lack of a
+genuine two-tab write-lock scenario, and the browser-provisioning
+mismatch behind its workaround (this run fixed the onboarding-commit
+flake's REAL cause at the unit level and did not re-run the e2e suite
+itself — the fix is exercised by the new `outbox.test.ts` cases, which
+reach the same production code path directly and faster than a browser
+would).
+
+The onboarding-commit flake named by v3-D367 is now CLOSED — it was
+never a timing flake in the test; it was this real, reproducible defect,
+and it should not be re-queued as "still unswept" or re-diagnosed as
+environment timing by a future run.

@@ -397,6 +397,43 @@ describe("selectPending", () => {
   });
 });
 
+describe("v3-D368 — a read-only pending/quarantine check must not mint a device id", () => {
+  it("selectPending() on a device that has never appended anything returns empty and creates no deviceId", async () => {
+    const db = await openDb();
+    expect(await db.get("meta", "deviceId")).toBeUndefined();
+
+    const { rows, quarantined } = await selectPending();
+    expect(rows).toEqual([]);
+    expect(quarantined).toEqual([]);
+
+    // The whole point: a read that found nothing to do must leave the
+    // device exactly as unidentified as it found it.
+    expect(await db.get("meta", "deviceId")).toBeUndefined();
+  });
+
+  it("scanQuarantined() on a device that has never appended anything creates no deviceId", async () => {
+    const db = await openDb();
+    expect(await db.get("meta", "deviceId")).toBeUndefined();
+
+    expect(await scanQuarantined()).toEqual([]);
+
+    expect(await db.get("meta", "deviceId")).toBeUndefined();
+  });
+
+  it("once a device HAS appended something, selectPending still finds it (no regression from the short-circuit)", async () => {
+    await appendMany(2);
+    const db = await openDb();
+    const before = await db.get("meta", "deviceId");
+
+    const { rows } = await selectPending();
+    expect(rows).toHaveLength(2);
+
+    // Still the SAME id — the fix must never regenerate one (edge cases
+    // #48/#49), only skip minting a NEW one when none exists yet.
+    expect(await db.get("meta", "deviceId")).toEqual(before);
+  });
+});
+
 describe("#103 — the outbox never blocks", () => {
   it("a totally failed flush still resolves, and never throws", async () => {
     vi.stubGlobal("fetch", async () => {

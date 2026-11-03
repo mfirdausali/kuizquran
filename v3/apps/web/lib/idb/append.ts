@@ -75,6 +75,22 @@ function newUuid(): string {
   return `ev-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
 }
 
+/** Read the device id WITHOUT creating one. `null` means this device has
+ *  never called `getDeviceId()` — equivalently, never called `append()`,
+ *  since that is the only other caller — so by construction it has written
+ *  zero events under any device id of its own. A read-only caller that only
+ *  wants to know "has this device done anything yet" must use this, never
+ *  `getDeviceId()`: the lazy-create half of that function is correct for a
+ *  WRITE (something is about to be stamped with a device id and needs one to
+ *  exist), but wrong for a READ (v3-D368 found it reached from a passive
+ *  pending/quarantine scan, stamping a fresh device identity onto a device
+ *  that had done nothing merely because that scan ran on mount). */
+export async function getExistingDeviceId(): Promise<string | null> {
+  const db = await openDb();
+  const existing = await db.get("meta", "deviceId");
+  return typeof existing?.value === "string" && existing.value ? existing.value : null;
+}
+
 /** Read (or lazily create) the stable per-device id. NEVER regenerated:
  *  regenerating forks the per-device ordinal namespace (edge cases #48/#49). */
 export async function getDeviceId(): Promise<string> {
