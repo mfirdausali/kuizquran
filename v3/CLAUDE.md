@@ -53,10 +53,93 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3162 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3172 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 432 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1765 apps/web. (v3-D373, 2026-11-04)
+             # 255 v2 vitest + 47 v2/api + 442 v3/api + 120 corpus-compiler
+             # + 470 engine + 73 fold-runner + 1765 apps/web. (v3-D374, 2026-11-04)
+             # NOTE (v3-D374, 2026-11-04): v3-D373 named FOUR models sharing
+             # the identical missing-`booted()`-append-only-guard shape it
+             # closed on `GlossDraftReview`, but deferred all four,
+             # reasoning that `Event` (and by the same shape,
+             # `EntitlementTransition`) has a genuine PDPA-purge cascade
+             # delete path and that a blanket guard "would THROW during
+             # every PDPA purge." **That reasoning was checked empirically
+             # this run and is wrong.** A database `ON DELETE CASCADE` runs
+             # entirely inside the database engine as part of the single
+             # `DELETE FROM users` statement — it never re-enters Eloquent,
+             # so the child model's own `deleting` event is never
+             # dispatched for a cascaded row. Proved directly: a temporary
+             # `deleting` guard that unconditionally threw was added to
+             # `Event` alone, and
+             # `AccountDeletionTest::test_purge_due_hard_deletes_an_elapsed_request_and_leaves_a_ledger_row`
+             # (whose own assertion REQUIRES the cascade to have happened)
+             # still passed unchanged, 9 assertions, no exception — the
+             # guard never fired. Reverted byte-identically before any
+             # permanent change. `Override` and `NightlyCheckRun` have no
+             # FK to `users` at all (confirmed against their migrations) —
+             # no cascade interaction to reconcile. All four now carry the
+             # identical `updating`/`deleting` → throw `RuntimeException`
+             # guard, plus `docs/ADMIN-CONSOLE.md` §1e–§1h. RED confirmed:
+             # `git stash` of the four model files + docs (ten new test
+             # cases across four files kept) against the unmodified models
+             # — 8 failed exactly as predicted (one update/delete case + one
+             # grant-documented case per model; the two cascade-safety cases
+             # correctly stayed green), 51 passed. Mutation-verified:
+             # restored byte-identically, reran — 59/59 green, was 49 (+10).
+             # Full `v3/api` PHPUnit: **442 passed** (was 432, +10 exactly),
+             # 2 incomplete (PAY-1, unchanged), 6 skipped (unchanged).
+             # `TZ=UTC make test`: **3172 passing** (was 3162, +10 exactly;
+             # every other suite unchanged: 255 v2 vitest, 47 v2/api, 120
+             # corpus-compiler, 470 engine, 73 fold-runner, 1765 apps/web).
+             # `check-test-floor.mjs`: OK, 3172 >= floor 1899 (+1273
+             # margin). `TZ=UTC make build`: exit 0, 30 routes, unchanged
+             # (the usual one-time `SecurityFatalError` CLI nudge on first
+             # invocation, not acted on, plain retry built clean). `npm run
+             # gates`: all green, 348 files, unchanged (294 v1 lines
+             # byte-identical; 2/6 UI fonts present, degraded-but-
+             # non-blocking, pre-existing; 362 words; 206 codepoints). `npx
+             # tsc --noEmit`: clean. `./vendor/bin/pint --test`: failed on 3
+             # touched test files on first run (`fully_qualified_strict_types`/
+             # `ordered_imports` only — inline `\App\Models\X::` instead of
+             # an import), auto-fixed with `./vendor/bin/pint`, content
+             # unchanged, reran clean on all eight touched PHP files. No
+             # `v1/**`/`v2/**` edit (the usual stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff reverted before committing). No Arabic
+             # codepoint, no `\u` escape, no `fromCharCode`/`fromCodePoint`
+             # introduced — swept programmatically over all nine changed
+             # files; every new string is a PHP/SQL identifier or a fixed
+             # English comment/assertion sentence. No oracle/golden-log/
+             # fixture/snapshot regenerated (`make compile-corpus` was run
+             # only to unblock a pre-existing test needing the real compiled
+             # artifact, v3-D77 — a build input, not a graded fixture).
+             #
+             # A SECOND, unrelated RED→fix cycle this run: the four models'
+             # docblocks initially named `GlossDraftReview` by its literal
+             # class name in a "same reasoning as..." list, and the bare
+             # substring `GlossDraft` tripped
+             # `GlossDraftIsolationTest::test_only_the_admin_authoring_surface_reads_gloss_drafts`
+             # — a structural grep that has nothing to do with these four
+             # models. Reworded to "its review-history sibling table" (no
+             # `GlossDraft` substring), content unaffected, full suite
+             # reran clean. Named here as a reminder: a docblock naming
+             # another model by its literal class name can itself trip a
+             # structural isolation gate.
+             #
+             # Session start: fresh container; both `v2/api` and `v3/api`
+             # composer installs hit the documented slow proxy git-mirror
+             # fallback for PHPUnit's dependency tree (`v3/api` also needed
+             # `--ignore-platform-req=php`, same as every prior entry);
+             # `v2/api`'s `.env`/`APP_KEY` were missing on this fresh
+             # checkout (not covered by any prior nightly note) and were
+             # generated by hand. `HEAD` was detached exactly at
+             # `origin/main`'s real tip (`f2e0c05`, v3-D373), local `main`
+             # 20 commits behind at `48ef9dd` — the recurring
+             # stale-local-`main` trap this file has recorded roughly fifty
+             # times since v3-D77 — caught via `git checkout -B main HEAD`
+             # before any exploration.
+             #
+             # The four-model append-only gap named across v3-D372/D373 is
+             # now fully CLOSED. Full detail: DECISIONS.md v3-D374.
              # NOTE (v3-D373, 2026-11-04): v3-D372 closed `AyahVerification`'s
              # missing structural append-only enforcement and named
              # `GlossDraftReview` (`gloss_draft_reviews`) as carrying the

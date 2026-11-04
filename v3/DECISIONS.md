@@ -40587,3 +40587,167 @@ still unwired — a P1 pages nobody without a live SMTP account); Stripe
 replay fixtures (PAY-1, gated on Stripe MY business verification
 clearing); `SpecsController`'s case-sensitive forbidden-key check (real
 but unreachable pre-M4).
+
+### v3-D374 (2026-11-04, nightly): the four-model append-only gap v3-D373 named and deferred — resolved, and one of its own claims was wrong
+
+v3-D373's own "NOT addressed" list named four models sharing the identical
+missing-`booted()`-guard shape its own fix closed on `GlossDraftReview`:
+`EntitlementTransition`, `Event`, `NightlyCheckRun`, `Override`. It
+explicitly refused to copy-paste the fix onto all four, reasoning that
+`Event` — and by the same shape, `EntitlementTransition` — has a
+**genuine, legitimate** delete path (`PurgeDueAccountsCommand`'s PDPA
+purge cascades `events`/`entitlement_transitions` rows when it deletes a
+`User`), and that a blanket `deleting` guard "would THROW during every
+PDPA purge and break LAUNCH-CHECKLIST gate 19 outright." This run did the
+real per-model investigation v3-D373 asked for, starting with that exact
+claim — **and it is wrong.**
+
+**Why it is wrong, checked empirically rather than assumed:** a database
+`ON DELETE CASCADE` (both `events.user_id` and
+`entitlement_transitions.user_id` are `cascadeOnDelete()`) is executed
+entirely inside the database engine, in response to the single
+`DELETE FROM users WHERE id = ?` statement `PurgeDueAccountsCommand`'s
+`$user->delete()` issues. It never re-enters Eloquent to load or delete
+the child rows as model instances, so the child model's own `deleting`
+event is **never dispatched** for a cascaded row — only for a row Eloquent
+itself explicitly deletes through that model. Proved directly, not by
+reading a docblock: a temporary `deleting` guard that unconditionally
+threw a `RuntimeException` was added to `Event` alone, and
+`AccountDeletionTest::test_purge_due_hard_deletes_an_elapsed_request_and_leaves_a_ledger_row`
+— whose own assertion (`assertSame(0, Event::where('user_id',
+$doomed->id)->count())`) REQUIRES the cascade to actually happen, so a
+silently-skipped cascade would itself fail the test — still **passed
+unchanged, 9 assertions, no exception**. The guard never fired. The
+temporary guard was then reverted byte-identically (`diff` against a
+backup, empty) before any permanent change was made.
+
+**Decision for each of the four, each checked rather than assumed:**
+
+- **`Override`** — no FK to `users` that cascades (`editor_id` is
+  `nullOnDelete`, confirmed against its migration). No cascade
+  interaction to reconcile at all. Guarded.
+- **`NightlyCheckRun`** — no FK to `users` whatsoever (confirmed against
+  its own migration — the table exists purely as nightly-run evidence).
+  No cascade interaction. Guarded.
+- **`Event`** — DOES cascade from a PDPA purge, but the cascade is
+  proven (above) to never touch Eloquent's `deleting` event on this
+  model. Guarded. v3-D373's claim that this would break gate 19 is
+  **retracted** by this entry.
+- **`EntitlementTransition`** — identical `user_id cascadeOnDelete()`
+  shape to `Event`; the same proof applies (re-confirmed independently
+  with its own cascade test, not merely inferred from `Event`'s). Guarded.
+
+For all four, grepped every call site in `app/` for `::update(`/`->update(`
+and `::delete(`/`->delete(` reachable on the model (none found beyond the
+PDPA-purge cascade already addressed) — the same discipline v3-D372/D373
+used, now actually following through on the "real per-model decision"
+those entries deferred rather than leaving it as a standing TODO.
+
+**Fixed:** the identical `updating`/`deleting` → throw
+`RuntimeException("...APPEND-ONLY...")` template used by
+`AdminAudit`/`PurgeLedgerEntry`/`AyahVerification`/`GlossDraftReview` added
+to all four models' `booted()`. `Event`'s and `EntitlementTransition`'s
+docblocks additionally record the cascade-vs-model-event proof above, so
+a future reader does not have to re-derive it. `docs/ADMIN-CONSOLE.md`
+gained §1e (`overrides`), §1f (`nightly_check_runs`), §1g (`events`) and
+§1h (`entitlement_transitions`) mirroring §1/§1b–§1d's `REVOKE`/`GRANT`
+blocks — §1g and §1h additionally explain why the DB-level grant does not
+interfere with the cascade either (a `REVOKE` on the app role blocks the
+app's OWN `UPDATE`/`DELETE` statements; it does not block a cascade fired
+by the database engine as part of deleting the parent row, which needs no
+separate privilege on the child table at all).
+
+**RED confirmed directly:** `git stash push` on the four model files plus
+`docs/ADMIN-CONSOLE.md` (the ten new test cases across four files kept,
+untouched), then `php artisan test --filter="OverridesTest|
+NightlyWindowTest|EventsIngestionTest|EntitlementStateMachineTest"`
+against the unmodified models — **8 failed, 51 passed**: one
+"can never be updated or deleted"-shaped case and one
+"grant is documented"-shaped case per model (the two cascade-safety cases,
+which assert a behavior the stash did not touch, correctly stayed green).
+Every other case in all four files was unaffected.
+
+**Mutation-verified:** `git stash pop` restored all five files
+byte-identically; reran — **59/59 green** (was 49, +10). Full `v3/api`
+PHPUnit: **442 passed** (was 432, +10 exactly), 2 incomplete (PAY-1,
+unchanged), 6 skipped (unchanged — Postgres/pcntl-gated).
+
+**A second, unrelated RED→fix cycle this run:** the first full-suite pass
+after the mutation-verify failed two cases in
+`GlossDraftIsolationTest::test_only_the_admin_authoring_surface_reads_gloss_drafts`
+— a structural grep asserting no learner-serving file mentions the
+`GlossDraft`/`gloss_drafts` table. The four models' docblocks had named
+`GlossDraftReview` by name in their "same two-layer reasoning as..." list,
+and the literal substring `GlossDraft` tripped the grep even though these
+models have nothing to do with gloss drafts. Reworded to "its review-history
+sibling table" (no `GlossDraft` substring) in all four docblocks — content
+unchanged, no behavior affected, confirmed by rerunning the full suite
+clean afterward. This is a reminder for future entries: a docblock naming
+another model by its literal class name can itself trip a structural
+isolation gate; check `grep -rn "GlossDraft\|gloss_drafts"` before writing
+one.
+
+**Verified, full suite:**
+
+- `TZ=UTC make test`: **3172 passing** (was 3162, +10 exactly — every
+  other suite unchanged: 255 v2 vitest, 47 v2/api, 120 corpus-compiler,
+  470 engine, 73 fold-runner, 1765 apps/web). `check-test-floor.mjs`: OK,
+  3172 >= floor 1899 (+1273 margin).
+- `TZ=UTC make build`: exit 0, 30 routes, unchanged (the usual one-time
+  `SecurityFatalError` CLI nudge on first invocation — not acted on; a
+  plain retry built clean).
+- `npm run gates` (apps/web): all green — locked-css OK (294 v1 lines
+  byte-identical); fonts degraded-but-non-blocking, pre-existing, 2/6 UI
+  fonts present; boundaries OK, 348 files, unchanged; corpus-morphology
+  OK, 362 words; corpus-glyphs OK, 206 codepoints across 4 artifacts — all
+  unchanged, this diff touches no `apps/web` file.
+- `npx tsc --noEmit` (apps/web): clean.
+- `./vendor/bin/pint --test`: failed on 3 of the touched test files on
+  first run (`fully_qualified_strict_types`/`ordered_imports` — the new
+  cases used inline `\App\Models\X::create()` instead of an import);
+  fixed with `./vendor/bin/pint` (auto-fix), content unchanged, reran
+  clean on all eight touched PHP files.
+- No `v1/**`/`v2/**` edit — the usual stray `v2/tsconfig.tsbuildinfo`
+  build-cache diff reverted before committing, `git status --porcelain --
+  v1 v2` empty immediately before committing.
+- No Arabic codepoint, no `\u` escape, no `fromCharCode`/`fromCodePoint`
+  introduced — swept programmatically (Python, over the Arabic/Arabic
+  Supplement/Arabic Extended-A/Presentation Forms Unicode blocks) across
+  all nine changed files: CLEAN — every new string is a PHP/SQL identifier
+  or a fixed English comment/assertion sentence.
+- No oracle/golden-log/fixture/snapshot regenerated — four existing
+  production model files, one existing docs file, and four existing test
+  files only. `make compile-corpus` was run this session only to unblock
+  `OverrideHashRecomputeTest` (which needs the real compiled artifact,
+  v3-D77) — it is a build input, not an oracle, and regenerating it is the
+  documented, expected setup step on a fresh checkout, not a graded fixture.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere. `v3/api`'s and `v2/api`'s plain `composer install` both
+hit the documented PHP-version mismatch and the proxy's slow
+git-mirror-clone fallback for PHPUnit's dependency tree (several minutes
+each, not a new finding); `v3/api` recovered with `composer install
+--ignore-platform-req=php`, `v2/api` needed no such flag (`composer.json`
+pins `^8.3`, already satisfied). `v2/api`'s `.env`/`APP_KEY` were missing
+on this fresh checkout (not covered by any prior nightly note) and were
+generated by hand before `make test` could pass its `v2/api` stage. After
+`git fetch origin main`, `HEAD`, local `main` and `origin/main` all
+disagreed: `HEAD` was detached at `origin/main`'s real tip (`f2e0c05`,
+v3-D373) while local `main` sat 20 commits behind at `48ef9dd` — the
+recurring stale-local-`main` trap this file has recorded roughly fifty
+times since v3-D77 — caught via `git checkout -B main HEAD` before any
+exploration.
+
+**NOT addressed, named for next run:** every item on v3-D373's own
+condensed list, unchanged and reconfirmed infra-gated or product-gated:
+the browser-provisioning mismatch behind the e2e Chromium-version
+workaround; a genuine two-DEVICE determinism e2e (needs a live `v3/api`
+server alongside the e2e Next.js server); `worker/fold-runner`'s own DB
+adapter + staging deploy (no host, no DB, no credentials); the
+operational mailer (v3-D18, still unwired); Stripe replay fixtures
+(PAY-1, gated on Stripe MY business verification clearing);
+`SpecsController`'s case-sensitive forbidden-key check (real but
+unreachable pre-M4). The four-model append-only gap named across
+v3-D372/D373 is now fully CLOSED — remove it from future sweeps. The
+Playwright e2e suite was NOT re-run this session (this diff touches no
+frontend file; the last recorded run remains v3-D369's 44/44).

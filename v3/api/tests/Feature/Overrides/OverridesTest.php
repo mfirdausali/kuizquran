@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Overrides;
 
+use App\Models\Override;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Config;
@@ -158,5 +159,78 @@ class OverridesTest extends TestCase
         $this->assertDatabaseCount('overrides', 2);
         $response = $this->getJson('/api/overrides?surah=12')->assertOk();
         $this->assertCount(2, $response->json('overrides'));
+    }
+
+    // ───────────── the append-only gap: no structural enforcement at all ──────────
+
+    /**
+     * The test above (`test_rows_are_append_only_a_correction_is_a_new_row`)
+     * only proves the HTTP layer never issues an UPDATE — it says nothing
+     * about whether the `Override` model itself could be rewritten in place.
+     * Unlike `AdminAudit`/`PurgeLedgerEntry`/`AyahVerification`/
+     * `GlossDraftReview`, `Override` carried no ORM `booted()` guard: nothing
+     * stopped a future developer (or a bug in a refactor) from fetching a row
+     * and calling `->update()`/`->delete()` on it directly, silently
+     * bypassing both B4's `(created_at, id)` tie-break AND
+     * `CorpusHashRecomputer`'s re-hash, which only fires on the INSERT path.
+     *
+     * MUTATION: remove the `updating`/`deleting` guards from the model.
+     */
+    public function test_a_row_can_never_be_updated_or_deleted_directly_on_the_model(): void
+    {
+        $admin = User::factory()->create(['email' => 'admin@example.com']);
+        $row = Override::create([
+            'surah' => 12, 'ayah' => 4, 'position' => 1, 'question_type' => 'S1',
+            'field' => 'gloss', 'payload' => ['lang' => 'en', 'text' => 'when'],
+            'editor_id' => $admin->id, 'created_at' => 1_700_000_000_000,
+        ]);
+
+        try {
+            $row->update(['payload' => ['lang' => 'en', 'text' => 'tampered']]);
+            $this->fail('an override row must never be updatable directly — a correction is a new row');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('APPEND-ONLY', $e->getMessage());
+        }
+
+        try {
+            $row->delete();
+            $this->fail('an override row must never be deletable directly');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('APPEND-ONLY', $e->getMessage());
+        }
+
+        $this->assertDatabaseHas('overrides', [
+            'id' => $row->id, 'field' => 'gloss',
+        ]);
+    }
+
+    /**
+     * Same reasoning as `VerificationsTest`'s/`GlossDraftsTest`'s identical
+     * check — the ORM guard above is layer 2 only. Layer 1 (`REVOKE UPDATE,
+     * DELETE` on the app's Postgres role) cannot be asserted from inside the
+     * app that lacks it, so the strongest available check is that the
+     * runnable grant for `overrides` exists in the document the other
+     * append-only tables' grants already live in.
+     *
+     * MUTATION: remove the `overrides` GRANT block from
+     * docs/ADMIN-CONSOLE.md. Red.
+     */
+    public function test_the_database_level_append_only_grant_is_documented(): void
+    {
+        $path = dirname(__DIR__, 3).'/docs/ADMIN-CONSOLE.md';
+        $this->assertFileExists($path);
+
+        $doc = file_get_contents($path);
+
+        $this->assertMatchesRegularExpression(
+            '/REVOKE\s+UPDATE,\s*DELETE.*ON\s+TABLE\s+overrides/is',
+            $doc,
+            'the document must carry the actual REVOKE for overrides, not just the other append-only tables',
+        );
+        $this->assertMatchesRegularExpression(
+            '/GRANT\s+INSERT,\s*SELECT\s+ON\s+TABLE\s+overrides/is',
+            $doc,
+            'the app role still needs INSERT and SELECT, or an override could never be recorded',
+        );
     }
 }

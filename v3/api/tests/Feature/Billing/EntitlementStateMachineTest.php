@@ -435,4 +435,98 @@ class EntitlementStateMachineTest extends TestCase
         $this->assertSame(EntitlementState::Active, $e->state);
         $this->assertSame(1, BillingEvent::where('provider_event_id', 'evt_x')->count(), 'the journal records everything, handled or not');
     }
+
+    // ───────────── the append-only gap: no structural enforcement at all ──────────
+
+    /**
+     * `entitlement_transitions`'s own docblock calls it append-only for edge
+     * case #114 ("data never deleted") and because the nightly reconcile
+     * diffs the provider's state against it. But unlike
+     * `AdminAudit`/`PurgeLedgerEntry`/`AyahVerification`/`GlossDraftReview`/
+     * `Override`/`NightlyCheckRun`/`Event`, it carried no ORM `booted()`
+     * guard: nothing stopped `->update()`/`->delete()` on a fetched row
+     * directly — which would make the reconcile's own evidence untrustworthy.
+     *
+     * `entitlement_transitions.user_id` is `cascadeOnDelete()`, the same
+     * shape as `events.user_id`. The guard must coexist with it — see the
+     * cascade case below and DECISIONS.md v3-D374.
+     *
+     * MUTATION: remove the `updating`/`deleting` guards from the model.
+     */
+    public function test_a_transition_row_can_never_be_updated_or_deleted_directly(): void
+    {
+        $user = User::factory()->create();
+        $row = EntitlementTransition::create([
+            'user_id' => $user->id, 'from_state' => null, 'to_state' => 'active',
+            'cause' => 'trial_start', 'actor' => 'system', 'at' => 1_700_000_000_000,
+        ]);
+
+        try {
+            $row->update(['to_state' => 'tampered']);
+            $this->fail('a transition row must never be updatable directly — the reconcile depends on it');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('APPEND-ONLY', $e->getMessage());
+        }
+
+        try {
+            $row->delete();
+            $this->fail('a transition row must never be deletable directly');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('APPEND-ONLY', $e->getMessage());
+        }
+
+        $this->assertDatabaseHas('entitlement_transitions', ['id' => $row->id, 'to_state' => 'active']);
+    }
+
+    /**
+     * The load-bearing counter-proof, identical in shape to `Event`'s own
+     * (`EventsIngestionTest::test_the_append_only_guard_does_not_block_a_pdpa_purge_cascade`):
+     * the guard above must NOT block the PDPA purge's `ON DELETE CASCADE`
+     * on `entitlement_transitions.user_id`. A database-level cascade never
+     * re-enters Eloquent, so the model's `deleting` event is never
+     * dispatched for the cascaded rows.
+     */
+    public function test_the_append_only_guard_does_not_block_a_pdpa_purge_cascade(): void
+    {
+        $doomed = User::factory()->create();
+        EntitlementTransition::create([
+            'user_id' => $doomed->id, 'from_state' => null, 'to_state' => 'active',
+            'cause' => 'trial_start', 'actor' => 'system', 'at' => 1_700_000_000_000,
+        ]);
+
+        $doomed->delete();
+
+        $this->assertNull(User::find($doomed->id));
+        $this->assertSame(0, EntitlementTransition::where('user_id', $doomed->id)->count());
+    }
+
+    /**
+     * Same reasoning as the other append-only tables' identical check — the
+     * ORM guard above is layer 2 only. Layer 1 (`REVOKE UPDATE, DELETE` on
+     * the app's Postgres role) cannot be asserted from inside the app that
+     * lacks it, so the strongest available check is that the runnable
+     * grant for `entitlement_transitions` exists in the document the other
+     * append-only tables' grants already live in.
+     *
+     * MUTATION: remove the `entitlement_transitions` GRANT block from
+     * docs/ADMIN-CONSOLE.md. Red.
+     */
+    public function test_the_database_level_append_only_grant_is_documented(): void
+    {
+        $path = dirname(__DIR__, 3).'/docs/ADMIN-CONSOLE.md';
+        $this->assertFileExists($path);
+
+        $doc = file_get_contents($path);
+
+        $this->assertMatchesRegularExpression(
+            '/REVOKE\s+UPDATE,\s*DELETE.*ON\s+TABLE\s+entitlement_transitions/is',
+            $doc,
+            'the document must carry the actual REVOKE for entitlement_transitions, not just the other append-only tables',
+        );
+        $this->assertMatchesRegularExpression(
+            '/GRANT\s+INSERT,\s*SELECT\s+ON\s+TABLE\s+entitlement_transitions/is',
+            $doc,
+            'the app role still needs INSERT and SELECT, or a transition could never be recorded',
+        );
+    }
 }

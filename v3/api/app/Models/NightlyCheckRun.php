@@ -13,6 +13,20 @@ use Illuminate\Database\Eloquent\Model;
  *
  * A re-run after a fix appends a NEW row; it never overwrites the P1 that
  * preceded it. The streak logic reads both.
+ *
+ * This table has NO foreign key to `users` at all (confirmed against its own
+ * migration) — unlike `events`/`entitlement_transitions`, there is no PDPA
+ * purge cascade to reconcile the guard below against.
+ *
+ * TWO LAYERS, same reasoning as `AdminAudit`/`PurgeLedgerEntry`/
+ * `AyahVerification`/its review-history sibling table/`Override` (`docs/ADMIN-CONSOLE.md`
+ * §1f):
+ *
+ *  1. DATABASE PERMISSION (production): the app's Postgres role is granted
+ *     INSERT and SELECT on this table and NOT update/delete.
+ *  2. THE ORM GUARD BELOW: `updating`/`deleting` hooks throw, giving a clear
+ *     error in development and in SQLite tests where per-table grants do
+ *     not exist.
  */
 class NightlyCheckRun extends Model
 {
@@ -39,5 +53,21 @@ class NightlyCheckRun extends Model
             'exit_code' => 'integer',
             'ran_at' => 'integer',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::updating(function (self $row) {
+            throw new \RuntimeException(
+                'nightly_check_runs is APPEND-ONLY. A check run may never be updated — '.
+                'a streak whose evidence can be edited afterwards is not evidence.',
+            );
+        });
+
+        static::deleting(function (self $row) {
+            throw new \RuntimeException(
+                'nightly_check_runs is APPEND-ONLY. A check run may never be deleted.',
+            );
+        });
     }
 }

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Admin;
 
+use App\Http\Controllers\Admin\Pseudonymizer;
 use App\Models\NightlyCheckRun;
 use App\Models\NightlyWindow;
 use App\Models\User;
@@ -199,7 +200,7 @@ class NightlyWindowTest extends TestCase
 
         // Pseudonymized — the raw integer id must never appear on the wire.
         $this->assertStringNotContainsString('"userId"', $response->getContent());
-        $pseudonymizer = app(\App\Http\Controllers\Admin\Pseudonymizer::class);
+        $pseudonymizer = app(Pseudonymizer::class);
         $this->assertSame($pseudonymizer->for(42), $response->json('lastP1Findings.0.subjectPseudonym'));
         $this->assertSame($pseudonymizer->for(43), $response->json('lastP1Findings.1.subjectPseudonym'));
         $this->assertNotSame(
@@ -382,7 +383,7 @@ class NightlyWindowTest extends TestCase
         // Pseudonymized — the raw integer id must never reach the wire, the
         // same rule every other admin finding list on this console follows.
         $this->assertStringNotContainsString('"userId"', $response->getContent());
-        $pseudonymizer = app(\App\Http\Controllers\Admin\Pseudonymizer::class);
+        $pseudonymizer = app(Pseudonymizer::class);
         $this->assertSame($pseudonymizer->for(42), $response->json('lastQuarantine.entries.0.subjectPseudonym'));
         $this->assertSame($pseudonymizer->for(43), $response->json('lastQuarantine.entries.1.subjectPseudonym'));
         $this->assertNotSame(
@@ -455,5 +456,74 @@ class NightlyWindowTest extends TestCase
     {
         $this->admin();
         $this->postJson('/api/admin/nightly-window', ['start' => '2026-09-01'])->assertStatus(405);
+    }
+
+    // ───────────── the append-only gap: no structural enforcement at all ──────────
+
+    /**
+     * `NightlyCheckRun`'s own docblock calls this table append-only "for the
+     * same reason the event log is append-only — a streak whose evidence can
+     * be edited afterwards is not evidence" (edge case #169). But unlike
+     * `AdminAudit`/`PurgeLedgerEntry`/`AyahVerification`/`GlossDraftReview`/
+     * `Override`, it carried no ORM `booted()` guard: nothing stopped a
+     * future developer (or a bug in a refactor) from fetching a P1 row and
+     * calling `->update()` to silently launder it into a `green` one, or
+     * `->delete()`-ing it outright — exactly the "contested gate" scenario
+     * edge case #169 exists to rule out, reachable by code, not just by a
+     * rogue DBA. This table carries no FK to `users`, so there is no
+     * PDPA-purge cascade to reconcile the guard against.
+     *
+     * MUTATION: remove the `updating`/`deleting` guards from the model.
+     */
+    public function test_a_check_run_can_never_be_updated_or_deleted(): void
+    {
+        $this->appendRun('2026-09-01', 'fold_determinism_check', 'p1', ['atomsCompared' => 8]);
+        $row = NightlyCheckRun::where('night', '2026-09-01')->first();
+
+        try {
+            $row->update(['severity' => 'green', 'exit_code' => 0]);
+            $this->fail('a check run must never be updatable — a launderable P1 defeats the gate');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('APPEND-ONLY', $e->getMessage());
+        }
+
+        try {
+            $row->delete();
+            $this->fail('a check run must never be deletable');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('APPEND-ONLY', $e->getMessage());
+        }
+
+        $this->assertDatabaseHas('nightly_check_runs', ['id' => $row->id, 'severity' => 'p1']);
+    }
+
+    /**
+     * Same reasoning as `VerificationsTest`'s/`GlossDraftsTest`'s identical
+     * check — the ORM guard above is layer 2 only. Layer 1 (`REVOKE UPDATE,
+     * DELETE` on the app's Postgres role) cannot be asserted from inside the
+     * app that lacks it, so the strongest available check is that the
+     * runnable grant for `nightly_check_runs` exists in the document the
+     * other append-only tables' grants already live in.
+     *
+     * MUTATION: remove the `nightly_check_runs` GRANT block from
+     * docs/ADMIN-CONSOLE.md. Red.
+     */
+    public function test_the_database_level_append_only_grant_is_documented(): void
+    {
+        $path = dirname(__DIR__, 3).'/docs/ADMIN-CONSOLE.md';
+        $this->assertFileExists($path);
+
+        $doc = file_get_contents($path);
+
+        $this->assertMatchesRegularExpression(
+            '/REVOKE\s+UPDATE,\s*DELETE.*ON\s+TABLE\s+nightly_check_runs/is',
+            $doc,
+            'the document must carry the actual REVOKE for nightly_check_runs, not just the other append-only tables',
+        );
+        $this->assertMatchesRegularExpression(
+            '/GRANT\s+INSERT,\s*SELECT\s+ON\s+TABLE\s+nightly_check_runs/is',
+            $doc,
+            'the app role still needs INSERT and SELECT, or a nightly run could never be recorded',
+        );
     }
 }

@@ -137,6 +137,109 @@ Verify the same way as §1's grant, substituting `gloss_draft_reviews` for
 
 ---
 
+## 1e · The same grant for `overrides` (build-plan step 15 / DEFECTS.md#B1/#B4)
+
+`overrides` is append-only for a slightly different reason than §1–§1d's
+sign-off tables, but the same mechanism: a correction is always a NEW row with
+a later `created_at` (B4's `(created_at, id)` tie-break resolves latest-wins
+across rows, never by editing one), and `App\Support\CorpusHashRecomputer`
+(v3-D81, closing B3) only fires from the INSERT path in
+`OverridesController::store()`. An in-place UPDATE would silently bypass the
+re-hash entirely — the content-after-hash sequencing bomb one layer below the
+corpus/spec freeze. `Override::booted` is the ORM layer (layer 2); this is
+layer 1, not yet applied anywhere because no production database exists yet
+(same gap as §1/§1b/§1c/§1d above). Note `overrides.editor_id` is
+`nullOnDelete`, not `cascadeOnDelete` — a PDPA purge nulls the editor
+reference on a deleted admin, it never deletes an override row, so this grant
+has no purge-cascade interaction to reconcile.
+
+```sql
+REVOKE UPDATE, DELETE, TRUNCATE ON TABLE overrides FROM app_role;
+GRANT  INSERT, SELECT                ON TABLE overrides TO   app_role;
+GRANT USAGE, SELECT ON SEQUENCE overrides_id_seq TO app_role;
+```
+
+Verify the same way as §1's grant, substituting `overrides` for `admin_audit`
+in the `information_schema.role_table_grants` query.
+
+---
+
+## 1f · The same grant for `nightly_check_runs` (build-plan step 30 / edge case #169)
+
+`nightly_check_runs` is append-only because the 7-consecutive-green-nights
+launch gate reads it as evidence, not as a trusted counter — edge case #169,
+"7-green-nights arithmetic → contested gate." A streak whose underlying runs
+can be edited or deleted after the fact is not a streak, it is a claim.
+`NightlyCheckRun::booted` is the ORM layer (layer 2); this is layer 1, not yet
+applied anywhere because no production database exists yet (same gap as
+§1/§1b/§1c/§1d/§1e above). This table carries no foreign key to `users` at
+all, so unlike `events`/`entitlement_transitions` there is no PDPA purge
+cascade to reconcile this grant against.
+
+```sql
+REVOKE UPDATE, DELETE, TRUNCATE ON TABLE nightly_check_runs FROM app_role;
+GRANT  INSERT, SELECT                ON TABLE nightly_check_runs TO   app_role;
+GRANT USAGE, SELECT ON SEQUENCE nightly_check_runs_id_seq TO app_role;
+```
+
+Verify the same way as §1's grant, substituting `nightly_check_runs` for
+`admin_audit` in the `information_schema.role_table_grants` query.
+
+---
+
+## 1g · The same grant for `events` (build-plan step 14 / invariant #2)
+
+`events` is append-only because the whole app is built on invariant #2: the
+event log is truth, `atom_cache` a rebuildable fold of it. `Event::booted`
+is the ORM layer (layer 2); this is layer 1, not yet applied anywhere
+because no production database exists yet (same gap as §1/§1b–§1f above).
+
+**This grant must NOT block the PDPA purge cascade, and it does not need
+to.** `events.user_id` is `ON DELETE CASCADE`; a `REVOKE UPDATE, DELETE`
+on the app role stops the app from issuing its OWN `UPDATE`/`DELETE`
+against `events`, but a cascade triggered by deleting the PARENT `users`
+row is executed by the database engine as part of that single statement,
+under the privileges the delete on `users` already required — it is not a
+second, separate DML statement against `events` that the revoked grant
+would catch. (The ORM-layer proof of the equivalent fact — that Eloquent's
+own `deleting` event is never dispatched for a cascaded row either — is in
+`Event`'s docblock and DECISIONS.md v3-D374.)
+
+```sql
+REVOKE UPDATE, DELETE, TRUNCATE ON TABLE events FROM app_role;
+GRANT  INSERT, SELECT                ON TABLE events TO   app_role;
+GRANT USAGE, SELECT ON SEQUENCE events_id_seq TO app_role;
+```
+
+Verify the same way as §1's grant, substituting `events` for `admin_audit`
+in the `information_schema.role_table_grants` query. The destructive proof
+should ALSO confirm the cascade still works under the revoked grant: as
+`app_role`, deleting a `users` row that owns `events` rows must still
+remove them (the cascade), while a direct `DELETE FROM events WHERE ...`
+must still be refused.
+
+---
+
+## 1h · The same grant for `entitlement_transitions` (build-plan step 23 / edge case #114)
+
+`entitlement_transitions` is append-only for the identical reason `events`
+is, and carries the identical `user_id cascadeOnDelete()` shape — see §1g's
+note on why a PDPA purge cascade is unaffected by this grant.
+`EntitlementTransition::booted` is the ORM layer (layer 2); this is layer
+1, not yet applied anywhere because no production database exists yet
+(same gap as §1/§1b–§1g above).
+
+```sql
+REVOKE UPDATE, DELETE, TRUNCATE ON TABLE entitlement_transitions FROM app_role;
+GRANT  INSERT, SELECT                ON TABLE entitlement_transitions TO   app_role;
+GRANT USAGE, SELECT ON SEQUENCE entitlement_transitions_id_seq TO app_role;
+```
+
+Verify the same way as §1g's grant, substituting `entitlement_transitions`
+for `events`.
+
+---
+
 ## 2 · Required environment
 
 | Variable | Purpose | Failure mode if unset |

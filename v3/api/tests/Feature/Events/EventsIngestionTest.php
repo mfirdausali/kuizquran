@@ -2,10 +2,12 @@
 
 namespace Tests\Feature\Events;
 
+use App\Models\Event;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -207,5 +209,101 @@ class EventsIngestionTest extends TestCase
 
         Log::shouldHaveReceived('warning')->once();
         $this->assertDatabaseCount('events', 3);
+    }
+
+    // ───────────── the append-only gap: no structural enforcement at all ──────────
+
+    /**
+     * `events` is append-only by this class's own header and invariant #2 —
+     * "the event log is truth" only holds if a row, once ingested, can
+     * never be rewritten. But unlike `AdminAudit`/`PurgeLedgerEntry`/
+     * `AyahVerification`/`GlossDraftReview`/`Override`/`NightlyCheckRun`,
+     * `Event` carried no ORM `booted()` guard: nothing stopped a future
+     * developer (or a bug in a refactor — e.g. a late-arrival refold
+     * "helper" that edits instead of appending) from calling
+     * `->update()`/`->delete()` on a fetched row directly.
+     *
+     * This guard must coexist with `events.user_id`'s `cascadeOnDelete()`
+     * — DECISIONS.md v3-D374 proves (and the second case below
+     * re-confirms) that a PDPA purge's cascade never dispatches this
+     * model's `deleting` event at all, so the guard cannot interfere with it.
+     *
+     * MUTATION: remove the `updating`/`deleting` guards from the model.
+     */
+    public function test_a_row_can_never_be_updated_or_deleted_directly_on_the_model(): void
+    {
+        $user = $this->actingUser();
+        $row = Event::create([
+            'user_id' => $user->id, 'uuid' => (string) Str::uuid(),
+            'type' => 'tap', 'ts' => 1_700_000_000_000, 'received_at' => 1_700_000_000_100,
+        ]);
+
+        try {
+            $row->update(['type' => 'tampered']);
+            $this->fail('an event row must never be updatable directly — invariant #2 depends on it');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('APPEND-ONLY', $e->getMessage());
+        }
+
+        try {
+            $row->delete();
+            $this->fail('an event row must never be deletable directly');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('APPEND-ONLY', $e->getMessage());
+        }
+
+        $this->assertDatabaseHas('events', ['id' => $row->id, 'type' => 'tap']);
+    }
+
+    /**
+     * The load-bearing counter-proof: the guard above must NOT break the
+     * PDPA purge's `ON DELETE CASCADE` on `events.user_id`. If it did, this
+     * would fail with the guard's own `RuntimeException` instead of
+     * completing — it does not, because a database-level cascade is
+     * executed by the database engine in response to the single
+     * `DELETE FROM users ...` statement and never re-enters Eloquent, so
+     * `Event`'s `deleting` event is never dispatched for the cascaded rows.
+     */
+    public function test_the_append_only_guard_does_not_block_a_pdpa_purge_cascade(): void
+    {
+        $doomed = User::factory()->create();
+        Event::create([
+            'user_id' => $doomed->id, 'uuid' => (string) Str::uuid(),
+            'type' => 'tap', 'ts' => 1_700_000_000_000, 'received_at' => 1_700_000_000_100,
+        ]);
+
+        $doomed->delete();
+
+        $this->assertNull(User::find($doomed->id));
+        $this->assertSame(0, Event::where('user_id', $doomed->id)->count());
+    }
+
+    /**
+     * Same reasoning as the other append-only tables' identical check — the
+     * ORM guard above is layer 2 only. Layer 1 (`REVOKE UPDATE, DELETE` on
+     * the app's Postgres role) cannot be asserted from inside the app that
+     * lacks it, so the strongest available check is that the runnable
+     * grant for `events` exists in the document the other append-only
+     * tables' grants already live in.
+     *
+     * MUTATION: remove the `events` GRANT block from docs/ADMIN-CONSOLE.md. Red.
+     */
+    public function test_the_database_level_append_only_grant_is_documented(): void
+    {
+        $path = dirname(__DIR__, 3).'/docs/ADMIN-CONSOLE.md';
+        $this->assertFileExists($path);
+
+        $doc = file_get_contents($path);
+
+        $this->assertMatchesRegularExpression(
+            '/REVOKE\s+UPDATE,\s*DELETE.*ON\s+TABLE\s+events/is',
+            $doc,
+            'the document must carry the actual REVOKE for events, not just the other append-only tables',
+        );
+        $this->assertMatchesRegularExpression(
+            '/GRANT\s+INSERT,\s*SELECT\s+ON\s+TABLE\s+events/is',
+            $doc,
+            'the app role still needs INSERT and SELECT, or an event could never be ingested',
+        );
     }
 }
