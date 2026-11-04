@@ -40150,3 +40150,177 @@ host, no DB, no credentials; not an agent-completable item). `EnrolledMarker
 .tsx`'s own role=status/role=alert gap is now CLOSED, and
 `test/session-gate.test.tsx`'s header comment's claim about it is now
 actually true — remove it from future sweeps.
+
+### v3-D371 (2026-11-04, nightly): a seventh fresh-sweep night found no confirmed defect — a broad, low-mention-count sweep across PHP commands/controllers, corpus-compiler, and gate scripts came back clean
+
+Every item on v3-D370's own "NOT addressed" list is infra-gated (the
+browser-provisioning mismatch; a genuine two-DEVICE determinism e2e, which
+needs a live `v3/api` server booted alongside the e2e Next.js server;
+`worker/fold-runner`'s DB adapter + staging deploy) and was correctly
+re-confirmed, not re-attempted, as none of the three became
+agent-completable overnight. With that list exhausted of code-level
+candidates, this run picked targets a different way: it listed every
+`.ts`/`.tsx`/`.php` file under `v3/` and ranked them by how few times their
+own basename appears in `CLAUDE.md`+`DECISIONS.md` combined — a proxy for
+"never individually audited, only read as a callee of something else" —
+and read the lowest-ranked ones end to end, across both languages and
+every layer (commands, controllers, models, corpus-compiler, engine,
+scripts, components).
+
+**Read in full, found correct, no defect:**
+
+- `app/Console/Commands/AutoWaiveKillsCommand.php` +
+  `app/Flags/{FlagService,FlagRegistry}.php` — re-confirmed, not
+  re-discovered: v3-D348's kill()/ack_at reset still holds, and
+  `routes/console.php` already schedules `flags:auto-waive` at 04:00 UTC,
+  clear of the other two nightly jobs.
+- `app/Billing/{PaywallDecision,StripeSignature}.php` and
+  `app/Http/Controllers/Billing/StripeWebhookController.php` — the HMAC
+  verify/sign pair, the fail-closed unconfigured-secret guard, and the
+  raw-body-not-`->all()` discipline are all intact.
+- `app/Http/Controllers/Admin/AdminRevealController.php` +
+  `app/Models/AdminRevealToken.php` — audit-before-reveal ordering,
+  server-side TTL, the anonymous-subject-still-audits branch, and the
+  token-bound-to-its-minting-admin `check()` lookup are all as documented.
+- `app/Console/Commands/BackupRestoreDrillCommand.php` (736 lines, read end
+  to end for the first time since v3-D123/D326's own fixes) — the
+  sqlite dump/restore ordering (`PRAGMA foreign_keys = OFF` during load,
+  re-checked via `PRAGMA foreign_key_check` after), the PII-stripped
+  exception diagnosis (`firstLine()`), and the real
+  `AccountDeletionRequest` → `PurgeDueAccountsCommand` → captured
+  `purge_ledger` row round trip are all sound.
+- `app/Console/Commands/{PurgeDueAccountsCommand,GrantAdminRoleCommand}.php`,
+  `app/Http/Controllers/Auth/PasswordResetController.php`,
+  `app/Http/Controllers/SpecsController.php`,
+  `app/Console/Commands/IngestHashesCommand.php`,
+  `app/Providers/AppServiceProvider.php`'s reset/verify-link
+  `createUrlUsing` closures — all correct against their own documented
+  contracts.
+- `packages/corpus-compiler/src/parseQac.ts` (zero prior mentions in
+  either file — genuinely never individually audited) — the QAC
+  segment-grouping, `headOf()`'s ROOT-then-LEM-then-last head-segment
+  choice, and the leading/trailing-clitic-run enumeration feeding
+  `fullQuranWordSet` all check out; it already has its own dedicated test
+  (`test/parseQac.test.ts`).
+- `packages/corpus-compiler/src/{connections,prdRank}.ts` — the former is
+  a 5-line `n→n+1` builder matching `validateCorpus`'s own
+  `ayahCount - 1` check exactly; the latter is byte-identical in logic to
+  the frozen, already-shipped `v1/packages/corpus-compiler/src/prdRank.ts`
+  (diffed directly — only comments differ), so a defect there would not be
+  new.
+- `worker/fold-runner/bin/selection-determinism-check.ts` (the CLI runner
+  — zero prior mentions; `selectionCheck.ts` itself was already read at
+  v3-D355/D356) — the minimum-trace floor, the per-event corpus lookup,
+  and the exit-code mapping are all correct.
+- `packages/engine/src/multiSurah.ts#splitBudget()` and its one real
+  caller, `apps/web/lib/plan/forecast.ts#buildForecast()` — the
+  proportional-by-weight division is correct, but its only production
+  call site (`PlanIsland.tsx`) always passes a single-element `enrolled`
+  array (multi-surah enrollment has no UI yet, the same already-ratified
+  gap named throughout this file), so the function is correct but
+  currently degenerate rather than exercised — not a fresh defect to add
+  to the pile of already-named "mechanism built, not yet reached" gaps.
+- `apps/web/lib/admin/identity-context.tsx` + its one consumer,
+  `components/workbench/QariMode.tsx#canSignQariTier` — the role string
+  (`"qari"`) matches `AdminRole::QARI` on the PHP side exactly; no
+  frontend/backend role-name drift.
+- `apps/web/lib/account/{resetLink,verifyLink}.ts` — pure, throw-free
+  parsers, already correct (and already named checked at v3-D370's own
+  "already fixed or explicitly examined and ruled correct" list — this
+  run independently re-confirmed rather than merely trusting that list).
+- `apps/web/components/{macro/GraphNodeMark,ui/Container,sections/Objections,
+  shell/ServiceWorkerRegistrar}.tsx` — all pure-presentational or
+  deliberately-swallow-every-failure components, no logic surface for a
+  code defect. `Container.tsx`'s own `Section`/`SectionHeading` id-pairing
+  convention (`aria-labelledby` pointing at a heading id that must match)
+  was checked across EVERY landing section's call site
+  (`Mechanism`/`Objections`/`Plan`/`Pricing`/`Proof`, plus the inline
+  `hero`/`demo`/`footer` cases in `app/page.tsx`) — every pair passes the
+  identical `id`, so the one way this convention silently breaks (a
+  heading pointed at an id nothing provides) does not occur anywhere on
+  the page.
+- `apps/web/scripts/{check-fonts,check-locked-css}.mjs` — the asymmetric
+  Amiri-hard-fail/UI-soft-warn split, and the locked-css gate's structural
+  byte-range diff (including re-verifying its hardcoded
+  `V1_SHA256`/`V1_LINES`/`V1_BYTES` constants directly against
+  `v1/styles/iman-ui.css` with `sha256sum`/`wc`) — exactly as documented.
+- `apps/web/scripts/{check-corpus-morphology,check-corpus-glyphs}.mjs` —
+  the GPL-morphology browser-reachability grep and the from-scratch WOFF2
+  table-directory parser + cmap format 4/12 coverage computation (both
+  already have dedicated gate tests) — read end to end, no parsing bug
+  found in the UIntBase128 reader, the table-length/offset bookkeeping, or
+  either cmap format's glyph-id resolution.
+
+**One candidate considered and explicitly NOT treated as a defect:**
+`SpecsController::assertNoForbiddenKeys()`'s forbidden-key check
+(`['rung','pretest','atom','structured']`) is case-sensitive
+(`in_array(..., true)`), so a payload key spelled `"Rung"` would bypass it.
+Not fixed: M4 (build-plan step 16, the real spec-driven question compiler)
+has not landed, so nothing anywhere reads a spec's `payload` by key at
+all today — there is no concrete, learner-facing failure this can
+currently cause, only a theoretical hardening gap in code with zero
+current consumers. NIGHTLY.md's bar is a genuine defect with a concrete
+failure scenario; this does not clear it. Named here so a future run does
+not have to re-derive the same non-finding, and so whoever builds the real
+M4 consumer knows to make the check case-insensitive (or canonicalize keys
+to lowercase) before trusting it.
+
+**Verified unchanged (no production file touched this run):**
+
+- `TZ=UTC make test`: **3158 passing** (identical to v3-D370: 255 v2
+  vitest, 47 v2/api, 428 v3/api, 120 corpus-compiler, 470 engine, 73
+  fold-runner, 1765 apps/web). `check-test-floor.mjs`: OK, 3158 >= floor
+  1899 (+1259 margin, unmoved).
+- `TZ=UTC make build`: exit 0, 30 routes, unchanged (the usual one-time
+  `SecurityFatalError` CLI nudge on first invocation — not acted on,
+  upgrading Next.js needs a human decision; a plain retry built clean).
+- `npm run gates` (apps/web): all green — locked-css OK (294 v1 lines
+  byte-identical); fonts degraded-but-non-blocking, pre-existing, 2/6 UI
+  fonts present; boundaries OK, 348 files, unchanged; corpus-morphology
+  OK, 362 words; corpus-glyphs OK, 206 codepoints across 4 artifacts —
+  all unchanged.
+- `npx tsc --noEmit`, run separately across all four v3 node packages
+  (`corpus-compiler`, `engine`, `fold-runner`, `apps/web`): clean in all
+  four, `Version 5.9.3` confirmed for apps/web.
+- `./vendor/bin/pint --test` (v3/api): reports its usual pre-existing
+  style findings across files this run did not touch — irrelevant, since
+  no PHP file was changed (confirmed: this commit is documentation-only).
+- No `v1/**`/`v2/**` edit — `git status --porcelain -- v1 v2` empty
+  immediately before committing (the usual stray
+  `v2/tsconfig.tsbuildinfo` build-cache diff from running the v2 suite
+  reverted first).
+- No Arabic codepoint, no `\u` escape, no `fromCharCode`/`fromCodePoint`
+  introduced — this commit touches only `v3/CLAUDE.md` and
+  `v3/DECISIONS.md` prose.
+- No oracle/golden-log/fixture/snapshot regenerated, no production or
+  test file touched at all — documentation only.
+
+**Session start:** `HEAD`, local `main` and `origin/main` all already
+agreed at `8e0d018` (v3-D370) — no stale-local-`main` trap this run. A
+fresh container (no `node_modules`/`vendor`/compiled corpus anywhere); `v2/api`'s
+composer install hit the same slow git-mirror proxy fallback several prior
+entries document (~15–20 minutes); `v3/api`'s plain `composer install`
+failed exactly as NIGHTLY.md predicts (`symfony/*` v8.1.x pinned in
+`composer.lock` require PHP >=8.4.1, this sandbox ships 8.3.6) and was
+recovered with `composer install --ignore-platform-req=php`, which
+installed and ran cleanly — the now-standard recovery path, not a new
+finding.
+
+**NOT addressed, named for next run:** every item on v3-D370's own
+condensed list, unchanged and reconfirmed infra-gated — the
+browser-provisioning mismatch behind the e2e Chromium-version workaround;
+a genuine two-DEVICE determinism e2e scenario (needs a live `v3/api`
+server alongside the e2e Next.js server — CORS, a second `webServer`
+entry, CI wiring); `worker/fold-runner`'s own DB adapter + staging deploy
+(no host, no DB, no credentials). `SpecsController`'s case-sensitive
+forbidden-key check (above) is a real but currently-unreachable hardening
+gap, not urgent until M4 ships a real payload consumer. Every file named
+"read in full, found correct" above should be removed from future
+low-mention-count sweep candidate lists — the remaining low-mention-count
+files not yet individually read this run (a future sweep can re-run the
+same basename-ranking technique, since more files have likely been
+touched since) include most of `v3/api/app/Models/*.php` (now confirmed
+to be thin Eloquent models carrying no logic surface, so a further pass
+there is low-value) and the `app/(admin)/settings/*` page components'
+remaining admin panels not yet individually re-audited for a fresh logic
+defect (as opposed to the now-nine-times-closed role=status/alert shape).

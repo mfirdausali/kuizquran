@@ -57,6 +57,113 @@ make test    # 3158 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 428 v3/api + 120 corpus-compiler
              # + 470 engine + 73 fold-runner + 1765 apps/web. (v3-D370, 2026-11-03)
+             # NOTE (v3-D371, 2026-11-04): a SEVENTH fresh-sweep night found
+             # no confirmed defect. Every item on v3-D370's own "NOT
+             # addressed" list is infra-gated (the browser-provisioning
+             # mismatch; a genuine two-DEVICE determinism e2e needing a live
+             # `v3/api` server beside the e2e Next.js server; `worker
+             # /fold-runner`'s DB adapter + staging deploy) and was
+             # reconfirmed, not re-attempted, since none became
+             # agent-completable overnight. With that list exhausted of
+             # code-level candidates, this run ranked every `.ts`/`.tsx`/
+             # `.php` file under `v3/` by how few times its own basename
+             # appears in this file + DECISIONS.md combined — a proxy for
+             # "never individually audited, only read as a callee" — and
+             # read the lowest-ranked ones end to end across every layer.
+             # Read in full and found correct, no defect: `app/Console
+             # /Commands/AutoWaiveKillsCommand.php` + `app/Flags
+             # /{FlagService,FlagRegistry}.php` (re-confirmed v3-D348's
+             # fix still holds, and `routes/console.php` already schedules
+             # it); `app/Billing/{PaywallDecision,StripeSignature}.php` +
+             # `Billing/StripeWebhookController.php` (HMAC verify/sign,
+             # fail-closed on an unconfigured secret, raw-body discipline);
+             # `Admin/AdminRevealController.php` + `AdminRevealToken.php`
+             # (audit-before-reveal ordering, server-side TTL, the
+             # anonymous-subject-still-audits branch, the token-bound-to-
+             # its-minting-admin lookup); `BackupRestoreDrillCommand.php`
+             # (736 lines, first full read since v3-D123/D326 — the sqlite
+             # FK-suspended restore, the PII-stripped exception diagnosis,
+             # the real purge-ledger round trip, all sound);
+             # `PurgeDueAccountsCommand.php`, `GrantAdminRoleCommand.php`,
+             # `Auth/PasswordResetController.php`, `SpecsController.php`,
+             # `IngestHashesCommand.php`, `AppServiceProvider.php`'s
+             # reset/verify-link closures — all correct. On the TS side:
+             # `packages/corpus-compiler/src/parseQac.ts` (zero prior
+             # mentions anywhere — the QAC segment-grouping, `headOf()`'s
+             # head-segment choice, the clitic-run enumeration all check
+             # out, and it already has its own test file);
+             # `src/{connections,prdRank}.ts` (the latter byte-identical in
+             # logic to the frozen v1 original — diffed directly, only
+             # comments differ); `worker/fold-runner/bin/selection-
+             # determinism-check.ts` (the CLI runner itself, zero prior
+             # mentions; `selectionCheck.ts` was already read at
+             # v3-D355/D356); `packages/engine/src/multiSurah.ts
+             # #splitBudget()` + its one real caller,
+             # `lib/plan/forecast.ts#buildForecast()` (correct but
+             # currently degenerate — its only call site always passes a
+             # single-element `enrolled` array, since multi-surah
+             # enrollment has no UI yet); `lib/admin/identity-context.tsx`
+             # + `QariMode.tsx#canSignQariTier` (the `"qari"` role string
+             # matches `AdminRole::QARI` exactly, no FE/BE drift);
+             # `lib/account/{resetLink,verifyLink}.ts` (independently
+             # re-confirmed, not merely trusted from v3-D370's own list);
+             # `components/{macro/GraphNodeMark,ui/Container,
+             # sections/Objections,shell/ServiceWorkerRegistrar}.tsx` (pure
+             # presentational/fail-safe, no logic surface — `Container
+             # .tsx`'s `Section`/`SectionHeading` id-pairing convention was
+             # checked across every landing-section call site, all
+             # consistent); `scripts/{check-fonts,check-locked-css,
+             # check-corpus-morphology,check-corpus-glyphs}.mjs` (including
+             # re-deriving `check-locked-css.mjs`'s own hardcoded
+             # `V1_SHA256`/`V1_LINES`/`V1_BYTES` constants directly against
+             # `v1/styles/iman-ui.css` with `sha256sum`/`wc`, and reading
+             # the from-scratch WOFF2/cmap binary parser end to end — no
+             # bug in the UIntBase128 reader, the table bookkeeping, or
+             # either cmap format). One candidate considered and NOT
+             # treated as a defect: `SpecsController
+             # ::assertNoForbiddenKeys()`'s forbidden-key check is
+             # case-sensitive, so a payload key spelled `"Rung"` would
+             # bypass it — but M4 (the real spec-driven question compiler)
+             # has not landed, so nothing reads a spec's `payload` by key
+             # at all today; no concrete, learner-facing failure exists
+             # yet, only a theoretical hardening gap on code with zero
+             # current consumers, named for whoever builds that consumer.
+             # `TZ=UTC make test`: 3158 passing, unchanged (255 v2 vitest,
+             # 47 v2/api, 428 v3/api, 120 corpus-compiler, 470 engine, 73
+             # fold-runner, 1765 apps/web). `check-test-floor.mjs`: OK,
+             # 3158 >= floor 1899 (+1259 margin, unmoved). `TZ=UTC make
+             # build`: exit 0, 30 routes, unchanged (the usual one-time
+             # `SecurityFatalError` CLI nudge on first invocation, not
+             # acted on, plain retry built clean). `npm run gates`: all
+             # green, unchanged (348 files, 294 v1 lines byte-identical,
+             # 2/6 UI fonts present degraded-but-non-blocking, 362 words,
+             # 206 codepoints). `npx tsc --noEmit`, run separately across
+             # all four v3 node packages: clean in all four. `./vendor/bin
+             # /pint --test`: its usual pre-existing findings on files this
+             # run did not touch — irrelevant, no PHP file changed. No
+             # `v1/**`/`v2/**` edit (the usual stray `v2/tsconfig
+             # .tsbuildinfo` build-cache diff reverted before committing).
+             # No Arabic codepoint, no `\u` escape, no `fromCharCode`/
+             # `fromCodePoint` introduced — this commit touches only
+             # `v3/CLAUDE.md`/`v3/DECISIONS.md` prose. No oracle/golden-
+             # log/fixture/snapshot regenerated, no production or test
+             # file touched at all — documentation only. Session start:
+             # `HEAD`, local `main` and `origin/main` already agreed at
+             # `8e0d018` (v3-D370) — no stale-local-`main` trap this run.
+             # Fresh container; `v3/api`'s plain `composer install` failed
+             # exactly as NIGHTLY.md predicts (symfony/* v8.1.x need PHP
+             # >=8.4.1, sandbox ships 8.3.6), recovered with `--ignore-
+             # platform-req=php` — the now-standard recovery path, not a
+             # new finding. NOT addressed, named for next run: every item
+             # on v3-D370's own condensed list, unchanged and reconfirmed
+             # infra-gated (the browser-provisioning mismatch; the
+             # two-DEVICE determinism e2e; `worker/fold-runner`'s DB
+             # adapter + staging deploy); `SpecsController`'s
+             # case-sensitive forbidden-key check (above, not urgent until
+             # M4 ships a real payload consumer). Every file named "read in
+             # full, found correct" above should be removed from future
+             # low-mention-count sweep candidate lists. Full detail:
+             # DECISIONS.md v3-D371.
              # NOTE (v3-D370, 2026-11-03): `components/library/EnrolledMarker.tsx`'s
              # own `"broken"` state (a genuine `readChoices()` throw — blocked
              # IndexedDB version upgrade, quota, private mode) rendered a bare
