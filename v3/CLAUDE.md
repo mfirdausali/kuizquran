@@ -53,10 +53,82 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3158 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3160 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 428 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1765 apps/web. (v3-D370, 2026-11-03)
+             # 255 v2 vitest + 47 v2/api + 430 v3/api + 120 corpus-compiler
+             # + 470 engine + 73 fold-runner + 1765 apps/web. (v3-D372, 2026-11-04)
+             # NOTE (v3-D372, 2026-11-04): `AyahVerification` — the
+             # ayah_verifications table, the qari's and admin's append-only
+             # sign-off chain behind DEFECTS.md#B3 — had NO structural
+             # append-only enforcement at all. Its own migration docblock
+             # claims "APPEND-ONLY... never updated or deleted by any code
+             # path in this app," but unlike its sibling append-only tables
+             # `AdminAudit` and `PurgeLedgerEntry`, which both carry an ORM
+             # `booted()` guard (updating/deleting throw) plus a documented,
+             # runnable Postgres REVOKE/GRANT in docs/ADMIN-CONSOLE.md,
+             # `AyahVerification` had neither — nothing stopped a future
+             # refactor (or a bug) from silently rewriting a qari's sign-off,
+             # the one row LAUNCH-CHECKLIST gate 7 treats as a human
+             # signature that must never be editable. Found by re-reading
+             # `v3/api/app/Models/*.php` despite v3-D371's own note ranking
+             # that directory low-value as "thin Eloquent models carrying no
+             # logic surface" — the logic surface here is an absence (a
+             # missing guard its siblings have), not a computation, so a
+             # "read for logic" sweep had skipped past it every prior night.
+             # Fixed: added the identical `booted()` guard
+             # (updating/deleting throw "APPEND-ONLY") and a new docs
+             # /ADMIN-CONSOLE.md §1c mirroring §1/§1b for admin_audit/
+             # purge_ledger. RED confirmed directly: reverted the model +
+             # docs change alone (`git stash` of those two files, the two
+             # new VerificationsTest cases kept) and ran
+             # `php artisan test --filter=VerificationsTest` against the
+             # unmodified source — 2 failed exactly as predicted (an
+             # unguarded `->update()`/`->delete()` silently succeeded; the
+             # grant regex found nothing), 15 passed, no other case moved.
+             # Mutation-verified: restored both files byte-identically
+             # (`git stash pop`), reran — 17/17 green, was 15 (+2). Full
+             # `v3/api` PHPUnit: **430 passed** (was 428, +2 exactly), 2
+             # incomplete (PAY-1, unchanged), 6 skipped (unchanged). `TZ=UTC
+             # make test`: **3160 passing** (was 3158, +2 exactly; every
+             # other suite unchanged: 255 v2 vitest, 47 v2/api, 120
+             # corpus-compiler, 470 engine, 73 fold-runner, 1765 apps/web).
+             # `check-test-floor.mjs`: OK, 3160 >= floor 1899 (+1261
+             # margin). `TZ=UTC make build`: exit 0, 30 routes, unchanged
+             # (the usual one-time `SecurityFatalError` CLI nudge on first
+             # invocation, not acted on, plain retry built clean). `npm run
+             # gates`: all green, 348 files, unchanged (294 v1 lines
+             # byte-identical; 2/6 UI fonts present, degraded-but-
+             # non-blocking, pre-existing; 362 words; 206 codepoints).
+             # `npx tsc --noEmit`, run separately across all four v3 node
+             # packages: clean in all four. `./vendor/bin/pint --test`:
+             # identical pre-existing findings on the one touched PHP test
+             # file before and after this diff (confirmed by stashing the
+             # diff and re-running) — no new style issue; the model file
+             # itself has zero findings. No `v1/**`/`v2/**` edit (the usual
+             # stray `v2/tsconfig.tsbuildinfo` build-cache diff reverted
+             # before committing). No Arabic codepoint, no `\u` escape, no
+             # `fromCharCode`/`fromCodePoint` introduced — swept
+             # programmatically over all three changed files; every new
+             # string is a PHP/SQL identifier or a fixed English comment/
+             # assertion sentence. No oracle/golden-log/fixture/snapshot
+             # regenerated. Session start: fresh container; `v3/api`'s
+             # plain `composer install` failed exactly as NIGHTLY.md
+             # predicts (symfony/* v8.1.x need PHP >=8.4.1, sandbox ships
+             # 8.3.6), recovered with `--ignore-platform-req=php` — the
+             # now-standard recovery path. `HEAD`, local `main` and
+             # `origin/main` all already agreed at `a08f26b` (v3-D371) —
+             # no stale-local-`main` trap this run. NOT addressed, named
+             # for next run: `GlossDraftReview` (`gloss_draft_reviews`)
+             # carries the identical "APPEND-ONLY" claim in its own
+             # docblock, for the identical B3 reason, with the identical
+             # missing guard/grant — the same defect class, found but not
+             # fixed this run to keep this commit scoped to one table;
+             # every item on v3-D371's own "NOT addressed" list, unchanged
+             # and still infra-gated (the browser-provisioning mismatch;
+             # the two-DEVICE determinism e2e; `worker/fold-runner`'s DB
+             # adapter + staging deploy); `SpecsController`'s
+             # case-sensitive forbidden-key check (v3-D371, still not
+             # urgent pre-M4).
              # NOTE (v3-D371, 2026-11-04): a SEVENTH fresh-sweep night found
              # no confirmed defect. Every item on v3-D370's own "NOT
              # addressed" list is infra-gated (the browser-provisioning

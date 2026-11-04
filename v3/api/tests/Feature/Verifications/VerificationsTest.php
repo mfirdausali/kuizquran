@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Verifications;
 
+use App\Models\AyahVerification;
 use App\Models\CorpusAyahHash;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -249,5 +250,78 @@ class VerificationsTest extends TestCase
         CorpusAyahHash::where('surah', 12)->where('ayah', 4)->update(['qari_hash' => 'hash-b', 'ingested_at' => 5000]);
 
         $this->assertSame(5000, $this->getJson('/api/verifications?surah=12')->json('frontier.4.ingestedAt'));
+    }
+
+    // ───────────── the append-only gap: no structural enforcement at all ──────────
+
+    /**
+     * `ayah_verifications` is the qari's signature chain — DEFECTS.md#B3 exists
+     * because v2's version was a single upserted row per ayah, and the whole
+     * fix is "every sign-off is a NEW row, read in `id` order, never
+     * overwritten." The migration's own docblock calls it APPEND-ONLY and
+     * "never updated or deleted by any code path in this app" — but unlike
+     * `AdminAudit` and `PurgeLedgerEntry`, which both carry an ORM
+     * `booted()` guard enforcing exactly that, `AyahVerification` had none:
+     * nothing stopped a future developer (or a bug in a refactor) from
+     * calling `->update()` or `->delete()` on a fetched row and silently
+     * rewriting a qari's sign-off — the one row LAUNCH-CHECKLIST gate 7
+     * treats as a human signature that must never be editable.
+     *
+     * MUTATION: remove the `updating`/`deleting` guards from the model.
+     */
+    public function test_a_verification_row_can_never_be_updated_or_deleted(): void
+    {
+        $this->seedHash(12, 4, 'hash-a');
+        $row = AyahVerification::create([
+            'surah' => 12, 'ayah' => 4, 'tier' => 'qari', 'content_hash' => 'hash-a',
+            'hash_spec_version' => 1, 'reviewer_kind' => 'human', 'verified_by' => 'qari-admin@example.com',
+            'created_at' => 1_700_000_000_000,
+        ]);
+
+        try {
+            $row->update(['content_hash' => 'tampered-hash']);
+            $this->fail('a verification row must never be updatable — a rewritable qari sign-off is not a sign-off');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('APPEND-ONLY', $e->getMessage());
+        }
+
+        try {
+            $row->delete();
+            $this->fail('a verification row must never be deletable');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('APPEND-ONLY', $e->getMessage());
+        }
+
+        $this->assertDatabaseHas('ayah_verifications', ['id' => $row->id, 'content_hash' => 'hash-a']);
+    }
+
+    /**
+     * Same reasoning as `AdminPrivacyTest::test_the_database_level_append_only_grant_is_documented`
+     * — the ORM guard above is layer 2 only. Layer 1 (`REVOKE UPDATE, DELETE`
+     * on the app's Postgres role) cannot be asserted from inside the app that
+     * lacks it, so the strongest available check is that the runnable grant
+     * for `ayah_verifications` exists in the document both `admin_audit`'s
+     * and `purge_ledger`'s grants already live in.
+     *
+     * MUTATION: remove the `ayah_verifications` GRANT block from
+     * docs/ADMIN-CONSOLE.md. Red.
+     */
+    public function test_the_database_level_append_only_grant_is_documented(): void
+    {
+        $path = dirname(__DIR__, 3).'/docs/ADMIN-CONSOLE.md';
+        $this->assertFileExists($path);
+
+        $doc = file_get_contents($path);
+
+        $this->assertMatchesRegularExpression(
+            '/REVOKE\s+UPDATE,\s*DELETE.*ON\s+TABLE\s+ayah_verifications/is',
+            $doc,
+            'the document must carry the actual REVOKE for ayah_verifications, not just admin_audit/purge_ledger',
+        );
+        $this->assertMatchesRegularExpression(
+            '/GRANT\s+INSERT,\s*SELECT\s+ON\s+TABLE\s+ayah_verifications/is',
+            $doc,
+            'the app role still needs INSERT and SELECT, or a qari sign-off could never be written',
+        );
     }
 }

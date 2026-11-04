@@ -98,6 +98,26 @@ Verify the same way as §1's grant, substituting `purge_ledger` for
 
 ---
 
+## 1c · The same grant for `ayah_verifications` (build-plan step 15 / DEFECTS.md#B3)
+
+`ayah_verifications` is append-only for the reason DEFECTS.md#B3 exists at all:
+it is the qari's and the admin's signature chain — "verified = ANY row's
+content_hash matches the CURRENT corpus hash" is only a meaningful audit trail
+if a row, once signed, can never be rewritten or removed. `AyahVerification::booted`
+is the ORM layer (layer 2); this is layer 1, not yet applied anywhere because no
+production database exists yet (same gap as §1/§1b above).
+
+```sql
+REVOKE UPDATE, DELETE, TRUNCATE ON TABLE ayah_verifications FROM app_role;
+GRANT  INSERT, SELECT                ON TABLE ayah_verifications TO   app_role;
+GRANT USAGE, SELECT ON SEQUENCE ayah_verifications_id_seq TO app_role;
+```
+
+Verify the same way as §1's grant, substituting `ayah_verifications` for
+`admin_audit` in the `information_schema.role_table_grants` query.
+
+---
+
 ## 2 · Required environment
 
 | Variable | Purpose | Failure mode if unset |

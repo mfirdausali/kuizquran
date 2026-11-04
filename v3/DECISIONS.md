@@ -40324,3 +40324,131 @@ to be thin Eloquent models carrying no logic surface, so a further pass
 there is low-value) and the `app/(admin)/settings/*` page components'
 remaining admin panels not yet individually re-audited for a fresh logic
 defect (as opposed to the now-nine-times-closed role=status/alert shape).
+
+### v3-D372 (2026-11-04, nightly): `AyahVerification` — the qari's own sign-off chain — had no structural append-only enforcement at all
+
+`app/Models/AyahVerification.php` backs `ayah_verifications`, the table
+DEFECTS.md#B3 exists for: v2's version was a single upserted row per ayah,
+which is exactly how B3 became possible (an override could silently
+invalidate a "verified" row with nothing ever re-checking it), and v3's
+fix is "every sign-off is a NEW row, read in `id` order, verified = ANY
+row's `content_hash` matches the CURRENT corpus hash." That predicate is
+only a meaningful audit trail if a row, once signed, can never be
+rewritten or removed — the migration's own docblock says exactly this:
+*"APPEND-ONLY... Never updated or deleted by any code path in this app."*
+
+That sentence was a comment, not a guarantee. `AdminAudit` and
+`PurgeLedgerEntry` — this build's other two append-only tables — both
+carry the identical two-layer treatment `docs/ADMIN-CONSOLE.md` §1/§1b
+documents: an ORM `booted()` guard (`updating`/`deleting` throw
+`RuntimeException`) for development/SQLite, plus a documented, runnable
+Postgres `REVOKE UPDATE, DELETE, TRUNCATE` / `GRANT INSERT, SELECT` for
+production. `AyahVerification` had **neither layer**: no `booted()` guard
+on the model, and no `ayah_verifications` entry anywhere in
+`docs/ADMIN-CONSOLE.md`. Nothing in the app currently calls
+`->update()`/`->delete()` on a fetched `AyahVerification` row (confirmed
+by grep across `app/Http/Controllers/`), so there is no live data-loss
+incident today — but that is exactly the "either alone is insufficient"
+shape `AdminAudit`'s own docblock warns about: the gap is one future
+refactor, one careless migration-writer, or one bug away from silently
+rewriting a qari's actual signature, on the one row LAUNCH-CHECKLIST gate
+7 treats as a human signature that must never be editable, with no test
+anywhere that would have caught it.
+
+**Why this escaped v3-D371's own sweep the very same night it was
+produced:** that entry explicitly ranked `v3/api/app/Models/*.php` as
+low-value for further sweeping, reasoning "thin Eloquent models carrying
+no logic surface." That reasoning holds for computation — these models
+genuinely have none — but misses that the *absence* of a guard its
+siblings carry is itself a logic surface, discoverable only by comparing
+siblings against each other, not by reading any one model in isolation.
+This run built a basename-mention-frequency ranking (the same technique
+v3-D371 used) across `app/Models/*.php`, `apps/web/lib|components|app/**`,
+`packages/engine/src/**`, `packages/corpus-compiler/src/**` and
+`worker/fold-runner/{src,bin}/**`, and specifically re-read every
+near-zero-mention model (`AyahVerification`, `FlagRampAudit`,
+`NightlyCheckRun`, `NightlyWindow`, `Spec`, `CorpusAyahHash`,
+`PurgeLedgerEntry`) side by side rather than individually, which is what
+surfaced the asymmetry.
+
+**Fixed:** added `AyahVerification::booted()` with the identical
+`updating`/`deleting` throw-`RuntimeException("...APPEND-ONLY...")`
+template `AdminAudit`/`PurgeLedgerEntry` already use, and a new
+`docs/ADMIN-CONSOLE.md` §1c mirroring §1/§1b's `REVOKE`/`GRANT` block for
+`ayah_verifications`.
+
+**RED confirmed directly:** `git stash push -- app/Models
+/AyahVerification.php docs/ADMIN-CONSOLE.md` (the two new
+`VerificationsTest` cases kept, untouched), then `php artisan test
+--filter=VerificationsTest` against the unmodified model — **2 failed, 15
+passed**: `test_a_verification_row_can_never_be_updated_or_deleted` failed
+because `$row->update(...)` and `$row->delete()` both silently succeeded
+(no `RuntimeException` thrown at all); `test_the_database_level_append_only
+_grant_is_documented` failed because the `REVOKE`/`GRANT` regex for
+`ayah_verifications` matched nothing in `docs/ADMIN-CONSOLE.md`. Every
+other case in the file was unaffected.
+
+**Mutation-verified:** `git stash pop` restored both files
+byte-identically; reran — `VerificationsTest` **17/17 green** (was 15,
++2). Full `v3/api` PHPUnit: **430 passed** (was 428, +2 exactly), 2
+incomplete (PAY-1, unchanged), 6 skipped (unchanged — Postgres/pcntl-gated).
+
+**Verified, full suite:**
+
+- `TZ=UTC make test`: **3160 passing** (was 3158, +2 exactly — these two
+  new cases; every other suite unchanged: 255 v2 vitest, 47 v2/api, 120
+  corpus-compiler, 470 engine, 73 fold-runner, 1765 apps/web).
+  `check-test-floor.mjs`: OK, 3160 >= floor 1899 (+1261 margin).
+- `TZ=UTC make build`: exit 0, 30 routes, unchanged (the usual one-time
+  `SecurityFatalError` CLI nudge on first invocation — not acted on,
+  upgrading Next.js needs a human decision; a plain retry built clean).
+- `npm run gates` (apps/web): all green — locked-css OK (294 v1 lines
+  byte-identical); fonts degraded-but-non-blocking, pre-existing, 2/6 UI
+  fonts present; boundaries OK, 348 files, unchanged; corpus-morphology
+  OK, 362 words; corpus-glyphs OK, 206 codepoints across 4 artifacts — all
+  unchanged, this diff carries no corpus data and touches no `apps/web`
+  file.
+- `npx tsc --noEmit`, run separately across all four v3 node packages:
+  clean in all four — this diff touches no TypeScript file.
+- `./vendor/bin/pint --test`: identical pre-existing findings on
+  `VerificationsTest.php` before and after this diff (confirmed by
+  stashing the diff and re-running `pint --test` against the unmodified
+  file — same two fixers reported either way); `AyahVerification.php`
+  itself has zero pint findings.
+- No `v1/**`/`v2/**` edit — `git status --porcelain -- v1 v2` empty
+  immediately before committing (the usual stray
+  `v2/tsconfig.tsbuildinfo` build-cache diff from running the v2 suite
+  reverted first).
+- No Arabic codepoint, no `\u` escape, no `fromCharCode`/`fromCodePoint`
+  introduced — swept programmatically over the Arabic/Arabic
+  Supplement/Arabic Extended-A/Presentation Forms Unicode blocks across
+  all three changed files: CLEAN — every new string is a PHP/SQL
+  identifier or a fixed English comment/assertion sentence.
+- No oracle/golden-log/fixture/snapshot regenerated — one existing
+  production model file, one existing docs file, and one existing test
+  file only.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere. `v3/api`'s plain `composer install` failed exactly as
+NIGHTLY.md predicts (`symfony/*` v8.1.x pinned in `composer.lock` require
+PHP >=8.4.1, this sandbox ships 8.3.6) and was recovered with `composer
+install --ignore-platform-req=php` — the now-standard recovery path, not
+a new finding. `HEAD`, local `main` and `origin/main` all already agreed
+at `a08f26b` (v3-D371) — no stale-local-`main` trap this run.
+
+**NOT addressed, named for next run:** `app/Models/GlossDraftReview.php`
+(`gloss_draft_reviews`) carries the byte-for-byte identical "APPEND-ONLY"
+claim in its own docblock, for the identical B3-shaped reason (it
+snapshots `text_at_review`, "the same principle as
+`ayah_verifications.content_hash`... for the same reason (B3)"), and has
+the identical missing guard and missing grant — the same defect class,
+found while reading the same low-mention-count batch, but deliberately
+not fixed this run to keep this commit scoped to the one table with the
+most severe consequence (a qari signature vs. a gloss-draft review note).
+A future run should apply the identical fix there. Also unaddressed,
+unchanged from v3-D371: the browser-provisioning mismatch behind the e2e
+Chromium-version workaround; a genuine two-DEVICE determinism e2e
+(needs a live `v3/api` server alongside the e2e Next.js server);
+`worker/fold-runner`'s own DB adapter + staging deploy (no host, no DB,
+no credentials); `SpecsController`'s case-sensitive forbidden-key check
+(real but unreachable pre-M4).
