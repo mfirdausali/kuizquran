@@ -40452,3 +40452,138 @@ Chromium-version workaround; a genuine two-DEVICE determinism e2e
 `worker/fold-runner`'s own DB adapter + staging deploy (no host, no DB,
 no credentials); `SpecsController`'s case-sensitive forbidden-key check
 (real but unreachable pre-M4).
+
+### v3-D373 (2026-11-04, nightly): `GlossDraftReview` carried the identical missing append-only guard v3-D372 named and deliberately deferred
+
+v3-D372 closed `AyahVerification`'s missing structural append-only
+enforcement and explicitly named `GlossDraftReview` in its own "NOT
+addressed" list as carrying the byte-for-byte identical gap, deferred only
+to keep that commit scoped to the table with the more severe consequence.
+This run picked up exactly that deferred item.
+
+`app/Models/GlossDraftReview.php` backs `gloss_draft_reviews`, this
+table's own append-only review history: `text_at_review` snapshots the
+bytes a reviewer actually approved, "the same principle as
+`ayah_verifications.content_hash`, for the same reason (B3): an approval
+that does not name what was approved silently survives an edit that
+invalidated it" — the model's own docblock says so. But like
+`AyahVerification` before this week's fix, and unlike `AdminAudit`,
+`PurgeLedgerEntry` and (now) `AyahVerification`, `GlossDraftReview` had
+**neither layer** of the two-layer append-only treatment
+`docs/ADMIN-CONSOLE.md` §1/§1b/§1c documents: no `booted()` guard on the
+model, and no `gloss_draft_reviews` entry anywhere in that document.
+Nothing in the app currently calls `->update()`/`->delete()` on a fetched
+`GlossDraftReview` row (confirmed by grep across
+`app/Http/Controllers/GlossDraftsController.php`, the only writer), so
+there is no live data-loss incident today — but the risk is the identical
+one-future-refactor-away shape v3-D372 described: an editable approval
+record is not an approval record, and nothing would have caught a bug or
+a careless edit silently rewriting one.
+
+**Fixed:** added `GlossDraftReview::booted()` with the identical
+`updating`/`deleting` throw-`RuntimeException("...APPEND-ONLY...")`
+template `AdminAudit`/`PurgeLedgerEntry`/`AyahVerification` already use,
+and a new `docs/ADMIN-CONSOLE.md` §1d mirroring §1/§1b/§1c's
+`REVOKE`/`GRANT` block for `gloss_draft_reviews`. The model's docblock was
+extended with the same two-layer explanation its siblings carry.
+
+**RED confirmed directly:** `git stash push -- app/Models
+/GlossDraftReview.php docs/ADMIN-CONSOLE.md` (the two new
+`GlossDraftsTest` cases kept, untouched), then `php artisan test
+--filter=GlossDraftsTest` against the unmodified model — **2 failed, 12
+passed**: `test_a_review_row_can_never_be_updated_or_deleted` failed
+because `$row->update(...)` and `$row->delete()` both silently succeeded
+(no `RuntimeException` thrown at all); `test_the_database_level_append_only
+_grant_is_documented` failed because the `REVOKE`/`GRANT` regex for
+`gloss_draft_reviews` matched nothing in `docs/ADMIN-CONSOLE.md`. Every
+other case in the file was unaffected.
+
+**Mutation-verified:** `git stash pop` restored both files
+byte-identically; reran — `GlossDraftsTest` **14/14 green** (was 12,
++2). Full `v3/api` PHPUnit: **432 passed** (was 430, +2 exactly), 2
+incomplete (PAY-1, unchanged), 6 skipped (unchanged — Postgres/pcntl-gated).
+
+**Verified, full suite:**
+
+- `TZ=UTC make test`: **3162 passing** (was 3160, +2 exactly — these two
+  new cases; every other suite unchanged: 255 v2 vitest, 47 v2/api, 120
+  corpus-compiler, 470 engine, 73 fold-runner, 1765 apps/web).
+  `check-test-floor.mjs`: OK, 3162 >= floor 1899 (+1263 margin).
+- `TZ=UTC make build`: exit 0, 30 routes, unchanged (the usual one-time
+  `SecurityFatalError` CLI nudge on first invocation — not acted on,
+  upgrading Next.js needs a human decision; a plain retry built clean).
+- `npm run gates` (apps/web): all green — locked-css OK (294 v1 lines
+  byte-identical); fonts degraded-but-non-blocking, pre-existing, 2/6 UI
+  fonts present; boundaries OK, 348 files, unchanged; corpus-morphology
+  OK, 362 words; corpus-glyphs OK, 206 codepoints across 4 artifacts — all
+  unchanged, this diff carries no corpus data and touches no `apps/web`
+  file.
+- `./vendor/bin/pint --test`: passed on both touched files
+  (`GlossDraftReview.php`, `GlossDraftsTest.php`) — zero findings either
+  way.
+- No `v1/**`/`v2/**` edit — `git status --porcelain -- v1 v2` empty
+  immediately before committing (the usual stray
+  `v2/tsconfig.tsbuildinfo` build-cache diff from running the v2 suite
+  reverted first).
+- No Arabic codepoint, no `\u` escape, no `fromCharCode`/`fromCodePoint`
+  introduced — swept programmatically over the Arabic/Arabic
+  Supplement/Arabic Extended-A/Presentation Forms Unicode blocks across
+  all three changed files: CLEAN — every new string is a PHP/SQL
+  identifier or a fixed English comment/assertion sentence.
+- No oracle/golden-log/fixture/snapshot regenerated — one existing
+  production model file, one existing docs file, and one existing test
+  file only.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere. `v3/api`'s plain `composer install` failed exactly as
+NIGHTLY.md predicts (`symfony/*` v8.1.x pinned in `composer.lock` require
+PHP >=8.4.1, this sandbox ships 8.3.6) and was recovered with `composer
+install --ignore-platform-req=php` — the now-standard recovery path, not
+a new finding. After `git fetch origin main`, `HEAD` matched
+`origin/main` exactly at `1a10629` (v3-D372) — no stale-local-`main` trap
+this run.
+
+**A broader instance of this same defect class, found while verifying the
+fix above, deliberately NOT fixed tonight:** before writing this entry, a
+`grep -rli "append-only" app/Models/*.php` was run to confirm no sibling
+table was missed — it found FOUR more models whose own docblocks claim
+"append-only" with no `booted()` guard: `EntitlementTransition`, `Event`,
+`NightlyCheckRun`, `Override`. This is NOT a fourth instance of tonight's
+mechanical copy-paste fix, and treating it as one would be wrong: `Event`
+— the append-only event log itself, invariant #2 — has a **genuine,
+legitimate** delete path. `PurgeDueAccountsCommand` (`pdpa:purge-due`)
+deletes a `User` row for a PDPA purge, which cascades to delete that
+user's `Event` rows (confirmed: `User`'s own `events()` relation docblock
+says "Append-only; nothing here ever deletes it" about the RELATION,
+meaning no code path updates/deletes an event directly — the deletion is
+a cascade from the user's own, deliberate removal, a different thing
+entirely). A blanket `deleting` guard on `Event`, copied verbatim from
+tonight's template, would THROW during every PDPA purge and break
+LAUNCH-CHECKLIST gate 19 outright — confirmed by reading
+`PurgeDueAccountsCommand`'s own docblock and `DB::transaction` body, not
+merely assumed. `Override`/`EntitlementTransition`/`NightlyCheckRun` were
+NOT confirmed either way this run (a shallow grep for `->update(`/
+`->delete(` near their usage sites found nothing, but v3-D372's own
+"thin Eloquent models carrying no logic surface" blind spot is exactly
+what missed `AyahVerification` in the first place, so a shallow grep is
+not treated as proof of safety here). This needs a real per-model
+decision — does each one ever legitimately get updated or deleted, and if
+`Event` needs a delete path at all, does the guard belong on the model
+(distinguishing cascade from direct calls, which Eloquent model events
+cannot do) or does the real fix belong at the DB-grant layer instead
+(§1/§1b/§1c/§1d's layer 1, which already permits exactly this shape:
+`REVOKE` the app role's UPDATE/DELETE, let only a privileged
+migration/cascade act) — not something to copy-paste blind.
+
+**NOT addressed, named for next run:** the four-model finding above (real
+investigation needed, starting with `Event`'s cascade-vs-direct-delete
+question); every item on v3-D372's own condensed list, unchanged and
+reconfirmed infra-gated or product-gated: the browser-provisioning
+mismatch behind the e2e Chromium-version workaround; a genuine
+two-DEVICE determinism e2e (needs a live `v3/api` server alongside the
+e2e Next.js server); `worker/fold-runner`'s own DB adapter + staging
+deploy (no host, no DB, no credentials); the operational mailer (v3-D18,
+still unwired — a P1 pages nobody without a live SMTP account); Stripe
+replay fixtures (PAY-1, gated on Stripe MY business verification
+clearing); `SpecsController`'s case-sensitive forbidden-key check (real
+but unreachable pre-M4).

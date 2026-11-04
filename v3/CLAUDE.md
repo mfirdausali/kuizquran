@@ -53,10 +53,81 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3160 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3162 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 430 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1765 apps/web. (v3-D372, 2026-11-04)
+             # 255 v2 vitest + 47 v2/api + 432 v3/api + 120 corpus-compiler
+             # + 470 engine + 73 fold-runner + 1765 apps/web. (v3-D373, 2026-11-04)
+             # NOTE (v3-D373, 2026-11-04): v3-D372 closed `AyahVerification`'s
+             # missing structural append-only enforcement and named
+             # `GlossDraftReview` (`gloss_draft_reviews`) as carrying the
+             # byte-for-byte identical gap, deferred only to keep that commit
+             # scoped to the table with the more severe consequence (a qari
+             # signature vs. a gloss-draft review note). This run picked up
+             # exactly that deferred item: `GlossDraftReview`'s own docblock
+             # already called `text_at_review` "the same principle as
+             # ayah_verifications.content_hash, for the same reason (B3)," but
+             # the model had neither an ORM `booted()` guard nor a
+             # `gloss_draft_reviews` entry in docs/ADMIN-CONSOLE.md. Fixed on
+             # the identical template: `booted()` now throws on
+             # updating/deleting, and a new §1d mirrors §1/§1b/§1c. RED
+             # confirmed directly: reverted the model + docs change alone
+             # (`git stash` of those two files, the two new GlossDraftsTest
+             # cases kept) and ran `php artisan test --filter=GlossDraftsTest`
+             # against the unmodified source — 2 failed exactly as predicted
+             # (an unguarded `->update()`/`->delete()` silently succeeded; the
+             # grant regex found nothing), 12 passed. Mutation-verified:
+             # restored both files byte-identically (`git stash pop`), reran —
+             # 14/14 green, was 12 (+2). Full `v3/api` PHPUnit: **432 passed**
+             # (was 430, +2 exactly), 2 incomplete (PAY-1, unchanged), 6
+             # skipped (unchanged). `TZ=UTC make test`: **3162 passing** (was
+             # 3160, +2 exactly; every other suite unchanged: 255 v2 vitest,
+             # 47 v2/api, 120 corpus-compiler, 470 engine, 73 fold-runner,
+             # 1765 apps/web). `check-test-floor.mjs`: OK, 3162 >= floor 1899
+             # (+1263 margin). `TZ=UTC make build`: exit 0, 30 routes,
+             # unchanged (the usual one-time `SecurityFatalError` CLI nudge on
+             # first invocation, not acted on, plain retry built clean). `npm
+             # run gates`: all green, 348 files, unchanged (294 v1 lines
+             # byte-identical; 2/6 UI fonts present, degraded-but-
+             # non-blocking, pre-existing; 362 words; 206 codepoints).
+             # `./vendor/bin/pint --test`: passed on both touched files, zero
+             # findings either way. No `v1/**`/`v2/**` edit (the usual stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted before
+             # committing). No Arabic codepoint, no `\u` escape, no
+             # `fromCharCode`/`fromCodePoint` introduced — swept
+             # programmatically over all three changed files; every new
+             # string is a PHP identifier or a fixed English comment/
+             # assertion sentence. No oracle/golden-log/fixture/snapshot
+             # regenerated. Session start: fresh container; `v3/api`'s plain
+             # `composer install` failed exactly as NIGHTLY.md predicts
+             # (symfony/* v8.1.x need PHP >=8.4.1, sandbox ships 8.3.6),
+             # recovered with `--ignore-platform-req=php`. After `git fetch
+             # origin main`, `HEAD` matched `origin/main` exactly at `1a10629`
+             # (v3-D372) — no stale-local-`main` trap this run.
+             #
+             # A BROADER INSTANCE of this defect class was found while
+             # verifying the fix above, and deliberately NOT fixed tonight:
+             # `grep -rli "append-only" app/Models/*.php` turned up FOUR MORE
+             # models claiming "append-only" with no `booted()` guard —
+             # `EntitlementTransition`, `Event`, `NightlyCheckRun`, `Override`.
+             # This is NOT a fourth instance of tonight's mechanical
+             # copy-paste fix: `Event` — the append-only event log itself,
+             # invariant #2 — has a GENUINE, legitimate delete path.
+             # `PurgeDueAccountsCommand` (`pdpa:purge-due`) deletes a `User`
+             # row for a PDPA purge, which cascades to delete that user's
+             # `Event` rows. A blanket `deleting` guard copied verbatim from
+             # tonight's template would THROW during every PDPA purge and
+             # break LAUNCH-CHECKLIST gate 19 outright. `Override`/
+             # `EntitlementTransition`/`NightlyCheckRun` were NOT confirmed
+             # either way this run — a shallow grep near their usage sites
+             # found no update/delete call, but a shallow grep is exactly
+             # what missed `AyahVerification` in the first place, so it is
+             # not treated as proof of safety. Named for next run: a real
+             # per-model decision on each of the four, and whether `Event`'s
+             # fix (if any) belongs on the model (distinguishing cascade from
+             # direct calls, which Eloquent model events cannot do) or at the
+             # DB-grant layer instead. See DECISIONS.md v3-D373 for the full
+             # write-up.
+             #
              # NOTE (v3-D372, 2026-11-04): `AyahVerification` — the
              # ayah_verifications table, the qari's and admin's append-only
              # sign-off chain behind DEFECTS.md#B3 — had NO structural
