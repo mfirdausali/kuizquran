@@ -278,4 +278,75 @@ class GlossDraftsTest extends TestCase
         );
         $this->assertSame('DIFFERENT text', $row['reviews'][1]['textAtReview']);
     }
+
+    // ───────────── the append-only gap: no structural enforcement at all ──────────
+
+    /**
+     * `gloss_draft_reviews` is this table's own append-only review history —
+     * its migration's docblock calls it exactly that, for the identical B3
+     * reason `ayah_verifications` carries one: "the text AS REVIEWED... if the
+     * text later changes, this snapshot is what proves the approval was for
+     * something else." But unlike `AdminAudit`/`PurgeLedgerEntry`/
+     * `AyahVerification`, which each carry an ORM `booted()` guard enforcing
+     * exactly that, `GlossDraftReview` had none: nothing stopped a future
+     * developer (or a bug in a refactor) from calling `->update()` or
+     * `->delete()` on a fetched row and silently rewriting what a reviewer
+     * actually approved.
+     *
+     * MUTATION: remove the `updating`/`deleting` guards from the model.
+     */
+    public function test_a_review_row_can_never_be_updated_or_deleted(): void
+    {
+        $row = GlossDraftReview::create([
+            'gloss_draft_id' => 1, 'from_status' => 'draft', 'to_status' => 'reviewed',
+            'text_at_review' => 'first draft text', 'actor_kind' => 'human',
+            'actor' => 'admin@example.com', 'created_at' => 1_700_000_000_000,
+        ]);
+
+        try {
+            $row->update(['text_at_review' => 'tampered text']);
+            $this->fail('a review row must never be updatable — a rewritable approval is not an approval');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('APPEND-ONLY', $e->getMessage());
+        }
+
+        try {
+            $row->delete();
+            $this->fail('a review row must never be deletable');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('APPEND-ONLY', $e->getMessage());
+        }
+
+        $this->assertDatabaseHas('gloss_draft_reviews', ['id' => $row->id, 'text_at_review' => 'first draft text']);
+    }
+
+    /**
+     * Same reasoning as `VerificationsTest::test_the_database_level_append_only_grant_is_documented`
+     * — the ORM guard above is layer 2 only. Layer 1 (`REVOKE UPDATE, DELETE`
+     * on the app's Postgres role) cannot be asserted from inside the app that
+     * lacks it, so the strongest available check is that the runnable grant
+     * for `gloss_draft_reviews` exists in the document `admin_audit`'s,
+     * `purge_ledger`'s and `ayah_verifications`'s grants already live in.
+     *
+     * MUTATION: remove the `gloss_draft_reviews` GRANT block from
+     * docs/ADMIN-CONSOLE.md. Red.
+     */
+    public function test_the_database_level_append_only_grant_is_documented(): void
+    {
+        $path = dirname(__DIR__, 3).'/docs/ADMIN-CONSOLE.md';
+        $this->assertFileExists($path);
+
+        $doc = file_get_contents($path);
+
+        $this->assertMatchesRegularExpression(
+            '/REVOKE\s+UPDATE,\s*DELETE.*ON\s+TABLE\s+gloss_draft_reviews/is',
+            $doc,
+            'the document must carry the actual REVOKE for gloss_draft_reviews, not just the other append-only tables',
+        );
+        $this->assertMatchesRegularExpression(
+            '/GRANT\s+INSERT,\s*SELECT\s+ON\s+TABLE\s+gloss_draft_reviews/is',
+            $doc,
+            'the app role still needs INSERT and SELECT, or a review could never be recorded',
+        );
+    }
 }

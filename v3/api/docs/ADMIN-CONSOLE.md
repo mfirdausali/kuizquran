@@ -118,6 +118,25 @@ Verify the same way as §1's grant, substituting `ayah_verifications` for
 
 ---
 
+## 1d · The same grant for `gloss_draft_reviews` (build-plan step 27 / DEFECTS.md#B3)
+
+`gloss_draft_reviews` is append-only for the same B3 reason `ayah_verifications`
+is: `text_at_review` snapshots the bytes a reviewer actually approved, and an
+editable approval record is not an approval record. `GlossDraftReview::booted`
+is the ORM layer (layer 2); this is layer 1, not yet applied anywhere because no
+production database exists yet (same gap as §1/§1b/§1c above).
+
+```sql
+REVOKE UPDATE, DELETE, TRUNCATE ON TABLE gloss_draft_reviews FROM app_role;
+GRANT  INSERT, SELECT                ON TABLE gloss_draft_reviews TO   app_role;
+GRANT USAGE, SELECT ON SEQUENCE gloss_draft_reviews_id_seq TO app_role;
+```
+
+Verify the same way as §1's grant, substituting `gloss_draft_reviews` for
+`admin_audit` in the `information_schema.role_table_grants` query.
+
+---
+
 ## 2 · Required environment
 
 | Variable | Purpose | Failure mode if unset |
