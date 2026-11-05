@@ -301,6 +301,36 @@ jobs:
         working-directory: v3/apps/web
         run: npx playwright install --with-deps chromium
 
+      # playwright.config.ts's SECOND `webServer` entry (DECISIONS.md
+      # v3-D366/D367/D369/D371 through D377's own recommended first commit
+      # toward a real two-device determinism e2e) boots a disposable v3/api
+      # instance via scripts/e2e-serve.sh. This job never installed v3/api at
+      # all before that entry existed — mirrored from the `php` job's own
+      # v3/api leg above, not shared with it, because this job has no
+      # Postgres service and never runs v3/api's PHPUnit suite; the e2e
+      # server only ever needs its own disposable sqlite file, which
+      # e2e-serve.sh migrates fresh on every boot.
+      - name: Set up PHP for v3/api (the e2e suite's disposable second server)
+        if: steps.has.outputs.yes == 'true'
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+
+      - name: Install v3/api deps (the e2e suite's disposable second server)
+        if: steps.has.outputs.yes == 'true'
+        working-directory: v3/api
+        env:
+          APP_KEY: base64:2fl+Ktt0V1Sj9K0m7hHkK2n8xY3qZp1Rw6cV0aB9eD4=
+        run: |
+          set -e
+          mkdir -p bootstrap/cache storage/framework/{cache,sessions,views} storage/logs
+          chmod -R 775 bootstrap/cache storage
+          cp -n .env.example .env 2>/dev/null || true
+          composer install --no-interaction --prefer-dist --no-scripts
+          php artisan key:generate --force || true
+          composer run-script post-autoload-dump --no-interaction || true
+          php artisan config:clear || true
+
       - name: Build + run the e2e suite
         # `npm run e2e` = `next build` (which reruns prebuild's corpus staging
         # against the just-compiled output/) then `playwright test` against the

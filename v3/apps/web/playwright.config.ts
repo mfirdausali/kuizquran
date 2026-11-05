@@ -40,6 +40,7 @@
 // that no longer starts.
 
 import { defineConfig, devices } from "@playwright/test";
+import { E2E_API_BASE_URL, E2E_API_PORT } from "./e2e/apiServer.ts";
 
 const PORT = Number(process.env.E2E_PORT ?? 3311);
 const BASE_URL = `http://127.0.0.1:${PORT}`;
@@ -95,15 +96,42 @@ export default defineConfig({
     },
   ],
 
-  webServer: {
-    // `next start` — the production server. `prebuild` (gates + corpus
-    // staging) has already run as part of `npm run build`, so the corpus in
-    // public/ is the staged, verified one.
-    command: `npx next start -p ${PORT}`,
-    url: BASE_URL,
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-    stdout: "ignore",
-    stderr: "pipe",
-  },
+  webServer: [
+    {
+      // `next start` — the production server. `prebuild` (gates + corpus
+      // staging) has already run as part of `npm run build`, so the corpus
+      // in public/ is the staged, verified one.
+      command: `npx next start -p ${PORT}`,
+      url: BASE_URL,
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+      stdout: "ignore",
+      stderr: "pipe",
+    },
+    {
+      // A SECOND, disposable server: v3/api, for the two-device determinism
+      // e2e (BUILD-PLAN M6's own exit criterion, DECISIONS.md v3-D366/D367/
+      // D369/D371 through D377 each named and deferred). `../../api` because
+      // Playwright resolves `command` relative to this config file's own
+      // directory (`apps/web`), not the repo root. The script migrates a
+      // fresh sqlite file on every boot — see its own header for why — so
+      // this entry is safe to run in parallel with `test-api3`'s own
+      // artisan test suite, which uses its OWN separate sqlite connection.
+      //
+      // `config/cors.php` (v3/api) defaults CORS_ALLOWED_ORIGINS to empty —
+      // no origin is allowed unless this exact variable says so — so this is
+      // the one place a cross-origin browser request from the e2e Next app
+      // to this server is deliberately permitted at all.
+      command: `bash ../../api/scripts/e2e-serve.sh`,
+      url: `${E2E_API_BASE_URL}/up`,
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+      stdout: "pipe",
+      stderr: "pipe",
+      env: {
+        CORS_ALLOWED_ORIGINS: BASE_URL,
+        E2E_API_PORT: String(E2E_API_PORT),
+      },
+    },
+  ],
 });
