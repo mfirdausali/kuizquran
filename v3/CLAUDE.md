@@ -53,10 +53,43 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3173 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3175 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 443 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1765 apps/web. (v3-D376, 2026-11-05)
+             # 255 v2 vitest + 47 v2/api + 445 v3/api + 120 corpus-compiler
+             # + 470 engine + 73 fold-runner + 1765 apps/web. (v3-D377, 2026-11-05)
+             # NOTE (v3-D377, 2026-11-05): `Spec` claimed IMMUTABLE/append-only
+             # ("no row is ever UPDATEd or DELETEd by any code path in this
+             # app") but, unlike `AdminAudit`/`PurgeLedgerEntry`/
+             # `AyahVerification`/`Override`/`NightlyCheckRun`/`Event`/
+             # `EntitlementTransition`/`GlossDraftReview` — which each make
+             # the identical claim and each closed the identical gap across
+             # v3-D372/D373/D374 — had NO `booted()` guard enforcing it.
+             # Missed three times running because v3-D372/D373/D374 each
+             # found their remaining instances by grepping literally for
+             # "append-only", and `Spec.php`'s docblock says "IMMUTABLE"
+             # instead. `SpecsController` (the only writer) only ever calls
+             # `Spec::create()`, never `->update()`/`->delete()` — so the
+             # claim held by current-controller discipline alone, nothing
+             # structural. Confirmed safe to guard unconditionally:
+             # `specs.author_id` is `nullOnDelete`, not `cascadeOnDelete`, and
+             # a DB-level `ON DELETE SET NULL` runs inside the database
+             # engine on the `users` delete statement, never re-entering
+             # Eloquent (the same v3-D374 proof for `ON DELETE CASCADE`,
+             # confirmed here for `SET NULL`) — so a PDPA purge has no
+             # interaction with this guard at all. Fixed on the identical
+             # eight-times-used template: `Spec::booted()` now throws on
+             # updating/deleting; `docs/ADMIN-CONSOLE.md` gains §1i,
+             # mirroring §1e's (`overrides`) identical `nullOnDelete` shape.
+             # RED confirmed directly: two new SpecsTest cases (create via
+             # the real `/api/specs` endpoint, then call `->update()`/
+             # `->delete()` on the model directly) against the unmodified
+             # source failed exactly as predicted (no exception thrown; the
+             # mutation silently succeeded), no other case moved (10 passed,
+             # 49 assertions). Mutation-verified: `git stash` of `Spec.php`
+             # alone (tests + docs kept) reproduced both failures identically;
+             # restored byte-identically, reran — `SpecsTest.php` 12/12
+             # green, was 10 (+2), 51 assertions, was 49. Full detail:
+             # DECISIONS.md v3-D377.
              # NOTE (v3-D376, 2026-11-05): `SpecsController::assertNoForbiddenKeys()`
              # compared payload keys with exact casing only (`in_array($key,
              # FORBIDDEN_PAYLOAD_KEYS, true)`) — a key spelled `"Rung"`,

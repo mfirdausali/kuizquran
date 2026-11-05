@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Specs;
 
+use App\Models\Spec;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Config;
@@ -167,5 +168,42 @@ class SpecsTest extends TestCase
             'specId' => (string) Str::uuid(), 'surah' => 12,
             'siteKey' => '12:ayah:4', 'lane' => 's1', 'payload' => [],
         ], $this->adminHeaders())->assertStatus(422);
+    }
+
+    /** The model's own docblock claims "no row is ever UPDATEd or DELETEd by
+     *  any code path in this app" — the identical IMMUTABLE/append-only
+     *  claim `AdminAudit`/`PurgeLedgerEntry`/`AyahVerification`/`Override`/
+     *  `NightlyCheckRun`/`Event`/`EntitlementTransition`/`GlossDraftReview`
+     *  each back with an ORM `booted()` guard. A tombstone-as-flip table
+     *  whose own controller never calls `->update()`/`->delete()` is only
+     *  as immutable as every future call site's discipline, never written
+     *  down — this asserts the structural guard exists, not just the
+     *  current controller's good behavior. */
+    public function test_a_spec_row_can_never_be_updated_or_deleted(): void
+    {
+        $headers = $this->adminHeaders();
+        $created = $this->postJson('/api/specs', [
+            'surah' => 12, 'siteKey' => '12:ayah:4', 'lane' => 's1', 'payload' => ['prompt' => 'x'],
+        ], $headers)->assertCreated();
+
+        $spec = Spec::findOrFail($created->json('spec.id'));
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('APPEND-ONLY');
+        $spec->update(['active' => false]);
+    }
+
+    public function test_a_spec_row_cannot_be_deleted(): void
+    {
+        $headers = $this->adminHeaders();
+        $created = $this->postJson('/api/specs', [
+            'surah' => 12, 'siteKey' => '12:ayah:4', 'lane' => 's1', 'payload' => ['prompt' => 'x'],
+        ], $headers)->assertCreated();
+
+        $spec = Spec::findOrFail($created->json('spec.id'));
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('APPEND-ONLY');
+        $spec->delete();
     }
 }

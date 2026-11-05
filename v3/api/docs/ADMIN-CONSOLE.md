@@ -240,6 +240,33 @@ for `events`.
 
 ---
 
+## 1i · The same grant for `specs` (build-plan step 15 / v3-D33, v3-D377)
+
+`specs` is append-only for the identical reason `overrides` (§1e) is:
+IMMUTABLE/versioned/tombstone-as-flip by design — an edit is always a NEW
+row at `spec_id`/`version+1`, and deactivating a spec flips a new row's
+`active` to `false`, never deletes one. `SpecsController` only ever calls
+`Spec::create()` — never `->update()`/`->delete()` — but that was, until
+v3-D377, discipline only: no structural guard enforced it, unlike every
+other table making the identical IMMUTABLE/append-only claim.
+`Spec::booted` is the ORM layer (layer 2); this is layer 1, not yet applied
+anywhere because no production database exists yet (same gap as
+§1/§1b–§1h above). `specs.author_id` is `nullOnDelete`, not
+`cascadeOnDelete` — a PDPA purge nulls the author reference on a deleted
+admin, it never deletes a spec row, so this grant has no purge-cascade
+interaction to reconcile (same as §1e's `overrides.editor_id` note).
+
+```sql
+REVOKE UPDATE, DELETE, TRUNCATE ON TABLE specs FROM app_role;
+GRANT  INSERT, SELECT                ON TABLE specs TO   app_role;
+GRANT USAGE, SELECT ON SEQUENCE specs_id_seq TO app_role;
+```
+
+Verify the same way as §1's grant, substituting `specs` for `admin_audit`
+in the `information_schema.role_table_grants` query.
+
+---
+
 ## 2 · Required environment
 
 | Variable | Purpose | Failure mode if unset |

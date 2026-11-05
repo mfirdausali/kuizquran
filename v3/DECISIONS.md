@@ -41023,3 +41023,126 @@ whoever picks this up: land the CORS config and second `webServer` entry as
 their own commit first (verifiable by a trivial smoke request), then the
 actual two-device scenario as a second commit, so a partial failure in
 either half is independently diagnosable.
+
+### v3-D377 (2026-11-05, nightly): `Spec` claimed IMMUTABLE/append-only but had no structural guard — the same defect class v3-D372/D373/D374 closed on eight other tables, missed because it used different wording
+
+v3-D372 (AyahVerification) and v3-D373/D374 (EntitlementTransition, Event,
+NightlyCheckRun, Override) each closed the same gap on a different table:
+a model's own docblock claims no row is ever updated or deleted, but only
+`AdminAudit`/`PurgeLedgerEntry` originally had the ORM `booted()` guard
+that actually enforces it — everything else was discipline only. Each of
+those three nights found its remaining instances by `grep -rli
+"append-only"` over `app/Models/*.php`. `Spec.php` carries the identical
+claim — "IMMUTABLE — no row is ever UPDATEd or DELETEd by any code path in
+this app" — but phrases it without the word "append-only" at all, so it
+silently survived that exact grep three times running. Found this run by
+re-ranking every `.ts`/`.tsx`/`.php` file under `v3/` by how rarely its own
+basename is mentioned in `CLAUDE.md`+`DECISIONS.md` combined (this file's
+own documented heuristic) and reading the remaining thin-model candidates
+end to end rather than skipping them as "just an Eloquent model" — `Spec`
+is 29 lines, but its own docblock's claim is exactly the shape this build
+has fixed eight times before.
+
+Confirmed exploitable the same way each prior instance was: `SpecsController`
+(the only writer) calls `Spec::create()` exclusively — never `->update()`
+or `->delete()` — so the IMMUTABLE claim held only by the current
+controller's good behavior, with nothing stopping a future refactor (or a
+bug) from rewriting a spec row in place, which would silently break the
+versioned/tombstone-as-flip lineage the whole table exists to preserve
+(`spec_id`/`version` grouping, "latest row per lineage is the current
+truth"). Checked the cascade question before fixing, the same way v3-D374
+checked it for `Event`: `specs.author_id` is `nullOnDelete`, not
+`cascadeOnDelete` (confirmed directly against
+`2026_08_10_230559_create_specs_table.php`), so a PDPA purge of an admin
+user only nulls `author_id` via the database's own `ON DELETE SET NULL`
+foreign-key action — it never deletes or updates a `specs` row as a whole,
+and that FK-level `SET NULL` runs entirely inside the database engine, the
+same way v3-D374 proved `ON DELETE CASCADE` does, so it never re-enters
+Eloquent and a `booted()` guard cannot intercept or break it. No
+purge-cascade interaction to reconcile — same as `Override`'s identical
+`nullOnDelete` shape (§1e).
+
+Fixed on the identical template as all eight prior closures:
+`Spec::booted()` now throws `RuntimeException` on `updating`/`deleting`,
+each message naming "specs is APPEND-ONLY" and the specific reason (an edit
+is a new row at `spec_id`/`version+1`; deactivating is a new
+tombstone-as-flip row, never a delete). `docs/ADMIN-CONSOLE.md` gains a new
+§1i mirroring §1e's (`overrides`) template exactly, including its
+`nullOnDelete`-means-no-cascade-to-reconcile note.
+
+RED confirmed directly: two new `SpecsTest` cases — create a spec via the
+real `/api/specs` endpoint, then call `->update()`/`->delete()` on the
+`Spec` model directly — run against the unmodified source, both failed
+exactly as predicted (`Failed asserting that exception of type
+"RuntimeException" is thrown` — the update/delete silently succeeded, no
+guard fired), no other case moved (10 passed, 49 assertions, unchanged).
+Mutation-verified: `git stash` of `Spec.php` alone (the two new tests and
+the docs addition kept) reproduced both failures identically; `git stash
+pop` restored it byte-identically (confirmed by the restore itself, not
+merely assumed), reran — `SpecsTest.php` 12/12 green, was 10, +2, 51
+assertions, was 49.
+
+Full `v3/api` PHPUnit (after `make compile-corpus`, needed on this fresh
+container before `OverrideHashRecomputeTest`'s real-fixture cases could
+run — a build input, not a graded fixture, same exemption NIGHTLY.md's own
+rule already carves out): **445 passed** (was 443, +2 exactly), 2
+incomplete (PAY-1, unchanged), 6 skipped (unchanged, Postgres/pcntl-gated).
+`v2/api` PHPUnit: 47/47, unchanged — this diff touches no `v2/api` file.
+`TZ=UTC make test`: **3175 passing** (was 3172, +2 exactly; every other
+suite unchanged: 255 v2 vitest, 120 corpus-compiler, 470 engine, 73
+fold-runner, 1765 apps/web — a PHP-only fix). `check-test-floor.mjs`: OK,
+3175 >= floor 1899 (+1276 margin). `TZ=UTC make build`: exit 0, 30 routes,
+unchanged (the usual one-time `SecurityFatalError` CLI nudge on first
+invocation, not acted on, plain retry built clean). `npm run gates`: all
+green, 347 files, unchanged (294 v1 lines byte-identical; 2/6 UI fonts
+present, degraded-but-non-blocking, pre-existing; 206 codepoints across 4
+artifacts) — this diff touches no `apps/web`/corpus-compiler file at all.
+`npx tsc --noEmit` (apps/web): clean. `./vendor/bin/pint --test`: flagged
+the new test file on first run (`fully_qualified_strict_types`/
+`ordered_imports` only — an inline `\App\Models\Spec::` instead of an
+import), auto-fixed with `./vendor/bin/pint`, content unchanged (confirmed
+by re-running the full `SpecsTest` suite after the fix, still 12/12), reran
+clean on all three touched files. No `v1/**`/`v2/**` edit — swept directly
+(`git status --porcelain -- v1 v2`), the usual stray
+`v2/tsconfig.tsbuildinfo` build-cache diff from running the v2 suite
+reverted before committing. No Arabic codepoint, no `\u` escape, no
+`fromCharCode`/`fromCodePoint` introduced — all three changed files swept
+programmatically over the Arabic/Arabic Supplement/Arabic Extended-A/
+Presentation-Forms Unicode blocks: CLEAN, every new string is a PHP
+identifier, a markdown heading, or a fixed English comment/exception-
+message/assertion sentence. No oracle/golden-log/fixture/snapshot
+regenerated — this diff touches one existing production file, one existing
+test file and one existing docs file only.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled corpus
+anywhere. `HEAD`, local `main` and `origin/main` all already agreed
+exactly at `995f846` (v3-D376) — no stale-local-`main` trap this run.
+`composer install --ignore-platform-req=php` on stock PHP 8.3.6 worked
+cleanly for both `v2/api` and `v3/api`, but hit the documented slow proxy
+git-mirror-clone fallback (laravel/framework's own mirror clone alone ran
+several minutes); the first attempt was killed by this run's own
+too-short background timeout (a self-inflicted mistake, not an
+environment issue) and had to be restarted with a longer one. Both API
+projects' `.env`/`APP_KEY` and gitignored `database/database.sqlite` were
+missing on this fresh checkout, as NIGHTLY.md predicts, and were created/
+generated by hand.
+
+**NOT addressed, named for next run:** every item on v3-D376's own
+condensed list, unchanged and reconfirmed infra-gated or product-gated —
+the browser-provisioning mismatch behind the e2e Chromium-version
+workaround; the two-DEVICE determinism e2e (CORS config + second
+Playwright `webServer` entry + a real register-on-A/login-on-B flow,
+scoped but deliberately not attempted, see v3-D376/D375's own scoping
+note); `worker/fold-runner`'s own DB adapter + staging deploy (no host, no
+DB, no credentials in this sandbox); the operational mailer's actual
+delivery (wired since v3-D82, only a real SMTP account is missing); Stripe
+replay fixtures (PAY-1, gated on Stripe MY business verification, H1). The
+Playwright e2e suite was NOT re-run this session (this diff touches no
+frontend file; the last recorded run remains v3-D369's 44/44). A fresh
+`grep -rli "append-only\|IMMUTABLE" app/Models/*.php` pass at the end of
+this run, widened past the single word that missed `Spec.php`, turned up
+one more hit, `User.php` — checked directly and it is a false positive
+(a doc-comment on `User::events()` describing the *related* `Event` log as
+append-only, not a claim about `User` itself) — every model making either
+claim about itself now carries the `booted()` guard. `Spec`'s own gap is
+now CLOSED — remove it from future sweep candidate lists.
