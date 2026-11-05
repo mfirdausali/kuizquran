@@ -41146,3 +41146,167 @@ one more hit, `User.php` — checked directly and it is a false positive
 append-only, not a claim about `User` itself) — every model making either
 claim about itself now carries the `booted()` guard. `Spec`'s own gap is
 now CLOSED — remove it from future sweep candidate lists.
+
+### v3-D378 (2026-11-05, nightly): CORS was wide open by accident (Laravel's own bundled `allowed_origins: ['*']` default) — fixed, and commit 1/2 of the two-device determinism e2e landed
+
+v3-D366/D367/D369/D371 through D377 each named the same gap and deferred it:
+the Playwright e2e suite has no genuine two-device scenario (BUILD-PLAN M6's
+own exit criterion), and the recommended first step — CORS config + a
+second `webServer` entry for a disposable `v3/api` instance, verified by a
+trivial smoke request, landed independently of the real two-device scenario
+— had never been attempted. This run took it on.
+
+**What was actually found, discovered while writing the fix, not assumed
+going in:** `config('cors')` never resolved empty. Laravel 11's own
+`Illuminate\Http\Middleware\HandleCors` is wired into the global middleware
+stack regardless of whether an app publishes `config/cors.php` — unpublished
+(the state of this app until now), it silently falls back to the
+framework's OWN bundled default
+(`vendor/laravel/framework/config/cors.php`): `'allowed_origins' => ['*']`
+for every `api/*` path. So before this commit, ANY origin on the public
+internet could make a cross-origin browser `fetch()` to this API's
+unauthenticated endpoints (`POST /api/auth/anonymous`,
+`GET /api/overrides`, `GET /api/verifications`, `GET /api/specs`) and read
+the response — never flagged anywhere in this file, because nothing had
+looked at CORS at all until the two-device e2e needed a genuinely
+cross-origin call. The original plan was "CORS is absent, therefore a
+no-op, therefore fail-closed by accident" — checked directly against
+`vendor/fruitcake/php-cors/src/CorsService.php` (Laravel's actual CORS
+engine) and found backwards: absent means the framework's own wildcard
+default applies, which is fail-*open*, not fail-closed.
+
+**Fixed:** `v3/api/config/cors.php` — an explicit, env-driven allowlist
+(`CORS_ALLOWED_ORIGINS`, comma-separated, trimmed, empty entries dropped)
+that denies every origin unless the variable is set. `supports_credentials`
+stays `false` (Bearer tokens, never cookies — `AuthController`'s own
+doc-comment) and `sanctum/csrf-cookie` is deliberately absent from `paths`.
+
+**A second, independent finding while writing the test for the first one:**
+`fruitcake/php-cors`'s `CorsService::isSingleOriginAllowed()` —
+`configureAllowedOrigin()` echoes back the ONE configured origin
+unconditionally, without ever comparing it to the request's own `Origin`
+header, whenever exactly one non-wildcard origin is configured (confirmed
+directly against the vendored source, lines ~204-229). This is not a gap in
+Laravel: a real browser independently rejects a response whose
+`Access-Control-Allow-Origin` does not equal its own page origin, so the
+genuine security boundary is enforced client-side regardless of what the
+server echoes — but it means a PHPUnit assertion that a *mismatched* origin
+gets no header is simply the wrong test for the single-origin configuration
+this app actually deploys (its one real use, the e2e run, configures
+exactly one origin). The original test asserted exactly that wrong thing,
+and failed — correctly, but for the wrong reason until chased down.
+`tests/Feature/CorsTest.php` now tests both the real single-origin echo
+behavior AND, with two configured origins, `fruitcake/php-cors`'s OTHER
+branch, which genuinely matches `Origin` against the list — proving the
+allowlist is real matching, not merely an echo, without resting that proof
+on the one configuration that can't exercise it.
+
+**A third finding, inside the test-writing itself, this file's own
+discipline catching its own author:** the test for the second finding
+above used `$this->withHeaders([...])->call('OPTIONS', ...)` and appeared to
+pass for the wrong reason (the single-origin echo doesn't read `Origin` at
+all, so it "passed" with the headers never actually attached), then
+genuinely failed once a second, real test needed the headers to matter.
+Root cause, confirmed directly against
+`vendor/laravel/framework/src/Illuminate/Foundation/Testing/Concerns/MakesHttpRequests.php`:
+the plain `call($method, $uri, ...)` signature reads `$this->serverVariables`
+for its `$server` argument, never `$this->defaultHeaders` — `withHeaders()`
+sets the LATTER, and only the `*Json()` convenience methods (`postJson`,
+`getJson`, …) ever convert `defaultHeaders` into server vars via
+`transformHeadersToServerVars()`. Chaining `withHeaders()` onto a bare
+`call('OPTIONS', ...)` silently sends neither `Origin` nor
+`Access-Control-Request-Method` at all. Fixed by using Laravel's own
+`$this->options($uri, $data, $headers)` helper, which takes headers as a
+direct third parameter and transforms them correctly — not a workaround,
+the actually-correct call for this case.
+
+**RED confirmed directly, twice:**
+1. `config/cors.php` removed (`mv` aside, not `git rm`), full `CorsTest`
+   re-run against the unmodified-otherwise app: 4 of 8 failed — the three
+   tests that `require` the file directly, plus (on the FIRST attempt, before
+   the `options()` fix above) the multi-origin matching test, which failed
+   for the real reason once the header-transport bug was fixed. All four
+   failures matched the file's own absence exactly; restored byte-identically
+   (`mv` back), reran green.
+2. A second, independent RED: the ORIGINAL (broken) `withHeaders()->call()`
+   version of the multi-origin test, run against a passing `config/cors.php`,
+   failed on its own — proving the test bug was real and not masked by
+   anything else.
+
+**`v3/api` PHPUnit:** 453 passed (was 445, +8 — exactly `CorsTest`'s eight
+cases), 2 incomplete (PAY-1, unchanged), 6 skipped (unchanged,
+Postgres/pcntl-gated). `TZ=UTC make test`: **3183 passing** (was 3175, +8;
+every other suite unchanged: 255 v2 vitest, 47 v2/api, 120 corpus-compiler,
+470 engine, 73 fold-runner, 1765 apps/web). `check-test-floor.mjs`: OK, 3183
+>= floor 1899 (+1284 margin). `TZ=UTC make build`: exit 0, 30 routes,
+unchanged (the usual one-time `SecurityFatalError` CLI nudge on first
+invocation, not acted on, plain retry built clean). `npm run gates`: all
+green, 350 files (+2, the two new `e2e/` TypeScript files; 294 v1 lines
+byte-identical; 2/6 UI fonts present, degraded-but-non-blocking,
+pre-existing; 362 words; 206 codepoints across 4 artifacts). `npx tsc
+--noEmit` (apps/web): clean. `./vendor/bin/pint --test`: passed on both
+touched PHP files. No `v1/**`/`v2/**` edit (the usual stray
+`v2/tsconfig.tsbuildinfo` build-cache diff reverted before committing). No
+Arabic codepoint, no `\u` escape, no `fromCharCode`/`fromCodePoint`
+introduced — all seven changed/added files swept programmatically over the
+Arabic/Arabic Supplement/Arabic Extended-A/Presentation-Forms Unicode
+blocks: CLEAN, every new string is a PHP/TypeScript/YAML identifier, a URL,
+or a fixed English comment/assertion sentence. No oracle/golden-log/
+fixture/snapshot regenerated.
+
+**The e2e half, run for real, not merely reasoned about:** `npx playwright
+test e2e/api-cors-smoke.test.ts --project=chromium` — both new cases green,
+including the genuine cross-origin browser `fetch()` (the e2e Next app's
+own origin calling the disposable `v3/api` server on a different port,
+inside `page.evaluate()`, not a Node-side `fetch` that CORS could never
+have blocked anyway). Full suite re-run with both projects (using a
+temporary, uncommitted `playwright.config.ts` `executablePath` override for
+this sandbox's pre-installed Chromium, same documented workaround as every
+prior entry since v3-D359, reverted via `Edit` before committing — `git
+diff v3/apps/web/playwright.config.ts` confirmed clean of it immediately
+before the final commit): **46 passed** (was 44, +2 — exactly the two new
+cases; chromium 35, mobile 11, both unchanged otherwise).
+
+**Also fixed in the same commit, required for the new `webServer` entry to
+be safe rather than merely locally-working:** `.github/workflows/ci.yml`'s
+`e2e` job never installed `v3/api` at all (only `apps/web` + the corpus
+compiler) — landing the second `webServer` entry without this would have
+newly, silently broken CI's e2e job the next time it ran, since
+`scripts/e2e-serve.sh` needs a real `php artisan serve` with `vendor/`,
+`.env`/`APP_KEY`, and a migratable sqlite file. Added the same
+`shivammathur/setup-php` + `composer install` steps the `php` job's own
+`v3/api` leg already uses (mirrored, not shared — this job has no Postgres
+service and never runs `v3/api`'s PHPUnit suite, so a smaller, dedicated
+set of steps is correct here, not a refactor into one shared step).
+
+**Session start:** fresh container; `make setup` failed exactly as this
+file predicts (`v3/api`'s plain `composer install` needs PHP >=8.4.1, this
+sandbox ships 8.3.6), but for the FIRST time failed the `setup` TARGET
+itself rather than merely the bare `composer install` command, because
+`make setup` has no `--ignore-platform-req=php` built in anywhere —
+recovered by running `v3/api`'s composer install by hand with that flag,
+then the remaining `make setup` steps (the four `npm install`s) by hand
+too, since the Makefile target had already exited non-zero and stopped.
+`HEAD`, local `main` and `origin/main` all already agreed exactly at
+`fc590fc` (v3-D377) — no stale-local-`main` trap this run. This session's
+own stop hook required uncommitted work to be committed mid-verification
+(`make setup` was still installing); the work was committed to a branch,
+never `main`, explicitly labelled unverified, and only merged to `main`
+once every gate above had actually run green — see that branch's own first
+commit message for the full account of why, if it is still visible in
+history.
+
+**NOT addressed, named for next run:** the actual two-device SCENARIO
+itself (register-on-device-A, login-on-device-B, drive both through a real
+session, assert `deviceSeq`-preserving merge end to end through the
+browser) — this commit was deliberately scoped to the CORS+webServer
+infrastructure alone, per every prior entry's own recommendation, so a
+partial failure in either half stays independently diagnosable. Every other
+item on v3-D377's own condensed list, unchanged and reconfirmed
+infra-gated or product-gated: the browser-provisioning mismatch behind the
+e2e Chromium-version workaround (now exercised again on both projects, same
+shape as every prior entry); `worker/fold-runner`'s own DB adapter +
+staging deploy (no host, no DB, no credentials in this sandbox); the
+operational mailer's actual delivery (wired since v3-D82, only a real SMTP
+account is missing); Stripe replay fixtures (PAY-1, gated on Stripe MY
+business verification, H1).

@@ -2,12 +2,20 @@
 
 /**
  * CORS. Absent from this app until now (DECISIONS.md v3-D369/D371/D375/D377's
- * own recurring "NOT addressed" note): `Laravel 11`'s global `HandleCors`
- * middleware is wired in by the framework regardless, but with no
- * `config/cors.php` file `config('cors')` resolves to an empty array, which
- * `HandleCors` reads as an empty `paths` list — CORS handling is a no-op and
- * every cross-origin browser request to `/api/*` is silently unprotected by
- * CORS headers at all (fail-closed by *accident*, not by configured intent).
+ * own recurring "NOT addressed" note) — and absent is NOT the same as
+ * "no-op". `Laravel 11`'s global `HandleCors` middleware is wired in by the
+ * framework regardless of whether this file exists; unpublished, it falls
+ * back to the FRAMEWORK'S OWN bundled default
+ * (`vendor/laravel/framework/config/cors.php`): `'allowed_origins' => ['*']`
+ * for every `api/*` path. So before this file, ANY origin on the public
+ * internet could make a cross-origin browser `fetch()` to this API's
+ * unauthenticated endpoints (`POST /api/auth/anonymous`,
+ * `GET /api/overrides`, `GET /api/verifications`, `GET /api/specs`) and read
+ * the response — wide open by *accident*, never a decision anyone made,
+ * found only while wiring the two-device e2e's genuinely cross-origin call
+ * (see `tests/Feature/CorsTest.php`'s own header for the full finding).
+ * This file replaces that wildcard with an explicit, env-driven allowlist
+ * that denies every origin by default.
  *
  * Every real client of this API today is either same-origin (`apps/web`'s
  * production deploy, served from the same host) or not a browser at all

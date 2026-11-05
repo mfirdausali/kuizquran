@@ -53,10 +53,85 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3175 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3183 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 445 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1765 apps/web. (v3-D377, 2026-11-05)
+             # 255 v2 vitest + 47 v2/api + 453 v3/api + 120 corpus-compiler
+             # + 470 engine + 73 fold-runner + 1765 apps/web. (v3-D378, 2026-11-05)
+             # NOTE (v3-D378, 2026-11-05): CORS was wide open by accident —
+             # `config/cors.php` was absent, and Laravel 11's global
+             # `HandleCors` middleware, wired in regardless of whether an app
+             # publishes that file, falls back to the FRAMEWORK'S OWN bundled
+             # default (`vendor/laravel/framework/config/cors.php`) when it
+             # is: `'allowed_origins' => ['*']` for every `api/*` path. So
+             # ANY origin on the public internet could make a cross-origin
+             # browser `fetch()` to this API's unauthenticated endpoints
+             # (`POST /api/auth/anonymous`, `GET /api/overrides`,
+             # `GET /api/verifications`, `GET /api/specs`) and read the
+             # response — never flagged anywhere in this file, because
+             # nothing had looked at CORS at all until the Playwright
+             # two-device determinism e2e (BUILD-PLAN M6's own exit
+             # criterion; DECISIONS.md v3-D366/D367/D369/D371 through D377
+             # each named the gap and recommended CORS + a second disposable
+             # `webServer` entry land first, verified by a trivial smoke
+             # request, independently of the real two-device scenario) needed
+             # a genuinely cross-origin call and this run finally wrote the
+             # file. Fixed: `v3/api/config/cors.php`, an explicit, env-driven
+             # allowlist (`CORS_ALLOWED_ORIGINS`) that denies every origin
+             # unless set — set only by the e2e run, to the e2e Next app's
+             # own origin. `apps/web/playwright.config.ts` gained a second
+             # `webServer` entry (`scripts/e2e-serve.sh`, a disposable
+             # `v3/api` instance, fresh-migrated sqlite on every boot);
+             # `.github/workflows/ci.yml`'s `e2e` job gained the `v3/api`
+             # PHP setup it would otherwise have silently needed and lacked.
+             # Two further findings surfaced while writing the test for the
+             # first one, both in DECISIONS.md v3-D378 in full: (1)
+             # `fruitcake/php-cors`'s own `isSingleOriginAllowed()` echoes
+             # back the one configured origin UNCONDITIONALLY when exactly
+             # one is configured, never comparing it to the request's own
+             # `Origin` — safe only because a real browser independently
+             # rejects a mismatched echo, confirmed directly against the
+             # vendored source; (2) Laravel's own `withHeaders()->call(...)`
+             # pattern silently sends NEITHER header at all, because the
+             # plain `call()` reads `$this->serverVariables`, never
+             # `$this->defaultHeaders` — only the `*Json()` helpers convert
+             # the latter. Fixed by using `$this->options($uri, $data,
+             # $headers)` instead, Laravel's own correct helper for this
+             # case. RED confirmed twice (`config/cors.php` moved aside,
+             # 4/8 `CorsTest` cases failed exactly as predicted; the ORIGINAL
+             # `withHeaders()->call()` version of the multi-origin test
+             # failed on its own even with `config/cors.php` present, proving
+             # the test bug was real). `v3/api` PHPUnit: **453 passed** (was
+             # 445, +8 exactly — `CorsTest`'s eight cases), 2 incomplete
+             # (PAY-1, unchanged), 6 skipped (unchanged). `TZ=UTC make test`:
+             # **3183 passing** (was 3175, +8; every other suite unchanged).
+             # `check-test-floor.mjs`: OK, 3183 >= floor 1899 (+1284 margin).
+             # `TZ=UTC make build`: exit 0, 30 routes, unchanged (the usual
+             # one-time `SecurityFatalError` CLI nudge, not acted on, plain
+             # retry built clean). `npm run gates`: all green, 350 files
+             # (+2, the two new `e2e/` files; 294 v1 lines byte-identical;
+             # 2/6 UI fonts present, degraded-but-non-blocking, pre-existing;
+             # 362 words; 206 codepoints). `npx tsc --noEmit`: clean.
+             # `./vendor/bin/pint --test`: passed on both touched PHP files.
+             # The e2e half run FOR REAL, not merely reasoned about: `npx
+             # playwright test e2e/api-cors-smoke.test.ts --project=chromium`
+             # — both new cases green, including a genuine cross-origin
+             # browser `fetch()` inside `page.evaluate()`. Full suite with
+             # both projects (the usual temporary, uncommitted
+             # `executablePath` workaround for this sandbox's pre-installed
+             # Chromium, reverted before committing): **46 passed** (was 44,
+             # +2 exactly). No `v1/**`/`v2/**` edit (the usual stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted before
+             # committing). No Arabic codepoint, no `\u` escape, no
+             # `fromCharCode`/`fromCodePoint` introduced — swept
+             # programmatically over all seven changed/added files. No
+             # oracle/golden-log/fixture/snapshot regenerated. NOT addressed:
+             # the actual two-device SCENARIO itself (deliberately scoped
+             # out, per every prior entry's own recommendation, so a partial
+             # failure in either half stays independently diagnosable);
+             # every item on v3-D377's own condensed list, unchanged (the
+             # browser-provisioning mismatch; `worker/fold-runner`'s DB
+             # adapter + staging deploy; the operational mailer; Stripe
+             # replay fixtures, PAY-1). Full detail: DECISIONS.md v3-D378.
              # NOTE (v3-D377, 2026-11-05): `Spec` claimed IMMUTABLE/append-only
              # ("no row is ever UPDATEd or DELETEd by any code path in this
              # app") but, unlike `AdminAudit`/`PurgeLedgerEntry`/

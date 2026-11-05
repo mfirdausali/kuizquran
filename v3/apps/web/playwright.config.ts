@@ -119,9 +119,11 @@ export default defineConfig({
       // artisan test suite, which uses its OWN separate sqlite connection.
       //
       // `config/cors.php` (v3/api) defaults CORS_ALLOWED_ORIGINS to empty —
-      // no origin is allowed unless this exact variable says so — so this is
-      // the one place a cross-origin browser request from the e2e Next app
-      // to this server is deliberately permitted at all.
+      // no origin is allowed unless this exact variable says so (replacing
+      // Laravel's own bundled wildcard default, `allowed_origins: ['*']`,
+      // see that file's own header) — so this is the one place a
+      // cross-origin browser request from the e2e Next app to this server
+      // is deliberately permitted at all.
       command: `bash ../../api/scripts/e2e-serve.sh`,
       url: `${E2E_API_BASE_URL}/up`,
       reuseExistingServer: !process.env.CI,
