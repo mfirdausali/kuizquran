@@ -40751,3 +40751,150 @@ unreachable pre-M4). The four-model append-only gap named across
 v3-D372/D373 is now fully CLOSED — remove it from future sweeps. The
 Playwright e2e suite was NOT re-run this session (this diff touches no
 frontend file; the last recorded run remains v3-D369's 44/44).
+
+### v3-D375 (2026-11-05, nightly): an eighth fresh-sweep night found no confirmed defect
+
+Steps 1-26/29 of BUILD-PLAN.md remain DONE; steps 27/28/30 and PAY-1 remain
+genuinely blocked on human/infra work (scene-beat authoring, a booked qari
+session, Stripe MY business verification, a live staging host for the
+7-night window, a human a11y pass) — none became agent-completable
+overnight. With v3-D374 closing the four-model append-only gap completely,
+this run was another fresh-sweep: pick code that has never been
+individually audited (basename mention count across this file and
+`CLAUDE.md`'s own nightly log as the proxy prior entries used), read it end
+to end for a real correctness defect, not a cosmetic one.
+
+**Read in full and found correct, no defect:**
+
+- `App\Support\CorpusHashRecomputer` + `App\Console\Commands
+  \IngestHashesCommand::ingestRows()` + `OverridesController::store()` — the
+  live override→rehash wiring (B3's closing gap, v3-D81): the
+  `(createdAt, id)` tie-break ordering matches B4 exactly, the upsert is
+  keyed `(surah, ayah)` matching `CorpusAyahHash`'s own docblock, a recompute
+  failure is logged and reported but never blocks the override write, and
+  `DeterminismCheckCommand::toWireEvent()` delegates to the identical
+  `App\Support\EventWireCodec::toWire()` `AtomCacheRebuilder` uses rather
+  than carrying a second, driftable copy.
+- `App\Support\AtomCacheRebuilder` (`rebuild()`/`rebuildOne()`/
+  `rebuildLocked()`) + `worker/fold-runner/bin/rebuild-atom-cache.ts` — the
+  admin whole-DB rebuild and `EventsController::store()`'s per-request
+  late-arrival refold (v3-D32's other deferred half): REPLACE-never-merge is
+  scoped to exactly the user IDs sent to the runner, a dead-lettered user's
+  existing rows are never touched by the `DELETE`, and the per-user
+  advisory lock spans the full read-fold-write span. `EventsController
+  ::store()`'s own `rebuildOne()` call is correctly wrapped so a refold
+  failure never rejects or rolls back an already-accepted event.
+- `App\Billing\EntitlementState`/`EntitlementTier` (the two closed-ladder
+  enums `EntitlementMachine::merge()` reads) and `EntitlementMachine::apply()`
+  itself (re-read end to end, not merely `merge()` — the two-guard ordering
+  precedence/optimistic-lock interaction holds exactly as its own docblock
+  claims).
+- `v3/api/routes/api.php` read end to end against its own ordering
+  comments (the `/billing/events` vs `/billing/{userId}` digit-constrained
+  route-shadowing guard; the `/flags/audit` vs `/flags/{key}` registration
+  order) — all correct, no shadowing bug.
+- `v3/api/config/{admin,pdpa,events}.php` — the admin allowlist's
+  `explode/trim/lower/filter` chain fails closed on an unset `ADMIN_EMAILS`
+  (confirmed: `explode(',', '')` plus `array_filter` removes the one empty
+  string, same as v2-D54's own contract); `EventsController::index()`'s
+  cursor pagination (`id > since`, `limit` clamped between 1 and
+  `pull_max_limit`) is correct.
+- `apps/web/next.config.mjs` (zero prior mentions anywhere) — the engine
+  path alias for both webpack and turbopack, and the `/sw.js` no-store
+  header, both match their own stated reasons.
+- `apps/web/app/api/e2e-cache-probe/route.ts` — the one real Next.js route
+  handler in this app; its own docblock already proves it harmless
+  (no input, constant output, `no-store`) and that was re-verified directly
+  rather than trusted.
+- `packages/corpus-compiler/src/{lookalikes,buildCorpus,validate}.ts` — the
+  diagnostic look-alike index (confirmed it is workbench-only, never a
+  grading input); `buildCorpus()`'s authored-vs-kernel distractor precedence
+  and its per-coordinate (not per-row) collision-drop bookkeeping; every one
+  of `validate.ts`'s FR1 checks, including the engine-equivalence self-
+  collision/sibling-duplicate checks added after the Al-Mulk incident.
+- `scripts/gen-golden-log.ts`/`gen-selection-log.ts` (the oracle/fixture
+  generators themselves — zero and two prior mentions respectively) — read
+  for a logic defect in the generator code, not to regenerate either
+  fixture (NIGHTLY.md's own rule). Both are internally consistent with
+  their own stated coverage goals; no action taken either way, since a
+  defect here would only be actionable by regenerating a committed
+  oracle/fixture, which stays a human call.
+- `apps/web/lib/progress/testHistory.ts` + `TestHistoryIsland.tsx` +
+  `TestHistoryPanel.tsx` + `packages/engine/src/test.ts#testHistory` end to
+  end: `getEventsForSurah(surah)` scopes the log before `testHistory()` ever
+  sees it, `wordDiagnostics(corpus, events, ayah)` filters by ayah
+  internally, and `correctCountOf()`'s round-trip from `score` back to an
+  integer count is exact for every value `TestIsland.tsx#finishTest` can
+  ever write. One doc-only nit, not a defect: the module header's own
+  example rangeLabel ("12:1–12:10") does not match what the code (or its
+  own test, `rangeLabel` asserted as `"12:5–20"`) actually produces
+  ("12:5–20", no second surah prefix) — left alone rather than "fixed",
+  since correcting a comment is not this run's mandate and the real
+  behavior is the tested, intended one.
+- Every `react-hooks/exhaustive-deps` suppression in the app (nine sites,
+  found via `grep -rn "eslint-disable.*exhaustive-deps"`): the six admin
+  panels (`FlagAuditPanel`/`BillingAuditPanel`/`AdminRolesPanel`/
+  `AuditLogPanel`/`PurgeLedgerPanel`/`BillingEventsPanel`) each omit only a
+  `refresh` callback whose own `useCallback` has an empty dependency array
+  (so it can never go stale); `SessionIsland.tsx`'s session-start effect
+  depends on `drillKey`/`practiceKey` by design (stable strings, not the
+  `drill`/`practice` object references) and the `pace`/`glossLang` it also
+  closes over cannot change without remounting the component (both are
+  resolved once, at `SessionGate`'s own mount, from `readChoices()` — traced
+  all the way through); `useLogState.ts`'s disable is on a caller-supplied
+  `deps` array, which eslint cannot statically analyze and which is
+  therefore a necessary suppression, not a hidden bug.
+
+**No defect found and nothing changed in `v1/**`/`v2/**`/any production or
+test file.** This is a documentation-only commit.
+
+**Verified, full suite, independently re-derived from a fresh container
+(this session's own numbers, not copied from CLAUDE.md):**
+
+- Session start: fresh container, no `node_modules`/`vendor`/compiled corpus
+  anywhere. `v2/api`'s and `v3/api`'s plain `composer install` both hit the
+  documented PHP-version mismatch (`v3/api` needs >=8.4.1, sandbox ships
+  8.3.6) and the proxy's slow git-mirror-clone dependency fallback — both
+  recovered with `--ignore-platform-req=php`, but this run's fallback was
+  markedly slower than prior entries record (~35+ minutes for each API
+  project's `composer install`, serialized one mirror-clone at a time); a
+  first attempt without a long enough background timeout was killed at the
+  harness's 30-minute default and had to be restarted with an explicit
+  longer timeout — named here in case a future run hits the same wall.
+  `v2/api`'s `.env`/`APP_KEY` were missing on this fresh checkout (not
+  covered by v3-D374's own note, which only needed this for `v2/api`
+  itself) and were generated by hand, same recovery as that entry. `HEAD`
+  and `origin/main` agreed exactly at `e7b5c31` (v3-D374) on a fresh
+  `git fetch` — local `main` was stale 20 commits behind at session start,
+  the recurring trap this file has recorded roughly fifty times since
+  v3-D77, caught via `git checkout -B main HEAD` before any exploration.
+- `TZ=UTC make test`: **3172 passing** (255 v2 vitest + 47 v2/api + 442
+  v3/api + 120 corpus-compiler + 470 engine + 73 fold-runner + 1765
+  apps/web), 2 incomplete (PAY-1, unchanged), 6 skipped (unchanged,
+  Postgres/pcntl-gated) — exactly matching `CLAUDE.md`'s own documented
+  v3-D374 count, confirming no regression from a completely fresh
+  environment rather than an incremental one.
+- `check-test-floor.mjs`: OK, 3172 >= floor 1899 (+1273 margin, unmoved).
+- `TZ=UTC make build`: exit 0, 30 routes, unchanged (the usual one-time
+  `SecurityFatalError` CLI nudge on first invocation, not acted on, a plain
+  retry built clean).
+- No `v1/**`/`v2/**` edit — the usual stray `v2/tsconfig.tsbuildinfo`
+  build-cache diff (produced by running the v2 suite) reverted before
+  committing; `git status --porcelain -- v1 v2` empty immediately before
+  committing.
+- No production or test file touched this run — documentation only, so no
+  Arabic-codepoint sweep, no mutation test, and no oracle/golden-log/
+  fixture/snapshot regenerated are applicable.
+
+**NOT addressed, named for next run:** every item on v3-D374's own condensed
+list, unchanged and reconfirmed infra-gated or product-gated (the
+browser-provisioning mismatch behind the e2e Chromium-version workaround; a
+genuine two-DEVICE determinism e2e; `worker/fold-runner`'s own DB adapter +
+staging deploy; the operational mailer; Stripe replay fixtures, PAY-1;
+`SpecsController`'s case-sensitive forbidden-key check). The Playwright e2e
+suite was NOT re-run this session (this diff touches no frontend file; the
+last recorded run remains v3-D369's 44/44). Every file named "read in full,
+found correct" above should be removed from future low-mention-count sweep
+candidate lists. `testHistory.ts`'s stale doc-comment example (above) is a
+cosmetic nit, not a defect, and is left for whoever next touches that file's
+comments rather than claimed as tonight's fix.

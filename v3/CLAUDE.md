@@ -56,7 +56,92 @@ make dev     # SPA :5273, API :8000
 make test    # 3172 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 442 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1765 apps/web. (v3-D374, 2026-11-04)
+             # + 470 engine + 73 fold-runner + 1765 apps/web. (v3-D375, 2026-11-05)
+             # NOTE (v3-D375, 2026-11-05): an EIGHTH fresh-sweep night found no
+             # confirmed defect. Steps 1-26/29 remain DONE; steps 27/28/30 and
+             # PAY-1 remain genuinely blocked on human/infra work (scene-beat
+             # authoring, a booked qari session, Stripe MY business
+             # verification, a live staging host for the 7-night window, a
+             # human a11y pass) — none became agent-completable overnight.
+             # Read in full and found correct, no defect: `App\Support
+             # \CorpusHashRecomputer` + `IngestHashesCommand::ingestRows()` +
+             # `OverridesController::store()` (B3's live override→rehash
+             # wiring — the `(createdAt, id)` tie-break matches B4, the
+             # upsert is keyed `(surah, ayah)`, a recompute failure never
+             # blocks the override write); `App\Support\AtomCacheRebuilder`
+             # (`rebuild()`/`rebuildOne()`/`rebuildLocked()`) +
+             # `worker/fold-runner/bin/rebuild-atom-cache.ts` (REPLACE-never-
+             # merge scoped to exactly the sent user IDs, a dead-lettered
+             # user's rows untouched, the per-user advisory lock spans the
+             # full read-fold-write span); `EventsController::store()`'s own
+             # `rebuildOne()` call (a refold failure never rejects or rolls
+             # back an already-accepted event); `App\Billing
+             # \{EntitlementState,EntitlementTier}` + `EntitlementMachine
+             # ::apply()` re-read end to end (the two-guard ordering-
+             # precedence/optimistic-lock interaction holds exactly as
+             # documented); `routes/api.php` (the `/billing/events` vs
+             # `/billing/{userId}` digit-constrained route-shadowing guard,
+             # the `/flags/audit` vs `/flags/{key}` registration order);
+             # `config/{admin,pdpa,events}.php` (the admin allowlist fails
+             # closed on an unset `ADMIN_EMAILS`; `EventsController::index()`'s
+             # cursor pagination clamps correctly); `apps/web/next.config.mjs`
+             # (zero prior mentions anywhere — the engine path alias for both
+             # webpack and turbopack, the `/sw.js` no-store header);
+             # `apps/web/app/api/e2e-cache-probe/route.ts` (the one real
+             # Next.js route handler in this app, re-verified harmless);
+             # `packages/corpus-compiler/src/{lookalikes,buildCorpus,
+             # validate}.ts` (look-alikes confirmed workbench-only, never a
+             # grading input; buildCorpus's authored-vs-kernel precedence;
+             # every validate.ts FR1 check); `scripts/gen-golden-log.ts`/
+             # `gen-selection-log.ts` (the oracle/fixture generators
+             # themselves, read for a logic defect, not to regenerate either
+             # — NIGHTLY.md's own rule); `apps/web/lib/progress
+             # /testHistory.ts` + `TestHistoryIsland.tsx` +
+             # `TestHistoryPanel.tsx` + `test.ts#testHistory` end to end (one
+             # doc-only nit found and left alone, not fixed: the module
+             # header's own example rangeLabel does not match what the code
+             # and its own test actually produce — correcting a comment is
+             # not this run's mandate); every `react-hooks/exhaustive-deps`
+             # suppression in the app, all nine sites, each confirmed safe
+             # (six admin panels' stable empty-deps `refresh` callbacks;
+             # `SessionIsland.tsx`'s session-start effect's `pace`/
+             # `glossLang` traced all the way to `SessionGate`'s own
+             # mount-once `readChoices()`; `useLogState.ts`'s caller-supplied
+             # `deps` array, which eslint cannot statically analyze).
+             # `TZ=UTC make test`: 3172 passing, unchanged, independently
+             # re-derived from a FRESH container (not copied from this
+             # file) — 255 v2 vitest + 47 v2/api + 442 v3/api + 120
+             # corpus-compiler + 470 engine + 73 fold-runner + 1765
+             # apps/web. `check-test-floor.mjs`: OK, 3172 >= floor 1899
+             # (+1273 margin, unmoved). `TZ=UTC make build`: exit 0, 30
+             # routes, unchanged (the usual one-time `SecurityFatalError`
+             # CLI nudge on first invocation, not acted on, plain retry
+             # built clean). No `v1/**`/`v2/**` edit (the usual stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted before
+             # committing). No production or test file touched this run —
+             # documentation only, so no Arabic-codepoint sweep, no mutation
+             # test, and no oracle/golden-log/fixture/snapshot regenerated
+             # are applicable. Session start: fresh container, composer
+             # installs on both API projects hit the documented slow proxy
+             # git-mirror-clone fallback, markedly slower than prior entries
+             # record (~35+ min each, serialized); a first attempt without a
+             # long enough background timeout was killed at the harness's
+             # 30-minute default and had to be restarted with an explicit
+             # longer timeout. `v2/api`'s `.env`/`APP_KEY` were missing and
+             # generated by hand. `HEAD` and `origin/main` agreed exactly at
+             # `e7b5c31` (v3-D374) on a fresh `git fetch`; local `main` was
+             # stale 20 commits behind — the recurring stale-local-`main`
+             # trap this file has recorded roughly fifty times since
+             # v3-D77 — caught via `git checkout -B main HEAD` before any
+             # exploration. NOT addressed, named for next run: every item on
+             # v3-D374's own condensed list, unchanged (the browser-
+             # provisioning mismatch; a genuine two-DEVICE determinism e2e;
+             # `worker/fold-runner`'s own DB adapter + staging deploy; the
+             # operational mailer; Stripe replay fixtures, PAY-1;
+             # `SpecsController`'s case-sensitive forbidden-key check). The
+             # Playwright e2e suite was NOT re-run this session (no frontend
+             # file touched; last recorded run remains v3-D369's 44/44).
+             # Full detail: DECISIONS.md v3-D375.
              # NOTE (v3-D374, 2026-11-04): v3-D373 named FOUR models sharing
              # the identical missing-`booted()`-append-only-guard shape it
              # closed on `GlossDraftReview`, but deferred all four,
