@@ -53,10 +53,33 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3172 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3173 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 442 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1765 apps/web. (v3-D375, 2026-11-05)
+             # 255 v2 vitest + 47 v2/api + 443 v3/api + 120 corpus-compiler
+             # + 470 engine + 73 fold-runner + 1765 apps/web. (v3-D376, 2026-11-05)
+             # NOTE (v3-D376, 2026-11-05): `SpecsController::assertNoForbiddenKeys()`
+             # compared payload keys with exact casing only (`in_array($key,
+             # FORBIDDEN_PAYLOAD_KEYS, true)`) — a key spelled `"Rung"`,
+             # `"PRETEST"`, `"Atom"` or `"Structured"` bypassed WIREFRAME's
+             # hard-problem-1 gate entirely, at any nesting depth. Named but
+             # deferred across v3-D373/D374/D375 as low-priority because M4
+             # (the real spec-driven question compiler) hasn't landed, so
+             # nothing reads a spec's payload by key today — that reasoning
+             # was right about impact but wrong to keep deferring: the gate
+             # is live, admin-callable code on `POST /api/specs` right now,
+             # independent of any downstream reader, and the fix is small,
+             # mechanical and fully testable without M4 existing. Fixed:
+             # `strtolower($key)` compared against the (already lowercase)
+             # forbidden set, both at the top level and recursively; the
+             # exception message still shows the admin's original casing.
+             # RED confirmed directly: a new SpecsTest case posting
+             # `Rung`/`PRETEST`/`Atom`/`Structured` (top-level and nested
+             # two deep) against the unmodified controller failed exactly as
+             # predicted (`Expected... [422] but received 201`). Mutation-
+             # verified: `git stash` of the one production file alone
+             # reproduced the identical failure; restored byte-identically,
+             # reran — `SpecsTest.php` 10/10 green, was 9 (+1), 45
+             # assertions, was 36. Full detail: DECISIONS.md v3-D376.
              # NOTE (v3-D375, 2026-11-05): an EIGHTH fresh-sweep night found no
              # confirmed defect. Steps 1-26/29 remain DONE; steps 27/28/30 and
              # PAY-1 remain genuinely blocked on human/infra work (scene-beat

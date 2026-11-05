@@ -131,6 +131,29 @@ class SpecsTest extends TestCase
         $this->assertDatabaseCount('specs', 0);
     }
 
+    /** `assertNoForbiddenKeys()` compared keys with strict `in_array` — exact
+     *  casing only. A payload key spelled with any different casing bypassed
+     *  the gate entirely while still carrying a grading field under a key an
+     *  M4 reader could plausibly fold on case-insensitively (e.g. a lookup
+     *  that normalizes keys first). The check must reject the SAME forbidden
+     *  concept regardless of how it is cased. */
+    public function test_payload_forbidden_key_check_is_case_insensitive(): void
+    {
+        $headers = $this->adminHeaders();
+        foreach (['Rung', 'PRETEST', 'Atom', 'Structured'] as $variant) {
+            $this->postJson('/api/specs', [
+                'surah' => 12, 'siteKey' => '12:ayah:4', 'lane' => 's1',
+                'payload' => [$variant => 'S3'],
+            ], $headers)->assertStatus(422);
+
+            $this->postJson('/api/specs', [
+                'surah' => 12, 'siteKey' => '12:ayah:4', 'lane' => 's1',
+                'payload' => ['nested' => ['deeper' => [$variant => 'S3']]],
+            ], $headers)->assertStatus(422);
+        }
+        $this->assertDatabaseCount('specs', 0);
+    }
+
     public function test_lane_must_be_one_of_the_six_closed_lanes(): void
     {
         $this->postJson('/api/specs', [

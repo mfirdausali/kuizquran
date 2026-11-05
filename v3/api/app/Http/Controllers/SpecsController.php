@@ -78,11 +78,15 @@ class SpecsController extends Controller
         return response()->json(['spec' => $this->toWire($row)], 201);
     }
 
-    /** Recursive — a forbidden key nested at any depth is still rejected. */
+    /** Recursive — a forbidden key nested at any depth is still rejected.
+     *  Case-insensitive: the concept being barred is "a grading field named
+     *  rung/pretest/atom/structured", not one exact casing of it, and a
+     *  future reader (e.g. M4's compiler) could plausibly normalize keys
+     *  before matching them. */
     private function assertNoForbiddenKeys(array $payload): void
     {
         foreach ($payload as $key => $value) {
-            if (is_string($key) && in_array($key, self::FORBIDDEN_PAYLOAD_KEYS, true)) {
+            if (is_string($key) && in_array(strtolower($key), self::FORBIDDEN_PAYLOAD_KEYS, true)) {
                 throw ValidationException::withMessages([
                     'payload' => "a spec payload may never carry a grading field (\"{$key}\") — WIREFRAME's hard problem 1",
                 ]);

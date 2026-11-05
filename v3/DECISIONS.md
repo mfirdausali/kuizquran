@@ -40898,3 +40898,128 @@ found correct" above should be removed from future low-mention-count sweep
 candidate lists. `testHistory.ts`'s stale doc-comment example (above) is a
 cosmetic nit, not a defect, and is left for whoever next touches that file's
 comments rather than claimed as tonight's fix.
+
+### v3-D376 (2026-11-05, nightly): `SpecsController::assertNoForbiddenKeys()` compared keys with exact casing only — fixed to case-insensitive
+
+v3-D373/D374/D375 each carried forward the same named-but-deferred
+candidate: `SpecsController::assertNoForbiddenKeys()` (WIREFRAME's hard
+problem 1 — no spec payload may ever carry a grading field) used
+`in_array($key, self::FORBIDDEN_PAYLOAD_KEYS, true)`, a strict, exact-case
+string comparison. A payload key spelled `"Rung"`, `"PRETEST"`, `"Atom"` or
+`"Structured"` — any casing other than the four lowercase literals — passed
+the check untouched, at any nesting depth. Every prior entry ranked this
+low-priority because M4 (the real spec-driven question compiler) hasn't
+landed, so nothing reads a spec's `payload` by key at all today, and the
+gap is real but currently unreachable through any live, learner-facing
+path. That reasoning was correct about *impact*, but the gate itself is
+live code on a live, admin-callable route (`POST /api/specs`, build-plan
+step 15) today, independent of whether anything downstream reads the
+result yet — a validation gate that only catches one exact spelling of the
+thing it claims to bar is a real, fixable defect in shipped code, not a
+purely theoretical one, and the fix is small, mechanical and genuinely
+testable without needing M4 to exist first: `assertNoForbiddenKeys()` is a
+private method called synchronously on every `store()`, so its own
+input/output contract is fully exercised by a request-level test with no
+caller beyond the existing endpoint.
+
+**What landed:** `assertNoForbiddenKeys()` now compares `strtolower($key)`
+against `self::FORBIDDEN_PAYLOAD_KEYS` (already four lowercase literals —
+`rung`/`pretest`/`atom`/`structured`) instead of the raw key, both at the
+top level and at every recursive depth. The exception message still
+interpolates the original, un-lowercased `$key` so the admin sees exactly
+what they typed. No other behavior changed: the four forbidden names, the
+recursive walk, and the 422 `ValidationException` shape are all unchanged.
+
+**RED confirmed directly:** a new `SpecsTest::test_payload_forbidden_key_check_is_case_insensitive`
+posts `Rung`/`PRETEST`/`Atom`/`Structured` (both as a top-level payload key
+and nested two levels deep, mirroring the existing exact-case test's own
+two shapes) and asserts 422, run against the unmodified controller —
+failed exactly as predicted: `Expected response status code [422] but
+received 201. Failed asserting that 201 is identical to 422.` on the first
+variant checked (`Rung`), confirming the row would otherwise have been
+created with a grading-shaped key intact.
+
+**Mutation-verified:** `git stash` of `SpecsController.php` alone (the new
+test and the eight pre-existing `SpecsTest` tests all kept) reproduced the
+identical single failure; restored byte-identically (`git stash pop`),
+reran: `SpecsTest.php` **10/10 green** (was 9, +1 — exactly this one new
+test; no other case moved, 45 assertions, was 36).
+
+**Full verification, from a container with no prior `vendor`/`node_modules`/
+compiled corpus (a genuinely fresh clone this run, not reused state):**
+
+- `v3/api`'s plain `composer install` failed exactly as every prior entry
+  predicts (symfony/* v8.1.x need PHP >=8.4.1; sandbox ships PHP 8.3.6, same
+  as `v2/api`'s own equivalent failure during `make setup`), recovered with
+  `--ignore-platform-req=php` for both API projects — the now-standard
+  recovery path, confirmed stable a dozen-plus nights running.
+- `HEAD` on session start was detached 22 commits AHEAD of a stale local
+  `main` ref (`48ef9dd`, v3-D354) that itself matched the session's own
+  initially-cached `origin/main` — i.e. the stale-local-`main` trap this
+  file has recorded roughly fifty times since v3-D77, but in its rarer
+  shape: `git fetch origin main` resolved it immediately (`48ef9dd..ed9058d`
+  fast-forward), confirming `HEAD`'s detached tip (`ed9058d`, v3-D375) was
+  already the real, unstale `origin/main` tip and no work was ever at risk.
+  `git checkout main && git merge --ff-only origin/main` before any
+  exploration, per this file's own standing instruction.
+- `TZ=UTC make test`: **3173 passing** (was 3172, +1 — exactly this run's
+  one new case; `v3/api` 443, was 442; no other suite moved: 255 v2 vitest,
+  47 v2/api, 120 corpus-compiler, 470 engine, 73 fold-runner, 1765
+  apps/web), 2 incomplete (PAY-1, unchanged), 6 skipped (unchanged,
+  Postgres/pcntl-gated).
+- `check-test-floor.mjs`: OK, 3173 >= floor 1899 (+1274 margin).
+- `TZ=UTC make build`: the usual one-time `SecurityFatalError` CLI nudge on
+  first invocation (not acted on — upgrading Next.js needs a human
+  decision), plain retry built clean: exit 0, 30 routes, unchanged.
+- `./vendor/bin/pint --test` on both touched PHP files: `{"result":"passed"}`,
+  zero findings.
+- No Arabic codepoint, no `\u` escape, no `fromCharCode`/`fromCodePoint`
+  introduced — both changed files swept programmatically over the Arabic,
+  Arabic Supplement, Arabic Extended-A and both Presentation Forms Unicode
+  blocks: CLEAN. Every new string is a PHP identifier, an HTTP-status
+  assertion, or a fixed English comment/exception-message sentence.
+- No `v1/**`/`v2/**` edit — the usual stray `v2/tsconfig.tsbuildinfo`
+  build-cache diff (produced by running the v2 suite as part of `make
+  test`) reverted via `git checkout --` before committing;
+  `git status --porcelain -- v1 v2` empty immediately before committing.
+- No oracle/golden-log/fixture/snapshot regenerated — this diff touches one
+  existing production file (`SpecsController.php`) and one existing test
+  file (`SpecsTest.php`) only.
+
+**NOT addressed, named for next run:** every other item on v3-D375's own
+condensed list, unchanged and reconfirmed infra-gated or product-gated —
+the browser-provisioning mismatch behind the e2e Chromium-version
+workaround; a genuine two-DEVICE determinism e2e (needs a live `v3/api`
+server booted alongside the e2e Next.js server — CORS wiring, a second
+Playwright `webServer` entry, CI changes; scoped and assessed again this
+run, deliberately NOT attempted — see the note below); `worker/fold-runner`'s
+own DB adapter + staging deploy (no host, no DB, no credentials in this
+sandbox); the operational mailer's actual delivery (the code path has been
+wired since v3-D82 — only a real SMTP account is missing, unchanged); Stripe
+replay fixtures (PAY-1, gated on Stripe MY business verification clearing,
+H1). The Playwright e2e suite was NOT re-run this session (this diff
+touches no frontend file; the last recorded run remains v3-D369's 44/44).
+`SpecsController`'s own forbidden-key gap is now CLOSED — remove it from
+future sweep candidate lists.
+
+A brief scoping note on the two-device e2e, since this run considered
+attempting it before choosing the smaller, fully-closeable fix above: it
+needs, at minimum, a `config/cors.php` (none exists in `v3/api` today — no
+`HandleCors` config at all, so a cross-origin browser `fetch` from the e2e
+Next.js server to a separately-booted Laravel server would be silently
+blocked by the browser, not by Laravel), a second Playwright `webServer`
+entry (`php artisan serve` against a disposable sqlite db, reset per run),
+and a real shared-account flow across two browser contexts (anonymous mint
+is per-device by construction — a genuine two-DEVICE scenario needs
+register-on-A/login-on-B, build-plan step 13's existing auth endpoints,
+never two independently-minted anonymous identities). Each piece is
+individually small, but wiring all three together correctly, under CI, and
+proving the resulting test is not vacuous (same discipline this file has
+enforced on every other e2e addition, e.g. v3-D369's own mutation-verified
+two-TAB test) is genuinely a multi-step effort, not a same-night add-on to
+an unrelated fix — consistent with why v3-D366/D367/D369/D371 through D375
+all named it and deliberately did not attempt it. Recommended approach for
+whoever picks this up: land the CORS config and second `webServer` entry as
+their own commit first (verifiable by a trivial smoke request), then the
+actual two-device scenario as a second commit, so a partial failure in
+either half is independently diagnosable.
