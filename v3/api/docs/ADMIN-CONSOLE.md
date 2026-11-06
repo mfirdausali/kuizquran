@@ -267,6 +267,30 @@ in the `information_schema.role_table_grants` query.
 
 ---
 
+## 1j · The same grant for `flag_ramp_audit` (build-plan step 26)
+
+`flag_ramp_audit` is append-only for the identical reason `admin_audit` is:
+its own model docblock says its four ceremony inputs are "STORED, not merely
+validated — 'we checked at the time' is unverifiable after the fact," and
+that is only true if a row, once written, can never be rewritten or removed.
+`FlagRampAudit::booted` is the ORM layer (layer 2); this is layer 1, not yet
+applied anywhere because no production database exists yet (same gap as
+§1/§1b–§1i above). `flag_ramp_audit.actor_admin_id` is `nullOnDelete`, not
+`cascadeOnDelete` — a PDPA purge nulls the actor reference on a deleted
+admin, it never deletes a ramp-audit row, so this grant has no purge-cascade
+interaction to reconcile (same as §1e's `overrides.editor_id` note).
+
+```sql
+REVOKE UPDATE, DELETE, TRUNCATE ON TABLE flag_ramp_audit FROM app_role;
+GRANT  INSERT, SELECT                ON TABLE flag_ramp_audit TO   app_role;
+GRANT USAGE, SELECT ON SEQUENCE flag_ramp_audit_id_seq TO app_role;
+```
+
+Verify the same way as §1's grant, substituting `flag_ramp_audit` for
+`admin_audit` in the `information_schema.role_table_grants` query.
+
+---
+
 ## 2 · Required environment
 
 | Variable | Purpose | Failure mode if unset |

@@ -53,10 +53,76 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3186 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3188 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 456 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1765 apps/web. (v3-D380, 2026-11-06)
+             # 255 v2 vitest + 47 v2/api + 458 v3/api + 120 corpus-compiler
+             # + 470 engine + 73 fold-runner + 1765 apps/web. (v3-D381, 2026-11-06)
+             # NOTE (v3-D381, 2026-11-06): `App\Models\FlagRampAudit` (the
+             # enable-hard/kill ceremony's audit trail, `flag_ramp_audit`)
+             # had no structural append-only guard, though its own docblock
+             # already claims immutable intent ("STORED, not merely
+             # validated — 'we checked at the time' is unverifiable after
+             # the fact") — the identical IMMUTABLE/append-only claim
+             # `AdminAudit`/`PurgeLedgerEntry`/`AyahVerification`/its
+             # review-history sibling table/`Override`/`NightlyCheckRun`/
+             # `Event`/`EntitlementTransition`/`Spec` each already back with
+             # an ORM `booted()` guard — a ninth instance of the same shape,
+             # missed by every prior `grep -rli "append-only"` sweep because
+             # this docblock never uses that literal word. Found by ranking
+             # source files by mention count in DECISIONS.md/CLAUDE.md/
+             # HANDOVER.md (v3-D371's technique) and reading the zero-mention
+             # Eloquent models directly. `BillingEvent`, found the same way,
+             # was checked and ruled correct: `WebhookHandler::ingest()`
+             # deliberately `->update()`s it twice by design (insert-raw-
+             # then-record-outcome), so a blanket guard there would break an
+             # intentional write path, not close a gap. Every real
+             # `FlagRampAudit::` call site (`FlagService::kill`/`ramp`/
+             # `acknowledgeKill`, the last also reached unattended from the
+             # nightly `autoWaiveDueKills()` scheduler) only ever calls
+             # `::create()`; the HTTP route is read-only by construction —
+             # both controller/route discipline only, the same gap `specs`
+             # carried until v3-D377. `flag_ramp_audit.actor_admin_id` is
+             # `nullOnDelete`, not `cascadeOnDelete`, so unlike `events`/
+             # `entitlement_transitions` there is no PDPA-purge cascade
+             # interaction to reconcile. Fixed: the identical `booted()`
+             # template as the eight prior closures; `docs/ADMIN-CONSOLE.md`
+             # gains §1j. RED confirmed directly: reverted `FlagRampAudit.php`
+             # alone (both new tests kept) and reran — both failed exactly
+             # as predicted (`Failed asserting that exception of type
+             # "RuntimeException" is thrown`); restored byte-identically,
+             # reran — `FlagAuditTest` 9/9 green, was 7 (+2). `v3/api`
+             # PHPUnit: **458 passed** (was 456, +2 exactly), 2 incomplete
+             # (PAY-1, unchanged), 6 skipped (unchanged). `TZ=UTC make test`:
+             # **3188 passing** (was 3186, +2; every other suite unchanged).
+             # `check-test-floor.mjs`: OK, 3188 >= floor 1899 (+1289 margin).
+             # `TZ=UTC make build`: exit 0, 30 routes, unchanged (the usual
+             # one-time `SecurityFatalError` Next.js CLI nudge on first
+             # invocation, not acted on, plain retry built clean). `npm run
+             # gates`: all green, 351 files, unchanged. `./vendor/bin/pint
+             # --test`: passed on both touched PHP files, zero findings
+             # either way. No `v1/**`/`v2/**` edit (the usual stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted before
+             # committing). No Arabic codepoint, no `\u` escape, no
+             # `fromCharCode`/`fromCodePoint` introduced — swept
+             # programmatically over the diff, every new string is a PHP
+             # identifier or a fixed English comment/assertion sentence. No
+             # oracle/golden-log/fixture/snapshot regenerated — one existing
+             # model file, one existing test file, one existing doc file.
+             # Session start: fresh container; `v2/api`+`v2` setup succeeded
+             # under plain `make setup`; `v3/api`'s composer install inside
+             # that run failed exactly as predicted (PHP >=8.4.1 needed,
+             # sandbox ships 8.3.6), recovered with a standalone
+             # `--ignore-platform-req=php` run. `HEAD`/`origin/main` agreed
+             # exactly at `df544d9` (v3-D380) — no stale-local-`main` trap
+             # this run. NOT addressed, named for next run: every item on
+             # v3-D379/D380's own condensed list, unchanged and still
+             # infra/human-gated (fold-runner DB adapter + staging deploy;
+             # the operational mailer; Stripe replay fixtures, PAY-1; surah
+             # 67's scene beats, H2; `foilKernels.ts`'s regex gap, v3-D351;
+             # `placement.ts#nextProbe()`'s zero-caller gap). `BillingEvent`
+             # is now confirmed correct — remove it from future sweep
+             # candidate lists. See DECISIONS.md v3-D381 for the full
+             # write-up.
              # NOTE (v3-D380, 2026-11-06): `NightlyWindowLedger::nights()`
              # extends its materialized range through `$today` whenever a
              # gap exists after the last recorded check run (v3-D360's own

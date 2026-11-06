@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Admin;
 
+use App\Flags\FlagService;
 use App\Http\Controllers\Admin\Pseudonymizer;
 use App\Models\FlagRampAudit;
 use App\Models\User;
@@ -179,5 +180,45 @@ class FlagAuditTest extends TestCase
         $response = $this->getJson('/api/admin/flags/audit')->assertOk();
         $this->assertCount(200, $response->json('entries'));
         $this->assertSame(200, $response->json('limit'));
+    }
+
+    /**
+     * `FlagRampAudit`'s own docblock claims its rows are "STORED, not merely
+     * validated — 'we checked at the time' is unverifiable after the fact" —
+     * the identical IMMUTABLE/append-only claim `AdminAudit`/`PurgeLedgerEntry`/
+     * `AyahVerification`/`Override`/`NightlyCheckRun`/`Event`/
+     * `EntitlementTransition`/`GlossDraftReview`/`Spec` each back with an ORM
+     * `booted()` guard. `FlagService` only ever calls `FlagRampAudit::create()`
+     * (kill/ramp/acknowledgeKill — grep-confirmed, no `->update()`/`->delete()`
+     * anywhere), and the HTTP route is read-only by construction (no POST/PUT/
+     * DELETE registered), but neither of those is a structural guarantee: an
+     * audit trail is only as immutable as every future call site's discipline,
+     * never written down, until a row itself refuses to be rewritten. This
+     * asserts the structural guard exists, driven through the REAL kill() call
+     * site (not a hand-built row), the same discipline SpecsTest/GlossDraftsTest
+     * use for their own append-only guards.
+     */
+    public function test_a_ramp_audit_row_can_never_be_updated(): void
+    {
+        $admin = $this->admin();
+        app(FlagService::class)->kill('social.leaderboard', $admin->id, 1_700_000_000_000);
+
+        $row = FlagRampAudit::where('flag_key', 'social.leaderboard')->firstOrFail();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('APPEND-ONLY');
+        $row->update(['action' => 'enable']);
+    }
+
+    public function test_a_ramp_audit_row_can_never_be_deleted(): void
+    {
+        $admin = $this->admin();
+        app(FlagService::class)->kill('social.leaderboard', $admin->id, 1_700_000_000_000);
+
+        $row = FlagRampAudit::where('flag_key', 'social.leaderboard')->firstOrFail();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('APPEND-ONLY');
+        $row->delete();
     }
 }

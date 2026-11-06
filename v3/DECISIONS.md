@@ -41603,3 +41603,111 @@ pass}.ts`; `api/app/Http/Controllers/Admin/Pseudonymizer.php`; `api/app
 + `packages/corpus-compiler/src/{recomputeHashes,hash}.ts`; `api/app
 /Http/Controllers/AccountController.php` (PDPA export/delete); `api
 /config/cors.php` (re-confirmed sound per v3-D378).
+
+## v3-D381 (2026-11-06)
+
+**The fix this run.** `App\Models\FlagRampAudit` — the enable-hard/kill
+ceremony's audit trail (`flag_ramp_audit`) — had no structural append-only
+guard, despite its own docblock's first line already claiming immutable
+intent: "the ceremony's four inputs are STORED, not merely validated — 'we
+checked at the time' is unverifiable after the fact." That is the identical
+IMMUTABLE/append-only claim `AdminAudit`/`PurgeLedgerEntry`/
+`AyahVerification`/its review-history sibling table/`Override`/
+`NightlyCheckRun`/`Event`/`EntitlementTransition`/`Spec` each already back
+with an ORM `booted()` guard (eight prior closures across v3-D372 through
+v3-D377) — `FlagRampAudit` is a ninth instance of the same shape, missed by
+every prior `grep -rli "append-only"` sweep because this model's own
+docblock never uses that literal word.
+
+Found by ranking source files with zero or one mention in
+`DECISIONS.md`/`CLAUDE.md`/`HANDOVER.md` by basename (the same proxy
+v3-D371 used) and reading the zero-mention Eloquent models directly rather
+than only their controllers. `BillingEvent` was checked the same way and
+ruled NOT a defect: `App\Billing\WebhookHandler::ingest()` deliberately
+calls `$row->update(...)` twice by design (insert the raw webhook first,
+then record the processing outcome — the migration's own "INSERT FIRST,
+THEN PROCESS" commit-before-paint discipline applied to money), so a
+blanket append-only guard there would break an intentional, tested write
+path rather than close a gap.
+
+`grep -rn "FlagRampAudit::" app/` confirms every call site
+(`FlagService::kill()`/`ramp()`/`acknowledgeKill()` — the last also reached
+unattended from the nightly `autoWaiveDueKills()` scheduler) calls
+`FlagRampAudit::create()` only, never `->update()`/`->delete()`; the HTTP
+surface is read-only by construction (`FlagAuditTest::test_the_route_accepts_no_writes`,
+no POST/PUT/DELETE registered). Both are controller/route discipline only,
+the same gap `specs` carried until v3-D377 — a future refactor, or any code
+reaching the model directly, had nothing stopping it from rewriting a
+kill/ramp record. `flag_ramp_audit.actor_admin_id` is `nullOnDelete`, not
+`cascadeOnDelete` (confirmed against `2026_08_11_120000_create_flags_tables.php`),
+so — unlike `events`/`entitlement_transitions` — there is no PDPA-purge
+cascade interaction to reconcile the guard against at all.
+
+**Fixed:** the identical `booted()` template as the eight prior closures —
+`updating`/`deleting` hooks throw `RuntimeException` with message
+`'flag_ramp_audit is APPEND-ONLY...'`. `docs/ADMIN-CONSOLE.md` gains §1j,
+mirroring §1e/§1i's `nullOnDelete`-has-no-cascade-interaction note.
+
+**Verified:**
+- Two new `FlagAuditTest.php` cases, driven through the REAL `kill()` call
+  site (`app(FlagService::class)->kill(...)`, not a hand-built row) — the
+  same discipline `SpecsTest`/`GlossDraftsTest` used for their own
+  append-only guards — then call `->update()`/`->delete()` on the fetched
+  model directly.
+- RED confirmed directly: `git stash` of `FlagRampAudit.php` alone (both
+  new tests kept, `docs/ADMIN-CONSOLE.md` kept) and reran
+  `--filter=FlagAuditTest` against the unmodified model — both new cases
+  failed exactly as predicted (`Failed asserting that exception of type
+  "RuntimeException" is thrown`), the other 7 pre-existing cases
+  unaffected. Restored byte-identically (`git stash pop`, `git diff`
+  empty), reran — `FlagAuditTest` 9/9 green, was 7 (+2).
+- `v3/api` PHPUnit: **458 passed** (was 456, +2 exactly — these two new
+  cases), 2 incomplete (PAY-1, unchanged), 6 skipped (unchanged). `TZ=UTC
+  make test`: **3188 passing** (was 3186, +2; every other suite unchanged:
+  255 v2 vitest, 47 v2/api, 120 corpus-compiler, 470 engine, 73
+  fold-runner, 1765 apps/web). `check-test-floor.mjs`: OK, 3188 >= floor
+  1899 (+1289 margin). `TZ=UTC make build`: exit 0, 30 routes, unchanged
+  (the usual one-time `SecurityFatalError` Next.js CLI nudge on first
+  invocation, not acted on, plain retry built clean). `npm run gates`: all
+  green, 351 files, unchanged (294 v1 lines byte-identical; 2/6 UI fonts
+  present, degraded-but-non-blocking, pre-existing; 362 words; 206
+  codepoints). `./vendor/bin/pint --test`: passed on both touched PHP
+  files, zero findings either way. No `v1/**`/`v2/**` edit (`git status
+  --porcelain -- v1 v2` empty immediately before committing; the usual
+  stray `v2/tsconfig.tsbuildinfo` build-cache diff reverted first). No
+  Arabic codepoint, no `\u` escape, no `fromCharCode`/`fromCodePoint`
+  introduced — the full diff swept programmatically over the Arabic/Arabic
+  Supplement/Arabic Extended-A/Presentation-Forms Unicode blocks: CLEAN,
+  every new string is a PHP identifier or a fixed English comment/
+  assertion sentence. No oracle/golden-log/fixture/snapshot regenerated —
+  one existing model file, one existing test file, one existing doc file.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; `v2/api` composer install + migrate + `v2` npm install
+succeeded under plain `make setup`; `v3/api`'s composer install inside that
+same `make setup` run failed exactly as predicted (symfony/* v8.1.x need
+PHP >=8.4.1, sandbox ships 8.3.6) and was recovered with a standalone
+`composer install --ignore-platform-req=php` run. `v3/api` had no
+`database/database.sqlite` on the fresh checkout (created by hand, then
+migrated). `HEAD` and `origin/main` agreed exactly at `df544d9` (v3-D380)
+on a fresh `git fetch` — no stale-local-`main` trap this run; local `main`
+was still reset to it via `git checkout -B main origin/main` as a
+precaution.
+
+**NOT addressed, named for next run:** every item on v3-D379/D380's own
+condensed list, unchanged and still infra/human-gated — `worker
+/fold-runner`'s own DB adapter + staging deploy (no host, no DB, no
+credentials in this sandbox); the operational mailer's actual delivery
+(only a real SMTP account is missing); Stripe replay fixtures (PAY-1,
+gated on Stripe MY business verification, H1); surah 67's scene beats
+(human-only, H2); `foilKernels.ts`'s `DISPLAY_STRIPPED` regex gap (v3-D351,
+human-decision-gated); `placement.ts#nextProbe()`'s zero-production-caller
+gap. `BillingEvent` is now confirmed correct, no defect — remove it from
+future low-mention-count sweep candidate lists. The ranked-by-mention-count
+sweep method (v3-D371's own technique) still has unread candidates among
+`api/config/*.php`, `api/database/migrations/*.php` and
+`apps/web/components/{quiz/ChoiceCard,quiz/LocateChoiceCard,
+sections/Plan,sections/Pricing,shell/ServiceWorkerRegistrar,shell/StubNote,
+ui/Button}.tsx` — migrations and configs are low-value (near-zero logic
+surface), but the named components were not read this run and are a
+reasonable next target.
