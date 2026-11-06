@@ -57,6 +57,109 @@ make test    # 3183 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 453 v3/api + 120 corpus-compiler
              # + 470 engine + 73 fold-runner + 1765 apps/web. (v3-D378, 2026-11-05)
+             # NOTE (v3-D379, 2026-11-06): commit 2/2 of the two-device
+             # determinism e2e (BUILD-PLAN M6's own exit criterion) — the
+             # actual SCENARIO v3-D366/D367/D369/D371 through D378 each
+             # named and deferred, now landed. Commit 1 (v3-D378) built the
+             # infra (CORS + a second disposable v3/api webServer entry)
+             # without touching the scenario itself. This is that scenario:
+             # `e2e/two-device-determinism.test.ts` registers a real account
+             # on "device A" (POST /api/auth/anonymous then
+             # POST /api/auth/register, against the REAL disposable v3/api
+             # server, over real sockets — not Laravel's in-process
+             # RefreshDatabase harness, not a hand-fed merge.ts fixture),
+             # logs "device B" into the SAME account
+             # (POST /api/auth/login), has each device push its own slice of
+             # an adversarial two-device event fixture (ts collisions across
+             # devices, overlapping deviceSeq ranges — edge case #49 — and a
+             # slip interleaved with successes, the identical load-bearing
+             # properties DEFECTS.md#B5's own closing fixture uses, so this
+             # cannot pass vacuously), pulls the FULL account log back
+             # through each device's own token, asserts byte round-trip
+             # fidelity on every field (ts/deviceId/deviceSeq/surah/ayah/
+             # rung/type/correct), and folds both pulls with the real engine
+             # (rebuild + canonicalOrder) against an oracle computed
+             # independently of the server entirely — proving the real
+             # HTTP+SQL round trip preserves determinism, which neither
+             # `apps/web/lib/sync/merge.test.ts` (client-only, hand-fed) nor
+             # `EventsPullTest.php` (server-only, in-process, no real second
+             # device) exercises. A second test proves idempotency
+             # (resending the same uuids from either device's own token is a
+             # no-op) survives a real second HTTP round trip. Deliberately
+             # uses Playwright's `request` fixture, never a browser `page`:
+             # driving this through the actual UI would need
+             # `NEXT_PUBLIC_API_BASE` baked into the main Next app's own
+             # production build at build time, which would change
+             # same-origin `/api/*` behavior for every OTHER e2e test
+             # sharing that build — reaching the disposable v3/api server
+             # directly proves the real thing with zero blast radius on the
+             # rest of the suite.
+             #
+             # Mutation-verified, not merely run once: temporarily dropped
+             # `'deviceSeq'` from `EventsController::NULLABLE_FIELDS`
+             # (reproducing a B5-shaped defect server-side — the field is
+             # accepted on push but never stored/returned on pull) and
+             # reran — failed exactly as predicted
+             # (`expect(got.deviceSeq).toBe(sent.deviceSeq)`: Expected
+             # `5000`, Received `undefined`); reverted `EventsController.php`
+             # byte-identically (`git checkout --`, confirmed empty diff),
+             # reran — 2/2 green again.
+             #
+             # Full e2e suite: **48 passed** (was 46, +2 — exactly these two
+             # new cases; chromium 37, was 35; mobile 11, unchanged).
+             # `TZ=UTC make test`: **3183 passing**, unchanged — this diff
+             # adds one e2e file only, outside every vitest/PHPUnit include
+             # glob, so no unit-suite count moves (255 v2 vitest, 47 v2/api,
+             # 453 v3/api, 120 corpus-compiler, 470 engine, 73 fold-runner,
+             # 1765 apps/web). `check-test-floor.mjs`: OK, 3183 >= floor 1899
+             # (+1284 margin, unmoved). `TZ=UTC make build`: exit 0, 30
+             # routes, unchanged (the usual one-time `SecurityFatalError`
+             # CLI nudge on first invocation, not acted on, plain retry
+             # built clean). `npm run gates`: all green, 351 files (+1, the
+             # new e2e file; 294 v1 lines byte-identical; 2/6 UI fonts
+             # present, degraded-but-non-blocking, pre-existing; 362 words;
+             # 206 codepoints across 4 artifacts). `npx tsc --noEmit`
+             # (apps/web): clean. No PHP file changed in the final diff, so
+             # `pint` was not applicable. No `v1/**`/`v2/**` edit (the usual
+             # stray `v2/tsconfig.tsbuildinfo` build-cache diff reverted
+             # before committing). No Arabic codepoint, no `\u` escape, no
+             # `fromCharCode`/`fromCodePoint` introduced — swept
+             # programmatically over the Arabic/Arabic Supplement/Arabic
+             # Extended-A/Presentation-Forms Unicode blocks: CLEAN, every
+             # new string is a TypeScript identifier, a UUID-shaped test
+             # email, or a fixed English comment/assertion sentence. No
+             # oracle/golden-log/fixture/snapshot regenerated — one new e2e
+             # test file only. The temporary `playwright.config.ts`
+             # `executablePath` workaround (v3-D308's documented pattern,
+             # this sandbox's chromium-1243 vs this pin's expected
+             # chromium-1234) was reverted via `git checkout --` before
+             # every commit (confirmed empty diff each time).
+             #
+             # Session start: fresh container, no `node_modules`/`vendor`/
+             # compiled corpus anywhere; both API projects' composer
+             # installs hit the documented slow proxy git-mirror-clone
+             # fallback (`laravel/framework`, `sebastianbergmann/*`);
+             # `v3/api` needed `--ignore-platform-req=php` (sandbox ships
+             # PHP 8.3.6, `v3/api` wants >=8.4.1) since plain `make setup`
+             # has no such flag built in. `HEAD`, and `origin/main` after a
+             # fresh `git fetch`, agreed exactly at `c748de6` (v3-D378) — no
+             # stale-local-`main` trap this run. This session's own stop
+             # hook required uncommitted work committed before the composer
+             # installs had finished; the new test file was pushed to a
+             # branch (`nightly/v3-two-device-e2e-wip`), explicitly labelled
+             # UNVERIFIED, the identical precedent `afb2098` set for commit
+             # 1/2 — merged to `main` only once every gate above had
+             # actually run green, never before.
+             #
+             # NOT addressed, named for next run: `worker/fold-runner`'s own
+             # DB adapter + staging deploy (no host, no DB, no credentials
+             # in this sandbox); the operational mailer's actual delivery
+             # (wired since v3-D82, only a real SMTP account is missing);
+             # Stripe replay fixtures (PAY-1, gated on Stripe MY business
+             # verification, H1); surah 67's scene beats (human-only,
+             # H2). **The two-device determinism e2e named across
+             # v3-D366/D367/D369/D371 through D378 is now genuinely
+             # CLOSED** — remove it from future sweep candidate lists.
              # NOTE (v3-D378, 2026-11-05): CORS was wide open by accident —
              # `config/cors.php` was absent, and Laravel 11's global
              # `HandleCors` middleware, wired in regardless of whether an app

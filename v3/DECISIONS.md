@@ -41310,3 +41310,161 @@ staging deploy (no host, no DB, no credentials in this sandbox); the
 operational mailer's actual delivery (wired since v3-D82, only a real SMTP
 account is missing); Stripe replay fixtures (PAY-1, gated on Stripe MY
 business verification, H1).
+
+### v3-D379 (2026-11-06, nightly): the real two-device determinism scenario — commit 2/2 of the two-device determinism e2e (BUILD-PLAN M6's own exit criterion)
+
+v3-D366/D367/D369/D371 through D378 each named the same genuinely unswept
+gap without anyone taking it on: the Playwright e2e suite had no scenario
+exercising a real SECOND DEVICE at all. v3-D378 (commit 1/2) landed the
+infrastructure a real two-device test needs — CORS config + a second,
+disposable `v3/api` `webServer` entry — deliberately scoped away from the
+actual scenario, so a partial failure in either half would stay
+independently diagnosable. This run picked up exactly that deferred
+scenario.
+
+**What exists already, and what this adds that neither does.**
+`apps/web/lib/sync/merge.test.ts` already closes DEFECTS.md#B5 — it proves
+the CLIENT's `mergeFromServer` is order-insensitive across 15 arrival
+orders, against a hand-fed `DrillEvent[]` array, entirely inside one
+process, never touching a socket or a real Laravel instance.
+`v3/api/tests/Feature/Events/EventsPullTest.php` already proves the
+SERVER's ingest+pull contract (ingest-order cursoring, late-arrival
+safety, per-user scoping, every wire field round-tripping), but against
+Laravel's own `RefreshDatabase` in-process testing harness
+(`$this->postJson(...)`/`Sanctum::actingAs()`), which never opens a real
+HTTP connection and never drives a genuine `register()` then `login()`
+two-request flow for a second device. Neither exercises a real SECOND
+DEVICE identity — a separate bearer token, minted by a separate
+`POST /auth/login` request, against a REAL running server process
+(`scripts/e2e-serve.sh`, over real sockets) — which is what BUILD-PLAN M6
+actually asks for ("two-device determinism e2e").
+
+**What was built:** `v3/apps/web/e2e/two-device-determinism.test.ts`, using
+Playwright's `request` fixture only (a direct HTTP client), never a
+browser `page`. That choice is deliberate, not a shortcut: driving this
+through the real UI would require `NEXT_PUBLIC_API_BASE` baked into the
+main Next app's own production build at build time (`apiFetch.ts`'s
+`apiBase()`, which defaults to same-origin, empty string) — changing that
+globally would change same-origin `/api/*` behavior for every OTHER e2e
+test sharing that same build (`first-session.test.ts`,
+`airplane-mode.test.ts`, `commit-before-paint.test.ts`, etc.), a blast
+radius this run was not willing to take on for one scenario. Reaching the
+disposable `v3/api` server directly, the same server commit 1/2 already
+proved reachable cross-origin from a browser, proves the real thing with
+zero risk to the rest of the suite.
+
+The scenario: "device A" mints an anonymous identity
+(`POST /api/auth/anonymous`) then claims it with email+password
+(`POST /api/auth/register`) — the real `AuthController` "adopt" flow,
+never Sanctum test helpers. "device B" signs into the SAME account from a
+separate request (`POST /api/auth/login`), getting its own, different
+bearer token for the same `user_id`. An adversarial two-device event
+fixture (modelled directly on `merge.test.ts#twoDeviceFixture()`'s own
+three load-bearing properties — ts collisions ACROSS devices, deviceSeq
+CONTRADICTING ts order within a device, and a slip interleaved with
+successes on the same ayah at colliding ts — because that file's own
+header already proved an all-correct, non-colliding fixture passes even
+when a merge silently drops `deviceSeq` entirely) is split by its
+`deviceId` tag; each device pushes only its own slice, under its own
+token, via `POST /api/events` — the real shape of a sync outbox flush,
+never one device pushing the other's rows. Both devices then pull the
+FULL account log back (`GET /api/events`, paged at `limit=3` so the real
+cursored pull protocol — `since`/`nextCursor`/`hasMore` — is genuinely
+exercised, not bypassed with one huge page). Every pulled event's
+`ts`/`deviceId`/`deviceSeq`/`surah`/`ayah`/`rung`/`type`/`correct` is
+asserted against what was originally sent, for both devices' pulls
+independently. Finally, the real engine (`rebuild` + the fold-runner's own
+`canonicalOrder`, never a reimplementation) folds each device's pull, and
+both folds are compared — via the fold-runner's own `compareAtomCaches`,
+never a length/key-count check — against an ORACLE computed from the
+original in-memory fixture, entirely independently of the server. A
+second test proves idempotency survives a real second HTTP round trip:
+resending the identical event uuids from the OTHER device's own token
+(the idempotency key is unique per-user, never per-device — the
+`events` migration's own doc comment) yields `accepted: 0, ignored: N`,
+and the pulled log and its fold are unchanged.
+
+**Mutation-verified, not merely run once.** Temporarily removed
+`'deviceSeq'` from `EventsController::NULLABLE_FIELDS` — reproducing a
+B5-shaped defect one layer down, server-side: the field is still ACCEPTED
+on push (nothing validates it) but never stored to a column or returned
+on pull. Reran against the unmodified test: failed exactly as predicted,
+on the direct field-fidelity assertion rather than only the deeper fold
+comparison —
+
+```
+Error: expect(received).toBe(expected) // Object.is equality
+Expected: 5000
+Received: undefined
+  > expect(got.deviceSeq).toBe(sent!.deviceSeq);
+```
+
+Reverted `EventsController.php` byte-identically (`git checkout --`,
+confirmed empty diff), reran — 2/2 green again. The idempotency test alone
+would NOT have caught this mutation (both idempotency-test events share
+one device, so `ts` alone already totally orders them regardless of
+`deviceSeq`) — it is the first test's direct field assertions, not the
+fold comparison, that is actually load-bearing here, the same lesson
+`merge.test.ts`'s own header draws about assertion (1) vs assertion (2).
+
+**Full e2e suite:** **48 passed** (was 46, +2 — exactly these two new
+cases; `chromium` 37, was 35; `mobile` 11, unchanged). `TZ=UTC make test`:
+**3183 passing**, unchanged — this diff adds one e2e file only, outside
+every vitest/PHPUnit include glob, so no unit-suite count moves (255 v2
+vitest, 47 v2/api, 453 v3/api, 120 corpus-compiler, 470 engine, 73
+fold-runner, 1765 apps/web). `check-test-floor.mjs`: OK, 3183 >= floor 1899
+(+1284 margin, unmoved). `TZ=UTC make build`: exit 0, 30 routes, unchanged
+(the usual one-time `SecurityFatalError` CLI nudge on first invocation,
+not acted on, plain retry built clean). `npm run gates`: all green, 351
+files (+1, the new e2e file; 294 v1 lines byte-identical; 2/6 UI fonts
+present, degraded-but-non-blocking, pre-existing; 362 words; 206
+codepoints across 4 artifacts). `npx tsc --noEmit` (apps/web): clean. No
+PHP file changed in the final, committed diff, so `pint` was not
+applicable. No `v1/**`/`v2/**` edit (the usual stray
+`v2/tsconfig.tsbuildinfo` build-cache diff reverted before committing —
+`git status --porcelain -- v1 v2` empty immediately before every commit).
+No Arabic codepoint, no `\u` escape, no `fromCharCode`/`fromCodePoint`
+introduced — swept programmatically, in Python, over the Arabic/Arabic
+Supplement/Arabic Extended-A/Presentation-Forms Unicode blocks: CLEAN,
+every new string is a TypeScript identifier, a UUID-shaped test email
+local part, or a fixed English comment/assertion sentence. No
+oracle/golden-log/fixture/snapshot regenerated — one new e2e test file
+only. The temporary `playwright.config.ts` `executablePath` workaround
+(v3-D308's documented pattern for this sandbox's chromium-1243 vs this
+pin's expected chromium-1234 — `playwright-core`'s own
+`chromium.executablePath()` resolves to a revision directory that does
+not exist here, confirmed directly) was added and reverted via `git
+checkout --` three separate times across this run (the first clean run,
+the mutation RED run, the post-revert GREEN re-check, and the full-suite
+run), confirmed empty diff each time before any commit.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere. Both API projects' `composer install` hit the documented
+slow proxy git-mirror-clone fallback (`laravel/framework`,
+`sebastianbergmann/type`/`sebastianbergmann/php-text-template`, etc.);
+`v3/api` needed `--ignore-platform-req=php` (sandbox ships PHP 8.3.6,
+`v3/api` wants >=8.4.1) since plain `make setup` has no such flag built
+in — recovered by running each project's `composer install` by hand with
+the flag, then the remaining `make setup` steps (the `.env`/`APP_KEY`/
+migrate steps, the four `npm install`s) individually, the now-standard
+recovery path several prior entries already document. `HEAD`, and
+`origin/main` after a fresh `git fetch`, agreed exactly at `c748de6`
+(v3-D378) — no stale-local-`main` trap this run. This session's own stop
+hook required uncommitted work to be committed while the composer installs
+were still running in the background; the new test file was pushed to a
+branch (`nightly/v3-two-device-e2e-wip`), explicitly labelled UNVERIFIED
+in its own commit message, the identical precedent `afb2098` set for
+commit 1/2 — merged to `main` only once every gate above had actually run
+green, never before, and the WIP branch's commit message says so
+explicitly for anyone who finds it in history.
+
+**NOT addressed, named for next run:** `worker/fold-runner`'s own DB
+adapter + staging deploy (no host, no DB, no credentials in this
+sandbox); the operational mailer's actual delivery (wired since v3-D82,
+only a real SMTP account is missing); Stripe replay fixtures (PAY-1,
+gated on Stripe MY business verification, H1); surah 67's scene beats
+(human-only, H2); the 7-consecutive-green-nights window (needs live
+staging and the `nightly:window --start` declaration, H5). **The
+two-device determinism e2e named across v3-D366/D367/D369/D371 through
+D378 is now genuinely CLOSED** — remove it from future sweep candidate
+lists; BUILD-PLAN M6's own exit criterion is met.
