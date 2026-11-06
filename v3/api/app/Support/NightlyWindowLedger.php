@@ -126,6 +126,41 @@ class NightlyWindowLedger
     }
 
     /**
+     * The value to pass as `status()`'s own `$today` — "today" only once
+     * the scheduled nightly run has had its chance to fire.
+     *
+     * v3-D360 made both real callers pass today's bare date so a gap AFTER
+     * the last recorded run reads as an unobserved night (a scheduler dead
+     * outright), rather than leaving `satisfied: true` standing forever at
+     * whatever the last recorded run happened to show. But the checks run
+     * once a day, at `config('nightly.run_at_utc')` (03:00 UTC by default)
+     * — so for every minute between 00:00 UTC and that time, TODAY's row
+     * genuinely has not been written yet, not because anything died.
+     * Passing the bare date straight into `nights()` during that window
+     * extends the materialized range through today regardless, producing a
+     * synthetic "today, both checks missing" night — and because
+     * `status()` scans backwards from the most recent night, THAT
+     * synthetic night is examined first and breaks the streak immediately.
+     * A perfectly healthy 7+-night streak reads as broken, every single
+     * day, for the hours before the scheduled run lands.
+     *
+     * Holding `$today` at yesterday until the scheduled time has passed
+     * closes that false positive while leaving v3-D360's own case intact:
+     * once the scheduled time for a given day is past and nothing has been
+     * recorded, that day is immediately eligible to materialize as a gap,
+     * with no added delay.
+     */
+    public static function asOfDate(int $nowMs): string
+    {
+        $runAtUtc = (string) config('nightly.run_at_utc', '03:00');
+        $nowSec = intdiv($nowMs, 1000);
+        $today = gmdate('Y-m-d', $nowSec);
+        $hm = gmdate('H:i', $nowSec);
+
+        return $hm >= $runAtUtc ? $today : gmdate('Y-m-d', $nowSec - 86400);
+    }
+
+    /**
      * Every calendar night from the first recorded run (or the window start,
      * whichever is later) through the last recorded run — INCLUDING nights
      * with no runs at all, which appear as non-green with every check

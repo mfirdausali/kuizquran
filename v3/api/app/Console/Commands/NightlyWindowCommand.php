@@ -69,7 +69,13 @@ class NightlyWindowCommand extends Command
         // clock: a scheduler that reached 7 green nights and then died
         // outright left `satisfied: true` standing forever after. See
         // DECISIONS.md v3-D360.
-        $status = NightlyWindowLedger::status(gmdate('Y-m-d'));
+        //
+        // `asOfDate()`, not the bare date (DECISIONS.md, this run): the
+        // checks run once a day at `config('nightly.run_at_utc')`, so the
+        // bare date reads TODAY as a gap for every minute before that time
+        // on an otherwise healthy scheduler.
+        $nowMs = (int) round(microtime(true) * 1000);
+        $status = NightlyWindowLedger::status(NightlyWindowLedger::asOfDate($nowMs));
 
         if ($this->option('json')) {
             $this->line((string) json_encode($status, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));

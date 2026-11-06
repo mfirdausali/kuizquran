@@ -114,7 +114,13 @@ class NightlyWindowController extends Controller
         // forever at whatever the last recorded run happened to show. See
         // `NightlyWindowLedger::nights()`'s own header and DECISIONS.md
         // v3-D360.
-        $status = NightlyWindowLedger::status(gmdate('Y-m-d'));
+        //
+        // `asOfDate()`, not the bare date (DECISIONS.md, this run): the
+        // checks run once a day at `config('nightly.run_at_utc')`, so the
+        // bare date reads TODAY as a gap for every minute before that time
+        // on an otherwise healthy scheduler — see `asOfDate()`'s own header.
+        $nowMs = (int) round(microtime(true) * 1000);
+        $status = NightlyWindowLedger::status(NightlyWindowLedger::asOfDate($nowMs));
         $status['lastP1Findings'] = $this->findingsFor($status['lastP1']);
         $status['lastQuarantine'] = $this->lastQuarantine($status['windowStartedAt']);
 

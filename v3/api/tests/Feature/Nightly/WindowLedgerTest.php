@@ -402,6 +402,116 @@ class WindowLedgerTest extends TestCase
     }
 
     /**
+     * This run: `asOfDate()` closes a daily false positive on this exact
+     * gate. `config('nightly.run_at_utc')` (03:00 UTC by default) is when
+     * the nightly checks actually run — before that time, on any given UTC
+     * calendar day, "today" genuinely has no row yet, not because anything
+     * died. `asOfDate()` must hold `$today` at YESTERDAY right up to the
+     * scheduled minute, then flip to today from that minute on.
+     */
+    public function test_as_of_date_holds_yesterday_until_the_scheduled_run_time_has_passed(): void
+    {
+        $runAtUtc = (string) config('nightly.run_at_utc', '03:00');
+        [$h, $m] = array_map('intval', explode(':', $runAtUtc));
+        $scheduledMs = gmmktime($h, $m, 0, 6, 15, 2026) * 1000;
+
+        $this->assertSame(
+            '2026-06-14',
+            NightlyWindowLedger::asOfDate($scheduledMs - 30 * 60 * 1000),
+            '30 minutes before the scheduled run, today has no row yet — still yesterday',
+        );
+        $this->assertSame(
+            '2026-06-14',
+            NightlyWindowLedger::asOfDate($scheduledMs - 1000),
+            'one second before the scheduled minute — still yesterday',
+        );
+        $this->assertSame(
+            '2026-06-15',
+            NightlyWindowLedger::asOfDate($scheduledMs),
+            'exactly at the scheduled minute — today, from this instant on',
+        );
+        $this->assertSame(
+            '2026-06-15',
+            NightlyWindowLedger::asOfDate($scheduledMs + 60 * 60 * 1000),
+            'well after the scheduled run — still today',
+        );
+    }
+
+    /**
+     * The load-bearing case this run's fix closes: a perfectly healthy,
+     * uninterrupted 7-night streak ending YESTERDAY, viewed at a UTC
+     * wall-clock time BEFORE today's scheduled check has had a chance to
+     * run. Passing the bare date straight into `status()` — what both real
+     * callers did before this fix — reads this exact healthy streak as
+     * `streak: 0, satisfied: false`, every single day, for the hours
+     * before the scheduled run lands. `asOfDate()` must leave it satisfied.
+     */
+    public function test_a_healthy_streak_does_not_false_positive_before_todays_scheduled_run(): void
+    {
+        $runAtUtc = (string) config('nightly.run_at_utc', '03:00');
+        [$h, $m] = array_map('intval', explode(':', $runAtUtc));
+        $anchorToday = '2026-06-15';
+        $yesterday = gmdate('Y-m-d', strtotime("{$anchorToday} -1 day"));
+        $days = array_map(
+            fn (int $i) => gmdate('Y-m-d', strtotime("{$yesterday} -{$i} day")),
+            range(6, 0, -1),
+        );
+
+        $this->window($days[0]);
+        foreach ($days as $d) {
+            $this->night($d, 'green');
+        }
+
+        $beforeRunMs = gmmktime($h, $m, 0, (int) substr($anchorToday, 5, 2), (int) substr($anchorToday, 8, 2), (int) substr($anchorToday, 0, 4)) * 1000
+            - 30 * 60 * 1000;
+
+        // Documents the exact bug this closes: the bare date, what both
+        // real callers passed before this fix, breaks this identical
+        // healthy streak.
+        $rawToday = gmdate('Y-m-d', intdiv($beforeRunMs, 1000));
+        $this->assertSame($anchorToday, $rawToday, 'sanity: the bare date at this instant is the anchor day');
+        $buggyStatus = NightlyWindowLedger::status($rawToday);
+        $this->assertSame(0, $buggyStatus['streak'], 'the bug this run closes: bare today falsely breaks a healthy streak');
+        $this->assertFalse($buggyStatus['satisfied']);
+
+        // The fix: asOfDate() holds "today" at yesterday this early, so the
+        // real streak is read correctly.
+        $fixedStatus = NightlyWindowLedger::status(NightlyWindowLedger::asOfDate($beforeRunMs));
+        $this->assertSame(7, $fixedStatus['streak']);
+        $this->assertTrue($fixedStatus['satisfied']);
+    }
+
+    /**
+     * Preserves v3-D360's own guarantee under the fix: once the scheduled
+     * run time for a day has genuinely passed with nothing recorded, that
+     * day is eligible to materialize as a gap immediately — no added delay
+     * beyond "this day's own scheduled time hasn't passed yet".
+     */
+    public function test_after_the_scheduled_run_time_a_missing_night_still_breaks_the_streak(): void
+    {
+        $runAtUtc = (string) config('nightly.run_at_utc', '03:00');
+        [$h, $m] = array_map('intval', explode(':', $runAtUtc));
+        $anchorToday = '2026-06-15';
+        $yesterday = gmdate('Y-m-d', strtotime("{$anchorToday} -1 day"));
+        $days = array_map(
+            fn (int $i) => gmdate('Y-m-d', strtotime("{$yesterday} -{$i} day")),
+            range(6, 0, -1),
+        );
+
+        $this->window($days[0]);
+        foreach ($days as $d) {
+            $this->night($d, 'green');
+        }
+
+        $afterRunMs = gmmktime($h, $m, 0, (int) substr($anchorToday, 5, 2), (int) substr($anchorToday, 8, 2), (int) substr($anchorToday, 0, 4)) * 1000
+            + 60 * 60 * 1000;
+
+        $status = NightlyWindowLedger::status(NightlyWindowLedger::asOfDate($afterRunMs));
+        $this->assertSame(0, $status['streak'], "today's own gap, past the scheduled time, correctly breaks the streak");
+        $this->assertFalse($status['satisfied']);
+    }
+
+    /**
      * v3-D225 gave the admin panel and the P1 pager email each night's own
      * `trigger` (schedule|manual|ci) so a human could tell the real
      * unattended cron apart from someone quietly re-running the check by
