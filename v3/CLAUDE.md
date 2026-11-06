@@ -53,10 +53,121 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3188 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3193 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 458 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1765 apps/web. (v3-D381, 2026-11-06)
+             # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D382, 2026-11-06)
+             # NOTE (v3-D382, 2026-11-06): the progress table's `StageBadge`
+             # and the macro ring's accessible label could both show, in the
+             # SAME glance, "● Not started 25%" — a word and a number telling
+             # two different stories. `lib/progress/rows.ts#stageWord()` and
+             # `components/macro/graphNodes.ts#stageLabelOf()` both decided
+             # "Not started" from `encoded` ALONE, but `update.ts`'s `GAIN.s2`
+             # raises an atom's `strength` on every correct Learn-band pass
+             # well before its first full production ever sets `encoded`
+             # true (DEFECTS.md#B14's own "progressive scaffold" ramp — the
+             # hidden tail grows toward the front as strength climbs, across
+             # several days, all of them `encoded: false`) — so a mid-ramp
+             # atom with real, nonzero strength read "Not started" in the
+             # stage word while `strengthLabel` (`rows.ts`, four lines below
+             # its own `stageWord` call) and `GraphNodeMark.tsx`'s own
+             # `started` (`encoded || strengthPct > 0`, deciding the disc's
+             # FILLED-vs-hollow paint) already used the more honest
+             # evidence-based test and showed the real percent / painted the
+             # disc filled. `RingDiagram.tsx#labelFor()`'s own `value`
+             # ternary carried the identical `encoded`-alone gap a third
+             # time, independently. Net effect: a sighted learner on
+             # `/progress` sees a filled, in-progress disc or a non-"—"
+             # percent; the accessible text for the SAME atom, on both
+             # `/progress/list` and the macro ring's screen-reader-only link
+             # list, says "Not started" / "not started" — exactly the
+             # word-vs-paint mismatch #87 ("never colour alone", which this
+             # codebase has always read as "a word and a number that
+             # TOGETHER tell one story") exists to forbid, and it happens for
+             # every single ayah during the ordinary, days-long Learn ramp,
+             # not a rare corner case. Found by ranking `apps/web/components/**`
+             # and `apps/web/lib/**` source files by mention count in
+             # DECISIONS.md/CLAUDE.md/HANDOVER.md (v3-D371's own technique)
+             # and reading the lowest-ranked macro-ring files
+             # (`GraphNodeMark.tsx`, never individually audited — only its
+             # siblings `geometry.ts`/`graphNodes.ts`/`RingDiagram.tsx` were,
+             # at v3-D367) directly against their own stated design intent
+             # ("a node with no encoding yet is drawn hollow… 'not started'
+             # and 'started but weak' must not look the same" — GraphNodeMark's
+             # own comment, which the OTHER two decision points did not
+             # honour). Fixed: a single shared `started = encoded ||
+             # strength > 0` test now feeds `stageWord()`, `stageLabelOf()`
+             # and `RingDiagram.tsx`'s `value`, matching the test
+             # `strengthLabel`/`GraphNodeMark.tsx`'s `started` already used —
+             # one decision, computed once per call site, instead of three
+             # independent, drifted copies (the identical "one decision,
+             # several copies" shape v3-D(gateStateOf's own unification)
+             # already fixed once for `gateStateOf`). RED confirmed directly:
+             # reverted the three production files alone (`git stash`, the 5
+             # new test cases — 3 in `test/progress-list.test.tsx`, 2 in
+             # `test/macro-ring.test.tsx` — kept) and reran: all 4
+             # bug-exposing cases failed exactly as predicted
+             # (`expected 'Not started' to be 'Learning'`, and the ring's
+             # accessible text matching `/not started/i` for a 30%-strength,
+             # un-encoded atom); the 5th case (a genuinely untouched atom
+             # still reading "Not started"/"—") passed both before and after,
+             # confirming the fix does not start fabricating a percent for a
+             # truly never-touched atom (the exact edge-case-#73 dishonesty
+             # `strengthLabel`'s own doc comment already names). Restored
+             # byte-identically (`git diff` empty), reran — 67/67 green
+             # across both files (was 63, +4 net bug-exposing — the 5th case
+             # is a non-regression guard, not a fix-dependent assertion).
+             # `npx vitest run` (apps/web, full suite): **1770 passing** (was
+             # 1765, +5 exactly — these five new cases; no other file
+             # moved). `npx tsc --noEmit` (apps/web): clean. `TZ=UTC make
+             # test`: **3193 passing** (was 3188, +5; every other suite
+             # unchanged: 255 v2 vitest, 47 v2/api, 458 v3/api, 120
+             # corpus-compiler, 470 engine, 73 fold-runner).
+             # `check-test-floor.mjs`: OK, 3193 >= floor 1899 (+1294
+             # margin). `TZ=UTC make build`: exit 0, 30 routes, unchanged
+             # (the usual one-time `SecurityFatalError` Next.js CLI nudge on
+             # first invocation, not acted on, plain retry built clean).
+             # `npm run gates`: all green, 351 files, unchanged (294 v1
+             # lines byte-identical; 2/6 UI fonts present,
+             # degraded-but-non-blocking, pre-existing; 362 words; 206
+             # codepoints). No PHP file changed, so `pint` was not
+             # applicable. No `v1/**`/`v2/**` edit (the usual stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted before
+             # committing). No Arabic codepoint, no `\u` escape, no
+             # `fromCharCode`/`fromCodePoint` introduced — swept
+             # programmatically over the full diff against the Arabic/
+             # Arabic Supplement/Arabic Extended-A/Presentation-Forms
+             # Unicode blocks: CLEAN, every new string is a TypeScript
+             # identifier or a fixed English comment/assertion sentence. No
+             # oracle/golden-log/fixture/snapshot regenerated — three
+             # existing production files and two existing test files only.
+             # Session start: fresh container; `v2/api`+`v3/api` composer
+             # installs both hit the documented slow proxy git-mirror-clone
+             # fallback, `v3/api` needing `--ignore-platform-req=php` (PHP
+             # 8.3.6 on this sandbox, `v3/api` wants >=8.4.1); both API
+             # projects' `database/database.sqlite` was missing on this
+             # fresh checkout and created by hand; `v2/api`'s `.env`/
+             # `APP_KEY` were also missing and generated by hand. Session
+             # started in detached `HEAD` at `592e56d` (v3-D381) with local
+             # `main` stale 3 commits behind — the recurring
+             # stale-local-`main` trap this file has recorded roughly fifty
+             # times since v3-D77 — caught via `git checkout -B main HEAD`
+             # before committing; `origin/main` agreed with `HEAD` exactly
+             # after `git fetch`. NOT addressed, named for next run: every
+             # item on v3-D379/D380/D381's own condensed list, unchanged and
+             # still infra/human-gated (fold-runner DB adapter + staging
+             # deploy; the operational mailer; Stripe replay fixtures,
+             # PAY-1; surah 67's scene beats, H2; `foilKernels.ts`'s regex
+             # gap, v3-D351; `placement.ts#nextProbe()`'s zero-caller gap).
+             # `lib/progress/retention.ts`'s own two `stageLabelOf()` call
+             # sites were checked and are unaffected by this fix: both
+             # already pass a boolean that is `true` whenever the atom is
+             # encoded (the only case that call site reaches, guarded
+             # upstream by `if (!p.atom.encoded) continue;`) or a
+             # surah-wide "has anything at all been encoded" flag for a
+             # legend bucket — neither depends on the OLD encoded-alone
+             # reading of "started" the way `rows.ts`/`graphNodes.ts`'s own
+             # per-atom call sites did.
              # NOTE (v3-D381, 2026-11-06): `App\Models\FlagRampAudit` (the
              # enable-hard/kill ceremony's audit trail, `flag_ramp_audit`)
              # had no structural append-only guard, though its own docblock

@@ -95,9 +95,10 @@ export interface ProgressRow {
   stageLabel: string;
   /** 0–100, already decayed to `now` and already rounded. */
   strengthPct: number;
-  /** "48%" — or "—" when the atom has never been encoded. A never-touched
-   *  atom is not "0% strong", it is UNMEASURED, and printing 0 for it is the
-   *  same class of dishonesty as edge case #73's zeros-while-pending. */
+  /** "48%" — or "—" when the atom has no measured evidence at all (never
+   *  encoded AND still zero strength). A never-touched atom is not "0%
+   *  strong", it is UNMEASURED, and printing 0 for it is the same class of
+   *  dishonesty as edge case #73's zeros-while-pending. */
   strengthLabel: string;
   /** "9.4 days", or "—" at stability 0. */
   halfLifeLabel: string;
@@ -108,13 +109,23 @@ export interface ProgressRow {
   timeOnTask: string;
 }
 
-/** The five stage words. Five, not four: "Not started" is `learn` with
- *  `encoded: false`, a state `heatmap.ts:31` already distinguishes and which a
- *  learner experiences as genuinely different from "learning". */
-function stageWord(stage: Stage, encoded: boolean): string {
+/** The five stage words. Five, not four: "Not started" is `learn` with no
+ *  evidence of any kind — never encoded AND still zero strength, the same
+ *  "genuinely untouched" test `strengthLabel` already applies. A learner
+ *  feels that as genuinely different from "learning".
+ *
+ *  `started` (not `encoded`) is deliberate (v3-D382): `update.ts`'s GAIN.s2
+ *  raises `strength` on every correct Learn-band pass well before the atom's
+ *  first full production ever sets `encoded`, so an un-encoded atom can carry
+ *  real, nonzero strength for days (DEFECTS.md#B14's own progressive-blank
+ *  ramp). Gating this word on `encoded` alone produced "Not started 25%" in
+ *  the SAME `StageBadge` as `strengthLabel`'s own `encoded || strength > 0` —
+ *  a word and a number telling two different stories, exactly what #87's
+ *  rule ("never colour alone", read as "never a word alone either") forbids. */
+function stageWord(stage: Stage, started: boolean): string {
   switch (stage) {
     case "learn":
-      return encoded ? "Learning" : "Not started";
+      return started ? "Learning" : "Not started";
     case "reinforce":
       return "Reinforcing";
     case "carry":
@@ -286,6 +297,10 @@ export function buildProgressRows(input: BuildRowsInput): ProgressRow[] {
     const strength = atom ? Math.round(currentStrength(atom, now)) : 0;
     const stage: Stage = atom ? currentBand(atom, now) : "learn";
     const encoded = atom?.encoded ?? false;
+    // v3-D382: the same "is there any real evidence at all" test
+    // `strengthLabel` below already uses — shared so the word and the number
+    // can never again tell two different stories about the same atom.
+    const started = encoded || strength > 0;
     const gate = gateStateOf(atom, now);
 
     const ms = timeOnTaskMs(events, surah, isSeam ? "connection" : "ayah", site.ayah);
@@ -300,10 +315,10 @@ export function buildProgressRows(input: BuildRowsInput): ProgressRow[] {
       kindLabel: isSeam ? "Joint" : "Ayah",
       text: isSeam ? seamText(corpus, site.ayah, site.ayah + 1) : ayahText(corpus, site.ayah),
       stage,
-      stageLabel: stageWord(stage, encoded),
+      stageLabel: stageWord(stage, started),
       strengthPct: strength,
       // Unmeasured is "—", not "0%". See the field's own doc above.
-      strengthLabel: encoded || strength > 0 ? `${strength}%` : "—",
+      strengthLabel: started ? `${strength}%` : "—",
       halfLifeLabel: halfLife > 0 ? `${halfLife.toFixed(1)} days` : "—",
       nextLabel: nextWord(atom, gate, now),
       gate,

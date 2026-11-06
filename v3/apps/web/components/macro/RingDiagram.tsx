@@ -169,7 +169,13 @@ function labelFor(node: GraphNode, current = false): string {
     node.kind === "seam"
       ? `Joint ${node.surah}:${node.from}→${node.to}`
       : `Ayah ${node.surah}:${node.ayah}`;
-  const value = node.encoded ? `${node.strengthPct}%` : "not started";
+  // v3-D382: the same "any real evidence yet" test GraphNodeMark.tsx's own
+  // `started` uses for the disc's fill — `node.encoded` alone said "not
+  // started" under a disc already painted FILLED (real, nonzero strength
+  // from the Learn-band ramp before the ayah's first full production ever
+  // sets `encoded`), contradicting the paint the learner actually sees.
+  const started = node.encoded || node.strengthPct > 0;
+  const value = started ? `${node.strengthPct}%` : "not started";
   return `${ref}, ${node.stageLabel}, ${value}${gateWord(node.gate)}${current ? ", you are here" : ""}`;
 }
 

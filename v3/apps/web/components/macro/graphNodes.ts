@@ -108,16 +108,25 @@ export function isHighlighted(node: GraphNode, highlight: HighlightRef): boolean
 }
 
 /** The five states a learner actually experiences. "Not started" is `learn`
- *  with `encoded: false` — heatmap.ts:31 already draws that distinction and a
- *  learner feels it as a different thing from "Learning".
+ *  with NO evidence at all — never encoded AND still zero strength. A
+ *  learner feels that as a different thing from "Learning".
  *
  *  These are the SAME five words `lib/progress/rows.ts` prints in the table,
  *  and a test asserts the two agree. The ring and the list must never call the
- *  same atom by two different names. */
-export function stageLabelOf(stage: Stage, encoded: boolean): string {
+ *  same atom by two different names.
+ *
+ *  The caller passes `started` (`encoded || strengthPct > 0`, v3-D382), not
+ *  `encoded` alone: `update.ts`'s GAIN.s2 raises strength on every correct
+ *  Learn-band pass well before the ayah's first full production ever sets
+ *  `encoded` (DEFECTS.md#B14's progressive-blank ramp), so an un-encoded atom
+ *  can carry real, nonzero strength for days. `GraphNodeMark.tsx` already
+ *  paints that atom's disc FILLED on the identical test; gating the WORD on
+ *  `encoded` alone said "Not started" under a filled, in-progress disc —
+ *  exactly the word-vs-paint mismatch #87 exists to forbid. */
+export function stageLabelOf(stage: Stage, started: boolean): string {
   switch (stage) {
     case "learn":
-      return encoded ? "Learning" : "Not started";
+      return started ? "Learning" : "Not started";
     case "reinforce":
       return "Reinforcing";
     case "carry":
@@ -137,10 +146,14 @@ function nodeFor(site: Site, atoms: Map<string, AtomState>, now: number, cfg?: D
   const stage: Stage = atom ? currentBand(atom, now, cfg) : "learn";
   const strengthPct = atom ? Math.round(currentStrength(atom, now, cfg)) : 0;
   const encoded = atom?.encoded ?? false;
+  // v3-D382: the same "any real evidence yet" test GraphNodeMark.tsx's own
+  // `started` already uses for the disc's fill — shared so the word and the
+  // paint can never again disagree about the same atom.
+  const started = encoded || strengthPct > 0;
   const base: GraphNodeBase = {
     atomKey: key,
     stage,
-    stageLabel: stageLabelOf(stage, encoded),
+    stageLabel: stageLabelOf(stage, started),
     strengthPct,
     gate: gateStateOf(atom, now),
     encoded,

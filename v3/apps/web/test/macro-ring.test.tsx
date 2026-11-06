@@ -375,6 +375,60 @@ describe("#87 — every stage carries a word and a number", () => {
 });
 
 // ===========================================================================
+// v3-D382 — an un-encoded atom with real strength must not read "not started"
+// ===========================================================================
+//
+// `GraphNodeMark.tsx`'s own `started` (whether to paint a FILLED or HOLLOW
+// disc) is `node.encoded || node.strengthPct > 0` — so a mid-Learn ayah
+// (several correct S2 passes, real nonzero strength, not yet encoded —
+// DEFECTS.md#B14's ordinary ramp) is drawn FILLED, in its stage colour. But
+// `stageLabelOf()` and `RingDiagram.tsx#labelFor()`'s own `value` both read
+// `encoded` ALONE, so the exact same mark's accessible name said "Not
+// started" with no percent at all — a sighted learner sees progress; a
+// screen-reader user, and the <desc> aggregate, are told there is none. #87
+// exists precisely to stop that gap.
+
+describe("v3-D382 — a filled, in-progress disc is not announced as 'not started'", () => {
+  it("stageLabel reflects real strength even before encoding", () => {
+    const atoms = atomsOf({
+      ...initAtom(103, "ayah", 1),
+      strength: 30,
+      stability: 5,
+      lastRetrieval: NOW,
+      reps: 2,
+      encoded: false,
+    });
+    const nodes = buildGraphNodes(103, 3, atoms, NOW);
+    const ayah1 = nodes.find((x) => x.kind === "ayah" && x.ayah === 1)!;
+
+    expect(ayah1.encoded).toBe(false);
+    expect(ayah1.strengthPct).toBe(30);
+    // The bug: this read "Not started" — contradicting the filled disc
+    // GraphNodeMark's own `started` already paints for this exact atom.
+    expect(ayah1.stageLabel).not.toBe("Not started");
+    expect(ayah1.stageLabel).toBe("Learning");
+  });
+
+  it("the ring's accessible label names the real percent, never 'not started', for a filled disc", () => {
+    const atoms = atomsOf({
+      ...initAtom(103, "ayah", 1),
+      strength: 30,
+      stability: 5,
+      lastRetrieval: NOW,
+      reps: 2,
+      encoded: false,
+    });
+    const nodes = buildGraphNodes(103, 3, atoms, NOW);
+    render(<RingDiagram surah={103} nodes={nodes} layout="strip" />);
+    const nav = screen.getByRole("navigation", { name: /ayat and joints/i });
+    const text =
+      Array.from(nav.querySelectorAll("a")).find((a) => /Ayah 103:1,/.test(a.textContent ?? ""))?.textContent ?? "";
+    expect(text).toMatch(/30%/);
+    expect(text).not.toMatch(/not started/i);
+  });
+});
+
+// ===========================================================================
 // EDGE CASE #101 — "gate-armed/due states + why-locked explanation"
 // ===========================================================================
 //

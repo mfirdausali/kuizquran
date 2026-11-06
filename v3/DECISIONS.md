@@ -41711,3 +41711,166 @@ sections/Plan,sections/Pricing,shell/ServiceWorkerRegistrar,shell/StubNote,
 ui/Button}.tsx` — migrations and configs are low-value (near-zero logic
 surface), but the named components were not read this run and are a
 reasonable next target.
+
+## v3-D382 (2026-11-06)
+
+**The fix this run.** Three independent copies of "has this atom's ayah been
+STARTED" disagreed with each other, and two of the three were wrong.
+
+`update.ts`'s `GAIN.s2` raises an atom's `strength` on every correct
+Learn-band pass, well before the ayah's first full production (`s3`/`gate`)
+ever sets `encoded: true` — DEFECTS.md#B14's own "progressive scaffold"
+describes exactly this: days of growing blank counts, all of them
+`encoded: false`, before the atom finally encodes. So an un-encoded atom can
+carry real, substantial, nonzero strength for the entire ordinary Learn
+ramp — not a rare edge case, the normal shape of "currently being learned".
+
+Three decision points read that fact three different ways:
+
+1. `components/macro/GraphNodeMark.tsx`'s own `started` — whether to paint an
+   ayah's disc FILLED or hollow — already read `node.encoded ||
+   node.strengthPct > 0`, and its own comment states the intent in so many
+   words: "A node with no encoding yet is drawn hollow rather than filled:
+   'not started' and 'started but weak' must not look the same."
+2. `lib/progress/rows.ts#strengthLabel` (the progress table's percent
+   column) already used the identical `encoded || strength > 0` test — its
+   own doc comment invokes edge case #73 by name to explain why a genuinely
+   untouched atom must print "—", not "0%".
+3. But `lib/progress/rows.ts#stageWord()`, `components/macro/graphNodes.ts
+   #stageLabelOf()` AND `components/macro/RingDiagram.tsx#labelFor()`'s own
+   `value` ternary each decided the STAGE WORD from `encoded` ALONE — three
+   separate, undrifted-looking copies of the same wrong criterion, none of
+   them reading `strengthPct` at all.
+
+The visible result: `components/progress/StageBadge.tsx` renders
+`stageLabel` and `strengthLabel` side by side in one badge
+(`stage-label__name` + `stage-label__value`), with no guard between them.
+For a mid-Learn, un-encoded atom at, say, 25% decayed strength, a learner on
+`/progress` or `/progress/list` saw, literally, "● Not started 25%" — a word
+and a number telling two different stories in the same glance. On the macro
+ring (`/surah/[surah]`, `/surah/[surah]/[ayah]`), the SAME atom's disc is
+painted filled and in its stage colour (GraphNodeMark's already-correct
+`started`), while the accessible link list beside it — the diagram's own
+documented text alternative — announced "Ayah S:A, Not started, not
+started", naming no percent at all. That is exactly the word-vs-paint
+mismatch edge case #87 exists to forbid — this codebase has always read
+"never colour alone" as "a word and a number that must together tell ONE
+story", and here the word told a different, more pessimistic story than
+either the colour or the number beside it, for every ayah, for the whole
+length of its normal Learn ramp.
+
+**Why nothing caught it.** No existing test in either file combined "an
+atom exists, with real nonzero strength" with "that atom is not yet
+encoded" — `test/progress-list.test.tsx`'s `atomsFixture()` and
+`test/macro-ring.test.tsx`'s `strongAtom()` helper both always set
+`encoded: true` when they wanted a nonzero strength, and the only
+`encoded: false` cases either used an empty atoms map (strength
+genuinely 0, so the old and new criteria agree) or built a gate-state
+fixture (`gateAtom()`) that happened to leave `strength` at `initAtom`'s
+default 0 too. The one combination that exposes the contradiction — real
+evidence, not yet encoded — was never constructed.
+
+**Found by** ranking `apps/web/components/**` and `apps/web/lib/**` files by
+mention count in `DECISIONS.md`/`CLAUDE.md`/`HANDOVER.md` (v3-D371's own
+technique) and reading the lowest-ranked macro-ring file,
+`components/macro/GraphNodeMark.tsx`, end to end against its own stated
+design intent — unlike its siblings `geometry.ts`/`graphNodes.ts`/
+`RingDiagram.tsx`, which v3-D367 already read in full, `GraphNodeMark.tsx`
+itself had never been individually audited. Reading its comment ("must not
+look the same") against its own code, then checking whether the two other
+places that decide the identical fact (`rows.ts`, `graphNodes.ts`,
+`RingDiagram.tsx`) agreed with it, surfaced the three-way drift directly.
+This is the identical "one decision, several independent copies" shape the
+`gateStateOf()` unification closed earlier in this build (`graphNodes.ts`
+used to carry its own unexported copy of that function too, until it was
+made to import `rows.ts`'s and the two were proven identical by reference)
+— `stageWord()`/`stageLabelOf()`/`labelFor()`'s `value` were never unified
+into one function, only brought into agreement on the VALUE each is called
+with, which is the smaller, more surgical fix this run made.
+
+**Fixed:** a single `started = encoded || strength > 0` (named `started` at
+every call site, matching `GraphNodeMark.tsx`'s own established name for
+the identical test) now feeds `stageWord()` (`rows.ts`), `stageLabelOf()`
+(`graphNodes.ts`'s `nodeFor()`) and `RingDiagram.tsx#labelFor()`'s `value`
+— computed once per row/mark, right beside the `strengthLabel`/`strengthPct`
+computation that already used it, rather than three separate re-derivations
+each getting their own answer. `lib/progress/retention.ts`'s two
+`stageLabelOf()` call sites were checked and need no change: one is reached
+only after `if (!p.atom.encoded) continue;`, so `encoded` is always `true`
+there already; the other passes a surah-wide "has anything at all been
+encoded" flag for a legend bucket, not a per-atom reading — neither depends
+on the old encoded-alone semantics the per-atom call sites in `rows.ts`/
+`graphNodes.ts` did.
+
+**Verified:**
+- Five new test cases: `test/progress-list.test.tsx` gained a
+  `v3-D382` describe block (3 cases — the contradiction reproduced through
+  the real `buildProgressRows()` + rendered `ProgressTable`; a genuinely
+  untouched atom still reads "Not started"/"—", proving the fix does not
+  start fabricating a percent for the case `strengthLabel`'s own #73
+  reasoning protects); `test/macro-ring.test.tsx` gained a matching
+  `v3-D382` describe block (2 cases — the node-level `stageLabel` and the
+  ring's rendered accessible-link text, for the identical 30%-strength,
+  un-encoded fixture).
+- RED confirmed directly: `git stash` of the three production files alone
+  (`RingDiagram.tsx`, `graphNodes.ts`, `rows.ts`; all five new tests kept)
+  and reran against the unmodified source — the four bug-exposing cases
+  failed exactly as predicted (`expected 'Not started' to be 'Learning'`;
+  the ring's link text matching `/not started/i` for a disc already filled
+  at 30%); the fifth (genuinely-untouched-atom) case passed unchanged both
+  before and after, confirming it guards the OTHER direction rather than
+  merely restating the fix. Restored byte-identically (`git stash pop`,
+  `git diff` empty), reran — 67/67 green across both files (was 63, +4 — the
+  fifth case is a pre-existing-behavior guard, not a fix-dependent
+  assertion, so it does not add to the "RED count").
+- `npx vitest run` (apps/web, full suite): **1770 passing** (was 1765, +5
+  exactly — these five new cases; no other file moved). `npx tsc --noEmit`
+  (apps/web): clean.
+- `TZ=UTC make test`: **3193 passing** (was 3188, +5; every other suite
+  unchanged: 255 v2 vitest, 47 v2/api, 458 v3/api, 120 corpus-compiler, 470
+  engine, 73 fold-runner). `check-test-floor.mjs`: OK, 3193 >= floor 1899
+  (+1294 margin). `TZ=UTC make build`: exit 0, 30 routes, unchanged (the
+  usual one-time `SecurityFatalError` Next.js CLI nudge on first invocation,
+  not acted on, plain retry built clean). `npm run gates`: all green, 351
+  files, unchanged (294 v1 lines byte-identical; 2/6 UI fonts present,
+  degraded-but-non-blocking, pre-existing; 362 words; 206 codepoints). No
+  PHP file changed, so `pint` was not applicable. No `v1/**`/`v2/**` edit
+  (`git status --porcelain -- v1 v2` empty immediately before committing;
+  the usual stray `v2/tsconfig.tsbuildinfo` build-cache diff reverted
+  first). No Arabic codepoint, no `\u` escape, no `fromCharCode`/
+  `fromCodePoint` introduced — the full diff swept programmatically over
+  the Arabic/Arabic Supplement/Arabic Extended-A/Presentation-Forms Unicode
+  blocks: CLEAN, every new string is a TypeScript identifier or a fixed
+  English comment/assertion sentence. No oracle/golden-log/fixture/snapshot
+  regenerated — three existing production files and two existing test
+  files only.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; `v3/packages/{engine,corpus-compiler}` and
+`worker/fold-runner`'s plain `npm install` succeeded cleanly; `v3/api`'s
+composer install needed `--ignore-platform-req=php` (sandbox ships PHP
+8.3.6, `v3/api` wants >=8.4.1), run standalone with
+`COMPOSER_PROCESS_TIMEOUT=900` in the background, the now-standard recovery
+path; `v2`/`v2/api` set up cleanly under their own plain `npm install`/
+`composer install`. Both API projects' `database/database.sqlite` was
+missing on the fresh checkout (created by hand); `v2/api`'s `.env`/
+`APP_KEY` were also missing and generated by hand. Session started in
+detached `HEAD` at `592e56d` (v3-D381) with local `main` three commits
+stale — the recurring stale-local-`main` trap this file has recorded
+roughly fifty times since v3-D77 — caught via `git checkout -B main HEAD`
+before committing; `origin/main` agreed with `HEAD` exactly after `git
+fetch`.
+
+**NOT addressed, named for next run:** every item on v3-D379/D380/D381's
+own condensed list, unchanged and still infra/human-gated (fold-runner DB
+adapter + staging deploy; the operational mailer; Stripe replay fixtures,
+PAY-1; surah 67's scene beats, H2; `foilKernels.ts`'s regex gap, v3-D351;
+`placement.ts#nextProbe()`'s zero-caller gap). v3-D381's own named
+candidates (`components/{quiz/ChoiceCard,quiz/LocateChoiceCard,
+sections/Plan,sections/Pricing,shell/ServiceWorkerRegistrar,shell/StubNote,
+ui/Button}.tsx`) were not reached this run either — this run's own
+ranked-by-mention-count pass went into `components/macro/*` instead, found
+and closed the `GraphNodeMark.tsx` gap above, and did not get back to that
+list. `lib/progress/retention.ts` is now confirmed correct against this
+exact defect class — remove it from future sweep candidate lists for THIS
+shape (it may still have unrelated gaps nobody has checked).

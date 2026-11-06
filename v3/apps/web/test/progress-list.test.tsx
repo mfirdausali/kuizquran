@@ -302,6 +302,73 @@ function labelFor(stage: string, encoded: boolean): string {
 }
 
 // ---------------------------------------------------------------------------
+// v3-D382 — stageLabel and strengthLabel must never contradict each other
+// ---------------------------------------------------------------------------
+//
+// An un-encoded atom accumulates real strength across several Learn-band
+// passes — `update.ts`'s `GAIN.s2` raises `strength` on every correct S2
+// fill, and only an `s3`/`gate` outcome ever sets `encoded: true`
+// (DEFECTS.md#B14's own "progressive scaffold" ramp describes exactly this:
+// days of growing blank counts before the first full production). `stageWord()`
+// read ONLY `encoded`, so every atom in that ordinary, days-long ramp was
+// labelled "Not started" — while `strengthLabel`, four lines below in the same
+// row builder, already read `encoded || strength > 0` and printed the real,
+// nonzero percent. `StageBadge` renders both in the SAME badge
+// (`stage-label__name` + `stage-label__value`), so a learner saw, literally,
+// "● Not started 25%" — a self-contradiction in one glance, exactly what #87's
+// own rule ("a word and a number that TOGETHER tell one story") exists to
+// prevent.
+describe("v3-D382 — an un-encoded atom with real strength is not 'Not started' (#87)", () => {
+  it("stageLabel and strengthLabel agree: a mid-Learn atom reads 'Learning', never 'Not started 25%'", () => {
+    const atoms = new Map<string, AtomState>();
+    atoms.set(atomKey(SURAH, "ayah", 1), {
+      ...initAtom(SURAH, "ayah", 1),
+      strength: 25,
+      stability: 5,
+      lastRetrieval: NOW,
+      reps: 2,
+      encoded: false,
+    });
+    const rows = buildProgressRows({ corpus: windowCorpus(1), atoms, events: [], now: NOW });
+    const row = rows.find((r) => r.kind === "ayah" && r.ayah === 1)!;
+
+    expect(row.strengthPct).toBe(25);
+    expect(row.strengthLabel).toBe("25%");
+    // The bug: stageLabel said "Not started" here, flatly contradicting the
+    // "25%" printed right beside it in the very same StageBadge.
+    expect(row.stageLabel).not.toBe("Not started");
+    expect(row.stageLabel).toBe("Learning");
+  });
+
+  it("a truly untouched atom (no evidence at all) still reads 'Not started' and '—', never '0%'", () => {
+    // Regression guard the OTHER direction: the fix must not start printing a
+    // percent for an atom that has genuinely never been touched — the exact
+    // edge-case-#73 dishonesty `strengthLabel`'s own doc comment already names.
+    const rows = buildProgressRows({ corpus: windowCorpus(1), atoms: new Map(), events: [], now: NOW });
+    const row = rows.find((r) => r.kind === "ayah" && r.ayah === 1)!;
+    expect(row.stageLabel).toBe("Not started");
+    expect(row.strengthLabel).toBe("—");
+  });
+
+  it("renders without the contradiction in the real table", () => {
+    const atoms = new Map<string, AtomState>();
+    atoms.set(atomKey(SURAH, "ayah", 1), {
+      ...initAtom(SURAH, "ayah", 1),
+      strength: 25,
+      stability: 5,
+      lastRetrieval: NOW,
+      reps: 2,
+      encoded: false,
+    });
+    const rows = buildProgressRows({ corpus: windowCorpus(1), atoms, events: [], now: NOW });
+    const { container } = render(<ProgressTable rows={rows} />);
+    const badge = container.querySelector(".stage-label")!;
+    expect(badge.querySelector(".stage-label__value")?.textContent).toBe("25%");
+    expect(badge.querySelector(".stage-label__name")?.textContent).toBe("Learning");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 3. DIRECTION — §15's "classic bug"
 // ---------------------------------------------------------------------------
 
