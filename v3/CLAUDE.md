@@ -53,10 +53,99 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3183 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3186 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 453 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1765 apps/web. (v3-D378, 2026-11-05)
+             # 255 v2 vitest + 47 v2/api + 456 v3/api + 120 corpus-compiler
+             # + 470 engine + 73 fold-runner + 1765 apps/web. (v3-D380, 2026-11-06)
+             # NOTE (v3-D380, 2026-11-06): `NightlyWindowLedger::nights()`
+             # extends its materialized range through `$today` whenever a
+             # gap exists after the last recorded check run (v3-D360's own
+             # fix for a scheduler that died outright). But both real
+             # callers (`NightlyWindowCommand`, `NightlyWindowController`)
+             # passed the BARE calendar date, with no account for
+             # `config('nightly.run_at_utc')` (03:00 UTC by default) — so
+             # for every minute between 00:00 UTC and that time, on any
+             # given day, today's row genuinely has not been written yet,
+             # not because anything died. Extending to "today" during that
+             # window materialized a synthetic, both-checks-missing night,
+             # which `status()`'s backward scan hits FIRST and breaks the
+             # streak immediately — a perfectly healthy 7+-night streak read
+             # as broken, every single day, for three hours, on BUILD-PLAN
+             # M10's own launch gate (`NightlyWindowController`'s own
+             # docblock: "the ENTIRE safety net for the gate that blocks
+             # public launch"). Found by a fresh-sweep agent re-reading
+             # `NightlyWindowLedger.php` end to end against v3-D360's own
+             # test fixture helper `recentWeek()`, which builds its week
+             # ENDING at `gmdate('Y-m-d')` — i.e. every existing test's
+             # "last recorded night" is literally "today," so `$today ==
+             # $last` and the false-positive window never triggers in any
+             # existing test. Fixed: `NightlyWindowLedger::asOfDate(int
+             # $nowMs): string` holds `$today` at yesterday until the
+             # scheduled run time has actually passed, then flips —
+             # preserving v3-D360's own dead-scheduler detection with no
+             # added delay once the scheduled time is past. Both callers now
+             # pass `asOfDate($nowMs)` instead of the bare date. RED
+             # confirmed directly: reverted the three production files
+             # (`git stash`, the three new `WindowLedgerTest.php` cases
+             # kept) and reran — all 3 failed exactly as predicted,
+             # including a direct assertion that the bare-date behavior
+             # breaks a seeded healthy 7-night streak (`streak: 0,
+             # satisfied: false`) independent of whether the new method
+             # even exists; restored byte-identically, reran green.
+             # `v3/api` PHPUnit: **456 passed** (was 453, +3 exactly — these
+             # three new cases), 2 incomplete (PAY-1, unchanged), 6 skipped
+             # (unchanged). `TZ=UTC make test`: **3186 passing** (was 3183,
+             # +3; every other suite unchanged: 255 v2 vitest, 47 v2/api,
+             # 120 corpus-compiler, 470 engine, 73 fold-runner, 1765
+             # apps/web). `check-test-floor.mjs`: OK, 3186 >= floor 1899
+             # (+1287 margin). `TZ=UTC make build`: exit 0, 30 routes,
+             # unchanged (the usual one-time `SecurityFatalError` Next.js
+             # CLI nudge on first invocation, not acted on, plain retry
+             # built clean). `npm run gates`: all green, 351 files,
+             # unchanged (294 v1 lines byte-identical; 2/6 UI fonts present,
+             # degraded-but-non-blocking, pre-existing; 362 words; 206
+             # codepoints). `npx tsc --noEmit`: clean. `./vendor/bin/pint
+             # --test`: the one finding on the test file
+             # (`php_unit_method_casing`) pre-exists without this diff,
+             # confirmed by stashing it alone and re-running pint — not
+             # introduced here. No `v1/**`/`v2/**` edit (the usual stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted before
+             # committing). No Arabic codepoint, no `\u` escape, no
+             # `fromCharCode`/`fromCodePoint` introduced — swept
+             # programmatically over the diff: every new string is a PHP
+             # identifier, a date/time value, or a fixed English
+             # comment/assertion sentence.
+             #
+             # Session start: fresh container, no `node_modules`/`vendor`/
+             # compiled corpus anywhere; both API projects' composer
+             # installs hit the documented slow proxy git-mirror-clone
+             # fallback; `v3/api` needed `--ignore-platform-req=php`
+             # (sandbox ships PHP 8.3.6, `v3/api` wants >=8.4.1). Both
+             # `v2/api` and `v3/api` had no `database/database.sqlite` on a
+             # fresh checkout (touched by hand); `v2/api`'s own `.env`/
+             # `APP_KEY` were also missing and generated by hand. `HEAD`
+             # and `origin/main` agreed exactly at `1ce28a1` (v3-D379) after
+             # a fresh `git fetch` — no stale-local-`main` trap this run,
+             # though local `main` itself was reset to `HEAD` via `git
+             # checkout -B main HEAD` as a precaution.
+             #
+             # NOT addressed, named for next run: every item on v3-D379's
+             # own condensed list, unchanged and still infra/human-gated —
+             # `worker/fold-runner`'s own DB adapter + staging deploy (no
+             # host, no DB, no credentials in this sandbox); the
+             # operational mailer's actual delivery (wired since v3-D82,
+             # only a real SMTP account is missing); Stripe replay fixtures
+             # (PAY-1, gated on Stripe MY business verification, H1);
+             # surah 67's scene beats (human-only, H2).
+             # `packages/corpus-compiler/src/foilKernels.ts`'s
+             # `DISPLAY_STRIPPED` regex gap remains correctly deferred to a
+             # human decision (v3-D351) — fixing it would change
+             # `corpusHash` for surahs 67/103 and invalidate Firdaus's
+             # already-signed QA sample; do not fix it without that
+             # decision. `packages/engine/src/placement.ts#nextProbe()`'s
+             # self-referential Act-1 junction remains a real but zero-
+             # production-caller gap, still not worth fixing ahead of a
+             # caller existing.
              # NOTE (v3-D379, 2026-11-06): commit 2/2 of the two-device
              # determinism e2e (BUILD-PLAN M6's own exit criterion) — the
              # actual SCENARIO v3-D366/D367/D369/D371 through D378 each

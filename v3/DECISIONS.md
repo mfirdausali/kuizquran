@@ -41468,3 +41468,138 @@ staging and the `nightly:window --start` declaration, H5). **The
 two-device determinism e2e named across v3-D366/D367/D369/D371 through
 D378 is now genuinely CLOSED** — remove it from future sweep candidate
 lists; BUILD-PLAN M6's own exit criterion is met.
+
+## v3-D380 (2026-11-06)
+
+**The fix this run.** `NightlyWindowLedger::nights()` extends its
+materialized date range through `$today` whenever a gap exists after the
+last recorded check run — v3-D360's own fix for a scheduler that died
+outright. But both real callers (`NightlyWindowCommand::handle()`,
+`NightlyWindowController::index()`) passed the *bare* calendar date
+(`gmdate('Y-m-d')`), with no account for `config('nightly.run_at_utc')`
+(03:00 UTC by default). For every minute between 00:00 UTC and that time,
+on any given day, today's row genuinely has not been written yet — not
+because the scheduler died, but because it hasn't fired yet today.
+Extending the range to "today" in that window materialized a synthetic,
+both-checks-missing night; `status()`'s backward-scanning streak loop hits
+that synthetic night FIRST (it is the most recent) and breaks the streak
+immediately, regardless of how green every real prior night was. A
+perfectly healthy 7+-night streak read as broken, every single day, for
+three hours, on BUILD-PLAN M10's own public-launch gate —
+`NightlyWindowController`'s own docblock calls this screen "the ENTIRE
+safety net for the gate that blocks public launch."
+
+**Found by** a fresh-sweep investigation agent re-reading
+`NightlyWindowLedger.php` end to end (dispatched by the nightly session
+after it confirmed, from `git log` and `NIGHTLY.md`'s own warning about its
+own staleness, that all 32 BUILD-PLAN steps are functionally complete and
+the only remaining work is the established fresh-sweep defect hunt),
+independently re-verified against the real source by the nightly session
+itself before any test was written.
+
+**Why nothing caught it:** v3-D360's own test fixture helper
+`recentWeek()` (used by both `WindowLedgerTest.php` and the admin HTTP
+test) builds its 7-night fixture week ENDING at `gmdate('Y-m-d')` — i.e.
+every existing test's "last recorded night" is literally "today," so
+`$today === $last` and the false-positive extension never triggers. No
+existing test combined "last recorded night was yesterday" with "queried
+before today's scheduled run has fired," the one scenario that exposes the
+bug.
+
+**Fixed:** `NightlyWindowLedger::asOfDate(int $nowMs): string` — holds
+`$today` at yesterday until `config('nightly.run_at_utc')` has genuinely
+passed for the current UTC day, then flips to today from that minute on.
+This preserves v3-D360's own guarantee (a scheduler dead for days still
+materializes the gap, with no added delay once a given day's scheduled
+time has passed) while eliminating the daily false positive before that
+time. Both callers now compute `$nowMs = (int) round(microtime(true) *
+1000)` (the same idiom `AutoWaiveKillsCommand`/`FlagController` already
+use) and pass `NightlyWindowLedger::asOfDate($nowMs)` in place of the bare
+`gmdate('Y-m-d')`.
+
+**Verified:**
+- Three new cases in `WindowLedgerTest.php`: `asOfDate()`'s own boundary
+  (30 minutes before / 1 second before / exactly at / an hour after the
+  scheduled minute, using a fixed synthetic anchor date — no real-clock
+  dependency); the load-bearing regression (a healthy 7-night streak
+  ending "yesterday," read before today's scheduled run — asserts BOTH
+  that the bare date breaks it, `streak: 0`, `satisfied: false`, directly
+  against the real `status()` call, independent of whether `asOfDate()`
+  exists, AND that `asOfDate()` fixes it, `streak: 7`, `satisfied: true`);
+  and a preservation case (once the scheduled time has genuinely passed
+  with nothing recorded, the gap still breaks the streak, unchanged from
+  v3-D360).
+- RED confirmed directly: reverted the three production files (`git
+  stash` of `NightlyWindowLedger.php` + both callers, the three new tests
+  kept) and reran — all 3 failed exactly as predicted (`Call to undefined
+  method asOfDate()` on two; the third's *first* assertions, which call
+  the real unmodified `status()` with the bare date, had already passed
+  before hitting that call, independently proving the production defect).
+  Restored byte-identically (`git diff` empty), reran — `WindowLedgerTest`
+  26/26 green, was 23 (+3).
+- `v3/api` PHPUnit: **456 passed** (was 453, +3 exactly), 2 incomplete
+  (PAY-1, unchanged), 6 skipped (unchanged). `TZ=UTC make test`: **3186
+  passing** (was 3183, +3; every other suite unchanged: 255 v2 vitest, 47
+  v2/api, 120 corpus-compiler, 470 engine, 73 fold-runner, 1765 apps/web).
+  `check-test-floor.mjs`: OK, 3186 >= floor 1899 (+1287 margin). `TZ=UTC
+  make build`: exit 0, 30 routes, unchanged (the usual one-time
+  `SecurityFatalError` Next.js CLI nudge on first invocation, not acted
+  on, plain retry built clean). `npm run gates`: all green, 351 files,
+  unchanged (294 v1 lines byte-identical; 2/6 UI fonts present,
+  degraded-but-non-blocking, pre-existing; 362 words; 206 codepoints).
+  `npx tsc --noEmit`: clean. `./vendor/bin/pint --test`: the one finding
+  on the test file (`php_unit_method_casing`) pre-exists without this
+  diff — confirmed by stashing the test file alone and re-running pint
+  against the unmodified version, same finding, same file; not introduced
+  here. No `v1/**`/`v2/**` edit (`git status --porcelain -- v1 v2` empty
+  immediately before committing; the usual stray `v2/tsconfig.tsbuildinfo`
+  build-cache diff from running the suites reverted first). No Arabic
+  codepoint, no `\u` escape, no `fromCharCode`/`fromCodePoint` introduced
+  — the full diff swept programmatically over the Arabic/Arabic
+  Supplement/Arabic Extended-A/Presentation-Forms Unicode blocks: CLEAN,
+  every new string is a PHP identifier, a date/time literal, or a fixed
+  English comment/assertion sentence. No oracle/golden-log/fixture/
+  snapshot regenerated — four existing source files only (one new method
+  on an existing class, two one-line caller wirings, one test file).
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere; both API projects' composer installs hit the documented
+slow proxy git-mirror-clone fallback; `v3/api` needed
+`--ignore-platform-req=php` (sandbox ships PHP 8.3.6, `v3/api` wants
+>=8.4.1). Neither `v2/api` nor `v3/api` had a `database/database.sqlite`
+on the fresh checkout (created by hand); `v2/api`'s own `.env`/`APP_KEY`
+were also missing and generated by hand — the first `make test` run
+failed on `v2/api`'s `ExampleTest` with "No application encryption key
+has been specified" until this was done. `HEAD` and `origin/main` agreed
+exactly at `1ce28a1` (v3-D379) after a fresh `git fetch`; local `main` was
+reset to it via `git checkout -B main HEAD` as a precaution before any
+exploration (no actual staleness found this run).
+
+**NOT addressed, named for next run:** every item on v3-D379's own
+condensed list, unchanged and still infra/human-gated — `worker
+/fold-runner`'s own DB adapter + staging deploy (no host, no DB, no
+credentials in this sandbox); the operational mailer's actual delivery
+(wired since v3-D82, only a real SMTP account is missing); Stripe replay
+fixtures (PAY-1, gated on Stripe MY business verification, H1); surah
+67's scene beats (human-only, H2).
+`packages/corpus-compiler/src/foilKernels.ts`'s `DISPLAY_STRIPPED` regex
+gap (v3-D351) remains correctly deferred to a human decision — fixing it
+would change `corpusHash` for surahs 67/103 and invalidate Firdaus's
+already-signed QA sample; a future run should put this to Firdaus rather
+than fix it silently.
+`packages/engine/src/placement.ts#nextProbe()`'s self-referential Act-1
+junction (`Math.max(1, lm.opening - 1)`) remains a real but
+zero-production-caller gap — still not worth fixing ahead of a caller
+existing. This run's own fresh-sweep investigation agent also read and
+ruled correct, no defect: `apps/web/lib/entitlement/{types,cache,gate,
+sync}.ts` cross-checked field-by-field against `api/app/Billing
+/{PaywallGate,EntitlementMachine,PaywallDecision,StripeSignature,
+TransitionResult}.php` and `Http/Controllers/Billing
+/EntitlementController.php`; `lib/pricing.ts`, `lib/settings
+/planSummary.ts`, `components/settings/PlanPanel.tsx`; `lib/legal
+/attribution.ts`, `lib/i18n/dictionaries.ts`; `lib/onboarding/{surahs,
+pass}.ts`; `api/app/Http/Controllers/Admin/Pseudonymizer.php`; `api/app
+/Support/EventWireCodec.php`; `api/app/Support/CorpusHashRecomputer.php`
++ `packages/corpus-compiler/src/{recomputeHashes,hash}.ts`; `api/app
+/Http/Controllers/AccountController.php` (PDPA export/delete); `api
+/config/cors.php` (re-confirmed sound per v3-D378).
