@@ -56,7 +56,28 @@ make dev     # SPA :5273, API :8000
 make test    # 3196 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 461 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D384, 2026-11-07)
+             # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D385, 2026-11-07)
+             # NOTE (v3-D385, 2026-11-07): a fresh-sweep night found no
+             # confirmed defect. `WebhookHandler.php`'s `grace_until`
+             # consistency (the shape v3-D383/D384 fixed two nights
+             # running) was re-checked first and found genuinely closed.
+             # With that line exhausted, a wide batch of genuinely
+             # low-mention-count files — `components/quiz/
+             # SequenceFillCard.tsx` (the fourth, least-audited render
+             # shape) + its callers, the PDPA account-deletion/
+             # verify-email/reset-password surface, and ~20 more files
+             # read via two parallel sweep forks (admin/workbench panels,
+             # settings/anchor-hour, enrollment cookies, corpus-compiler
+             # connections/normalize, PurgeLedger end to end) — were read
+             # end to end for a fresh, reachable defect of any shape, not
+             # only the grace-clearing one. None was found. One
+             # named-but-INERT gap surfaced (six routes read the raw,
+             # override-unaware `loadCorpus` instead of
+             # `loadEffectiveCorpus`, but none of their render paths
+             # shows corpus text today) and is recorded for if it ever
+             # becomes live. No code changed; `TZ=UTC make test`: 3196
+             # passing, unchanged. See DECISIONS.md v3-D385 for the full
+             # list of files cleared and the session-start notes.
              # NOTE (v3-D384, 2026-11-07): `App\Billing\WebhookHandler.php`'s
              # `onRefunded()` full-refund branch and `onDisputeClosed()`'s
              # "lost" branch both reach `EntitlementState::LapsedReviewOnly`
