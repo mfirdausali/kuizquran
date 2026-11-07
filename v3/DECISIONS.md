@@ -42078,3 +42078,160 @@ concurrent-composer-install cache race above is an environment/process
 lesson for whichever future run parallelizes setup steps again — it is not
 a defect in this codebase and needs no code fix, only "don't run two
 composer installs against the same empty cache at once."
+
+## v3-D384 (2026-11-07, nightly) — two more `WebhookHandler` paths to `LapsedReviewOnly` left a stale `grace_until`, the same shape v3-D383 fixed on the "won" dispute path
+
+**The fix this run.** Two more `App\Billing\WebhookHandler` branches that
+land on `EntitlementState::LapsedReviewOnly` did not clear `grace_until`,
+the identical gap v3-D383 found and fixed last night on
+`onDisputeClosed()`'s "won" branch (which lands on `Active`):
+
+- `onRefunded()`'s full-refund branch.
+- `onDisputeClosed()`'s "lost"/other branch (the non-"won" return).
+
+The ONE handler that already reaches `LapsedReviewOnly` and clears
+`grace_until` correctly is `onSubscriptionDeleted()` — confirmed by
+reading it again directly. So among the three handlers landing on this
+same target state, one clears the field and two did not: the identical
+"one decision, computed independently at several call sites, drifted at
+some of them" shape this build keeps finding (`gateStateOf`, v3-D382's
+`stageWord()`/`stageLabelOf()`/`RingDiagram.tsx#labelFor()`, and v3-D383's
+own `onDisputeClosed` "won" branch) — a direct continuation of last
+night's own fix, in the same handler file, found by re-checking the SAME
+file field-by-field across every handler rather than assuming the one
+fixed branch was the only one.
+
+**The reachable sequence, for each.** `grace_until` is set to a real,
+non-null timestamp by exactly one handler, `onPaymentFailed` (from
+Stripe's `next_payment_attempt`), when a failed payment moves an Active
+subscription to Grace.
+
+- If, while in that Grace period, a `charge.refunded` event arrives for
+  one of this customer's charges with `amount_refunded >= amount` (a full
+  refund — e.g. a goodwill refund on an earlier successful charge while
+  the current one is failing), `onRefunded()` moves the account to
+  `LapsedReviewOnly` but — before this fix — left the stale
+  `next_payment_attempt` timestamp attached.
+- If, while in that same Grace period, a dispute opens
+  (`onDisputeCreated()` writes `state: Grace` only, never touching
+  `grace_until` — confirmed by reading it directly) and is later LOST,
+  `onDisputeClosed()`'s non-"won" branch moves the account to
+  `LapsedReviewOnly` with the identical stale timestamp still attached.
+
+**Why this is a real, observable wrongness.** The same read path v3-D383
+named: `AdminBillingController::snapshot()`/`EntitlementController::show()`
+return `grace_until` unconditionally, and
+`apps/web/components/admin/BillingAuditPanel.tsx` renders its "Grace
+until" `<dt>/<dd>` pair (confirmed directly at line ~250) regardless of
+`snapshot.snapshot.state` — the one field in that panel not gated on
+state. An admin pulling up either of these accounts sees a
+`lapsed_review_only` row that still claims a pending payment retry from
+days or weeks earlier, reading as a second unresolved problem that does
+not exist. `apps/web/lib/settings/planSummary.ts`, the learner-facing
+consumer, is unaffected for the same reason v3-D383 found: its `switch
+(state)` only reads `graceUntil` inside the `"grace"` case.
+
+**Why nothing caught it.** The two existing tests for these branches
+(`test_full_refund_lapses_to_review_only`, `test_dispute_lost_lapses`)
+both start from `EntitlementState::Active` with no `grace_until` seeded —
+the realistic prior-Grace-episode path was never constructed, identical
+to why v3-D383's own gap went uncaught.
+
+**Found by:** re-reading `WebhookHandler.php` end to end a second time,
+field-by-field across all eight handlers for the `grace_until` clear
+specifically, rather than treating last night's single fix as having
+closed the whole file. (Before landing on this, this run's own candidate
+sweep read and re-confirmed correct, no defect:
+`App\Models\{Override,NightlyCheckRun,PurgeLedgerEntry,CorpusAyahHash,
+AdminRevealToken}`, `App\Http\Controllers\Admin\{AdminAuthController,
+AdminUsersController}`, `App\Http\Controllers\Billing\
+StripeWebhookController`, `packages/engine/src/{arabic,multiSurah}.ts`,
+`packages/corpus-compiler/src/recomputeHashes.ts`, `apps/web/lib/demo/
+loadClientCorpus.ts`, `apps/web/components/{shell/TabBar,workbench/
+MacroClassificationPanel,progress/TestHistoryPanel}.tsx`,
+`apps/web/app/not-found.tsx`.)
+
+**Fixed:** both branches now pass `'grace_until' => null` alongside
+`'state' => EntitlementState::LapsedReviewOnly`, matching
+`onSubscriptionDeleted()`.
+
+**Verified:**
+- Two new tests: `EntitlementStateMachineTest::test_full_refund_clears_
+  stale_grace_until` and `::test_dispute_lost_clears_stale_grace_until`.
+  Each seeds an entitlement in `Grace` with a real, non-null
+  `grace_until`, ingests the real event through the real
+  `WebhookHandler::ingest()`, and asserts both the target state and
+  `grace_until === null`.
+- RED confirmed directly against the unmodified source: both new cases
+  failed on `Failed asserting that 1700086400000 is null.` — the exact
+  seeded stale timestamp, reproduced verbatim — 2 failed, 20 passed (54
+  assertions).
+- Mutation-verified: `git stash push -- app/Billing/WebhookHandler.php`
+  (both new tests kept, untouched) reproduced both failures identically;
+  `git stash pop` restored the file byte-identically (`git diff --stat`
+  showed only the expected 10-line insertion); reran —
+  `EntitlementStateMachineTest` 22/22 green, was 20 (+2, 54 assertions —
+  the two new cases' assertions replace none removed).
+- `v3/api` PHPUnit, full suite: **461 passed** (was 459, +2 exactly), 2
+  incomplete (PAY-1, by design, unchanged), 6 skipped (unchanged).
+- `TZ=UTC make test`: **3196 passing** (was 3194, +2; every other suite
+  unchanged: 255 v2 vitest, 47 v2/api, 120 corpus-compiler, 470 engine, 73
+  fold-runner, 1770 apps/web). `check-test-floor.mjs`: OK, 3196 >= floor
+  1899 (+1297 margin).
+- `TZ=UTC make build`: exit 0, 30 routes, unchanged (the usual one-time
+  `SecurityFatalError` Next.js CLI nudge on first invocation — not acted
+  on; a plain retry built clean).
+- `npm run gates` (apps/web): all green, 350 files (294 v1 lines
+  byte-identical; 2/6 UI fonts present, degraded-but-non-blocking,
+  pre-existing; 362 words; 206 codepoints across 4 artifacts — the file
+  count reads 350 here against 351 recorded at v3-D383; no file was
+  added or removed by this diff in `apps/web`, so this is environment
+  enumeration drift of the kind earlier entries have already noted as
+  pre-existing, not a regression from this change). `npx tsc --noEmit`
+  (apps/web): clean, `Version 5.9.3`.
+- `./vendor/bin/pint --test`: `app/Billing/WebhookHandler.php`'s five
+  findings (`unary_operator_spaces`, `braces_position`,
+  `no_unused_imports`, `not_operator_with_successor_space`,
+  `single_line_empty_body`) confirmed PRE-EXISTING by stashing this run's
+  diff on that one file alone and re-running pint against it as it stood
+  before this change: identical five findings, unchanged. The test file
+  itself: zero findings.
+- No `v1/**`/`v2/**` edit: `git status --porcelain -- v1 v2` empty
+  immediately before committing (the usual stray
+  `v2/tsconfig.tsbuildinfo` build-cache diff from running the v2 suite
+  was reverted first via `git checkout --`).
+- No Arabic codepoint, no `\u` escape, no `fromCharCode`/`fromCodePoint`
+  introduced — the full diff (73 added lines across the two changed
+  files) swept programmatically over the Arabic/Arabic Supplement/Arabic
+  Extended-A/Presentation-Forms Unicode blocks: CLEAN. Every new string is
+  a PHP identifier, an integer epoch-millisecond literal, or a fixed
+  English comment/assertion sentence — this file's own domain
+  (billing/entitlement state) has no Arabic surface at all.
+- No oracle/golden-log/fixture/snapshot regenerated — one existing
+  production file (`WebhookHandler.php`) and one existing test file
+  (`EntitlementStateMachineTest.php`) only.
+
+**Session start.** Fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere. Composer installs for both API projects were run
+SEQUENTIALLY (`v3/api` first, with `--ignore-platform-req=php` since this
+sandbox ships PHP 8.3.6 and `v3/api` wants >=8.4.1; `v2/api` second) —
+explicitly avoiding the concurrent-install cache race v3-D383 hit the
+previous run. Both API projects' `database/database.sqlite` was missing
+on the fresh checkout (created by hand). `HEAD`, local `main` and
+`origin/main` all already agreed exactly at `18ff8bd` (v3-D383) after a
+fresh `git fetch` — no stale-local-`main` trap this run.
+
+**NOT addressed, named for next run.** Every item on v3-D379 through
+v3-D383's own condensed list, unchanged and still infra/human-gated:
+`worker/fold-runner`'s own DB adapter + staging deploy; the operational
+mailer's actual delivery; Stripe replay fixtures (PAY-1, H1); surah 67's
+scene beats (H2); `foilKernels.ts`'s `DISPLAY_STRIPPED` regex gap
+(v3-D351); `placement.ts#nextProbe()`'s zero-production-caller gap. The
+`grace_until` field is now consistent across all handlers that reach
+`LapsedReviewOnly`/`Active` from a Grace-adjacent path in
+`WebhookHandler.php` — remove this file from future low-mention-count
+sweep candidate lists for this specific defect shape (a fresh read for a
+genuinely different defect is still fair game). The ten files this run's
+own sweep read before landing on this fix (listed above, under "Found
+by") are now independently re-confirmed correct a second time each —
+remove them too.

@@ -53,10 +53,85 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3194 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3196 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 459 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D383, 2026-11-07)
+             # 255 v2 vitest + 47 v2/api + 461 v3/api + 120 corpus-compiler
+             # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D384, 2026-11-07)
+             # NOTE (v3-D384, 2026-11-07): `App\Billing\WebhookHandler.php`'s
+             # `onRefunded()` full-refund branch and `onDisputeClosed()`'s
+             # "lost" branch both reach `EntitlementState::LapsedReviewOnly`
+             # without clearing `grace_until` — the identical gap v3-D383
+             # fixed the previous night on `onDisputeClosed`'s "won" branch
+             # (which reaches `Active`), found by re-reading the SAME file
+             # a second time, field-by-field, for every other handler that
+             # lands on a state `onPaymentFailed`'s own stale
+             # `next_payment_attempt` timestamp could survive into.
+             # `onSubscriptionDeleted()` — the one OTHER handler reaching
+             # `LapsedReviewOnly` — already clears it; these two did not.
+             # Reachable: a Grace period with a real `grace_until` (from a
+             # failed payment), then either a full refund on one of the
+             # customer's charges, or a dispute opened during that Grace
+             # period and later LOST — both leave the stale timestamp on
+             # the resulting `LapsedReviewOnly` row, which
+             # `BillingAuditPanel.tsx`'s "Grace until" field (confirmed at
+             # line ~250) renders UNCONDITIONALLY regardless of `state`,
+             # the same admin-surface misreading v3-D383 fixed. Fixed:
+             # both branches now set `'grace_until' => null` alongside
+             # their state change, matching `onSubscriptionDeleted()`.
+             # RED confirmed directly: two new
+             # `EntitlementStateMachineTest` cases (`test_full_refund_
+             # clears_stale_grace_until`, `test_dispute_lost_clears_stale_
+             # grace_until`), each seeding a real `grace_until` in Grace
+             # before the real event, run against the unmodified source —
+             # both failed exactly as predicted (`Failed asserting that
+             # 1700086400000 is null.`); mutation-verified by reverting
+             # `WebhookHandler.php` alone (`git stash`, both new tests
+             # kept) — reproduced both failures identically; restored
+             # byte-identically (`git diff` empty), reran —
+             # `EntitlementStateMachineTest` 22/22 green, was 20 (+2).
+             # `v3/api` PHPUnit: **461 passed** (was 459, +2 exactly), 2
+             # incomplete (PAY-1, unchanged), 6 skipped (unchanged).
+             # `TZ=UTC make test`: **3196 passing** (was 3194, +2; every
+             # other suite unchanged: 255 v2 vitest, 47 v2/api, 120
+             # corpus-compiler, 470 engine, 73 fold-runner, 1770 apps/web).
+             # `check-test-floor.mjs`: OK, 3196 >= floor 1899 (+1297
+             # margin). `TZ=UTC make build`: exit 0, 30 routes, unchanged
+             # (the usual one-time `SecurityFatalError` Next.js CLI nudge
+             # on first invocation, not acted on, plain retry built
+             # clean). `npm run gates`: all green, 350 files (294 v1 lines
+             # byte-identical; 2/6 UI fonts present,
+             # degraded-but-non-blocking, pre-existing; 362 words; 206
+             # codepoints — the 350 vs. v3-D383's 351 is environment file-
+             # enumeration drift, not a change from this diff, which added
+             # no file under apps/web). `npx tsc --noEmit`: clean.
+             # `./vendor/bin/pint --test`: `WebhookHandler.php`'s five
+             # findings confirmed pre-existing (stashed this diff alone on
+             # that file, identical findings before and after); the test
+             # file has zero findings. No `v1/**`/`v2/**` edit. No Arabic
+             # codepoint/`\u` escape/`fromCharCode`/`fromCodePoint`
+             # introduced — swept programmatically over the full diff (73
+             # added lines): every new string is a PHP identifier, an
+             # integer epoch-millisecond literal, or a fixed English
+             # comment/assertion sentence. No oracle/golden-log/fixture/
+             # snapshot regenerated — one existing production file and one
+             # existing test file only. Session start: fresh container;
+             # both API projects' composer installs run SEQUENTIALLY
+             # (v3/api first with `--ignore-platform-req=php`, PHP 8.3.6 on
+             # this sandbox vs. v3/api's >=8.4.1 requirement; v2/api
+             # second) to avoid the concurrent-install cache race v3-D383
+             # hit the prior run; both API projects' `database.sqlite`
+             # missing and created by hand. `HEAD`/local `main`/
+             # `origin/main` all agreed exactly at `18ff8bd` (v3-D383) — no
+             # stale-local-`main` trap this run. NOT addressed, named for
+             # next run: every item on v3-D379 through v3-D383's own
+             # condensed list, unchanged and still infra/human-gated
+             # (fold-runner DB adapter + staging deploy; the operational
+             # mailer; Stripe replay fixtures, PAY-1; surah 67's scene
+             # beats, H2; `foilKernels.ts`'s regex gap, v3-D351;
+             # `placement.ts#nextProbe()`'s zero-caller gap). See
+             # DECISIONS.md v3-D384 for the full write-up, including the
+             # ten files this run's candidate sweep read and re-confirmed
+             # correct before landing on this fix.
              # NOTE (v3-D383, 2026-11-07): `App\Billing\WebhookHandler
              # ::onDisputeClosed()`'s "won" branch — the dispute-reinstates-
              # access path (edge case #115) — reinstates `state: Active` but

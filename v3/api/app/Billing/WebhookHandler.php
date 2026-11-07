@@ -261,8 +261,15 @@ class WebhookHandler
         // Full refund. #114: -> lapsed_review_only. The learner's events, atoms and
         // history are NOT touched. "A refund costs less than betraying someone's
         // memorization history" (v3-D16).
+        //
+        // v3-D384: `onSubscriptionDeleted` (the OTHER handler that lands on
+        // this same target state) explicitly clears `grace_until` — this one
+        // must too, or an account refunded while already in a payment-failure
+        // Grace period (which never touches `grace_until` itself) carries a
+        // stale, already-past deadline into its new LapsedReviewOnly row.
         return $this->machine->apply($e, [
             'state' => EntitlementState::LapsedReviewOnly,
+            'grace_until' => null,
         ], EntitlementMachine::CAUSE_WEBHOOK, $now, $id, 'system', null, $createdAt);
     }
 
@@ -298,8 +305,16 @@ class WebhookHandler
 
         // Lost / warning_closed: the money is gone, so access lapses — review-only,
         // indefinitely, data intact.
+        //
+        // v3-D384: same reasoning as the "won" branch's own `grace_until`
+        // clear above, and as `onSubscriptionDeleted`'s — a dispute opened
+        // during an existing payment-failure Grace period never touches
+        // `grace_until` (`onDisputeCreated` writes `state: Grace` only), so a
+        // LOST dispute reaching this branch without clearing it leaves the
+        // identical stale-deadline row the "won" branch was fixed for.
         return $this->machine->apply($e, [
             'state' => EntitlementState::LapsedReviewOnly,
+            'grace_until' => null,
         ], EntitlementMachine::CAUSE_WEBHOOK, $now, $id, 'system', null, $createdAt);
     }
 }

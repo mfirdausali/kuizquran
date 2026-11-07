@@ -169,6 +169,39 @@ class EntitlementStateMachineTest extends TestCase
         $this->assertSame(EntitlementState::LapsedReviewOnly, $e->state);
     }
 
+    /**
+     * v3-D384. `onRefunded`'s full-refund branch reaches the identical target
+     * state (`LapsedReviewOnly`) as `onSubscriptionDeleted`, which explicitly
+     * clears `grace_until` — this branch did not. A real sequence that
+     * reaches this: a failed payment stamps a real `grace_until` (Grace); the
+     * SAME charge (or another of this customer's charges) is later refunded
+     * in full before any `invoice.paid`/`subscription.deleted` event clears
+     * it, landing the account in `LapsedReviewOnly` with the stale timestamp
+     * still attached — the exact admin-surface misreading v3-D383 fixed for
+     * the "won" dispute path.
+     *
+     * MUTATION: delete `'grace_until' => null,` from `onRefunded`'s full-
+     * refund return.
+     */
+    public function test_full_refund_clears_stale_grace_until(): void
+    {
+        $e = $this->entitlement([
+            'state' => EntitlementState::Grace->value,
+            'tier' => EntitlementTier::Lifetime->value,
+            'grace_until' => 1_700_086_400_000,
+        ]);
+
+        $this->handler()->ingest($this->event('evt_5b', 'charge.refunded', [
+            'customer' => $e->provider_customer_id,
+            'amount' => 50000,
+            'amount_refunded' => 50000,
+        ]));
+
+        $e->refresh();
+        $this->assertSame(EntitlementState::LapsedReviewOnly, $e->state);
+        $this->assertNull($e->grace_until, 'grace_until must clear on a full refund, or a later check sees a stale deadline');
+    }
+
     // ───────────────── #114 — a refund NEVER deletes learner data ──────────────
 
     /**
@@ -307,6 +340,31 @@ class EntitlementStateMachineTest extends TestCase
 
         $e->refresh();
         $this->assertSame(EntitlementState::LapsedReviewOnly, $e->state);
+    }
+
+    /**
+     * v3-D384. Same gap as the full-refund one above, on the other handler
+     * that lands on `LapsedReviewOnly`: `onDisputeClosed`'s "lost" branch did
+     * not clear `grace_until` either. A dispute opened while already in a
+     * payment-failure Grace period (`onDisputeCreated` writes `state: Grace`
+     * only, never touching `grace_until`) and later LOST left the stale
+     * timestamp on the resulting lapsed row.
+     *
+     * MUTATION: delete `'grace_until' => null,` from `onDisputeClosed`'s
+     * final (non-"won") return.
+     */
+    public function test_dispute_lost_clears_stale_grace_until(): void
+    {
+        $e = $this->entitlement(['state' => EntitlementState::Grace->value, 'grace_until' => 1_700_086_400_000]);
+
+        $this->handler()->ingest($this->event('evt_9b', 'charge.dispute.closed', [
+            'customer' => $e->provider_customer_id,
+            'status' => 'lost',
+        ]));
+
+        $e->refresh();
+        $this->assertSame(EntitlementState::LapsedReviewOnly, $e->state);
+        $this->assertNull($e->grace_until, 'grace_until must clear on a lost dispute, or a later check sees a stale deadline');
     }
 
     /** #115: do not punish before the verdict. */
