@@ -259,6 +259,43 @@ class EntitlementStateMachineTest extends TestCase
         $this->assertSame(EntitlementState::Active, $e->state, 'winning a dispute must not leave the customer stuck lapsed');
     }
 
+    /**
+     * v3-D383. `onDisputeClosed`'s "won" branch reinstates `state` but was
+     * the ONE path back to Active that never cleared `grace_until` — every
+     * other active-transition (`onCheckoutCompleted`, `onInvoicePaid`,
+     * `onSubscriptionUpdated`'s active branch, and `test_grace_returns_to_
+     * active_on_invoice_paid` above) explicitly sets it null, for exactly
+     * the reason that test states: "grace_until must clear, or a later
+     * check sees a stale deadline." A real sequence that reaches this: a
+     * failed payment moves the account to Grace with a real
+     * `next_payment_attempt` stamped into `grace_until`; a dispute is then
+     * opened (`charge.dispute.created` only ever writes `state: Grace`,
+     * never touching `grace_until`) and later WON. The account is correctly
+     * reinstated to Active, but `grace_until` is left holding that stale,
+     * already-past timestamp — which `GET /api/admin/billing`'s
+     * `BillingAuditPanel.tsx` renders UNCONDITIONALLY ("Grace until: …"),
+     * regardless of `state`, so an operator investigating this exact
+     * dispute sees an Active account that still claims a pending retry.
+     *
+     * MUTATION: delete `'grace_until' => null,` from the "won" branch of
+     * `WebhookHandler::onDisputeClosed`.
+     */
+    public function test_dispute_won_clears_stale_grace_until(): void
+    {
+        // Simulates the realistic path: a payment failure already stamped a
+        // real grace_until before the dispute ever opened.
+        $e = $this->entitlement(['state' => EntitlementState::Grace->value, 'grace_until' => 1_700_086_400_000]);
+
+        $this->handler()->ingest($this->event('evt_8b', 'charge.dispute.closed', [
+            'customer' => $e->provider_customer_id,
+            'status' => 'won',
+        ]));
+
+        $e->refresh();
+        $this->assertSame(EntitlementState::Active, $e->state);
+        $this->assertNull($e->grace_until, 'grace_until must clear on reinstatement, or a later check sees a stale deadline');
+    }
+
     public function test_dispute_lost_lapses(): void
     {
         $e = $this->entitlement(['state' => EntitlementState::Active->value]);

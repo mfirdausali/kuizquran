@@ -284,8 +284,15 @@ class WebhookHandler
         // "stuck lapsed" after winning, which is the exact failure the edge case
         // names. Won means the charge stands, so the entitlement stands.
         if ($status === 'won') {
+            // v3-D383: every OTHER path back to Active
+            // (`onCheckoutCompleted`/`onInvoicePaid`/`onSubscriptionUpdated`'s
+            // active branch) explicitly clears `grace_until` — this one must
+            // too, or a dispute opened during an existing payment-failure
+            // grace period (which never touches `grace_until` itself) leaves
+            // a stale, already-past deadline on a reinstated Active row.
             return $this->machine->apply($e, [
                 'state' => EntitlementState::Active,
+                'grace_until' => null,
             ], EntitlementMachine::CAUSE_WEBHOOK, $now, $id, 'system', null, $createdAt);
         }
 

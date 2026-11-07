@@ -53,10 +53,125 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3193 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3194 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 458 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D382, 2026-11-06)
+             # 255 v2 vitest + 47 v2/api + 459 v3/api + 120 corpus-compiler
+             # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D383, 2026-11-07)
+             # NOTE (v3-D383, 2026-11-07): `App\Billing\WebhookHandler
+             # ::onDisputeClosed()`'s "won" branch — the dispute-reinstates-
+             # access path (edge case #115) — reinstates `state: Active` but
+             # was the ONE path back to Active that never cleared
+             # `grace_until`. Every OTHER active-transition in the same file
+             # (`onCheckoutCompleted`, `onInvoicePaid`,
+             # `onSubscriptionUpdated`'s active branch, and the existing
+             # `test_grace_returns_to_active_on_invoice_paid` test's own
+             # assertion: "grace_until must clear, or a later check sees a
+             # stale deadline") explicitly sets it null on the same
+             # transition. A real, reachable sequence: a failed payment
+             # moves an account to Grace with a genuine
+             # `next_payment_attempt` stamped into `grace_until`
+             # (`onPaymentFailed`); a dispute then opens on top of that
+             # (`onDisputeCreated` writes `state: Grace` only, never
+             # touching `grace_until`) and is later WON. The account is
+             # correctly reinstated to Active, but `grace_until` is left
+             # holding that stale, already-past timestamp —
+             # `BillingAuditPanel.tsx`'s "Grace until" field renders it
+             # UNCONDITIONALLY, regardless of `state`, so an admin
+             # investigating that exact dispute sees an Active account that
+             # still claims a pending payment retry. Found by ranking
+             # `v3/api/app/**` source files by mention count in
+             # DECISIONS.md/CLAUDE.md/HANDOVER.md (v3-D371's own technique)
+             # and reading the near-zero-mention Billing classes
+             # (`PaywallDecision.php`, `StripeSignature.php`,
+             # `TransitionResult.php`) end to end, which led into
+             # `WebhookHandler.php`'s own transition table and a field-by-
+             # field consistency check across its eight handlers — a
+             # decision ("clear grace_until on reinstatement") computed
+             # independently at three call sites and drifted at a fourth,
+             # the same "one decision, several copies" shape this build has
+             # closed before for `gateStateOf`/the v3-D382 stage-word fix
+             # above. Fixed: `onDisputeClosed`'s "won" branch now sets
+             # `'grace_until' => null` alongside `state: Active`, matching
+             # the other three. RED confirmed directly: a new
+             # `EntitlementStateMachineTest::test_dispute_won_clears_stale_
+             # grace_until` case (entitlement seeded in Grace with a real
+             # `grace_until`, then a real `charge.dispute.closed` status=won
+             # event ingested through the real `WebhookHandler::ingest()`)
+             # run against the unmodified source failed exactly as
+             # predicted (`Failed asserting that 1700086400000 is null`);
+             # mutation-verified by reverting `WebhookHandler.php` alone
+             # (`git stash` of that one file, the new test kept) —
+             # reproduced the identical failure; restored byte-identically
+             # (`git stash pop`, `git diff` empty), reran —
+             # `EntitlementStateMachineTest` 20/20 green, was 19 (+1).
+             # `v3/api` PHPUnit: **459 passed** (was 458, +1 exactly), 2
+             # incomplete (PAY-1, unchanged), 6 skipped (unchanged). `TZ=UTC
+             # make test`: **3194 passing** (was 3193, +1; every other
+             # suite unchanged: 255 v2 vitest, 47 v2/api, 120
+             # corpus-compiler, 470 engine, 73 fold-runner, 1770 apps/web).
+             # `check-test-floor.mjs`: OK, 3194 >= floor 1899 (+1295
+             # margin). `TZ=UTC make build`: exit 0, 30 routes, unchanged
+             # (the usual one-time `SecurityFatalError` Next.js CLI nudge on
+             # first invocation, not acted on, plain retry built clean).
+             # `npm run gates`: all green, 351 files, unchanged (294 v1
+             # lines byte-identical; 2/6 UI fonts present,
+             # degraded-but-non-blocking, pre-existing; 362 words; 206
+             # codepoints). `npx tsc --noEmit`: clean. `./vendor/bin/pint
+             # --test`: the WebhookHandler.php findings
+             # (`unary_operator_spaces`/`braces_position`/
+             # `no_unused_imports`/`not_operator_with_successor_space`/
+             # `single_line_empty_body`) are confirmed pre-existing —
+             # identical before and after this diff (stashed this diff
+             # alone and reran pint, same findings); the test file itself
+             # has zero findings. No `v1/**`/`v2/**` edit (`git status
+             # --porcelain -- v1 v2` empty immediately before committing; the
+             # usual stray `v2/tsconfig.tsbuildinfo` build-cache diff
+             # reverted first). No Arabic codepoint, no `\u` escape, no
+             # `fromCharCode`/`fromCodePoint` introduced — the full diff (44
+             # added lines) swept programmatically over the Arabic/Arabic
+             # Supplement/Arabic Extended-A/Presentation-Forms Unicode
+             # blocks: CLEAN, every new string is a PHP identifier or a
+             # fixed English comment/assertion sentence. No oracle/
+             # golden-log/fixture/snapshot regenerated — one existing
+             # production file and one existing test file only.
+             #
+             # Session start: fresh container, no `node_modules`/`vendor`/
+             # compiled corpus anywhere; `v2/api`'s and `v3/api`'s composer
+             # installs, launched in parallel, raced on a shared
+             # `~/.cache/composer/vcs` git-mirror clone directory for
+             # `symfony/routing` and both failed with "already exists and is
+             # not an empty directory" / "repository ... does not exist" —
+             # a new friction, not previously recorded: running two
+             # composer installs concurrently on a fresh cache is unsafe.
+             # Recovered by retrying them SEQUENTIALLY (`v3/api` first, with
+             # the documented `--ignore-platform-req=php` for its PHP
+             # >=8.4.1 requirement against this sandbox's 8.3.6; `v2/api`
+             # second), both clean once serialized. Both API projects'
+             # `database/database.sqlite` was missing on the fresh
+             # checkout (created by hand); `v2/api`'s `.env`/`APP_KEY` were
+             # also missing and generated by hand. `HEAD`, local `main` and
+             # `origin/main` all already agreed exactly at `9168290`
+             # (v3-D382) on a fresh `git fetch` — no stale-local-`main` trap
+             # this run.
+             #
+             # NOT addressed, named for next run: every item on
+             # v3-D379/D380/D381/D382's own condensed list, unchanged and
+             # still infra/human-gated (fold-runner DB adapter + staging
+             # deploy; the operational mailer; Stripe replay fixtures,
+             # PAY-1; surah 67's scene beats, H2; `foilKernels.ts`'s regex
+             # gap, v3-D351; `placement.ts#nextProbe()`'s zero-caller gap).
+             # `PaywallDecision.php`, `StripeSignature.php` and
+             # `TransitionResult.php` are now confirmed correct — remove
+             # them from future low-mention-count sweep candidate lists.
+             # `components/{quiz/ChoiceCard,quiz/LocateChoiceCard,
+             # ui/Button,shell/ServiceWorkerRegistrar,shell/StubNote,
+             # sections/Plan,sections/Pricing}.tsx` (named unread by
+             # v3-D381) were also read this run and are likewise confirmed
+             # correct, no defect — remove them too. The concurrent-
+             # composer-install cache race above is an environment/process
+             # finding for a future run to avoid, not a repo defect — no
+             # fix needed in this codebase. See DECISIONS.md v3-D383 for
+             # the full write-up.
              # NOTE (v3-D382, 2026-11-06): the progress table's `StageBadge`
              # and the macro ring's accessible label could both show, in the
              # SAME glance, "● Not started 25%" — a word and a number telling

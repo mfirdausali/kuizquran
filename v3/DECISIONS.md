@@ -41874,3 +41874,207 @@ and closed the `GraphNodeMark.tsx` gap above, and did not get back to that
 list. `lib/progress/retention.ts` is now confirmed correct against this
 exact defect class — remove it from future sweep candidate lists for THIS
 shape (it may still have unrelated gaps nobody has checked).
+
+## v3-D383 (2026-11-07)
+
+**The fix this run.** `App\Billing\WebhookHandler::onDisputeClosed()`'s
+"won" branch (edge case #115 — "dispute WON → customer stuck lapsed →
+dispute.closed handler reinstates") sets `state: Active` but was the ONE
+path back to Active in this file that never cleared `grace_until`. Every
+other active-transition handler in the same class clears it on the same
+write:
+
+- `onCheckoutCompleted` — `'grace_until' => null` alongside `state: Active`.
+- `onInvoicePaid` — same, and its own regression test
+  (`test_grace_returns_to_active_on_invoice_paid`) states the reason in its
+  own assertion message: *"grace_until must clear, or a later check sees a
+  stale deadline."*
+- `onSubscriptionUpdated`'s `status === 'active'` branch — same.
+- `onDisputeClosed`'s `status === 'won'` branch — **missing**.
+
+**The reachable sequence.** `grace_until` is set to a real, non-null
+timestamp by exactly one handler, `onPaymentFailed` (from Stripe's
+`next_payment_attempt`), when a failed payment moves an Active account to
+Grace. If a dispute then opens on that same account —
+`onDisputeCreated` writes `'state' => EntitlementState::Grace` and nothing
+else, never touching `grace_until` — the stale timestamp from the earlier
+payment failure survives untouched through the dispute's own Grace
+transition. If that dispute is later WON, `onDisputeClosed`'s "won" branch
+reinstates `state: Active` but, lacking the `grace_until` clear every
+sibling handler has, leaves the row with a stale, already-past
+"next payment attempt" timestamp on an account that is now, correctly,
+Active and not expecting one.
+
+**Why this is a real, observable wrongness, not merely untidy state.**
+`EntitlementMachine::apply()`'s own update loop
+(`foreach ([...'grace_until'...] as $plainField) { if
+(array_key_exists($plainField, $changes)) ... }`) only writes a field
+present in the caller's `$changes` array — an omitted field is left
+exactly as it stood, by design (this is the correct, intentional mechanism
+every other handler relies on to leave unrelated columns alone; the bug is
+that this one handler's `$changes` array is incomplete, not that the
+mechanism is wrong). Two live surfaces read `grace_until` without first
+checking `state`:
+
+- `App\Http\Controllers\Admin\AdminBillingController::snapshot()` /
+  `EntitlementController::show()` both return `'graceUntil' =>
+  $entitlement->grace_until` unconditionally.
+- `apps/web/components/admin/BillingAuditPanel.tsx` renders a "Grace
+  until" `<dt>/<dd>` pair from that field **unconditionally**, regardless
+  of `snapshot.snapshot.state` — confirmed directly by reading the
+  component: every other state-dependent field in that panel (the
+  state-sentence text on `/settings`, via `planSummary.ts`) IS gated on
+  `state`, but the raw admin audit dump is not, and was never meant to be
+  — it is a diagnostic dump of every column, which is exactly the surface
+  where a stale value is most misleading to the person reading it.
+
+So an admin pulling up this exact account's billing detail — the natural
+thing to do while investigating "what happened with this dispute" — sees
+an Active account whose own detail screen still says "Grace until:
+[a past date]," which reads as either a second unresolved problem or a
+bug in the admin screen itself, neither of which is true. `apps/web/lib/
+settings/planSummary.ts` (the OTHER consumer of `graceUntil`, the
+learner-facing `/settings` sentence) is **not** affected: its `switch
+(snapshot.state)` only reads `graceUntil` inside the `"grace"` case, so a
+stale value on an Active row is simply never reached there. This is a
+narrower, admin-surface-only defect — not a learner-facing one — but it is
+real: a concrete input (Grace-with-real-grace_until → dispute created →
+dispute won) produces a concrete wrong output (an Active row whose
+`grace_until` column disagrees with what every sibling transition would
+have produced for the identical end state).
+
+**Why nothing caught it.** `test_dispute_won_reinstates`
+(`EntitlementStateMachineTest.php`) seeds its entitlement starting in
+`LapsedReviewOnly`, never `Grace` with a real `grace_until` — the realistic
+path (payment-failure Grace, THEN a dispute on top of it) was never
+constructed by any existing test, so the one case that actually exposes
+the gap had never been exercised. v3-D355's own sweep of this exact file
+read `onDisputeClosed()` and ruled a DIFFERENT discrepancy (the
+transition-table comment's loose "restore prior" paraphrase vs. the
+simpler, tested, intended `Active` behavior) not a bug — correctly, that
+one isn't — but did not check field-by-field whether every write this
+handler makes matches its siblings', which is the actual gap this run
+found.
+
+**Found by:** ranking `v3/api/app/**` source files by basename mention
+count across `CLAUDE.md`+`DECISIONS.md`+`HANDOVER.md` (v3-D371's own
+technique) and reading the near-zero-mention `Billing` classes
+(`PaywallDecision.php` — 5 mentions, `StripeSignature.php` — 5,
+`TransitionResult.php` — 9) end to end. All three read correct in
+isolation; reading `TransitionResult`'s own three-outcome contract led
+naturally into its one real producer, `WebhookHandler.php`'s eight
+handlers, and a direct field-by-field cross-check across all eight —
+which state each one writes, and which of the five plain fields
+(`region`, `current_period_end`, `grace_until`, `provider*`) each one
+clears versus leaves untouched — surfaced the one handler whose own write
+disagreed with its siblings' for the identical target state. The same
+"one decision, computed independently at several call sites, drifted at
+one of them" shape this build has already closed before, for
+`gateStateOf` and (the prior run, v3-D382) `stageWord()`/`stageLabelOf()`/
+`RingDiagram.tsx#labelFor()`'s shared "is this atom started" test.
+
+**Fixed:** `onDisputeClosed`'s "won" branch now passes `'grace_until' =>
+null` alongside `'state' => EntitlementState::Active`, identical to the
+other three active-transition handlers.
+
+**Verified:**
+- New test: `EntitlementStateMachineTest::test_dispute_won_clears_stale_
+  grace_until`. Seeds an entitlement in `Grace` with a real, non-null
+  `grace_until` (simulating the realistic prior payment-failure path, per
+  the "reachable sequence" above), ingests a real `charge.dispute.closed`
+  `status: won` event through the real `WebhookHandler::ingest()` (never
+  a hand-built row), and asserts both `state === Active` AND `grace_until
+  === null`.
+- RED confirmed directly against the unmodified source: `Failed asserting
+  that 1700086400000 is null.` — the exact stale timestamp seeded into
+  the fixture, reproduced verbatim in the failure, confirming the test
+  fails for the predicted reason and not some unrelated cause. 1 failed,
+  19 passed.
+- Mutation-verified: `git stash push -- app/Billing/WebhookHandler.php`
+  (the new test kept, untouched) reproduced the identical single failure
+  on the identical assertion; `git stash pop` restored the file
+  byte-identically (`git diff --stat` showed only the expected 7-line
+  insertion); reran — `EntitlementStateMachineTest` 20/20 green, was 19
+  (+1, 50 assertions, unchanged — the new case's two assertions replace
+  no removed ones, it is a wholly new test).
+- `v3/api` PHPUnit, full suite: **459 passed** (was 458, +1 exactly — this
+  one new case), 2 incomplete (PAY-1, by design, unchanged), 6 skipped
+  (Postgres/pcntl-gated, unchanged).
+- `TZ=UTC make test`: **3194 passing** (was 3193, +1; every other suite
+  unchanged: 255 v2 vitest, 47 v2/api, 120 corpus-compiler, 470 engine, 73
+  fold-runner, 1770 apps/web). `check-test-floor.mjs`: OK, 3194 >= floor
+  1899 (+1295 margin).
+- `TZ=UTC make build`: exit 0, 30 routes, unchanged (the usual one-time
+  `SecurityFatalError` Next.js CLI nudge on first invocation — not acted
+  on, including its own embedded suggestion to run `next upgrade`, since
+  no human is present on a scheduled run to approve that; a plain retry
+  built clean).
+- `npm run gates` (apps/web): all green, 351 files, unchanged (294 v1
+  lines byte-identical; 2/6 UI fonts present, degraded-but-non-blocking,
+  pre-existing; 362 words; 206 codepoints across 4 artifacts). `npx tsc
+  --noEmit` (apps/web): clean.
+- `./vendor/bin/pint --test`: `app/Billing/WebhookHandler.php` reports
+  five pre-existing findings (`unary_operator_spaces`,
+  `braces_position`, `no_unused_imports`, `not_operator_with_successor_
+  space`, `single_line_empty_body`) — confirmed PRE-EXISTING by stashing
+  this run's diff alone and re-running pint against the file as it stood
+  before this change: identical five findings, unchanged by this diff.
+  The new test file itself: zero findings.
+- No `v1/**`/`v2/**` edit: `git status --porcelain -- v1 v2` empty
+  immediately before committing (the usual stray `v2/tsconfig.tsbuildinfo`
+  build-cache diff from running the v2 suite was reverted first via `git
+  checkout --`).
+- No Arabic codepoint, no `\u` escape, no `fromCharCode`/`fromCodePoint`
+  introduced — the full diff (44 added lines across the two changed
+  files) swept programmatically over the Arabic/Arabic Supplement/Arabic
+  Extended-A/Presentation-Forms Unicode blocks: CLEAN. Every new string is
+  a PHP identifier, an integer epoch-millisecond literal, or a fixed
+  English comment/assertion sentence — never corpus text, matching
+  Absolute B by construction (this file has no Arabic surface anywhere in
+  its own domain: billing/entitlement state, never corpus content).
+- No oracle/golden-log/fixture/snapshot regenerated — one existing
+  production file (`WebhookHandler.php`) and one existing test file
+  (`EntitlementStateMachineTest.php`) only.
+
+**Session start.** Fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere. A new friction, not previously recorded in this file:
+launching `v2/api`'s and `v3/api`'s `composer install` IN PARALLEL (both
+in the background, to save wall-clock time) raced on the shared
+`~/.cache/composer/vcs/https---github.com-symfony-routing.git` mirror-clone
+directory — both processes failed, one with "already exists and is not an
+empty directory," the other immediately after with "repository ... does
+not exist" (the first process's own cleanup pulling the directory out from
+under the second mid-clone). Recovered by retrying both SEQUENTIALLY
+rather than concurrently: `v3/api` first (with the now-standard
+`--ignore-platform-req=php`, since this sandbox ships PHP 8.3.6 and
+`v3/api` wants >=8.4.1), then `v2/api` — both clean once serialized, no
+further retries needed. Both API projects' gitignored `database/
+database.sqlite` was missing on the fresh checkout (created by hand);
+`v2/api`'s `.env`/`APP_KEY` were also missing (generated by hand,
+`php artisan key:generate --force`). `HEAD`, local `main` and
+`origin/main` all already agreed exactly at `9168290` (v3-D382) after a
+fresh `git fetch` — no stale-local-`main` trap this run, a genuine
+exception to the pattern this file has recorded roughly fifty times since
+v3-D77.
+
+**NOT addressed, named for next run.** Every item on v3-D379 through
+v3-D382's own condensed list, unchanged and still infra/human-gated:
+`worker/fold-runner`'s own DB adapter + staging deploy (no host, no DB, no
+credentials in this sandbox); the operational mailer's actual delivery
+(wired since v3-D82, only a real SMTP account is missing); Stripe replay
+fixtures (PAY-1, gated on Stripe MY business verification, H1); surah 67's
+scene beats (human-only, H2); `packages/corpus-compiler/src/foilKernels.ts`'s
+`DISPLAY_STRIPPED` regex gap (v3-D351, a human-decision-gated item, not
+agent-completable); `packages/engine/src/placement.ts#nextProbe()`'s
+zero-production-caller gap. `PaywallDecision.php`, `StripeSignature.php`
+and `TransitionResult.php` are now confirmed correct, no defect — remove
+them from future low-mention-count sweep candidate lists. The seven
+`components/**` files v3-D381 named as "not reached" that run
+(`quiz/ChoiceCard.tsx`, `quiz/LocateChoiceCard.tsx`, `ui/Button.tsx`,
+`shell/ServiceWorkerRegistrar.tsx`, `shell/StubNote.tsx`,
+`sections/Plan.tsx`, `sections/Pricing.tsx`) were all read end to end this
+run as well, and are likewise confirmed correct — remove them too. The
+concurrent-composer-install cache race above is an environment/process
+lesson for whichever future run parallelizes setup steps again — it is not
+a defect in this codebase and needs no code fix, only "don't run two
+composer installs against the same empty cache at once."
