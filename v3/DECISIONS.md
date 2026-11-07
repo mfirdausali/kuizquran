@@ -42346,3 +42346,144 @@ correct" above (both directly and via the two sweep forks) should be
 removed from future low-mention-count sweep candidate lists for a
 repeat of the SAME defect-shape check; a fresh read for a genuinely
 different defect shape is still fair game.
+
+## v3-D386 (2026-11-07, nightly) — a tenth fresh-sweep night found no confirmed defect
+
+No code change. This run checked `App\Billing\EntitlementMachine::merge()`
+(the account-adoption path, edge case #113) for a NEW instance of the
+`grace_until`/`current_period_end`-consistency defect SHAPE v3-D383/D384
+fixed in `WebhookHandler.php`: `merge()` picks the winning STATE by
+permissiveness rank (`keep->state->rank() >= absorb->state->rank() ? keep
+: absorb`) but never touches `grace_until`/`current_period_end` at all, so
+a `keep` entitlement sitting in `Grace` with a real, non-null
+`grace_until` (from a prior payment failure) merging with an `absorb`
+entitlement in `Trial` (rank 2 > Grace's rank 1) would land on `state:
+trial` while the stale `grace_until` rides along unchanged —
+`BillingAuditPanel.tsx` renders `graceUntil` unconditionally regardless of
+`state` (confirmed again this run, same line as v3-D383/D384's own
+finding), so an admin would see a "Grace until" date on an account that
+reads `trial`.
+
+**Not fixed — confirmed `EntitlementMachine::merge()` has ZERO production
+callers**, so this is not a live, reachable gap: `grep -rn "merge(\$keep"
+v3/api/app` and `grep -rn "EntitlementMachine::class" v3/api/app` (outside
+its own test file) both return nothing. Read `AuthController::register()`
+directly to confirm why: it claims the SAME user row in place
+("register() claims the CURRENTLY authenticated (anonymous) user... same
+user id, same event history"), never a second row to merge away, and
+`AuthController::login()`'s own docblock states it "does not touch the
+caller's prior identity" — the two never reach `merge()`. This is the
+SAME already-tracked, already-excluded zero-caller gap this file has
+carried since v3-D88..D94/D144/D145 (`grep -c "EntitlementMachine::merge"
+v3/DECISIONS.md` → 242 mentions, all in the standing exclusion list) — the
+BUILD-PLAN M6 "anonymous→account adoption + merge job" `merge()`
+anticipates has never been wired to a real endpoint. Named here as new
+detail on that existing item, not fixed, and not a new item to track
+separately: fixing a function nothing calls would need a synthetic,
+could-never-fail-in-the-wild test to prove RED — exactly the vacuous
+verification this build's own CLAUDE.md warns against. Revisit only once
+a real caller is wired to `merge()`, at which point it needs the same
+`'grace_until' => null`-style carry-through fix `onDisputeClosed`/
+`onRefunded`/`onSubscriptionDeleted` already got in `WebhookHandler.php`.
+
+With that checked, this run read a further batch of files end to end
+looking for a fresh, reachable defect of any shape, not only this one.
+None was found. Read in full and confirmed correct or confirmed
+already-decided:
+
+- `App\Billing\EntitlementMachine::apply()`'s two guards re-read end to
+  end — ordering precedence correctly uses `<` (not `<=`) so same-
+  millisecond provider events are never wrongly refused, matching its own
+  docblock; the optimistic lock re-reads the row inside the transaction
+  before comparing `state_version`. No defect.
+- `current_period_end`'s full wire path end to end
+  (`WebhookHandler::onSubscriptionUpdated` is the ONLY writer, never
+  cleared anywhere → `EntitlementController::show()`/
+  `AdminBillingController::snapshot()` → `BillingAuditPanel.tsx`/
+  `apps/web/lib/settings/planSummary.ts`) — unlike `grace_until`, nothing
+  about a stale `current_period_end` implies a pending action, and the
+  one learner-facing reader (`planSummary.ts`) already gates its render
+  on `state === "active"`. The admin panel's unconditional render of a
+  stale renewal date is not the same wrongness `grace_until`'s stale
+  "pending retry" implication was. Not a defect.
+- `App\Support\NightlyWindowLedger::asOfDate()` + both real callers
+  (`NightlyWindowCommand`, `NightlyWindowController`) re-read against a
+  genuine question raised while reading it: `asOfDate()` uses `gmdate()`
+  (UTC-explicit) but `nights()`'s own calendar-day stepping uses
+  `date('Y-m-d', strtotime($cursor.' +1 day'))`, which is local-timezone
+  by default — a potential daybound-purity-style leak (INVARIANTS.md
+  Absolute A's own concern, applied here to a different file). Checked
+  directly against `vendor/laravel/framework/.../LoadConfiguration.php:47`:
+  `date_default_timezone_set($config->get('app.timezone', 'UTC'))` runs on
+  every boot, and `config('app.timezone')` defaults to `'UTC'`
+  (`config/app.php`) — so `date()`/`strtotime()` run in UTC by construction
+  unless a deployment sets `APP_TIMEZONE` to something else, which would
+  be a deployment misconfiguration, not a code defect. No defect in this
+  codebase as shipped.
+- `v3/api/config/cors.php` — re-confirmed the v3-D378 finding (the vendored
+  `fruitcake/php-cors` echoes back the one configured origin
+  unconditionally, never comparing it to the request's actual `Origin`)
+  is still inert: the requesting BROWSER itself rejects a mismatched
+  `Access-Control-Allow-Origin` echo before letting its own script read
+  the response, and `supports_credentials: false` with Bearer-only auth
+  (never a cookie) means no credential travels automatically on any
+  cross-origin request regardless of what CORS allows. Reconfirmed, not
+  live.
+- `packages/corpus-compiler/src/{sceneBeats,io,report}.ts`'s `TODO:`
+  placeholder scene-beat labels — confirmed this is the deliberate,
+  `content-freeze.mjs`-gated scaffold for H2 (surah 67's human-authored
+  scene beats), not a missed implementation masquerading as a comment.
+
+**Verified.** `TZ=UTC make test`: **3196 passing**, unchanged (255 v2
+vitest, 47 v2/api, 461 v3/api — 2 incomplete PAY-1, 6 skipped — 120
+corpus-compiler, 470 engine, 73 fold-runner, 1770 apps/web) — every suite
+also re-run individually (not only through `make test`) from this fresh
+container, same counts. `check-test-floor.mjs`: OK, 3196 >= floor 1899
+(+1297 margin). `TZ=UTC make build`: exit 0, 30 routes. The Next.js CLI's
+`SecurityFatalError` security-advisory nudge fired NONDETERMINISTICALLY
+this run — three bare, back-to-back `npm run build` invocations in
+`apps/web` with zero source change between them exited 0, then 1, then 0
+— confirmed as environment noise (a flaky network check against npm's
+advisory registry), not a build defect; `make build` itself needed one
+retry to exit 0, consistent with every prior entry's "not acted on, plain
+retry built clean" note, except this run observed the failure can recur
+beyond "the first invocation ever," so a future run should not assume one
+retry is always enough. `npm run gates` (apps/web): all green, 350 files
+(294 v1 lines byte-identical; 2/6 UI fonts present,
+degraded-but-non-blocking, pre-existing; 362 words; 206 codepoints across
+4 artifacts). `npx tsc --noEmit` (apps/web): clean, `Version 5.9.3`. No
+`v1/**`/`v2/**` edit (`git status --porcelain -- v1 v2` empty immediately
+before this entry; the usual stray `v2/tsconfig.tsbuildinfo` build-cache
+diff from running the suites reverted first). No production or test file
+touched this run — documentation only, so no Arabic-codepoint sweep, no
+mutation test, and no oracle/golden-log/fixture/snapshot regeneration are
+applicable.
+
+**Session start.** Fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere. Ran `v3/api`'s composer install alone first (needing
+`--ignore-platform-req=php` — PHP 8.3.6 on this sandbox vs. `v3/api`'s
+`>=8.4.1` requirement) since it hit the documented slow proxy
+git-mirror-clone fallback for its ~111-package tree; `v2/api`'s composer
+install ran after it finished, avoiding the concurrent-install cache race
+v3-D383 named. All five npm installs (`v2`, `corpus-compiler`, `engine`,
+`fold-runner`, `apps/web`) ran in parallel with each other and alongside
+the slow PHP install, since they share no cache with composer or each
+other — cut real wall-clock time versus running everything serially.
+Both API projects' `database/database.sqlite` were missing on the fresh
+checkout and created by hand. `HEAD`/`origin/main` agreed exactly at
+`ecc8e90` (v3-D385) after `git fetch`; local `main` was stale one commit
+behind — the recurring stale-local-`main` trap — caught via `git checkout
+-B main HEAD` before any exploration.
+
+**NOT addressed, named for next run.** Every item on v3-D379 through
+v3-D385's own condensed list, unchanged and still infra/human-gated:
+`worker/fold-runner`'s own DB adapter + staging deploy; the operational
+mailer's actual delivery; Stripe replay fixtures (PAY-1, H1); surah 67's
+scene beats (H2); `foilKernels.ts`'s regex gap (v3-D351);
+`placement.ts#nextProbe()`'s zero-caller gap. `EntitlementMachine::merge()`
+stays on the standing exclusion list, unchanged — the grace_until/
+current_period_end sub-finding above is new detail on that already-
+excluded item, not a new item, and needs no action unless a real caller
+is ever wired to it. The Next.js build's nondeterministic security-nudge
+flakiness (above) is an environment observation for a future run to
+expect, not a repo defect to fix.

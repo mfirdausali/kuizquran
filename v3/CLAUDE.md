@@ -56,7 +56,105 @@ make dev     # SPA :5273, API :8000
 make test    # 3196 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 461 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D385, 2026-11-07)
+             # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D386, 2026-11-07)
+             # NOTE (v3-D386, 2026-11-07): a tenth fresh-sweep night found
+             # no confirmed defect. Checked `EntitlementMachine::merge()`
+             # (edge case #113, account adoption) for a NEW instance of the
+             # grace_until/current_period_end-consistency shape v3-D383/
+             # D384 fixed in `WebhookHandler.php`: `merge()` picks the
+             # winning state by permissiveness rank but never touches
+             # `grace_until`/`current_period_end`, so a `Grace`-state `keep`
+             # row with a real `grace_until` merging into a higher-ranked
+             # `Trial` `absorb` row would leave the stale date on a `trial`
+             # account — `BillingAuditPanel.tsx` renders it unconditionally,
+             # same as v3-D383/D384's own finding. **Not fixed — confirmed
+             # `EntitlementMachine::merge()` has ZERO production callers**
+             # (`grep -rn "merge(\$keep" v3/api/app` and `grep -rn
+             # "EntitlementMachine::class" v3/api/app` both empty outside
+             # its own test file; `AuthController::register()` claims the
+             # SAME user row in place, `login()`'s own docblock says it
+             # "does not touch the caller's prior identity" — neither ever
+             # reaches `merge()`). This is the SAME already-tracked,
+             # already-excluded zero-caller gap carried since v3-D88..D94/
+             # D144/D145 (242 mentions, standing exclusion list) — the
+             # BUILD-PLAN M6 adoption/merge job this function anticipates
+             # was never wired to a real endpoint. New detail on an
+             # existing excluded item, not a new item; revisit only once a
+             # real caller exists, with the same `'grace_until' => null`
+             # carry-through fix `onDisputeClosed`/`onRefunded`/
+             # `onSubscriptionDeleted` already got.
+             #
+             # Also read end to end and confirmed correct/already-decided:
+             # `EntitlementMachine::apply()`'s two guards (ordering
+             # precedence uses `<` not `<=`, ties pass; optimistic lock
+             # re-reads inside the transaction); `current_period_end`'s
+             # full wire path (only ever set, never cleared; the one
+             # learner-facing reader already gates on `state === "active"`,
+             # so a stale admin-panel render carries no "pending action"
+             # implication the way `grace_until` did — not the same
+             # wrongness); `NightlyWindowLedger::asOfDate()`/`nights()`'s
+             # `gmdate()` vs. `date()`/`strtotime()` mix — checked directly
+             # against `vendor/laravel/framework/.../LoadConfiguration
+             # .php:47`, which runs `date_default_timezone_set
+             # ($config->get('app.timezone', 'UTC'))` on every boot, and
+             # `config('app.timezone')` defaults `UTC` — so both run in UTC
+             # by construction absent a deployment misconfiguration, not a
+             # code defect; `config/cors.php`'s v3-D378 finding (the
+             # vendored `fruitcake/php-cors` echoes the one configured
+             # origin unconditionally) reconfirmed still inert — the
+             # requesting browser itself rejects a mismatched ACAO echo,
+             # and Bearer-only auth (no cookie) means no credential travels
+             # automatically cross-origin regardless; `corpus-compiler`'s
+             # `TODO:` scene-beat placeholder labels confirmed deliberate
+             # and gate-enforced (H2), not a missed implementation.
+             #
+             # `TZ=UTC make test`: 3196 passing, unchanged, independently
+             # re-derived from a fresh container — every suite also run
+             # individually, same counts: 255 v2 vitest, 47 v2/api, 461
+             # v3/api, 120 corpus-compiler, 470 engine, 73 fold-runner, 1770
+             # apps/web. `check-test-floor.mjs`: OK, 3196 >= floor 1899
+             # (+1297 margin, unmoved). `TZ=UTC make build`: exit 0, 30
+             # routes. The Next.js CLI's `SecurityFatalError`
+             # security-advisory nudge fired NONDETERMINISTICALLY this run
+             # — three bare, back-to-back `npm run build` invocations with
+             # zero source change between them exited 0, then 1, then 0 —
+             # confirmed as environment noise (a flaky network check
+             # against npm's advisory registry), not a build defect; a
+             # future run should not assume one retry is always enough, as
+             # every prior entry's phrasing implied. `npm run gates`: all
+             # green, 350 files, unchanged (294 v1 lines byte-identical;
+             # 2/6 UI fonts present, degraded-but-non-blocking,
+             # pre-existing; 362 words; 206 codepoints across 4 artifacts).
+             # `npx tsc --noEmit`: clean, `Version 5.9.3`. No `v1/**`/
+             # `v2/**` edit (`git status --porcelain -- v1 v2` empty
+             # immediately before this entry; the usual stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted first).
+             # No production or test file touched this run — documentation
+             # only, so no Arabic-codepoint sweep, no mutation test, and no
+             # oracle/golden-log/fixture/snapshot regeneration are
+             # applicable. Session start: fresh container, no
+             # `node_modules`/`vendor`/compiled corpus anywhere; ran
+             # `v3/api`'s composer install (`--ignore-platform-req=php`,
+             # PHP 8.3.6 here vs. its `>=8.4.1` requirement) alone first
+             # since it hit the documented slow proxy git-mirror fallback,
+             # then `v2/api`'s (avoiding the v3-D383 concurrent-install
+             # cache race), while running all five npm installs in
+             # parallel with each other and with the PHP installs, since
+             # they share no cache — cut real wall-clock time. Both API
+             # projects' `database.sqlite` missing on the fresh checkout,
+             # created by hand. `HEAD`/`origin/main` agreed exactly at
+             # `ecc8e90` (v3-D385) after `git fetch`; local `main` was
+             # stale one commit behind — the recurring stale-local-`main`
+             # trap — caught via `git checkout -B main HEAD` before any
+             # exploration. NOT addressed, named for next run: every item
+             # on v3-D379 through v3-D385's own condensed list, unchanged
+             # and still infra/human-gated (fold-runner DB adapter +
+             # staging deploy; the operational mailer; Stripe replay
+             # fixtures, PAY-1; surah 67's scene beats, H2; `foilKernels.ts`'s
+             # regex gap, v3-D351; `placement.ts#nextProbe()`'s zero-caller
+             # gap). `EntitlementMachine::merge()` stays on the standing
+             # exclusion list, unchanged. See DECISIONS.md v3-D386 for the
+             # full write-up.
              # NOTE (v3-D385, 2026-11-07): a fresh-sweep night found no
              # confirmed defect. `WebhookHandler.php`'s `grace_until`
              # consistency (the shape v3-D383/D384 fixed two nights
