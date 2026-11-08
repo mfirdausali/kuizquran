@@ -42853,3 +42853,172 @@ confirmed correct — remove them from future low-mention-count sweep candidate
 lists. The new `bootstrap/cache`/`storage/*` fresh-checkout friction above is
 an environment/process finding for a future run to expect, not a repo defect
 — no fix needed in this codebase.
+
+---
+
+## v3-D390 (2026-11-08, nightly) — a fourteenth fresh-sweep night found no confirmed defect
+
+A fourteenth consecutive fresh-sweep night found no confirmed defect. Steps
+1-26/29 remain DONE; steps 27/28/30 and PAY-1 remain genuinely blocked on
+human/infra work — none became agent-completable overnight.
+
+**Read in full, found correct.** `packages/engine/src/{corpus,faces}.ts` —
+small, pure primitives (`ayahWords`/`wordGloss`/`distractorsFor`;
+`buildFace`, re-confirmed as the ONE Face constructor, provenance mandatory
+by construction, `resolveRef(corpus, face.from) === face.text` true by
+construction). `packages/engine/src/buildQuestion.ts` end to end, all five
+lane kernels (s1/cloze/junction/locate/reorder): each traced against its own
+documented byte-parity claim; `buildJunction`'s delta-escalation distractor
+search and `buildLocate`/`buildReorder`'s deliberate "never crash, never
+fabricate, decline to build" null contracts both hold exactly as their own
+header comments describe. `packages/engine/src/{strength,options}.ts` —
+`retrievability`/`currentStrength`/`halfLifeDays` checked against their own
+stated formulas (including the `lastRetrieval === null` short-circuit
+bypassing decay entirely, matching `currentStrength`'s identical branch);
+`options()`'s band thresholds match the PRD table. `packages/engine/src
+/variant.ts` (252 lines, the admit() 4-clause admissibility predicate read
+in full for the first time as its own file, not only as a callee) —
+`buildResourceLedger`, `hasSupply`, `optionsDistinct` (correctly stricter for
+cloze/junction via `normalizeArabicSurface`, identity for s1 since gloss
+options are already deduped by construction at build time), and clause 3's
+"keep the first occurrence by position, drop the rest" collision rule in
+`admit()` were each traced against WIREFRAME §23 Q4's own four clauses and
+match exactly; junction's own width-escalation fallback ladder (1→3→5→8
+words) "never drop the seam" guarantee holds, returning the widest attempt
+even when it still collides. `packages/engine/src/site.ts` —
+`siteKey`/`siteToAtomKey`/`expand`/`nextVisitOrdinal`; `expand()`'s own
+seam-never-constructed-at-`to` loop was re-confirmed, directly, as E-08's
+actual mechanism (not merely cited as such elsewhere). `api/config
+/{sanctum,events,admin,corpus}.php` + `config/mail.php`'s default +
+`routes/web.php` — all either stock Laravel or already-documented app
+policy with no drift from what every call site already assumes
+(`admin.php`'s empty-allowlist-fails-closed, `events.php`'s
+log-only-then-enforced cap, `mail.php`'s `log` default matching the
+"operational mailer wired, SMTP creds just missing" story). `api/app/Http
+/Controllers/Admin/Pseudonymizer.php` — the HMAC construction itself, not
+merely its many callers: fails closed (`RuntimeException`) on an unset
+pepper, a real `hash_hmac('sha256', ...)` under that pepper, truncated to 12
+hex chars with a `u_` prefix — never a raw, reversible digest of the
+integer id. `worker/fold-runner/bin/fold-determinism-check.ts` read as its
+own file for the first time (previously cross-referenced only by concept)
+— the stdin/`--fixture` contract, and both "refuse to report green over
+zero comparisons" guards (an empty sample array, and separately a nonempty
+sample set that nonetheless compares zero atoms) are real, load-bearing
+checks, not decorative ones. `worker/fold-runner/src/{foldCheck,
+determinism}.ts` re-read end to end with a specific question each prior
+read had not asked explicitly: does `compareAtomCaches`'s key-union
+comparison catch a divergence in EITHER direction (a key stale only in the
+live cache, or only in the fresh fold)? Yes — `keys = new Set([...a.keys(),
+...b.keys()])` with `!av || !bv || !atomsEqual(av,bv)` covers both. And does
+`atomsEqual`'s per-field `===` compare risk a false divergence on a nested
+array/object compared by reference? Checked directly against `AtomState`'s
+real shape in `atom.ts`: every field is a primitive (`number`/`boolean`/
+`number|null`) — the "flat, JSON-safe shape" the comment claims is true, not
+assumed. `apps/web/app/layout.tsx` (root) + `app/(app)/layout.tsx` +
+`app/(admin)/layout.tsx` + `app/(onboarding)/layout.tsx` — each layout's own
+claims (stylesheet import order, the Amiri preload, `dir="ltr" lang="en"`
+on the document with Arabic as an RTL island, and "reads no IndexedDB, no
+edge-case-#72 zero-flash risk") checked directly against the actual source,
+not merely summarized from memory. `apps/web/lib/cn.ts` — eight lines,
+correct.
+
+**A systematic re-check, not a new ad-hoc read.** v3-D387 claimed the
+"model's own docblock claims append-only/immutable but carries no
+`booted()` guard" defect class (closed across nine instances at v3-D372/
+373/374/377/381) is "genuinely exhausted." This run re-derived that claim
+independently rather than trusting the historical record: grepped all 20
+`api/app/Models/*.php` files for "append-only"/"immutable" (case-insensitive)
+and, separately, a broader phrasing sweep ("never (updated|deleted|mutated|
+edited|changes)", "cannot be (edited|updated|deleted|changed)",
+"read-only", "one-way", "no update"), then cross-checked `booted()` guard
+presence on every hit. Ten hits on the narrow phrasing, all ten already
+guarded (`AdminAudit`, `AyahVerification`, `EntitlementTransition`, `Event`,
+`FlagRampAudit`, `GlossDraftReview`, `NightlyCheckRun`, `Override`,
+`PurgeLedgerEntry`, `Spec` — plus a `User.php` false positive, below). Two
+hits on the broader phrasing, both already-guarded subsets of the same ten
+(`EntitlementTransition`, `Event`). **One near-miss investigated directly,
+not assumed away:** `User.php`'s own docblock on its `events()` relation
+reads "Append-only; nothing here ever deletes it" — grep-matched on
+"append-only," no `booted()` guard on `User` itself. Read in context: the
+sentence describes the RELATED `Event` model (already guarded since
+v3-D372), not `User` — `User` rows are genuinely, legitimately mutable
+(email, password, etc.) and the docblock never claims otherwise. False
+positive, not a tenth instance. **The exhaustion claim holds**, now
+independently re-derived rather than merely carried forward. A second,
+unrelated mechanical sweep: every non-test `.ts`/`.tsx` file under
+`apps/web/lib`, `apps/web/components`, `packages/engine/src`,
+`packages/corpus-compiler/src`, `worker/fold-runner/src`, and every `.php`
+file under `api/app`, grepped for loose `==` (excluding `===`/`!==`/`>=`/
+`<=`). Four hits, all the already-intentional `== null` idiom in
+`lib/sync/{outbox,merge}.ts` and `corpus-compiler/src/hash.ts` (catching
+both `null` and `undefined` by design, matching `lib/idb/schema.ts`'s own
+documented convention); zero hits anywhere in `api/app`.
+
+**Verified.** `TZ=UTC make test`: **3196 passing**, unchanged, independently
+re-derived from a fresh container — every suite run individually first
+(engine 470, corpus-compiler 120, fold-runner 73, v2 vitest 255, v2/api
+PHPUnit 47, v3/api PHPUnit 469 total/6 skipped/2 incomplete = 461, apps/web
+vitest 1770) and then again together via the real `make test` invocation,
+same counts both times. `check-test-floor.mjs` (invoked by `make test`
+itself against that exact run's own log, v3-D95's own discipline): OK, 3196
+>= floor 1899 (+1297 margin, unmoved). `TZ=UTC make build`: the Next.js
+CLI's `SecurityFatalError` security-advisory nudge fired on the first
+invocation (exit 1) — noted here, as its own on-screen text asks, but NOT
+acted on: upgrading the pinned Next.js major is a framework-version product
+decision outside this run's mandate, the same call every prior night
+recording this same nudge has made; a plain retry built clean, exit 0, the
+usual 30 page routes, unchanged — no frontend surface touched this run.
+`npm run gates` (apps/web): all green, 351 files, unchanged (294 v1 lines
+byte-identical, 1 documented hunk; 2/6 UI fonts present,
+degraded-but-non-blocking, pre-existing; 362 words; 206 codepoints across 4
+artifacts). `npx tsc --noEmit` (apps/web): clean, exit 0. No PHP file was
+edited this run (every PHP file above was read only, never changed), so
+`./vendor/bin/pint --test` has no diff to check. No `v1/**`/`v2/**` edit
+(`git status --porcelain -- v1 v2` empty immediately before this entry; the
+usual stray `v2/tsconfig.tsbuildinfo` build-cache diff from running the
+suites reverted first). No production or test file touched this run —
+documentation only, so no Arabic-codepoint sweep, no mutation test, and no
+oracle/golden-log/fixture/snapshot regeneration are applicable.
+
+**Session start.** Fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere. `HEAD` was already sitting exactly at `origin/main`'s real
+tip (`3b95c32`, v3-D389) after `git fetch`, but in DETACHED state, with
+local `main` stale five commits behind at `18ff8bd` (v3-D383) — the
+recurring stale-local-`main` trap this file has recorded roughly fifty
+times since v3-D77 — caught via `git checkout -B main HEAD` before any
+exploration. `v3/api`'s composer install (`--ignore-platform-req=php`, PHP
+8.3.6 here vs. its `>=8.4.1` requirement) ran first, launched alongside all
+five npm installs (which share no cache with it or with each other), and
+finished clean WITHOUT needing `bootstrap/cache`/`storage/framework/*`
+created by hand this time — checked WHY, rather than shrugging it off as
+luck: `v3/api/bootstrap/cache` already carries a tracked `.gitignore` file,
+so the directory itself survives a fresh checkout (`git status --porcelain
+bootstrap storage` showed it clean, already present); `v2/api` carries no
+such tracked file in that directory, so its `bootstrap/cache`/
+`storage/framework/{cache,sessions,views}`/`storage/logs` were created by
+hand BEFORE its own composer install this run, pre-empting the exact
+`package:discover` failure v3-D389 hit the hard way the previous night.
+`v2/api`'s composer install ran sequentially after `v3/api`'s, per the
+standing recommendation to avoid the shared `~/.cache/composer/vcs`
+mirror-clone race. Both API projects' `.env`/`APP_KEY`/`database.sqlite`
+were missing on the fresh checkout and created/generated by hand, as every
+recent entry also records.
+
+**NOT addressed, named for next run.** Every item on v3-D379 through
+v3-D389's own condensed list, unchanged and still infra/human-gated:
+`worker/fold-runner`'s own DB adapter + staging deploy; the operational
+mailer's actual delivery; Stripe replay fixtures (PAY-1, H1); surah 67's
+scene beats (H2); `foilKernels.ts`'s regex gap (v3-D351);
+`placement.ts#nextProbe()`'s zero-caller gap; `EntitlementMachine::merge()`'s
+standing zero-caller exclusion; `lib/entitlement/gate.ts#permitsIssuance()`'s
+own unwired-by-design gap (v3-D88); `TrialAttribution`'s standing open
+product-decision gap (v3-D91/D148). `corpus.ts`/`faces.ts`/
+`buildQuestion.ts`/`strength.ts`/`options.ts`/`variant.ts`/`site.ts`,
+`Pseudonymizer.php`, `fold-determinism-check.ts`, the four route-group
+layout files and `lib/cn.ts` are now confirmed correct — remove them from
+future low-mention-count sweep candidate lists. The append-only-guard defect
+class is reconfirmed genuinely exhausted, independently re-derived rather
+than merely trusted — a future run should stop re-grepping for it as a
+sweep technique and look for a different cross-cutting pattern instead (this
+run's `==`-vs-`===` mechanical sweep is one candidate shape; it came back
+clean this time but is cheap enough to re-run after any future diff).
