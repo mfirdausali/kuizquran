@@ -56,7 +56,119 @@ make dev     # SPA :5273, API :8000
 make test    # 3196 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 461 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D388, 2026-11-08)
+             # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D389, 2026-11-08)
+             # NOTE (v3-D389, 2026-11-08): a thirteenth fresh-sweep night
+             # found no confirmed defect. Read in full and found correct:
+             # `components/progress/ProgressTable.tsx` +
+             # `lib/progress/rows.ts` end to end (the `timeOnTaskMs` ayah-vs-
+             # connection event filter, `stageWord`/`gateStateOf`/`nextWord`,
+             # the `expand()`-order default sort and its stable tiebreak —
+             # all correct; the ayah-kind filter's theoretical double-count
+             # of a stray `connection_born` event sharing an ayah number is
+             # inert, since `chain_step`/`junction_result`/`connection_born`
+             # are never emitted by the real session loop in production,
+             # the same already-ratified `bridge.ts` attic architecture
+             # v3-D370 already named — not a fresh gap); `CorpusAyahHash.php`
+             # (plain current-state mirror, no logic surface);
+             # `Http/Controllers/Billing/StripeWebhookController.php` (fails
+             # closed on an unconfigured secret, verifies the RAW body
+             # before parsing, 200s every outcome including duplicates so
+             # Stripe never retries a correctly-handled event);
+             # `components/quiz/SequenceFillCard.tsx` (the #80 bidi
+             # isolation and #81 logical-vs-visual cursor discipline both
+             # hold; no visual-index arithmetic anywhere in the file, as its
+             # own header claims); the four read-only workbench diagnostic
+             # panes `{LookAlikes,SceneBeats,DistractorYield,GeneratedFrom}
+             # Panel.tsx` (each per-ayah or surah-level filtered, no write
+             # path, every rendered string an integer, a fixed English
+             # label or a compiler-recorded path/hash — never Arabic);
+             # `Flags/FlagRegistry.php` (the closed-registry throw on an
+             # unknown key, every flag defaulting `false`); `Billing
+             # /EntitlementTier.php` (the `max(tier)` ladder).
+             #
+             # One candidate investigated closely and ruled a
+             # non-finding, already standing, not new: `App\Billing
+             # \TrialAttribution` (`TrialAttribution::apply()`/`recompute()`)
+             # was re-confirmed to still have ZERO production callers
+             # anywhere outside its own tests (`grep -rn "TrialAttribution\b"
+             # --include=*.php .` across the whole `v3/api` tree, excluding
+             # vendor, found only its own class file, `PaywallGate.php`'s
+             # own explanatory comment at line 81, and three test files) —
+             # so `Entitlement.trial_started_at` is still never stamped in a
+             # running app, and `PaywallGate::permitsIssuance()`'s 14-day
+             # trial-expiry branch (v3-D07's "other half") is still
+             # unreachable in production; `PaywallBoundaryTest.php`'s own
+             # `test_trial_denies_even_the_trial_surah_once_the_day_limit_
+             # elapses` hand-seeds `trial_started_at` directly on the
+             # `Entitlement` factory row rather than driving it through any
+             # real wiring, which is exactly how the gap stays invisible to
+             # the suite. This is DECISIONS.md v3-D91 (2026-08-15),
+             # reconfirmed open at v3-D148 and re-affirmed on every
+             # standing "NOT addressed" list since (most recently v3-D388)
+             # — a deliberate stop-and-report, not a mechanical wiring
+             # fix: `TrialAttribution`'s own mechanism keys off a
+             # `surah_started` event type and a `spec_snapshot.
+             # trialSurahSource` flag that do not exist in the frozen wire
+             # (`packages/engine/src/types.ts`'s closed `EventType` union
+             # has no `surah_started` member), so wiring it needs a real
+             # product decision (extend the frozen wire vs. derive the
+             # signal from the existing `session_start` event's own
+             # `surah` field) that only Firdaus can make — not a fresh
+             # finding, and NOT fixed this run either, per v3-D91's own
+             # instruction not to guess at the resolution. Left exactly as
+             # found.
+             #
+             # `TZ=UTC make test`: 3196 passing, unchanged, independently
+             # re-derived from a fresh container — every suite also run
+             # individually, same counts as above. `check-test-floor.mjs`:
+             # OK, 3196 >= floor 1899 (+1297 margin, unmoved). `TZ=UTC make
+             # build`: exit 0, 30 routes (unchanged — no frontend surface
+             # touched this run). `npm run gates`: all green, unchanged.
+             # `npx tsc --noEmit`: clean. No PHP file changed in substance
+             # (only read, never edited), so `pint` was not run against any
+             # diff — there is none. No `v1/**`/`v2/**` edit (`git status
+             # --porcelain -- v1 v2` empty immediately before this entry).
+             # No production or test file touched this run — documentation
+             # only, so no Arabic-codepoint sweep, no mutation test, and no
+             # oracle/golden-log/fixture/snapshot regeneration are
+             # applicable.
+             #
+             # Session start: fresh container, no `node_modules`/`vendor`/
+             # compiled corpus anywhere; `HEAD` was detached exactly at
+             # `origin/main`'s real tip (`3b4dbef`, v3-D388), local `main`
+             # stale at `18ff8bd` (v3-D383) — the recurring stale-local-
+             # `main` trap — caught via `git checkout -B main HEAD` before
+             # any exploration. `v3/api`'s composer install
+             # (`--ignore-platform-req=php`, PHP 8.3.6 here vs. its
+             # `>=8.4.1` requirement) ran first and finished clean; `v2/api`'s
+             # ran sequentially after it rather than concurrently (v3-D383's
+             # own recommendation) and needed `bootstrap/cache`+`storage/
+             # framework/{cache,sessions,views}`+`storage/logs` created by
+             # hand before `composer install`'s `package:discover` step
+             # would run — a new, previously-unrecorded friction (prior
+             # runs' fresh checkouts apparently already had these
+             # directories, or hit it and didn't name it) — followed by a
+             # plain `composer dump-autoload`, no reinstall needed. Both API
+             # projects' `.env`/`APP_KEY`/`database.sqlite` were missing and
+             # created/generated by hand. All five npm installs ran in
+             # parallel with each other and with the PHP installs.
+             #
+             # NOT addressed, named for next run: every item on v3-D379
+             # through v3-D388's own condensed list, unchanged and still
+             # infra/human-gated (fold-runner DB adapter + staging deploy;
+             # the operational mailer; Stripe replay fixtures, PAY-1;
+             # surah 67's scene beats, H2; `foilKernels.ts`'s regex gap,
+             # v3-D351; `placement.ts#nextProbe()`'s zero-caller gap;
+             # `EntitlementMachine::merge()`'s standing zero-caller
+             # exclusion; `permitsIssuance()`'s unwired-by-design gap,
+             # v3-D88; `TrialAttribution`'s standing open product-decision
+             # gap, v3-D91/D148, reconfirmed above, unchanged). The
+             # `ProgressTable.tsx`+`rows.ts`, `CorpusAyahHash.php`,
+             # `StripeWebhookController.php`, `SequenceFillCard.tsx`, the
+             # four workbench diagnostic panes, `FlagRegistry.php` and
+             # `EntitlementTier.php` named above are now confirmed correct
+             # — remove them from future low-mention-count sweep candidate
+             # lists.
              # NOTE (v3-D388, 2026-11-08): a twelfth fresh-sweep night found
              # no confirmed defect. Read in full and found correct:
              # `components/plan/{PlanCalendar,PlanIsland}.tsx` +

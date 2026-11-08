@@ -42717,3 +42717,139 @@ reconfirmed an already-accepted design choice (v3-D153/v3-D194) — remove it
 from future sweep candidate lists; it needs a human product decision
 (structural flush-or-block vs. the current warn-first posture) if it is
 ever revisited, not an agent guess.
+
+---
+
+## v3-D389 (2026-11-08, nightly) — a thirteenth fresh-sweep night found no confirmed defect
+
+A thirteenth consecutive fresh-sweep night found no confirmed defect. Read in
+full and found correct, no defect: `components/progress/ProgressTable.tsx` +
+`lib/progress/rows.ts` end to end — the `timeOnTaskMs` ayah-vs-connection
+event filter, `stageWord()`/`gateStateOf()`/`nextWord()`, the `expand()`-order
+default sort and its stable original-index tiebreak, `seamText`/`ayahText`'s
+corpus-at-runtime-only text, and `filterRows`'s deliberate exclusion of the
+Arabic field from search all match their own doc comments exactly. One
+candidate considered and ruled inert, not a defect: the ayah-kind branch of
+`timeOnTaskMs`'s event filter (`e.ayah === ref && e.type !== "junction_result"
+&& e.stepKind !== "junction"`) does not also exclude a `connection_born` event
+sharing the same ayah number, so such an event would in principle be
+double-counted into both an ayah's and its outgoing connection's time-on-task.
+This is unreachable today: `chain_step`/`junction_result`/`connection_born`
+are never emitted by the real session loop in production — the deliberately
+ratified `bridge.ts`-atticked architecture `run.ts`'s own comments name in
+three places and v3-D370 already documented — so there is no live caller that
+can trigger it. `api/app/Models/CorpusAyahHash.php` (a plain current-state
+Eloquent mirror with no logic surface);
+`api/app/Http/Controllers/Billing/StripeWebhookController.php` (fails CLOSED
+on an unconfigured webhook secret, verifies the Stripe signature against the
+RAW request body via `$request->getContent()` before any JSON parsing — never
+the re-encoded form, which would break the HMAC — and returns 200 for every
+outcome including duplicates/stale events so Stripe never retries a
+correctly-handled event); `components/quiz/SequenceFillCard.tsx` (the #80
+bidi-isolation discipline and the #81 logical-vs-visual cursor discipline both
+hold throughout; confirmed no visual-index arithmetic — `getBoundingClientRect`,
+`childNodes` order, click coordinates — appears anywhere in the file, exactly
+as its own header claims); the four read-only workbench diagnostic panes
+`{LookAlikes,SceneBeats,DistractorYield,GeneratedFrom}Panel.tsx` (each
+correctly per-ayah- or surah-level-filtered, writes nothing, and every
+rendered string is an integer, a fixed English label, a file path or a
+compiler-recorded content hash — never Quranic Arabic);
+`api/app/Flags/FlagRegistry.php` (the closed registry throws on an unknown
+key rather than defaulting permissive, and every declared flag defaults
+`false`); `api/app/Billing/EntitlementTier.php` (the `max(tier)` ladder for
+edge case #113's merge rule).
+
+**One candidate investigated closely and ruled a non-finding, already
+standing, not new.** The low-mention-count sweep technique (ranking files by
+basename-mention-count across CLAUDE.md/DECISIONS.md/HANDOVER.md/DEFECTS.md,
+v3-D371's own method) surfaced `App\Billing\TrialAttribution` again. Verified
+directly, independent of trusting the historical record: `grep -rn
+"TrialAttribution\b" --include=*.php .` across the whole `v3/api` tree
+(excluding `vendor/`) returns only the class's own file, a single explanatory
+comment at `PaywallGate.php:81`, and three test files
+(`PaywallBoundaryTest.php`, `TrialAttributionTest.php`,
+`EntitlementBoundaryTest.php`'s own file-path allowlist) — zero controllers,
+console commands, listeners, or jobs call `TrialAttribution::apply()` or
+`recompute()` anywhere (there is in fact no `app/Console/Commands` entry, no
+`Listeners`/`Jobs` directory at all, and `EventsController::store()` — the
+one place that already runs an equivalent synchronous post-write side effect,
+`AtomCacheRebuilder::rebuildOne()`, matching v3-D81's/v3-D85's precedent —
+does not call it either). So `Entitlement.trial_started_at` is still never
+stamped by a running app, and `PaywallGate::permitsIssuance()`'s 14-day
+trial-expiry branch (v3-D07's "one surah, OR 14 days" — the day half) stays
+unreachable in production: a learner who never leaves their one trial surah
+gets it for free indefinitely, never hitting a day-based cutoff.
+`PaywallBoundaryTest::test_trial_denies_even_the_trial_surah_once_the_day_
+limit_elapses` hand-seeds `trial_started_at` directly on the `Entitlement`
+factory row rather than driving it through any real wiring — exactly how this
+stays invisible to the suite, the same "verification that runs on the
+author's machine is not verification" shape CLAUDE.md already names several
+times over. **This is not a fresh finding.** It is DECISIONS.md v3-D91
+(2026-08-15, "Adjacent finding, explicitly NOT touched"), reconfirmed open at
+v3-D148, and re-affirmed on every standing "NOT addressed" condensed list
+since (most recently v3-D388's own list by inheritance from v3-D379..D387).
+v3-D91's own write-up is explicit about why this is a stop-and-report rather
+than a mechanical wiring commit: `TrialAttribution`'s mechanism keys off a
+`surah_started` event type and a `spec_snapshot.trialSurahSource` flag,
+neither of which exists in the frozen wire — `packages/engine/src/types.ts`'s
+closed `EventType` union has no `surah_started` member, only `session_start`
+— and CLAUDE.md's own rule is that the wire freezes once, complete, because
+three consumers read it. Wiring this needs a real product decision (extend
+the frozen wire vs. derive the "first learner-chosen surah" signal from the
+existing `session_start` event's own `surah` field, which is not obviously
+equivalent) that only Firdaus can make. Re-verified the standing facts
+directly rather than trusting the historical record, found them unchanged,
+and left it exactly as found — not fixed, not re-litigated, per v3-D91's own
+instruction not to guess at the resolution.
+
+`TZ=UTC make test`: **3196 passing**, unchanged, independently re-derived
+from a fresh container — every suite also run individually, same counts: 255
+v2 vitest, 47 v2/api, 461 v3/api (2 incomplete, 6 skipped), 120
+corpus-compiler, 470 engine, 73 fold-runner, 1770 apps/web.
+`check-test-floor.mjs`: OK, 3196 >= floor 1899 (+1297 margin, unmoved).
+`TZ=UTC make build`: exit 0, 30 routes, unchanged — no frontend surface
+touched this run. `npm run gates`: all green, unchanged (294 v1 lines
+byte-identical; 350 files; fonts 2/6 present, degraded-but-non-blocking,
+pre-existing; corpus-morphology OK; corpus-glyphs OK, 206 codepoints across 4
+artifacts). `npx tsc --noEmit`: clean, apps/web. No PHP file was edited this
+run (every PHP file above was read only, never changed), so `./vendor/bin/pint
+--test` has no diff to check. No `v1/**`/`v2/**` edit (`git status
+--porcelain -- v1 v2` empty immediately before this entry). No production or
+test file touched this run — documentation only, so no Arabic-codepoint
+sweep, no mutation test, and no oracle/golden-log/fixture/snapshot
+regeneration are applicable.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled corpus
+anywhere; `HEAD` was detached exactly at `origin/main`'s real tip (`3b4dbef`,
+v3-D388) after `git fetch`, local `main` stale at `18ff8bd` (v3-D383) — the
+recurring stale-local-`main` trap — caught via `git checkout -B main HEAD`
+before any exploration. `v3/api`'s composer install
+(`--ignore-platform-req=php`, PHP 8.3.6 here vs. its `>=8.4.1` requirement)
+ran first, launched alongside all five npm installs (which share no cache
+with it or with each other), and finished clean; `v2/api`'s composer install
+ran sequentially AFTER it rather than concurrently, per v3-D383's own
+recommendation to avoid the shared `~/.cache/composer/vcs` mirror-clone race.
+A new, previously-unrecorded friction: `v2/api`'s composer install's own
+`package:discover` post-autoload-dump step failed outright
+("`bootstrap/cache` directory must be present and writable") because
+`bootstrap/cache`, `storage/framework/{cache,sessions,views}` and
+`storage/logs` did not exist on this fresh checkout — created by hand, then a
+plain `composer dump-autoload` completed it; no reinstall was needed. Both
+API projects' `.env`/`APP_KEY`/`database.sqlite` were missing on the fresh
+checkout and created/generated by hand, as every recent entry also records.
+
+**NOT addressed, named for next run:** every item on v3-D379 through
+v3-D388's own condensed list, unchanged and still infra/human-gated
+(fold-runner DB adapter + staging deploy; the operational mailer; Stripe
+replay fixtures, PAY-1; surah 67's scene beats, H2; `foilKernels.ts`'s regex
+gap, v3-D351; `placement.ts#nextProbe()`'s zero-caller gap;
+`EntitlementMachine::merge()`'s standing zero-caller exclusion;
+`permitsIssuance()`'s unwired-by-design gap, v3-D88; `TrialAttribution`'s
+standing open product-decision gap, v3-D91/D148, reconfirmed above and still
+unchanged). `ProgressTable.tsx`+`rows.ts`, `CorpusAyahHash.php`,
+`StripeWebhookController.php`, `SequenceFillCard.tsx`, the four workbench
+diagnostic panes, `FlagRegistry.php` and `EntitlementTier.php` are now
+confirmed correct — remove them from future low-mention-count sweep candidate
+lists. The new `bootstrap/cache`/`storage/*` fresh-checkout friction above is
+an environment/process finding for a future run to expect, not a repo defect
+— no fix needed in this codebase.
