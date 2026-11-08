@@ -56,7 +56,65 @@ make dev     # SPA :5273, API :8000
 make test    # 3196 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 461 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D387, 2026-11-08)
+             # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D388, 2026-11-08)
+             # NOTE (v3-D388, 2026-11-08): a twelfth fresh-sweep night found
+             # no confirmed defect. Read in full and found correct:
+             # `components/plan/{PlanCalendar,PlanIsland}.tsx` +
+             # `lib/plan/forecast.ts` + `lib/plan/awayDay.ts` +
+             # `packages/engine/src/awayDays.ts` (the offset vs. absolute
+             # calendar-day-index round trip holds for any integer offset,
+             # confirmed algebraically — no drift between "which day is
+             # away" and "which day is shown"); `OnboardingFlow.tsx`;
+             # `MacroPanelIsland.tsx`+`useLogState.ts`+`state.ts` (the
+             # cross-surah `getAllEvents()` scope is harmless by
+             # construction); `DeviceReset.tsx`; `MySurahs.tsx`;
+             # `{PlanPanel,AccountAuthPanel}.tsx`+`lib/account/auth.ts`+
+             # `lib/settings/anchorHour.ts`+`SettingsController.php`+
+             # `daybound.ts#anchorTime()`; `EntitlementMachine.php` re-read
+             # for a field other than grace_until/current_period_end — none
+             # found; `merge()` reconfirmed zero production callers. One
+             # candidate investigated closely and ruled a non-finding:
+             # `AccountAuthPanel.tsx`'s "does not merge" copy vs.
+             # `outbox.ts#selectPending()`'s identity-independent
+             # `deviceId` scope — a device with genuinely unsynced events,
+             # signed into a DIFFERENT account before the outbox drains,
+             # would push those events under the new account. This is
+             # ALREADY documented and deliberately accepted
+             # (`AuthController::login()`'s own docblock; v3-D194's
+             # `hasHistory`-warning mitigation), not a new defect — see
+             # DECISIONS.md v3-D388 for the full write-up and why this was
+             # not re-opened. `TZ=UTC make test`: 3196 passing, unchanged,
+             # independently re-derived from a fresh container — every
+             # suite also run individually, same counts as above.
+             # `check-test-floor.mjs`: OK, 3196 >= floor 1899 (+1297
+             # margin, unmoved). `TZ=UTC make build`: the usual one-time
+             # `SecurityFatalError` CLI nudge fired on the first
+             # invocation, not acted on; a plain retry built clean, exit 0,
+             # 30 routes. `npm run gates`: all green, 350 files, unchanged.
+             # `npx tsc --noEmit`: clean. No PHP file changed, so `pint`
+             # was not applicable. No `v1/**`/`v2/**` edit (the usual stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted first).
+             # No production or test file touched this run — documentation
+             # only, so no Arabic-codepoint sweep, mutation test, or
+             # oracle/golden-log/fixture/snapshot regeneration applies.
+             # Session start: fresh container; `HEAD` was detached exactly
+             # at `origin/main`'s real tip (`d252cb5`, v3-D387), local
+             # `main` stale one commit behind at `18ff8bd` (v3-D383) — the
+             # recurring stale-local-`main` trap — caught via `git
+             # checkout -B main HEAD` before any exploration. `v2/api` and
+             # `v3/api` composer installs ran CONCURRENTLY this run (the
+             # same shape v3-D383 found a cache race on) and both finished
+             # clean with no race — cache-state-dependent luck, not a
+             # structural fix; still prefer serializing them. NOT
+             # addressed, named for next run: every item on v3-D379
+             # through v3-D387's own condensed list, unchanged and still
+             # infra/human-gated (fold-runner DB adapter + staging deploy;
+             # the operational mailer; Stripe replay fixtures, PAY-1;
+             # surah 67's scene beats, H2; `foilKernels.ts`'s regex gap,
+             # v3-D351; `placement.ts#nextProbe()`'s zero-caller gap;
+             # `EntitlementMachine::merge()`'s standing zero-caller
+             # exclusion; `permitsIssuance()`'s unwired-by-design gap,
+             # v3-D88).
              # NOTE (v3-D387, 2026-11-08): an eleventh fresh-sweep night
              # found no confirmed defect. Read in full and found correct:
              # `AdminUsersController.php`/`StripeSettingsController.php`

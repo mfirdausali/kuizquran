@@ -42609,3 +42609,111 @@ own unwired-by-design gap (v3-D88, reconfirmed above) stays exactly where
 it was — it needs a human product decision on the queue-split question,
 not an agent guess. Every file named "read in full, found correct" above
 should be removed from future low-mention-count sweep candidate lists.
+
+---
+
+## v3-D388 (2026-11-08, nightly) — a twelfth fresh-sweep night found no confirmed defect
+
+A twelfth consecutive fresh-sweep night found no confirmed defect. Read in
+full and found correct, no defect: `components/plan/PlanCalendar.tsx` +
+`components/plan/PlanIsland.tsx` + `lib/plan/forecast.ts` +
+`lib/plan/awayDay.ts` + `packages/engine/src/awayDays.ts` end to end,
+cross-checking the offset↔absolute-day-index round trip between the
+engine's `dayIndexOf()` (plain UTC calendar-day arithmetic, deliberately
+NOT `daybound.ts`'s tz-explicit boundary — its own docblock says so) and
+`forecast.ts`'s `now + offset * DAY_MS` scheme: confirmed
+`dayIndexOf(now + offset * DAY_MS) = dayIndexOf(now) + offset` holds for
+any integer offset regardless of time-of-day, so no drift is possible
+between "which day is away" and "which day is being shown";
+`components/onboarding/OnboardingFlow.tsx` (all seven screens, the
+commit-once-at-screen-7 discipline, the `ENROLLABLE_SURAHS` vs
+`OFFERED_SURAHS` distinction); `components/macro/MacroPanelIsland.tsx` +
+`lib/idb/useLogState.ts` + `lib/idb/state.ts` (the `empty`/`ready` split,
+and `getAllEvents()`'s cross-surah scope — confirmed harmless: `rebuild()`
+folds every surah's atoms regardless, `buildGraphNodes(surah, ...)` only
+ever reads this surah's own keys, so an `empty` classification that is
+really "nothing for THIS surah, something for another" renders identically
+to a genuinely-empty log); `components/home/DeviceReset.tsx` (the
+enumerate-before-destroy confirm, correctly disabled with no clear/restore
+primitive built yet); `components/home/MySurahs.tsx` (#97/#98's zero-state
+and long-absence messaging); `components/settings/{PlanPanel,AccountAuthPanel}.tsx`
++ `lib/account/auth.ts` + `lib/settings/anchorHour.ts` +
+`api/app/Http/Controllers/SettingsController.php` +
+`packages/engine/src/daybound.ts#anchorTime()` (the anchor-hour write path,
+validated `0<=x<24` server-side, matching the client's half-hour choice
+list; confirmed `cfg.anchorHour` still has exactly one reader anywhere in
+`packages/engine/src`, unchanged since v3-D140); `api/app/Billing/EntitlementMachine.php`
++ the `entitlements` migration, re-read end to end for a field OTHER than
+`grace_until`/`current_period_end` (the ones fixed across v3-D383/D384) —
+none found; `merge()` reconfirmed zero production callers
+(`grep -rn "merge(\$keep" app` / `grep -rn "EntitlementMachine::class" app`
+both still empty outside its own test file), unchanged from v3-D386.
+
+**One candidate investigated closely and ruled a non-finding, not a
+defect.** `AccountAuthPanel.tsx#SignInForm`'s "switches THIS device... does
+not merge it" copy, cross-checked against
+`lib/sync/outbox.ts#selectPending()` (scoped by the device's permanent,
+identity-independent `deviceId`, never reset by
+`loginAccount()`/`logoutAccount()`) and `EventsController::store()`
+(`$userId = $request->user()->id`, from the bearer token only). A device
+with genuinely unsynced (`syncedAt === null`) events, signed into a
+DIFFERENT existing account before the outbox drains, would push those
+events under the newly-signed-in account — in tension with the UI's "does
+not merge" sentence, on first read. **Already found and deliberately
+accepted, not new**: `AuthController::login()`'s own docblock states this
+exactly ("does not touch the caller's prior identity... any not-yet-synced
+local events simply sync under whichever account is signed in"), and
+v3-D194 already closed the chosen mitigation — surfacing `hasHistory` so a
+learner can see, before committing to a switch, whether the destination
+account already holds data — rather than a structural flush-or-block fix.
+Re-litigating this as new would be exactly the re-opening NIGHTLY.md warns
+against; left untouched.
+
+`TZ=UTC make test`: **3196 passing**, unchanged, independently re-derived
+from a fresh container — every suite also run individually, same counts:
+255 v2 vitest, 47 v2/api, 461 v3/api (2 incomplete, 6 skipped), 120
+corpus-compiler, 470 engine, 73 fold-runner, 1770 apps/web.
+`check-test-floor.mjs`: OK, 3196 >= floor 1899 (+1297 margin, unmoved).
+`TZ=UTC make build`: the usual one-time `SecurityFatalError` CLI nudge
+fired on the first invocation, not acted on; a plain retry built clean,
+exit 0, 30 routes. `npm run gates`: all green — locked-css OK (294 v1
+lines byte-identical, 1 documented `@import`→`@font-face` hunk); boundaries
+OK, 350 files; fonts 2/6 present (Amiri), degraded-but-non-blocking,
+pre-existing; corpus-morphology OK; corpus-glyphs OK, 206 codepoints across
+4 artifacts. `npx tsc --noEmit`: clean, apps/web. No PHP file changed this
+run, so `pint` is not applicable. No `v1/**`/`v2/**` edit
+(`git status --porcelain -- v1 v2` empty immediately before this entry; the
+usual stray `v2/tsconfig.tsbuildinfo` build-cache diff reverted first). No
+production or test file touched this run — documentation only, so no
+Arabic-codepoint sweep, no mutation test, and no oracle/golden-log/fixture/
+snapshot regeneration are applicable.
+
+Session start: fresh container, no `node_modules`/`vendor`/compiled corpus
+anywhere; `HEAD` was detached exactly at `origin/main`'s real tip
+(`d252cb5`, v3-D387) after `git fetch`, local `main` stale one commit
+behind at `18ff8bd` (v3-D383) — the recurring stale-local-`main` trap —
+caught via `git checkout -B main HEAD` before any exploration. This run's
+own `v2/api` and `v3/api` composer installs (the latter needing
+`--ignore-platform-req=php`, PHP 8.3.6 here vs. its `>=8.4.1` requirement)
+were launched CONCURRENTLY, the same shape v3-D383 found a shared
+`~/.cache/composer/vcs` mirror-clone race on — both finished clean, exit 0,
+with no race this time (cache-state-dependent, not a structural fix;
+a future run should still prefer serializing them per v3-D383's own
+recommendation rather than reading this as "the race is gone"). All five
+npm installs ran in parallel with each other and with the composer
+installs, since they share no cache. Both API projects'
+`database.sqlite`/`.env`/`APP_KEY` were missing on the fresh checkout and
+created by hand.
+
+**NOT addressed, named for next run:** every item on v3-D379 through
+v3-D387's own condensed list, unchanged and still infra/human-gated
+(fold-runner DB adapter + staging deploy; the operational mailer; Stripe
+replay fixtures, PAY-1; surah 67's scene beats, H2; `foilKernels.ts`'s
+regex gap, v3-D351; `placement.ts#nextProbe()`'s zero-caller gap;
+`EntitlementMachine::merge()`'s standing zero-caller exclusion;
+`permitsIssuance()`'s unwired-by-design gap, v3-D88). The
+`AccountAuthPanel.tsx`/outbox cross-account-sync question above is now
+reconfirmed an already-accepted design choice (v3-D153/v3-D194) — remove it
+from future sweep candidate lists; it needs a human product decision
+(structural flush-or-block vs. the current warn-first posture) if it is
+ever revisited, not an agent guess.
