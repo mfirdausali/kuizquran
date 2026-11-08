@@ -56,7 +56,89 @@ make dev     # SPA :5273, API :8000
 make test    # 3196 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 461 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D386, 2026-11-07)
+             # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D387, 2026-11-08)
+             # NOTE (v3-D387, 2026-11-08): an eleventh fresh-sweep night
+             # found no confirmed defect. Read in full and found correct:
+             # `AdminUsersController.php`/`StripeSettingsController.php`
+             # (the audited CSV export, the read-probe-never-persist
+             # credential screen); re-swept every `app/Models/*.php` for a
+             # false "append-only"/"immutable" claim with no `booted()`
+             # guard — the nine-model defect class v3-D372/D373/D374/D377/
+             # D381 closed is now genuinely exhausted, no tenth instance
+             # exists; `AccountController.php`,
+             # `Auth\EmailVerificationController.php` + its route wiring,
+             # `WebhookHandler.php` re-read a FOURTH time field-by-field
+             # (specifically checking whether `onSubscriptionUpdated`'s
+             # `past_due`/`unpaid` branch carries the v3-D383/D384-shaped
+             # stale-`grace_until` gap — it does not: `planSummary.ts`'s
+             # own `graceUntil === null` branch already anticipates exactly
+             # this case and degrades honestly, so this is accepted design,
+             # not a fresh instance), `EntitlementMachine::apply()`. On the
+             # TS side: `RetentionPanel`/`TabBar`/`FaceText`/`corpusRef.ts`/
+             # `PracticePicker`/`VerifyEmailScreen`/`PricingPanel`/
+             # `EmptyPlanAwayList`+`forecast.ts#dateLabel()`/`GrowthPanel`/
+             # the five `workbench/*Panel.tsx` files + `WorkbenchIsland.tsx`'s
+             # own full prop-wiring/`AccountDeletionPanel`/
+             # `ResetPasswordForm`/`recomputeHashes.ts`/`onboarding
+             # /choices.ts`/`entitlement/{gate,sync}.ts` — all correct, no
+             # defect. **Reconfirmed, not reopened:**
+             # `lib/entitlement/gate.ts#permitsIssuance()` is still called
+             # from nowhere but tests — the same gap v3-D88 found and
+             # deliberately left unwired as "Firdaus's call, not mine to
+             # make silently" on the product's one ethical commitment (does
+             # denying a lapsed learner's session also wrongly deny the
+             # review half v3-D16 promises stays open forever, since
+             # today's queue mixes new material and review in one
+             # assembly) — ~300 decision entries later this is still
+             # correctly a stop-and-report, not a guess, and stays
+             # untouched. `TZ=UTC make test`: 3196 passing, unchanged,
+             # independently re-derived from a fresh container — every
+             # suite also run individually, same counts: 255 v2 vitest, 47
+             # v2/api, 461 v3/api, 120 corpus-compiler, 470 engine, 73
+             # fold-runner, 1770 apps/web. `check-test-floor.mjs`: OK, 3196
+             # >= floor 1899 (+1297 margin, unmoved). `TZ=UTC make build`:
+             # the usual `SecurityFatalError` CLI nudge fired on the first
+             # invocation, not acted on; a plain retry built clean, exit 0,
+             # 30 routes. `npm run gates`: all green, 351 files, unchanged
+             # (294 v1 lines byte-identical; 2/6 UI fonts present,
+             # degraded-but-non-blocking, pre-existing; 362 words; 206
+             # codepoints). `npx tsc --noEmit`: clean, `Version 5.9.3`.
+             # `./vendor/bin/pint --test`: its usual pre-existing findings
+             # on files this run did not touch — irrelevant, no PHP file
+             # changed. No `v1/**`/`v2/**` edit (`git status --porcelain --
+             # v1 v2` empty immediately before this entry; the usual stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted first).
+             # No production or test file touched this run — documentation
+             # only, so no Arabic-codepoint sweep, no mutation test, and no
+             # oracle/golden-log/fixture/snapshot regeneration are
+             # applicable. Session start: fresh container, no `node_modules`/
+             # `vendor`/compiled corpus anywhere; ran `v3/api`'s composer
+             # install alone first (`--ignore-platform-req=php`, PHP 8.3.6
+             # here vs. its `>=8.4.1` requirement) since it hit the
+             # documented slow proxy git-mirror fallback, then `v2/api`'s
+             # (avoiding the v3-D383 concurrent-install cache race), while
+             # running all five npm installs in parallel with each other
+             # and with the PHP installs, since they share no cache — cut
+             # real wall-clock time; both finished in well under a minute,
+             # the corpus compiled cleanly from already-vendored source
+             # data, no network fetch needed. Both API projects'
+             # `database.sqlite` missing on the fresh checkout, created by
+             # hand. `HEAD` was detached exactly at `origin/main`'s real tip
+             # (`0d18841`, v3-D386) after `git fetch`; local `main` was
+             # stale one commit behind at `18ff8bd` (v3-D383) — the
+             # recurring stale-local-`main` trap — caught via `git checkout
+             # -B main HEAD` before any exploration. NOT addressed, named
+             # for next run: every item on v3-D379 through v3-D386's own
+             # condensed list, unchanged and still infra/human-gated
+             # (fold-runner DB adapter + staging deploy; the operational
+             # mailer; Stripe replay fixtures, PAY-1; surah 67's scene
+             # beats, H2; `foilKernels.ts`'s regex gap, v3-D351;
+             # `placement.ts#nextProbe()`'s zero-caller gap;
+             # `EntitlementMachine::merge()`'s standing zero-caller
+             # exclusion). `permitsIssuance()`'s unwired-by-design gap
+             # (v3-D88) stays exactly where it was — it needs a human
+             # product decision, not an agent guess. See DECISIONS.md
+             # v3-D387 for the full write-up.
              # NOTE (v3-D386, 2026-11-07): a tenth fresh-sweep night found
              # no confirmed defect. Checked `EntitlementMachine::merge()`
              # (edge case #113, account adoption) for a NEW instance of the

@@ -42487,3 +42487,125 @@ excluded item, not a new item, and needs no action unless a real caller
 is ever wired to it. The Next.js build's nondeterministic security-nudge
 flakiness (above) is an environment observation for a future run to
 expect, not a repo defect to fix.
+
+## v3-D387 (2026-11-08, nightly) — an eleventh fresh-sweep night found no confirmed defect
+
+No code change. Session started per NIGHTLY.md's rule: `git fetch origin
+main` showed `HEAD` detached at `0d18841` (v3-D386), already identical to
+`origin/main`'s real tip, while local `main` was stale one commit behind
+at `18ff8bd` (v3-D383) — the recurring stale-local-`main` trap this file
+has recorded roughly fifty times since v3-D77 — caught via `git checkout
+-B main HEAD` before any exploration. All 32 build-plan steps remain
+either DONE, human-gated (27/28), or infra/human-gated (30's E6-E8), so
+this run continued v3-D375/D385/D386's practice of a candidate sweep
+ranked by low mention-count in DECISIONS.md/CLAUDE.md/HANDOVER.md
+(v3-D371's own technique) over files never individually audited.
+
+**Read in full this run and found correct, no defect:**
+`App\Http\Controllers\Admin\AdminUsersController.php` (the audited-before-
+one-byte-streamed CSV export, no identity columns);
+`App\Http\Controllers\Admin\StripeSettingsController.php` (the
+read-probe-never-persist credential screen, the `test()` action's own
+read-only `GET /v1/balance` probe, the PAY-1 fixture-count surfaced
+honestly); `App\Models\{CorpusAyahHash,AdminRevealToken,
+AccountDeletionRequest}.php` (none falsely claims append-only — confirmed
+by re-sweeping every `Models/*.php` for "append-only"/"immutable"/"never
+updated" language with no `booted()` guard: the nine-model defect class
+v3-D372/D373/D374/D377/D381 closed is now genuinely exhausted — every
+model making that claim has the guard, and none of the ten still-unguarded
+models, `AccountDeletionRequest/AdminRevealToken/AdminRole/BillingEvent/
+CorpusAyahHash/Entitlement/Flag/GlossDraft/NightlyWindow/User`, makes the
+claim falsely); `App\Flags\FlagRegistry.php`; `App\Http\Controllers
+\AccountController.php` (PDPA export/delete/restore, re-read end to end —
+the admin-self-delete-via-audit-trail guard, the per-user `hash_equals`
+restore-token scoping); `App\Http\Controllers\Auth
+\EmailVerificationController.php` + its `routes/api.php` wiring (signed +
+throttled + `auth:sanctum`, matching the device-bound design its own
+docblock claims); `App\Billing\WebhookHandler.php` re-read a FOURTH time
+end to end, field-by-field across all eight handlers, specifically
+checking whether `onSubscriptionUpdated`'s `past_due`/`unpaid` branch
+(which moves to `Grace` without touching `grace_until`) carries the
+v3-D383/D384-shaped staleness gap — it does not: `lib/settings
+/planSummary.ts`'s own `graceUntil === null` branch already anticipates
+exactly this case ("a grace row not caused by a payment-failure webhook")
+and degrades honestly rather than fabricating a date, so this is accepted
+design, not a fresh instance of the pattern; `App\Billing
+\EntitlementMachine.php#apply()` re-confirmed sound.
+
+On the TS/TSX side: `components/progress/RetentionPanel.tsx`,
+`components/shell/TabBar.tsx`, `components/quiz/FaceText.tsx`,
+`packages/engine/src/corpusRef.ts`, `components/practice
+/PracticePicker.tsx`, `components/account/VerifyEmailScreen.tsx`,
+`components/landing/PricingPanel.tsx`, `components/plan
+/EmptyPlanAwayList.tsx` (+ `lib/plan/forecast.ts#dateLabel()`),
+`components/progress/GrowthPanel.tsx`, `components/workbench
+/{MacroClassificationPanel,DroppedCollisionsPanel,DistractorYieldPanel,
+GeneratedFromPanel,WorkbenchIsland}.tsx` (the island's full prop-wiring
+traced — every panel's data traced to a real source, no stub left wired
+to nothing), `components/settings/AccountDeletionPanel.tsx`,
+`components/account/ResetPasswordForm.tsx`,
+`packages/corpus-compiler/src/recomputeHashes.ts`, `lib/onboarding
+/choices.ts`, `lib/entitlement/{gate,sync}.ts`.
+
+**Reconfirmed, not reopened:** `lib/entitlement/gate.ts#permitsIssuance()`
+is still called from nowhere but tests (`grep -rn "permitsIssuance(\|
+permitsReview(" apps/web` outside test files and the two function
+definitions themselves returns nothing) — the SAME gap v3-D88 found and
+deliberately left unwired, naming it "Firdaus's call, not mine to make
+silently on a path this codebase already flagged as the one place a wrong
+guess costs a learner's trust in the app's core promise" (the queue-split
+question: does `permitsIssuance` deny the WHOLE mixed session, which
+would deny review too and break v3-D16's "review is never gated" promise,
+or does assembly need to split new-material from review first). ~300
+decision entries later this is still open and still correctly flagged as
+a stop-and-report, not a guess an autonomous run should make on the
+product's single ethical commitment — reconfirmed rather than touched.
+
+**Verified.** `TZ=UTC make test`: **3196 passing**, unchanged (255 v2
+vitest, 47 v2/api, 461 v3/api — 2 incomplete PAY-1, 6 skipped — 120
+corpus-compiler, 470 engine, 73 fold-runner, 1770 apps/web) — every suite
+also re-run individually from this fresh container before `make test`,
+same counts. `check-test-floor.mjs`: OK, 3196 >= floor 1899 (+1297
+margin). `TZ=UTC make build`: the Next.js CLI's `SecurityFatalError`
+nudge fired on the first invocation (exit 2); a plain retry built clean,
+exit 0, 30 routes — consistent with the documented pattern. `npm run
+gates` (apps/web): all green, 351 files, unchanged (294 v1 lines
+byte-identical; 2/6 UI fonts present, degraded-but-non-blocking,
+pre-existing; 362 words; 206 codepoints across 4 artifacts). `npx tsc
+--noEmit` (apps/web): clean, `Version 5.9.3`. `./vendor/bin/pint --test`:
+its usual pre-existing findings on files this run did not touch
+(`WebhookHandler.php`'s five, `AdminRevealController.php`'s six, and
+several test files' import-ordering/casing nits) — irrelevant, no PHP
+file changed this run. No `v1/**`/`v2/**` edit (`git status --porcelain
+-- v1 v2` empty immediately before this entry; the usual stray
+`v2/tsconfig.tsbuildinfo` build-cache diff from running the suites
+reverted first). No production or test file touched this run —
+documentation only, so no Arabic-codepoint sweep, no mutation test, and
+no oracle/golden-log/fixture/snapshot regeneration are applicable.
+
+**Session start.** Fresh container, no `node_modules`/`vendor`/compiled
+corpus anywhere. Ran `v3/api`'s composer install alone first
+(`--ignore-platform-req=php` — PHP 8.3.6 on this sandbox vs. `v3/api`'s
+`>=8.4.1` requirement), since it hit the documented slow proxy
+git-mirror-clone fallback for PHPUnit's dependency tree; all five npm
+installs (`v2`, `corpus-compiler`, `engine`, `fold-runner`, `apps/web`)
+ran in parallel with each other and alongside the PHP install, since they
+share no cache — resolved in well under a minute. `v2/api`'s composer
+install ran only after `v3/api`'s finished, avoiding the concurrent-
+install cache race v3-D383 named; it completed quickly, served entirely
+from the now-warm local cache. Both API projects' `database/database
+.sqlite` were missing on the fresh checkout and created by hand. The
+corpus (12, 67, 103, 112) compiled cleanly from already-vendored source
+data, no network fetch needed.
+
+**NOT addressed, named for next run.** Every item on v3-D379 through
+v3-D386's own condensed list, unchanged and still infra/human-gated:
+`worker/fold-runner`'s own DB adapter + staging deploy; the operational
+mailer's actual delivery; Stripe replay fixtures (PAY-1, H1); surah 67's
+scene beats (H2); `foilKernels.ts`'s regex gap (v3-D351);
+`placement.ts#nextProbe()`'s zero-caller gap; `EntitlementMachine::merge()`'s
+standing zero-caller exclusion. `lib/entitlement/gate.ts#permitsIssuance()`'s
+own unwired-by-design gap (v3-D88, reconfirmed above) stays exactly where
+it was — it needs a human product decision on the queue-split question,
+not an agent guess. Every file named "read in full, found correct" above
+should be removed from future low-mention-count sweep candidate lists.
