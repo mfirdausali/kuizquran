@@ -43166,3 +43166,194 @@ are the remaining plain fields `EntitlementMachine::apply()` accepts) rather
 than assuming `grace_until` itself has more instances left — this run
 checked `merge()` again specifically for this and found it, as before, has
 no production caller to carry the bug.
+
+## v3-D392 (2026-11-09, nightly) — a fifteenth fresh-sweep night found no confirmed defect
+
+Steps 1-26/29 remain DONE; steps 27/28/30 and PAY-1 remain genuinely blocked
+on human/infra work — none became agent-completable overnight. `HEAD`, local
+`main` and `origin/main` all agreed exactly at `5024bec` (v3-D391) on a fresh
+`git fetch` — no stale-local-`main` trap this run. The sandbox's usual fresh
+state (dependencies, `.env`/`APP_KEY`/migrated sqlite for both API projects,
+the compiled corpus) was already present from a prior setup and needed no
+rebuilding.
+
+**Technique, and why it is not a repeat of an exhausted one.** v3-D391's own
+"NOT addressed" list named a specific, concrete next step: look for OTHER
+"one decision, several call-sites" shapes on the entitlement/billing surface
+— `current_period_end`, `provider_subscription_id`, `last_provider_event_at`
+— rather than assuming `grace_until` had more instances left. This run took
+that up directly, then, once it came back clean, ran six further independent
+checks spanning PDPA/cascade-delete reasoning, the sync pull/merge protocol,
+the corpus-compiler's foil kernels, timezone/day-boundary math, the
+word-vs-number/ARIA "two decisions, one fact" shape (v3-D370/D382's own
+class), and the flag plane's kill/ramp/ack field consistency — a deliberately
+wide spread rather than one narrow repeat, since the billing surface alone
+has now been swept five nights running (v3-D383/384/386/390/391) and reading
+only that again would not be a fresh angle.
+
+**1. Billing/entitlement field consistency, generalized beyond `grace_until`.**
+Read `App\Billing\EntitlementMachine::apply()`/`merge()`,
+`App\Billing\WebhookHandler.php` (all eight handlers, re-read field-by-field
+for `current_period_end`/`provider_subscription_id`/`trial_started_at`, not
+only `grace_until`), `Admin\AdminBillingController.php` (`override()`/
+`show()`), and `BillingAuditPanel.tsx`'s rendering of every snapshot field.
+Confirmed, not merely trusted: `override()`'s own docblock deliberately scopes
+the admin to `state`/`tier`, and the fix already landed at v3-D391 for
+`grace_until` is the only field the machine's own `$changes` array computes
+there — `current_period_end`/`provider_subscription_id`/`trial_started_at`
+are never touched by it, matching v3-D386's own finding that
+`current_period_end` carries no "pending action" implication the way
+`grace_until` does (the one self-service reader already gates on `state ===
+"active"`) and matching `App\Billing\TrialAttribution`'s standing
+zero-production-caller gap (v3-D91/D148, reconfirmed again this run via
+`grep -rn "TrialAttribution\b" --include=*.php .`, excluding vendor — still
+only its own class file, `PaywallGate.php`'s own comment, and its three test
+files) which means `trial_started_at` drift has no live code path to surface
+through in the first place. `EntitlementMachine::merge()` reconfirmed zero
+production callers (`grep -rn "merge(\$keep"` / `grep -rn
+"EntitlementMachine::class"` across `app/`, excluding its own test). No fifth
+drifted field found — this line of the billing surface is now genuinely
+exhausted, not merely re-asserted.
+
+**2. Cascade-delete / PDPA-purge interaction sweep.** Read every migration's
+`onDelete` clause (`events`, `atom_cache`, `overrides.editor_id`,
+`specs.author_id`, `entitlements`, `entitlement_transitions`,
+`billing_events.user_id`, `admin_roles`, `admin_audit.actor_admin_id`,
+`admin_reveal_tokens` — both `admin_id` and `subject_user_id`,
+`account_deletion_requests`) against `PurgeDueAccountsCommand.php` and
+`AccountController.php` (`requestDeletion()`/`restoreDeletion()`/`export()`).
+Two things checked directly rather than assumed: `purge_ledger.user_id` is
+deliberately NOT a foreign key (the migration's own docblock: the row is
+written when "the user row it describes has already been (or is about to be)
+deleted"), so no interaction with the purge's own transaction exists to
+reason about. `admin_audit.actor_admin_id` is `restrictOnDelete` — an admin
+who has ever written an audit row cannot have their user row deleted — and
+`AccountController::requestDeletion()` already guards this exactly
+(`AdminAudit::where('actor_admin_id', $user->id)->exists()`, 403). The
+TOCTOU gap this guard cannot close (an admin role or an audit-writing action
+granted to a learner sometime during their 14-day deletion grace window,
+after the guard already passed) was traced to `PurgeDueAccountsCommand`'s
+own `try`/`catch`: a `restrictOnDelete` violation there is caught, logged by
+user id, counted in `$failed`, and fails the whole command's exit code —
+named explicitly in the command's own docblock and comments as the intended
+handling, not a silent drop. Not a fresh gap; already reasoned about by the
+code's own authors.
+
+**3. `EventsController.php` + `lib/sync/{cursor,sync,merge,apiFetch}.ts`
+merge/pull edge cases.** Read `EventsController::store()`/`index()`/
+`toWire()` end to end, specifically re-verifying the `spec_snapshot` round
+trip: `store()` manually `json_encode()`s it because `insertOrIgnore()` is a
+raw query-builder call that bypasses Eloquent's `array` cast entirely, and
+`toWire()`'s `$r->spec_snapshot` read goes back through a real hydrated
+model, where the SAME cast auto-`json_decode()`s it — consistent, no
+encode/decode mismatch. On the client side, traced a hypothesized race
+through to its actual consequence rather than stopping at "a race exists":
+if a device's bearer token dies and is reminted (`apiFetch.ts`'s 401 handler)
+in the middle of a multi-page `pullFromServer()` call, `mergeFromServer()`'s
+cursor write at the end of that call still carries the OLD identity string
+captured before the loop started, which can overwrite the fresh
+`pullCursorIdentity` that `resetPullCursor()` had just written for the NEW
+identity moments earlier. Followed this all the way through: because a
+reminted identity is always a freshly generated, never-reused token string,
+the next real pull's own `identity` is necessarily different from whatever
+stale value this would leave behind — so `readPullCursor()`'s own documented
+mismatch rule ("a cursor from a DIFFERENT identity is discarded and 0 is
+returned... when in doubt, RESET") always catches it and forces a harmless
+full re-pull. It cannot reach the ONE case that file's own docblock calls
+genuinely unrecoverable (a stale-HIGH cursor matching the identity that reads
+it). Confirmed inert, not a fresh defect.
+
+**4. `packages/corpus-compiler/src/foilKernels.ts`.** Read in full — `buildPool`,
+`FoilSet`/`admit()` (the `#7`/`#9` structural-impossibility accumulator),
+all four kernels (visual/phonetic/semantic/contextual), `mergeScore`,
+`compareCandidates`, `admitAuthored`. No second, independent correctness bug
+alongside the already-deferred, already-correctly-excluded `DISPLAY_STRIPPED`
+regex gap (v3-D351, which stays a human corpus-hash-impact decision and was
+not touched).
+
+**5. `packages/engine/src/daybound.ts`.** Re-read `dayStart`/
+`learningDayIndex`/`anchorTime`/`dayOfWeek`/`zonedWallClockToUtc`/
+`localMidnightOf` end to end, specifically probing `learningDayIndex`'s fixed
+86,400,000ms-bucket flooring across a DST transition (a day whose real
+wall-clock length is not exactly 24h). This is the identical, already-named
+"accepted limitation every non-Temporal tz library carries" the file's own
+`zonedWallClockToUtc` docblock states — and the product's actual target
+timezone (`Asia/Kuala_Lumpur`, `DEFAULT_DAY_CONFIG`'s real-world use)
+observes no DST at all, so the theoretical imprecision has no concrete,
+reachable production trigger. Not a fresh finding.
+
+**6. The word-vs-number/ARIA "two decisions, one fact" shape (v3-D370/D382's
+own class), checked for a sibling instance.** Grepped every production use
+of `.encoded` across `apps/web/lib` and `apps/web/components`
+(`lib/progress/{rows,retention}.ts`, `components/macro/{graphNodes,
+RingDiagram,GraphNodeMark}.tsx`, `lib/plan/dueToday.ts`, `lib/drill/preview.ts`,
+`lib/session/run.ts`) to confirm v3-D382's shared `started = encoded ||
+strength > 0` test is applied everywhere a label and a number are derived
+from the same atom. It is — `rows.ts`'s `stageWord`/`strengthLabel`,
+`graphNodes.ts`'s `stageLabelOf`, and both `RingDiagram.tsx`/
+`GraphNodeMark.tsx` all share it. `retention.ts`'s own two `stageLabelOf()`
+call sites (independently re-confirmed, not merely trusted from v3-D388's own
+list) pass a boolean that is always true-when-encoded by construction at
+their call sites, so the old gap cannot recur there either. No new instance.
+
+**7. `App\Flags\FlagService.php`** re-read a second time this run,
+specifically applying the SAME "does every path to a shared field agree"
+question the billing sweep above uses, to `kill()`/`ramp()`/
+`acknowledgeKill()`/`autoWaiveDueKills()`'s shared `ack_at`/`ack_by`/
+`ack_auto_waived`/`killed_at`/`killed_by`/`version` fields. v3-D348's own fix
+(every field cleared together on both the kill and the ramp transition) and
+v3-D371's re-confirmation both still hold exactly as written — no drifted
+field.
+
+**8. `/practice` (FR6 Door 3) end to end** — `app/(app)/practice/page.tsx`,
+`components/practice/PracticePicker.tsx`, `lib/practice/handoff.ts`,
+`lib/session/run.ts#startOpenPractice`/`machineForOpenPractice`, and
+`packages/engine/src/freeplay.ts#openPracticePick`. Never individually named
+by this route's own basename in DECISIONS.md before. The ayah clamp, the
+S2/S3 difficulty's lowercase-URL round trip (`practiceHref`/
+`parsePracticeParams`), the `resolveSurah` reuse (v3-D310's own fix, not a
+second private copy), and the already-corrected (2026-10-06) docblock
+staleness about the adoption offer being wired were all read and confirmed
+correct. No defect.
+
+**`TZ=UTC make test`:** 3200 passing, unchanged, independently re-derived
+this run (not copied from v3-D391) — 255 v2 vitest, 47 v2/api PHPUnit, 465
+v3/api PHPUnit (2 incomplete, PAY-1, by design; 6 skipped,
+Postgres/pcntl-gated), 120 corpus-compiler, 470 engine, 73 fold-runner, 1770
+apps/web. `check-test-floor.mjs`: OK, 3200 >= floor 1899 (+1301 margin,
+unmoved). `TZ=UTC make build`: the `SecurityFatalError` Next.js CLI nudge
+fired on BOTH of the first two invocations this run, not only the first —
+confirmed as the same environment-noise flakiness v3-D386 already recorded
+("three bare, back-to-back `npm run build` invocations... exited 0, then 1,
+then 0"), not a build defect; a third plain retry built clean, exit 0, 30
+routes, unchanged. `npm run gates` (apps/web): all green, 351 files,
+unchanged (294 v1 lines byte-identical; 2/6 UI fonts present,
+degraded-but-non-blocking, pre-existing; 362 words; 206 codepoints across 4
+artifacts). `npx tsc --noEmit` (apps/web): clean, exit 0. No PHP file was
+edited this run (every PHP file above was read only, never written), so
+`./vendor/bin/pint --test` has no diff to check. No `v1/**`/`v2/**` edit
+(`git status --porcelain -- v1 v2` empty immediately before this entry; the
+usual stray `v2/tsconfig.tsbuildinfo` build-cache diff reverted first). No
+production or test file touched this run — documentation only, so no
+Arabic-codepoint sweep, no mutation test, and no oracle/golden-log/fixture/
+snapshot regeneration are applicable.
+
+**NOT addressed, named for next run.** Every item on v3-D379 through
+v3-D391's own condensed list, unchanged and still infra/human-gated:
+`worker/fold-runner`'s own DB adapter + staging deploy; the operational
+mailer's actual delivery; Stripe replay fixtures (PAY-1, H1); surah 67's
+scene beats (H2); `foilKernels.ts`'s `DISPLAY_STRIPPED` regex gap (v3-D351,
+reconfirmed above, still correctly deferred); `placement.ts#nextProbe()`'s
+zero-caller gap; `EntitlementMachine::merge()`'s standing zero-caller
+exclusion (reconfirmed again this run); `lib/entitlement/gate.ts
+#permitsIssuance()`'s own unwired-by-design gap (v3-D88); `TrialAttribution`'s
+standing open product-decision gap (v3-D91/D148, reconfirmed again this run
+via a fresh grep). The eight areas read above — the generalized billing
+field-consistency check, the PDPA/cascade-delete reasoning, the sync pull/
+merge identity-race trace, `foilKernels.ts`, `daybound.ts`, the word-vs-number
+ARIA sweep, `FlagService.php`, and the `/practice` route end to end — are now
+confirmed correct; remove them from future sweep candidate lists. The billing
+surface specifically (`EntitlementMachine`/`WebhookHandler`/
+`AdminBillingController`, swept five nights running) should not be the
+default next candidate for a sixteenth night; a genuinely different area of
+the tree is more likely to pay off.

@@ -56,7 +56,82 @@ make dev     # SPA :5273, API :8000
 make test    # 3200 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 465 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D391, 2026-11-09)
+             # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D392, 2026-11-09)
+             # NOTE (v3-D392, 2026-11-09): a fifteenth fresh-sweep night found
+             # no confirmed defect. Steps 1-26/29 remain DONE; steps 27/28/30
+             # and PAY-1 remain genuinely blocked on human/infra work.
+             # Technique: took up v3-D391's own named next step (look for a
+             # drifted field on the billing surface OTHER than `grace_until`
+             # — `current_period_end`/`provider_subscription_id`/
+             # `trial_started_at`), then ran seven further, independent
+             # checks rather than one narrow repeat, since the billing
+             # surface alone has now been swept five nights running
+             # (v3-D383/384/386/390/391). Read and confirmed correct, no
+             # defect: `EntitlementMachine::apply()`/`merge()`,
+             # `WebhookHandler.php` (all eight handlers, re-checked
+             # field-by-field for `current_period_end`/
+             # `provider_subscription_id`/`trial_started_at`, not only
+             # `grace_until` — `AdminBillingController::override()` is
+             # deliberately scoped to `state`/`tier`[+`grace_until`, fixed
+             # last night] only, matching `current_period_end`'s already-
+             # established "no pending-action implication" (v3-D386) and
+             # `TrialAttribution`'s standing zero-caller gap (v3-D91/D148,
+             # regrepped fresh, still true); every migration's `onDelete`
+             # clause against `PurgeDueAccountsCommand.php`/
+             # `AccountController.php` (the `admin_audit.actor_admin_id`
+             # `restrictOnDelete` TOCTOU during a pending PDPA deletion's
+             # grace window is already caught and reported by the command's
+             # own try/catch, not a silent drop; `purge_ledger.user_id` is
+             # deliberately not an FK); `EventsController.php`'s
+             # `spec_snapshot` json_encode/cast round trip
+             # (`insertOrIgnore` bypasses the model cast, so the manual
+             # encode is necessary and correct; `toWire()`'s read goes
+             # through a real hydrated model, which auto-decodes); a
+             # hypothesized `lib/sync` mid-pull token-remint identity race
+             # between `apiFetch.ts`/`cursor.ts`/`merge.ts`, traced all the
+             # way to its actual consequence — it always lands in
+             # `readPullCursor()`'s own documented "reset on identity
+             # mismatch" safe case, never the one genuinely unrecoverable
+             # case (a stale-HIGH cursor matching the NEW identity), since
+             # a reminted identity is always a fresh, never-reused token
+             # string; `packages/corpus-compiler/src/foilKernels.ts` in
+             # full (no second bug alongside the already-deferred
+             # `DISPLAY_STRIPPED` regex gap, v3-D351); `daybound.ts`'s
+             # `learningDayIndex` DST-bucket imprecision (the same accepted,
+             # already-named non-Temporal-library limitation, and
+             # Malaysia's real target timezone observes no DST, so it has
+             # no reachable trigger); every production `.encoded` read
+             # across `apps/web/lib`+`components` re-checked against
+             # v3-D382's shared `started = encoded || strength > 0` test —
+             # applied everywhere a label and a number are derived from one
+             # atom, no sibling instance of that defect shape; `FlagService
+             # .php` re-read against the SAME "does every path to a shared
+             # field agree" question the billing sweep uses, applied to
+             # `ack_at`/`ack_by`/`ack_auto_waived`/`killed_at`/`killed_by`/
+             # `version` — v3-D348's fix still holds exactly; `/practice`
+             # (FR6 Door 3) end to end — `PracticePicker.tsx`,
+             # `lib/practice/handoff.ts`, `startOpenPractice`,
+             # `openPracticePick` — never individually swept by this
+             # route's own basename before, no defect. `TZ=UTC make test`:
+             # 3200 passing, unchanged, independently re-derived.
+             # `check-test-floor.mjs`: OK, 3200 >= floor 1899 (+1301
+             # margin, unmoved). `TZ=UTC make build`: the `SecurityFatalError`
+             # Next.js CLI nudge fired on BOTH of the first two invocations
+             # this run (not only the first) — the same nondeterministic
+             # environment noise v3-D386 already recorded, not a build
+             # defect; a third plain retry built clean, exit 0, 30 routes.
+             # `npm run gates`: all green, 351 files, unchanged. `npx tsc
+             # --noEmit`: clean. No PHP file edited (read-only this run), so
+             # `pint` has no diff to check. No `v1/**`/`v2/**` edit. No
+             # production or test file touched — documentation only, so no
+             # Arabic sweep, mutation test, or oracle regeneration applies.
+             # NOT addressed: every item on v3-D379 through v3-D391's own
+             # condensed list, unchanged and still infra/human-gated. The
+             # eight areas read above are now confirmed correct — remove
+             # them from future sweep candidate lists; the billing surface
+             # specifically should not be the default next candidate for a
+             # sixteenth night. See DECISIONS.md v3-D392 for the full
+             # write-up.
              # NOTE (v3-D391, 2026-11-09): `AdminBillingController::override()` —
              # a real, wired admin write path (`POST /api/admin/billing/{userId}
              # /override`, called from `BillingAuditPanel.tsx`) — could move a
