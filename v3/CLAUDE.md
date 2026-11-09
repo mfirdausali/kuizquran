@@ -56,7 +56,23 @@ make dev     # SPA :5273, API :8000
 make test    # 3200 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 465 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D392, 2026-11-09)
+             # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D393, 2026-11-09)
+             # NOTE (v3-D393, 2026-11-09): a sixteenth fresh-sweep night found
+             # no confirmed defect. This run also re-checked HANDOVER.md's E6
+             # ("fold-runner DB adapter") and E7 ("operational mailer") against
+             # the actual code rather than the table's own stale prose:
+             # DeterminismCheckCommand::sampleFromDatabase() IS the DB adapter
+             # (real events/atom_cache reads, per-user advisory locks, dead-
+             # letter quarantine) and App\Mail\DeterminismP1Alert IS the paging
+             # path — both fully coded, blocked only on a host+production-DB
+             # and a real SMTP account respectively, neither of which an agent
+             # can create. Every remaining open item (H1 Stripe, H2 scene
+             # beats, H3 qari booking, H5 pager owner, H6 a11y pass, E6 host/
+             # DB, E7 SMTP account, E8 Stripe fixtures) is human/infra-gated,
+             # unmoved since 2026-08-12. Recommendation to the next run: do
+             # not default to another source-sweep night; say plainly that the
+             # build is stalled on the human/infra list above. See
+             # DECISIONS.md v3-D393 for the full write-up.
              # NOTE (v3-D392, 2026-11-09): a fifteenth fresh-sweep night found
              # no confirmed defect. Steps 1-26/29 remain DONE; steps 27/28/30
              # and PAY-1 remain genuinely blocked on human/infra work.

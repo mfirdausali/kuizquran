@@ -43357,3 +43357,95 @@ surface specifically (`EntitlementMachine`/`WebhookHandler`/
 `AdminBillingController`, swept five nights running) should not be the
 default next candidate for a sixteenth night; a genuinely different area of
 the tree is more likely to pay off.
+
+## v3-D393 (2026-11-09, nightly) — a sixteenth fresh-sweep night found no confirmed defect; E6/E7 confirmed CODE-COMPLETE, blocked only on infra/human action
+
+A different technique this run: rather than sweeping another slice of
+`apps/web`/`v3/api` source for an unseen defect (the same technique the prior
+eleven nights used, with declining yield), this run went back to BUILD-PLAN's
+own "WHAT IS LEFT" table (`HANDOVER.md` §E6/E7) and checked, directly against
+the code rather than against the table's own August-dated prose, whether the
+two items it still lists as engineering gaps are actually still missing
+*code*, or whether they are finished code waiting on infrastructure that this
+sandbox cannot provide.
+
+**E6 — "fold-runner DB adapter + staging deploy."** Read
+`App\Console\Commands\DeterminismCheckCommand::sampleFromDatabase()` /
+`sampleOneUserLocked()` end to end (`v3/api/app/Console/Commands/
+DeterminismCheckCommand.php`). This is already the DB adapter HANDOVER.md's
+E6 row describes as absent: it reads real `events` and `atom_cache` rows
+through Eloquent/the `DB` facade, snapshots each learner's log by an
+ingest-sequence ceiling (race-safe against new events arriving mid-run),
+holds a `PerUserFoldLock` per learner for the exact span of that learner's
+read (so a concurrent `AtomCacheRebuilder::rebuild()` for the same learner
+cannot interleave — v3-D32/v3-D70, closed v3-D116), dead-letters any learner
+whose row fails `json_encode()` rather than blanking the whole envelope
+(edge case #130), and only then hands the envelope to the Node fold-runner
+over stdin — matching v3-D08's "Node is the sole server-side fold" rule
+exactly; there is no fold arithmetic in this file. **There is no missing
+adapter code.** What HANDOVER.md's own E6 row is actually naming, confirmed
+by rereading it against this file rather than trusting its one-line
+description: a *host* that runs `schedule:run` continuously, and a
+*database with real learner data* for `sampleFromDatabase()` to read — both
+infrastructure, neither of which this sandboxed container can create for
+itself (no persistent host, no production DB credentials, no way to
+originate "real learner data" without a live product). `worker/fold-runner`'s
+own directory (`find v3/worker/fold-runner -maxdepth 2 -type d`) is still
+only `src`/`test`/`bin`, as every prior entry also found — but that absence
+is accounted for entirely by the PHP-side adapter above; there is nothing
+left to write in the Node package itself.
+
+**E7 — "operational mailer."** Read `config/mail.php` and
+`App\Mail\DeterminismP1Alert` plus `DeterminismCheckCommand::pageOnCall()`.
+The paging path is fully wired (v3-D18's "a fold_determinism P1 pages by
+email, not phone," `pageOnCall()`'s own docblock) — a real P1 does call
+`Mail::to($recipients)->send(new DeterminismP1Alert($run))`, wrapped so a
+send failure is logged and swallowed rather than losing the ledger row.
+`.env`/`.env.example` both set `MAIL_MAILER=log`, `MAIL_HOST=127.0.0.1` — the
+code path is complete and will send the moment a real SMTP account exists;
+today it only logs. This is **not** a code gap; it is a credential/
+infrastructure gap, identical in shape to H1 (Stripe) and E6 above.
+
+**Conclusion, stated plainly because eleven consecutive "no defect" nights
+risk this reading as evasive rather than accurate: there is no more
+agent-doable engineering work queued on this build.** Every item still open
+— H1 (Stripe MY business verification), H2 (surah 67 scene-beat authoring,
+human-only by INVARIANTS.md Absolute B — an agent may never generate this
+content), H3 (booking the qari), H5 (naming a pager owner), H6 (the human
+a11y pass), E6 (a host + production DB — confirmed above as infra, not
+code), E7 (an SMTP account — confirmed above as infra, not code), E8
+(Stripe replay fixtures, gated on H1) — needs a human action, a purchased
+service, or elapsed calendar time that this container cannot produce. Three
+months have passed since v3-D77 (2026-08-12, when steps 1-26/29 completed)
+with these exact items named and unmoved; the nightly agent re-confirming
+them every 12-24h is not advancing the build. **Recommendation to whoever
+reads this next: do not spend another run re-sweeping source files for a
+marginal defect.** If a future run finds the human/infra items above still
+unaddressed, the honest and useful action is to say so plainly in the
+report rather than manufacture a sixteenth, seventeenth, eighteenth sweep —
+this entry and the PushNotification sent alongside it are that message for
+tonight.
+
+`TZ=UTC make test`: **3200 passing**, unchanged from v3-D392 earlier today
+(255 v2 vitest + 47 v2/api + 465 v3/api [+2 incomplete, PAY-1, by design; +6
+skipped, Postgres/pcntl-gated] + 120 corpus-compiler + 470 engine + 73
+fold-runner + 1770 apps/web). `check-test-floor.mjs`: OK, 3200 >= floor 1899
+(+1301 margin, unmoved). `TZ=UTC make build`: hit the usual one-time
+`SecurityFatalError` Next.js CLI advisory nudge on the first invocation —
+not acted on (upgrading the pinned Next.js major is a framework-version
+decision outside this run's mandate, the same call every prior night has
+made); a plain retry built clean, exit 0, unchanged routes. No `v1/**`/
+`v2/**` edit (`git status --porcelain -- v1 v2` empty before this commit;
+the usual stray `v2/tsconfig.tsbuildinfo` build-cache diff reverted first).
+No production or test file touched this run — documentation only (this
+entry plus a CLAUDE.md note), so no Arabic-codepoint sweep, mutation test,
+or oracle/golden-log/fixture/snapshot regeneration applies. Session start:
+fresh container; `make setup`'s plain `v3/api` composer install failed
+exactly as every prior entry predicts (`symfony/*` v8.1.x need PHP >=8.4.1,
+sandbox ships 8.3.6) and was recovered by hand with
+`--ignore-platform-req=php`, run standalone after `v2/api`'s own install had
+already succeeded under plain `make setup`. `HEAD` was detached exactly at
+`origin/main`'s real tip (`d074177`, v3-D392) after `git fetch`, with local
+`main` stale one commit behind at `18ff8bd` (v3-D383) — the recurring
+stale-local-`main` trap this file has recorded roughly fifty times since
+v3-D77 — caught via `git checkout -B main HEAD` before committing.
