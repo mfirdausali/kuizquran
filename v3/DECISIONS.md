@@ -43022,3 +43022,147 @@ than merely trusted — a future run should stop re-grepping for it as a
 sweep technique and look for a different cross-cutting pattern instead (this
 run's `==`-vs-`===` mechanical sweep is one candidate shape; it came back
 clean this time but is cheap enough to re-run after any future diff).
+
+## v3-D391 (2026-11-09, nightly) — the admin billing override was a fourth path that left a stale `grace_until` behind
+
+`AdminBillingController::override()` — the one write route on the admin
+billing surface (v3-D147), a real, wired `POST /api/admin/billing/{userId}
+/override` an operator can call today from `BillingAuditPanel.tsx` — let a
+support admin move a learner's `state` to `active` or `lapsed_review_only`
+without ever clearing `grace_until`. Every OTHER path to those two target
+states already clears it: `App\Billing\WebhookHandler`'s
+`onCheckoutCompleted`/`onInvoicePaid`/`onSubscriptionUpdated`'s active
+branch, `onSubscriptionDeleted`, `onRefunded`, and both branches of
+`onDisputeClosed` each explicitly set `'grace_until' => null` in their own
+`$changes` array — the exact chain v3-D383/D384 closed, two nights running,
+for the webhook handlers. `override()` is a fourth, independently-computed
+path to the identical two target states and had the identical gap, never
+checked before because every prior sweep of this shape (v3-D383/D384/D386)
+looked only at `WebhookHandler.php`'s own handlers, never at the admin
+write path that reaches the same states through the same
+`EntitlementMachine::apply()`.
+
+Reachable, concretely: a learner's payment fails
+(`onPaymentFailed` sets `state: grace`, `grace_until` = Stripe's own
+`next_payment_attempt`). The learner contacts support and pays by bank
+transfer, outside Stripe. A support admin, following this controller's own
+docblock ("a support admin manually correcting a learner's billing state —
+a missed webhook, a goodwill refund, a manual grant"), overrides `state` to
+`active`. The override succeeds and the transition log records it — but
+`grace_until` keeps the stale, already-past timestamp from the original
+failed payment. `BillingAuditPanel.tsx`'s "Grace until" field (confirmed by
+reading the component directly, not merely its docblock) renders whatever
+is on the snapshot row UNCONDITIONALLY, with no `state`-based gate — the
+same admin-surface misreading v3-D383/D384 fixed on the webhook side. The
+next admin who looks up this learner's snapshot (via the panel's own "Look
+up current snapshot" button, v3-D279) sees an `active` account that still
+claims a pending grace deadline.
+
+Checked and deliberately NOT treated as the same gap, to keep the fix
+scoped exactly: `current_period_end` is left untouched by `override()`,
+matching v3-D386's own finding that this field carries no "pending action"
+implication the way `grace_until` does (its one self-service reader already
+gates on `state === "active"`) — `override()`'s docblock explicitly scopes
+the admin to only `state`/`tier`, and nothing here changes that; this fix
+only makes the machine clear a value the admin had no part in setting,
+exactly as every webhook handler already does on the same transition.
+`EntitlementMachine::merge()` (v3-D386's own finding, same file, same
+shape) stays on the standing zero-production-caller exclusion list — unlike
+`merge()`, `override()` has a real caller today (`BillingAuditPanel.tsx`),
+which is exactly why this one gets fixed and `merge()` still does not.
+
+**Fixed:** `AdminBillingController::override()`, right after validating
+`$changes` is non-empty: if `state` is present in `$changes` and its target
+is anything other than `EntitlementState::Grace`, `grace_until` is also set
+to `null` in the same `$changes` array passed to `apply()` — one guarded
+assignment, matching the shape of every webhook handler's own `$changes`
+array exactly, never a separate write.
+
+**Verified:**
+- RED confirmed directly: two new `AdminBillingTest` cases
+  (`test_override_to_active_clears_a_stale_grace_until`,
+  `test_override_to_lapsed_review_only_clears_a_stale_grace_until`), each
+  seeding a real `grace_until` on a `grace`-state entitlement before the
+  real `POST /api/admin/billing/{userId}/override` call, run against the
+  unmodified controller: both failed exactly as predicted (`Failed
+  asserting that 1700086400000 is null.`).
+- Two guard cases prove the fix is scoped correctly, not a blanket clear:
+  `test_override_to_grace_leaves_grace_until_untouched` (overriding INTO
+  grace must not strip a value the admin might be intentionally carrying)
+  and `test_override_of_tier_only_leaves_grace_until_untouched` (an
+  override with no `state` key at all must not touch it either) — both
+  passed before AND after the fix, proving no regression.
+- Mutation-verified: reverted `AdminBillingController.php` alone (`git
+  stash` of that one file, the four new test cases and the pre-existing
+  ones kept) and reran — reproduced the identical two failures exactly;
+  restored byte-identically (`git stash pop`, `git diff` on that file
+  confirmed unchanged), reran — `AdminBillingTest` 22/22 green, was 20
+  (+2 net test files; +4 new cases).
+- `TZ=UTC make test`: **3200 passing** (was 3196, +4 exactly — these four
+  new cases; every other suite unchanged: 255 v2 vitest, 47 v2/api, 465
+  v3/api (was 461, +4), 120 corpus-compiler, 470 engine, 73 fold-runner,
+  1770 apps/web, unchanged). `check-test-floor.mjs`: OK, 3200 >= floor 1899
+  (+1301 margin). `TZ=UTC make build`: the usual one-time
+  `SecurityFatalError` Next.js CLI nudge fired on the first invocation, not
+  acted on (a framework-version decision outside this run's mandate, the
+  same call every prior night recording this nudge has made); a plain
+  retry built clean, exit 0. `npm run gates` (apps/web): all green, 351
+  files, unchanged (294 v1 lines byte-identical; 2/6 UI fonts present,
+  degraded-but-non-blocking, pre-existing; 362 words; 206 codepoints across
+  4 artifacts — this diff touches no corpus/frontend file at all). `npx tsc
+  --noEmit` (apps/web): clean. `./vendor/bin/pint --test` on both touched
+  PHP files: the one finding on the TEST file
+  (`fully_qualified_strict_types`/`ordered_imports`) is confirmed
+  pre-existing — identical before and after this diff (stashed this diff
+  alone and reran pint on the unmodified file, same finding); the
+  controller file itself has zero findings. No `v1/**`/`v2/**` edit
+  (`git status --porcelain -- v1 v2` empty immediately before committing;
+  the usual stray `v2/tsconfig.tsbuildinfo` build-cache diff reverted
+  first). No Arabic codepoint, `\u` escape, `fromCharCode`, or
+  `fromCodePoint` introduced — the full diff swept programmatically over
+  the Arabic/Arabic Supplement/Arabic Extended-A/Presentation-Forms
+  Unicode blocks: CLEAN, every new string is a PHP identifier, an integer
+  epoch-millisecond literal, or a fixed English comment/assertion
+  sentence. No oracle/golden-log/fixture/snapshot regenerated — one
+  existing production file and one existing test file only.
+
+**How this was found.** Not a re-run of an exhausted technique (the
+append-only-guard grep, or the doc-mention-count ranking both already
+closed out at v3-D390). This run instead unshallowed the git clone (the
+sandbox starts with a 50-commit-deep shallow clone) and ranked every
+source file in `apps/web/{lib,components,app}`, `packages/engine/src`,
+`packages/corpus-compiler/src`, `worker/fold-runner/src` and `api/app` by
+how many times `git log --follow` ever touched it — a different sieve from
+"never mentioned in the docs," looking instead for "built once at its
+creation commit and never revisited since." Every file at touch-count 1
+turned out to already carry 5+ mentions in DECISIONS.md/CLAUDE.md, meaning
+the existing sweeps' coverage is itself real, not merely claimed — but
+reading `BillingAuditPanel.tsx` directly (rather than trusting its own
+docblock, which correctly describes its READ-ONLY rendering fields as
+verbatim) led to re-opening `AdminBillingController.php`, the file
+`BillingAuditPanel.tsx`'s own write form posts to, with the specific
+question v3-D383/D384/D386 had each only asked of `WebhookHandler.php`:
+"does every path to this same target state agree on `grace_until`?" This
+was the fourth path, and the one no prior night had checked.
+
+**NOT addressed, named for next run.** Every item on v3-D379 through
+v3-D390's own condensed list, unchanged and still infra/human-gated:
+`worker/fold-runner`'s own DB adapter + staging deploy; the operational
+mailer's actual delivery; Stripe replay fixtures (PAY-1, H1); surah 67's
+scene beats (H2); `foilKernels.ts`'s regex gap (v3-D351);
+`placement.ts#nextProbe()`'s zero-caller gap; `EntitlementMachine::merge()`'s
+standing zero-caller exclusion (reconfirmed still zero-caller this run,
+unchanged — grepped fresh); `lib/entitlement/gate.ts#permitsIssuance()`'s
+own unwired-by-design gap (v3-D88); `TrialAttribution`'s standing open
+product-decision gap (v3-D91/D148). The git-unshallow + touch-count
+technique this run used is now itself a candidate for exhaustion sweeps —
+it came back clean except for this one finding, which surfaced not from
+the ranking directly but from asking the webhook-handler grace-clearing
+question of a sibling write path the ranking merely led a reader back
+toward. A future run should look for OTHER "one decision, several
+call-sites" shapes elsewhere in the entitlement/billing surface
+(`current_period_end`, `provider_subscription_id`, `last_provider_event_at`
+are the remaining plain fields `EntitlementMachine::apply()` accepts) rather
+than assuming `grace_until` itself has more instances left — this run
+checked `merge()` again specifically for this and found it, as before, has
+no production caller to carry the bug.

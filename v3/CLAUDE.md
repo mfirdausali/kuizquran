@@ -53,10 +53,62 @@ Full list: `BUILD-PLAN.md` §5, H1–H15.
 ```bash
 make setup   # once
 make dev     # SPA :5273, API :8000
-make test    # 3196 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
+make test    # 3200 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
-             # 255 v2 vitest + 47 v2/api + 461 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D390, 2026-11-08)
+             # 255 v2 vitest + 47 v2/api + 465 v3/api + 120 corpus-compiler
+             # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D391, 2026-11-09)
+             # NOTE (v3-D391, 2026-11-09): `AdminBillingController::override()` —
+             # a real, wired admin write path (`POST /api/admin/billing/{userId}
+             # /override`, called from `BillingAuditPanel.tsx`) — could move a
+             # learner's state to `active`/`lapsed_review_only` without ever
+             # clearing a stale `grace_until`, the identical "one decision,
+             # several call-sites, drifted at one" shape v3-D383/D384 closed
+             # for `WebhookHandler.php`'s own handlers, just never checked on
+             # this fourth path before. `BillingAuditPanel.tsx`'s "Grace until"
+             # field renders whatever is on the snapshot unconditionally, so an
+             # admin who had just corrected a learner out of Grace would see
+             # that learner's account still claiming a pending, already-past
+             # deadline. Fixed: `override()` now clears `grace_until` whenever
+             # its target `state` is anything other than `grace`, in the same
+             # `$changes` array passed to `EntitlementMachine::apply()` — never
+             # a separate write. RED confirmed directly (two new
+             # `AdminBillingTest` cases, seeded with a real `grace_until` on a
+             # `grace`-state row, failed exactly as predicted against the
+             # unmodified controller) and mutation-verified (reverting the
+             # controller alone reproduced both failures identically; restored
+             # byte-identically, reran green); two further guard cases prove
+             # the fix is scoped to "target is not grace," not a blanket clear.
+             # `AdminBillingTest`: 22/22 green, was 20 (+4 new cases: 2
+             # bug-exposing, 2 non-regression guards). `TZ=UTC make test`:
+             # 3200 passing (was 3196, +4; every other suite unchanged).
+             # `check-test-floor.mjs`: OK, 3200 >= floor 1899 (+1301 margin).
+             # `TZ=UTC make build`: the usual one-time `SecurityFatalError`
+             # Next.js CLI nudge fired on first invocation, not acted on;
+             # plain retry built clean, exit 0, unchanged routes. `npm run
+             # gates`: all green, 351 files, unchanged — this diff touches no
+             # frontend or corpus file. `npx tsc --noEmit`: clean.
+             # `./vendor/bin/pint --test`: the one finding on the touched test
+             # file is confirmed pre-existing (stashed this diff alone,
+             # identical finding on the unmodified file); the controller file
+             # has zero findings. No `v1/**`/`v2/**` edit. No Arabic codepoint/
+             # `\u` escape/`fromCharCode`/`fromCodePoint` introduced — swept
+             # programmatically over the full diff. No oracle/golden-log/
+             # fixture/snapshot regenerated — one existing production file,
+             # one existing test file. Found via a fresh technique: the
+             # sandbox's shallow (50-commit) clone was unshallowed, and every
+             # source file under `apps/web/{lib,components,app}`,
+             # `packages/engine/src`, `packages/corpus-compiler/src`,
+             # `worker/fold-runner/src` and `api/app` was ranked by git
+             # touch-count (times `git log --follow` ever modified it, not
+             # doc-mention-count, which v3-D390 confirmed exhausted) — every
+             # touch-count-1 file already had 5+ doc mentions, confirming
+             # existing coverage is real, but reading `BillingAuditPanel.tsx`
+             # directly led back to the write path it posts to, asking it the
+             # same "does every path to this state agree on `grace_until`"
+             # question v3-D383/D384/D386 had only ever asked of
+             # `WebhookHandler.php`. `EntitlementMachine::merge()` reconfirmed
+             # still zero production callers, unchanged, standing exclusion.
+             # See DECISIONS.md v3-D391 for the full write-up.
              # NOTE (v3-D390, 2026-11-08): a fourteenth fresh-sweep night found
              # no confirmed defect. Steps 1-26/29 remain DONE; steps 27/28/30
              # and PAY-1 remain genuinely blocked on human/infra work — none

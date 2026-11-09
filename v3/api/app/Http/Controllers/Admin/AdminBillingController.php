@@ -128,6 +128,22 @@ class AdminBillingController extends Controller
             return response()->json(['error' => 'at least one of state or tier is required'], 422);
         }
 
+        // v3-D391: every OTHER path to `active`/`lapsed_review_only`
+        // (`onCheckoutCompleted`/`onInvoicePaid`/`onSubscriptionUpdated`'s active
+        // branch, `onSubscriptionDeleted`, `onRefunded`, `onDisputeClosed`'s both
+        // branches — the chain v3-D383/D384 closed in `WebhookHandler.php`)
+        // explicitly clears a stale `grace_until` on arrival. This override is a
+        // FOURTH, real, wired path to the same two target states (a support admin
+        // manually correcting a learner stuck in Grace after confirming payment
+        // out-of-band) and must match, or `BillingAuditPanel.tsx`'s "Grace until"
+        // field keeps showing a stale, already-past deadline on an account the
+        // admin just corrected. Scoped to "target state is not grace" so an
+        // override that moves a learner INTO grace, or that only touches tier,
+        // never clears a value it had no part in setting.
+        if (array_key_exists('state', $changes) && $changes['state'] !== EntitlementState::Grace) {
+            $changes['grace_until'] = null;
+        }
+
         $entitlement = Entitlement::where('user_id', $userId)->first();
         if (! $entitlement) {
             return response()->json(['error' => 'no entitlement row for this learner — nothing to override'], 404);
