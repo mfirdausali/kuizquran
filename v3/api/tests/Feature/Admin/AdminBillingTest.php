@@ -341,6 +341,108 @@ class AdminBillingTest extends TestCase
         $this->assertSame('active', $entitlement->fresh()->state->value);
     }
 
+    /**
+     * v3-D391: every OTHER path to `active`/`lapsed_review_only`
+     * (`onCheckoutCompleted`/`onInvoicePaid`/`onSubscriptionUpdated`'s active
+     * branch, `onSubscriptionDeleted`, `onRefunded`, `onDisputeClosed`'s both
+     * branches — the chain v3-D383/D384 closed) explicitly clears a stale
+     * `grace_until` on arrival. `override()` is a FOURTH, real, wired path to
+     * the same two target states (a support admin manually correcting a
+     * learner stuck in Grace after confirming payment out-of-band) and never
+     * cleared it — the identical "one decision, several copies, drifted at
+     * one" shape, this time on the admin write path rather than a webhook
+     * handler. `BillingAuditPanel.tsx`'s "Grace until" field renders whatever
+     * is there UNCONDITIONALLY, so an admin who just overrode a learner to
+     * `active` would see that learner's snapshot still claiming a pending,
+     * already-past grace deadline.
+     */
+    public function test_override_to_active_clears_a_stale_grace_until(): void
+    {
+        $this->admin();
+        $learner = $this->learner();
+        $entitlement = Entitlement::create([
+            'user_id' => $learner->id,
+            'state' => 'grace',
+            'tier' => 'monthly',
+            'grace_until' => 1_700_086_400_000,
+            'state_version' => 0,
+        ]);
+
+        $this->postJson("/api/admin/billing/{$learner->id}/override", [
+            'state' => 'active',
+            'reason' => 'confirmed payment manually per support ticket 5521',
+        ])->assertOk()->assertJson(['applied' => true, 'state' => 'active', 'tier' => 'monthly']);
+
+        $this->assertNull($entitlement->fresh()->grace_until, 'grace_until must clear, or a later admin re-read sees a stale deadline');
+    }
+
+    /** Same gap, the other target state `override()` can also reach. */
+    public function test_override_to_lapsed_review_only_clears_a_stale_grace_until(): void
+    {
+        $this->admin();
+        $learner = $this->learner();
+        $entitlement = Entitlement::create([
+            'user_id' => $learner->id,
+            'state' => 'grace',
+            'tier' => 'monthly',
+            'grace_until' => 1_700_086_400_000,
+            'state_version' => 0,
+        ]);
+
+        $this->postJson("/api/admin/billing/{$learner->id}/override", [
+            'state' => 'lapsed_review_only',
+            'reason' => 'refund confirmed manually per support ticket 5522',
+        ])->assertOk();
+
+        $this->assertNull($entitlement->fresh()->grace_until);
+    }
+
+    /**
+     * Overriding INTO `grace` must not be prevented from carrying its own
+     * `grace_until` — this proves the fix is "clear when the target is NOT
+     * grace", never "always clear on any state override".
+     */
+    public function test_override_to_grace_leaves_grace_until_untouched(): void
+    {
+        $this->admin();
+        $learner = $this->learner();
+        $entitlement = Entitlement::create([
+            'user_id' => $learner->id,
+            'state' => 'active',
+            'tier' => 'monthly',
+            'grace_until' => 1_700_086_400_000,
+            'state_version' => 0,
+        ]);
+
+        $this->postJson("/api/admin/billing/{$learner->id}/override", [
+            'state' => 'grace',
+            'reason' => 'manual grace per support ticket 5523',
+        ])->assertOk();
+
+        $this->assertSame(1_700_086_400_000, $entitlement->fresh()->grace_until);
+    }
+
+    /** Overriding only `tier` (no `state` key at all) must not touch `grace_until` either. */
+    public function test_override_of_tier_only_leaves_grace_until_untouched(): void
+    {
+        $this->admin();
+        $learner = $this->learner();
+        $entitlement = Entitlement::create([
+            'user_id' => $learner->id,
+            'state' => 'grace',
+            'tier' => 'none',
+            'grace_until' => 1_700_086_400_000,
+            'state_version' => 0,
+        ]);
+
+        $this->postJson("/api/admin/billing/{$learner->id}/override", [
+            'tier' => 'lifetime',
+            'reason' => 'goodwill lifetime grant per ticket 4472',
+        ])->assertOk();
+
+        $this->assertSame(1_700_086_400_000, $entitlement->fresh()->grace_until);
+    }
+
     // ---- show() — v3-D279. `override()`'s own 409 says "Re-read and retry",
     // and its own 404 means an admin has to guess blind whether a row exists
     // — but until now there was NO route that let an admin read a specific
