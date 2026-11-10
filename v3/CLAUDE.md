@@ -139,6 +139,84 @@ make test    # 3200 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # Postgres is absent — this container had it installed and
              # merely stopped, and that may or may not be true of the next
              # one. Full write-up: DECISIONS.md v3-D395.
+             # NOTE (v3-D396, 2026-11-10): found and fixed a real CI gap, not
+             # another sweep night — `.github/workflows/ci.yml` has NEVER
+             # invoked `check-test-floor.mjs` (the TEST-FLOOR gate, v3-D95,
+             # just tightened at v3-D394). `check-test-floor.mjs` parses the
+             # Makefile's own non-`@`-silenced recipe-echo lines ("cd v2 &&
+             # npm test", "cd v3/api && php artisan test", ...) — a shape only
+             # `make test` itself prints, in that order. The `js` job runs
+             # each JS project's own `npm test` in a shell loop (no such
+             # lines); the `php` job runs `php artisan test` per matrix leg
+             # directly. Confirmed by grep: `grep -rn "make test\|check-test-
+             # floor" .github/workflows/*.yml` returned nothing before this
+             # fix, in any of the three workflow files. So the floor has only
+             # ever been enforced when a human/agent manually ran `make test`
+             # locally — the CI merge gate itself (`ci.yml`'s own header:
+             # "the ONLY thing stopping 'merge everything' from merging
+             # broken code") could pass a PR that silently shrank a suite by
+             # hundreds of tests. Same bug class this build has found
+             # repeatedly (B9's `|| true` build gate; v3-D77's CI never
+             # running v3/api's suite at all; v3-D149's unread config key) —
+             # here aimed at the floor-check mechanism itself. Fixed: a new
+             # `test-floor` job, `needs: [js, php]`, that runs `make setup`
+             # then `make test` for real — the exact command whose log shape
+             # the parser requires, so there is no other correct way to wire
+             # this. Deliberately no Postgres service in the new job (unlike
+             # `php`'s matrix): a container without one is this gate's own
+             # documented baseline (TEST-FLOOR was set FROM a no-Postgres
+             # run), and the check is `>=`, so a Postgres-backed run's +6
+             # still passes. Verified: YAML parses clean (`python3 -c "import
+             # yaml; yaml.safe_load(open('.github/workflows/ci.yml'))"`,
+             # confirmed job order `[js, php, test-floor, e2e]` and
+             # `test-floor`'s `needs: [js, php]`); every Makefile recipe line
+             # the parser anchors on cross-checked token-for-token against
+             # `SUITES` in `check-test-floor.mjs` (all seven match exactly).
+             # Could not execute the actual GitHub Actions runner from this
+             # sandbox, so verified the job's real commands end-to-end
+             # locally instead, on this exact fresh checkout: `make setup`
+             # (both Laravel apps + all five npm projects, composer/npm
+             # installs serialized per v3-D383) then `TZ=UTC make test` —
+             # **3200 passing**, `check-test-floor.mjs` itself printing `OK —
+             # 3200 >= floor 3200` inside that real log, exit 0 (255 v2
+             # vitest + 47 v2/api + 465 v3/api + 120 corpus-compiler + 470
+             # engine + 73 fold-runner + 1770 apps/web — matches TEST-FLOOR
+             # exactly, margin 0, as v3-D394 left it; this run's Postgres was
+             # left running but not wired into this invocation, so the 6
+             # pcntl-gated tests skip here exactly as the new job's own
+             # no-Postgres design expects). `TZ=UTC make build`: the usual
+             # `SecurityFatalError` Next.js CLI nudge fired TWICE this run
+             # (not once) before a plain retry built clean, exit 0, 30
+             # routes — the same nondeterministic-noise shape v3-D386/D392
+             # already recorded, not a build defect. `npm run gates`: all
+             # green, 351 files, unchanged (294 v1 lines byte-identical; 2/6
+             # UI fonts present, degraded-but-non-blocking, pre-existing; 362
+             # words; 206 codepoints). Also swept, fresh angles, no defect
+             # found: `grep -rn "TODO\|FIXME\|XXX\|HACK"` across
+             # `api/app`/`packages/*/src`/`apps/web/{lib,components,app}`/
+             # `worker/fold-runner/src` — only the already-known, deliberate
+             # scene-beat `TODO:` placeholders (H2, gate-enforced,
+             # reconfirmed unchanged); every `loadCorpus`/`fetchCorpus` call
+             # site in `apps/web` re-greps to a single `surah: number`
+             # argument, zero multi-surah callers — DEFECTS.md#E-07 ("no UI
+             # yet") is still accurate even post-M5, a non-finding;
+             # `readChoices()`'s singular `surah` field has gained no second
+             # caller; `PerUserFoldLock::withLocks()`'s two real production
+             # callers (`AtomCacheRebuilder::rebuild()`, batched, sorted
+             # ascending inside the lock; `DeterminismCheckCommand
+             # ::sampleFromDatabase()`, one user at a time, never holding a
+             # second lock while waiting) cannot deadlock against each other
+             # by construction — the nightly side never holds more than one
+             # lock concurrently, so no cycle is reachable. No `v1/**`/
+             # `v2/**` edit (only the stray `v2/tsconfig.tsbuildinfo`
+             # build-cache diff, reverted before commit). No Arabic
+             # codepoint possible — the only changed file is
+             # `.github/workflows/ci.yml`; swept programmatically (Arabic,
+             # Arabic Supplement, Arabic Extended-A, both Presentation Forms
+             # blocks, `\u` escapes, `fromCharCode`/`fromCodePoint`): zero
+             # hits. No oracle/golden-log/fixture/snapshot regenerated. NOT
+             # addressed, unchanged: H1/H2/H3/H5/H6/E6/E7/E8. Full write-up:
+             # DECISIONS.md v3-D396.
              # NOTE (v3-D393, 2026-11-09): a sixteenth fresh-sweep night found
              # no confirmed defect. This run also re-checked HANDOVER.md's E6
              # ("fold-runner DB adapter") and E7 ("operational mailer") against

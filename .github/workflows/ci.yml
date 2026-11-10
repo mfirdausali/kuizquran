@@ -254,6 +254,76 @@ jobs:
           fi
           php artisan test
 
+  # ---- The test-count floor gate (v3-D95/HANDOVER.md#E10) — v3-D396's own
+  # finding: this workflow has NEVER invoked `check-test-floor.mjs`, the exact
+  # mechanism built to catch a suite silently shrinking while every test that
+  # DID run still prints PASS. `js` above runs each JS project's own `npm
+  # test` in a shell loop; `php` above runs `php artisan test` per matrix leg.
+  # Neither produces the log shape `check-test-floor.mjs` actually parses —
+  # it anchors on the Makefile's own non-`@`-silenced recipe echo lines
+  # ("cd v2 && npm test", "cd v3/api && php artisan test", ...), which only
+  # `make test` itself prints, in that literal form, in that order. So the
+  # floor (TEST-FLOOR, bumped 1899->3200 at v3-D394) has only ever been
+  # enforced when a human or agent happens to run `make test` locally —
+  # never by the merge gate itself. A PR could pass `js` and `php` both green
+  # while a suite shrank by hundreds of tests (an accidental `git rm`, a
+  # `describe.skip` left in, a glob that stopped matching half its files) and
+  # merge to main undetected. `needs: [js, php]` so this job (which re-runs
+  # every suite via `make test`, deliberately NOT sharing the `js`/`php` jobs'
+  # already-green run — the floor check reads `make test`'s OWN log, never a
+  # second source) does not spend minutes counting a build that's already red
+  # for an unrelated reason. ----
+  test-floor:
+    runs-on: ubuntu-latest
+    needs: [js, php]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect the Makefile
+        id: has
+        run: |
+          if [ -f Makefile ]; then
+            echo "yes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "yes=false" >> "$GITHUB_OUTPUT"; echo "no root Makefile yet"
+          fi
+
+      - uses: shivammathur/setup-php@v2
+        if: steps.has.outputs.yes == 'true'
+        with:
+          php-version: "8.4"
+
+      - uses: actions/setup-node@v4
+        if: steps.has.outputs.yes == 'true'
+        with:
+          node-version: 22
+
+      # `make setup` creates bootstrap/cache + storage/framework (gitignored,
+      # absent on a fresh checkout), installs both Laravel apps' composer deps
+      # with `php artisan key:generate` + `migrate --force`, and `npm install`s
+      # all five JS/TS projects — the exact same command this repo's own
+      # LOCAL-SETUP.md and every nightly run uses on a clean checkout. No
+      # `--ignore-platform-req=php` here: CI's PHP is 8.4 (set above), so
+      # v3/api's `>=8.4.1` composer constraint needs no override, unlike the
+      # sandbox this fix was authored in (PHP 8.3.6 — a documented, harmless,
+      # sandbox-only mismatch, never a CI one).
+      - name: make setup
+        if: steps.has.outputs.yes == 'true'
+        run: make setup
+
+      # `make test` IS the floor gate: it runs test-web/test-api/test-api3/
+      # test-v3 itself, tees the combined output, and pipes that exact log
+      # into `node v3/scripts/check-test-floor.mjs` — exit code 0 only when
+      # all seven suite markers are present AND the summed total is >= the
+      # TEST-FLOOR file. No Postgres service here (unlike `php` above): a
+      # container without it is exactly this gate's own documented baseline
+      # (TEST-FLOOR was set FROM a no-Postgres run, v3-D394), and the floor
+      # check is `>=`, so a greener Postgres-backed run (v3-D395's own +6)
+      # still passes it.
+      - name: make test (enforces TEST-FLOOR via check-test-floor.mjs)
+        if: steps.has.outputs.yes == 'true'
+        run: make test
+
   # ---- Playwright e2e (v3/apps/web): the M5 exit-criterion suite — full-Yusuf
   # offline session, airplane-mode drill, commit-before-paint, a11y geometry.
   # It has existed since build-plan step 17/18 but this workflow never ran it

@@ -43696,3 +43696,190 @@ surfaces, prefer it over both a source-sweep and over re-deriving this same
 finding on a container that already has Postgres running (check
 `pg_lsclusters` once, and if already `online`, this entry's work is already
 done for that container).
+
+---
+
+## v3-D396 (2026-11-10, nightly) — the TEST-FLOOR gate (v3-D95, just tightened at v3-D394) has NEVER actually run in CI; fixed
+
+v3-D394/D395 both broke the recent "fresh-sweep night found no confirmed
+defect" pattern by checking a premise nobody had checked rather than
+re-reading already-cleared files. This run did the same, on a different
+premise: does the CI workflow that gates every merge to `main` actually run
+`check-test-floor.mjs` — the exact mechanism built at v3-D95 so a suite
+silently shrinking (an accidental `git rm`, a `describe.skip` left in, a
+glob that stops matching half its files) cannot read as green?
+
+**It does not, and never has.** `grep -rn "make test\|make build\|check-
+test-floor" .github/workflows/*.yml` (all three workflow files — `ci.yml`,
+`claude.yml`, `v2-autobuild.yml`) returned nothing except two comment lines
+in `ci.yml` that merely *mention* `make test`/`make build` in prose. The
+only two places `check-test-floor.mjs` is invoked anywhere in this
+repository, by any mechanism (`grep -rln check-test-floor` over every
+`.json`/`.yml`/`.yaml`/`Makefile`/`.sh` file, excluding `node_modules`),
+are the root `Makefile`'s own `test:` target and — as of this fix —
+`ci.yml`.
+
+**Why the gap is real, not merely a missing convenience.** `ci.yml`'s own
+header names it "the merge gate... the ONLY thing stopping 'merge
+everything' from merging broken code." It has two jobs that run tests:
+`js` (a shell loop over every JS project's own `npm test`, with
+`cd "$GITHUB_WORKSPACE/$d"` as a bash `cd`, never printed as a literal
+Make recipe line) and `php` (a matrix over `v2/api`/`v3/api`, each running
+`php artisan test` directly inside a `working-directory:` step). Neither
+job's output contains the specific text `check-test-floor.mjs` parses:
+its `SUITES` table anchors on the Makefile's own non-`@`-silenced recipe
+echo — literally `cd v2 && npm test`, `cd v2/api && php artisan test`,
+`cd v3/api && php artisan test`, `cd v3/packages/corpus-compiler && npm
+test`, `cd v3/packages/engine && npm test`, `cd v3/worker/fold-runner &&
+npm test`, `cd v3/apps/web && npm test`, in that exact order — which only
+Make itself prints, and only when the recipe line is NOT prefixed `@`.
+Confirmed every one of those seven marker strings against the Makefile's
+own `test-web`/`test-api`/`test-api3`/`test-v3` targets: all seven match
+character-for-character. So there is no way to satisfy this parser except
+by actually invoking `make test` (or manually reproducing its exact
+recipe-echo shape, which would just be re-implementing the Makefile badly).
+
+**Consequence, concretely:** a PR that passed `js` and `php` both green
+while a suite shrank by hundreds of tests — the exact scenario v3-D95 built
+this gate to catch — would merge to `main` with no complaint from CI. The
+floor has only ever been enforced on a human's or an agent's own machine,
+manually running `make test`, which is exactly the "verification that runs
+on the author's machine is not verification" shape this build has found
+repeatedly in other forms: B9 (`|| true` on the build step, M0), v3-D77
+(CI never ran `v3/api`'s PHPUnit suite at all, on *any* checkout, until
+caught), v3-D149 (`config('nightly.sample_size')` written, documented, and
+never read by the one caller that could mean anything). This is the same
+class aimed at the floor-check mechanism itself — the thing that exists
+specifically to catch a silent regression was, itself, silently never
+wired into the one place that would make it matter.
+
+**Fixed:** a new `test-floor` job in `.github/workflows/ci.yml`,
+`needs: [js, php]` (so a build that is already red for an unrelated reason
+doesn't also spend CI minutes being counted), that does `make setup` then
+`make test` on a fresh checkout — PHP 8.4 + Node 22, no platform-req
+override needed (unlike this sandbox's PHP 8.3.6, a documented, harmless,
+sandbox-only mismatch). Deliberately **no Postgres service** in this job,
+unlike `php`'s matrix: a container without one is this gate's own
+documented baseline — TEST-FLOOR (3200) was set FROM a no-Postgres run at
+v3-D394 — and `check-test-floor.mjs`'s own comparison is `>=`, so a
+Postgres-backed run's extra +6 (v3-D395) still satisfies it; adding
+Postgres here would only duplicate the `php` job's own proof of that half
+without changing what this job needs to demonstrate.
+
+**Verified, as far as this sandbox allows.** Could not execute the actual
+GitHub Actions runner here (no path to trigger a real Actions run from
+inside a cloud session against this repo in this task). Instead:
+
+1. **YAML validity.** `python3 -c "import yaml; yaml.safe_load(open('.github
+   /workflows/ci.yml'))"` parses clean; printed job list is `['js', 'php',
+   'test-floor', 'e2e']` with `test-floor`'s `needs` exactly `['js', 'php']`.
+2. **Marker-string correctness.** Every one of `check-test-floor.mjs`'s
+   seven `SUITES[].marker` strings cross-checked token-for-token against
+   the Makefile's actual recipe lines — exact matches, confirmed by direct
+   `grep`/read of both files side by side.
+3. **The job's actual commands, run for real, end to end, on this exact
+   fresh checkout** (which is also this run's own baseline test pass,
+   below): `make setup` (both Laravel apps' composer installs, serialized
+   per v3-D383's documented concurrent-install cache-race finding, plus
+   all five `npm install`s) completed clean, then `TZ=UTC make test`
+   produced, inside its own real log, exactly the line the new job depends
+   on: `test-floor: OK — 3200 >= floor 3200`. That is not a simulation of
+   the job's logic — it is the literal command the job runs, executed on a
+   literal fresh clone-equivalent state, producing the literal pass/fail
+   line the fix exists to surface in CI.
+
+**This run's own baseline** (re-derived fresh, per NIGHTLY.md's own rule,
+not trusted from any prior entry): `TZ=UTC make test` — **3200 passing**
+(255 v2 vitest + 47 v2/api PHPUnit + 465 v3/api PHPUnit + 120
+corpus-compiler + 470 engine + 73 fold-runner + 1770 apps/web), 2
+incomplete (PAY-1, by design, unchanged), 6 skipped (Postgres was started
+in this container but not wired into this particular invocation's env
+vars, so the pcntl-gated tests self-skip exactly as the new CI job's own
+no-Postgres design expects) — matches TEST-FLOOR exactly, margin 0, as
+v3-D394 left it. `check-test-floor.mjs`: `OK — 3200 >= floor 3200`.
+`TZ=UTC make build`: the `SecurityFatalError` Next.js CLI security-advisory
+nudge fired on BOTH of the first two bare invocations this run (not only
+the first) — the same nondeterministic-environment-noise shape v3-D386/
+v3-D392 already recorded, not a build defect; a third plain retry built
+clean, exit 0, 30 routes. `npm run gates` (apps/web): all green, 351 files,
+unchanged (294 v1 lines byte-identical; 2/6 UI fonts present,
+degraded-but-non-blocking, pre-existing; 362 words; 206 codepoints across
+4 artifacts). `npx tsc --noEmit` clean on both `packages/engine` and
+`apps/web` (checked directly; `make test`'s own `typecheck-v3` prerequisite
+covers all four v3 node packages). No PHP file touched this run, so
+`pint` had nothing to check. No `v1/**`/`v2/**` edit (`git status
+--porcelain -- v1 v2` empty immediately before commit — the usual stray
+`v2/tsconfig.tsbuildinfo` build-cache diff reverted first). No Arabic
+codepoint possible — the only changed file is `.github/workflows/ci.yml`;
+swept programmatically over the full diff against the Arabic, Arabic
+Supplement, Arabic Extended-A and both Presentation Forms Unicode blocks,
+plus `\u` escapes and `fromCharCode`/`fromCodePoint`: zero hits (every
+added line is YAML structure, a shell command, or a fixed English
+comment). No oracle/golden-log/fixture/snapshot regenerated — one existing
+workflow file only.
+
+**Also swept this run, fresh angles, no defect found (each a genuine
+non-finding, not a token effort):**
+
+- Every `TODO`/`FIXME`/`XXX`/`HACK` comment across `api/app`,
+  `packages/*/src`, `apps/web/{lib,components,app}`, `worker/fold-runner
+  /src` — the only hits are the already-known, deliberate scene-beat
+  `TODO: author scene-beat label for act N` placeholders (H2, gate-enforced
+  by `content-freeze.mjs`, already confirmed deliberate at v3-D386).
+- DEFECTS.md#E-07 ("Corpus fetch is per-surah and unguarded... Open (M5, no
+  UI yet)") re-checked now that M5's UI has shipped: every `loadCorpus`/
+  `loadEffectiveCorpus`/`fetchCorpus` call site in `apps/web` (12 call
+  sites across `app/`/`components/`) takes a single `surah: number`
+  argument — zero callers fetch more than one surah per load. E-07's own
+  "no UI yet" reasoning is stale text but its verdict ("open, no trigger")
+  is still accurate; non-finding.
+- `readChoices()`'s 8 call sites re-greped fresh — `lib/onboarding
+  /choices.ts`'s `OnboardingChoices.surah` is still a single `number`, no
+  second caller has grown an array/list expectation since the last check.
+- `App\Support\PerUserFoldLock::withLocks()`'s two real production callers
+  (`AtomCacheRebuilder::rebuild()`, which locks a whole batch, sorted
+  ascending inside the class itself; `DeterminismCheckCommand
+  ::sampleFromDatabase()`, which locks exactly one user id at a time, per
+  iteration, releasing before requesting the next) checked specifically
+  for a cross-call-site deadlock now that v3-D395 proved the advisory locks
+  work for real against Postgres. No deadlock is reachable: classic
+  lock-ordering deadlock needs each side to hold one resource while
+  blocked waiting for another, and the nightly side never holds more than
+  one lock concurrently — it can only ever be the one *waiting*, never
+  also the one *holding*. This is new verification of an existing
+  mechanism's actual wiring (not previously checked at this specific
+  granularity), not a reopened question.
+
+**NOT addressed, unchanged:** every item on v3-D393/D394/D395's own list —
+H1 (Stripe), H2 (surah 67 scene beats, human-only), H3 (qari booking), H5
+(pager owner), H6 (human a11y pass), E6 (a persistent host + production
+DB), E7 (an SMTP account), E8 (Stripe replay fixtures).
+
+**Recommendation for the next run:** this CI gap is now closed, so it is
+no longer a sweep candidate. The next run should look for another concrete,
+agent-doable, non-infra gap in how CI itself is wired (the same angle that
+found this one and found v3-D77's) before defaulting to either a source
+sweep or declaring the build stalled — `ci.yml`, `claude.yml` and
+`v2-autobuild.yml` have not been read end-to-end together as a single
+question ("does every gate this repo believes it has actually fire") since
+v3-D77/v3-D78, and both of those found something real.
+
+**Session start:** fresh container; `origin/main` and detached `HEAD`
+agreed exactly at `be418b0` (v3-D395) after `git fetch`; local `main` was
+stale at `18ff8bd` (v3-D383) — the recurring stale-local-`main` trap this
+file has recorded roughly fifty times since v3-D77 — caught via `git
+checkout -B main HEAD` before any exploration. `v3/api`'s composer install
+hit the documented slow proxy git-mirror-clone fallback hard enough to
+exceed one background task's 30-minute wall-clock limit and had to be
+restarted with a longer one (resumed cleanly from the packages already
+cached — composer install is idempotent); confirmed directly that
+`api.github.com`'s zipball endpoint 403s from this sandbox's proxy, forcing
+every PHPUnit-ecosystem dependency onto the slow `git clone --mirror`
+fallback — consistent with every prior entry's own account of this, not a
+new finding, but confirmed first-hand rather than assumed this time.
+`v2/api`'s composer install ran AFTER `v3/api`'s finished, not concurrently
+(v3-D383's own recommendation). Both API projects' `.env`/`APP_KEY`/
+`database.sqlite` were missing on the fresh checkout and created/generated
+by hand. Postgres 16 was started in this container (again present, as
+v3-D395 found) but not used for anything beyond confirming it was
+available — this run's actual fix needed no database.
