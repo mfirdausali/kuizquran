@@ -43449,3 +43449,99 @@ already succeeded under plain `make setup`. `HEAD` was detached exactly at
 `main` stale one commit behind at `18ff8bd` (v3-D383) — the recurring
 stale-local-`main` trap this file has recorded roughly fifty times since
 v3-D77 — caught via `git checkout -B main HEAD` before committing.
+
+## v3-D394 (2026-11-10, nightly) — heeded v3-D393's own recommendation; tightened the test-count floor (HANDOVER.md's E10) instead of a seventeenth source-sweep
+
+v3-D393 explicitly recommended against another blind source-sweep night and
+said the honest action is to report the build as human/infra-stalled. This
+run re-confirmed that conclusion is still accurate (nothing in H1/H2/H3/H5/
+H6/E6/E7/E8 has moved — `docs/AL-MULK-SCENE-BEATS.md` is still scaffold-only,
+`v3/fixtures/stripe/` is still README-only, no DB adapter host exists in this
+sandbox) and, rather than re-sweeping source for a seventeenth night, picked
+up a concrete, never-executed item sitting in HANDOVER.md since the very
+first audit (2026-08-11): **E10, "raise the test floor... or accept that the
+margin means a deleted test no longer trips the tripwire."** It was closed
+in name only — `check-test-floor.mjs` was built (v3-D95) and the floor was
+bumped once, early, to 1899 — but `TEST-FLOOR` was never moved again despite
+the suite growing by >1300 tests since, so every night from v3-D95 onward
+had been certifying "OK" with a margin wide enough to hide a catastrophic,
+~1300-test silent deletion.
+
+**Demonstrated concretely before fixing it** (RED, in the spirit of this
+build's own discipline, applied to a config gate rather than source code):
+built a synthetic `make test` log with `apps/web` shrunk by 500 tests
+(1770→1270, total 2700) and ran the real `check-test-floor.mjs` against the
+real committed floor (1899) — **exit 0, "OK — 2700 >= floor 1899 (+801
+margin)"**, i.e. a 500-test deletion reads green today. Ran the identical
+synthetic log against a floor of 3200 — **exit 1, "FAIL — 2700 < floor
+3200"**. The gap was real, not theoretical.
+
+**Fixed:** `v3/TEST-FLOOR` moved from `1899` to `3200` — this run's own
+independently-reconfirmed, fresh-container `TZ=UTC make test` total (exact
+match to v3-D392/D393's own count, no drift). No source or test file needed
+editing: `check-test-floor-gate.test.ts`'s own `"reads the REAL repo
+TEST-FLOOR file..."` case (added at v3-D95) already reads `TEST-FLOOR`
+dynamically rather than hardcoding a total, by its own documented design —
+confirmed by running it after the bump: 10/10 green, unchanged. Margin is
+now exactly 0, restoring the tripwire's original intent (HANDOVER.md's own
+phrase: "a single deleted test no longer trips it" was already true at +63
+margin in August; it is far more true at +1301).
+
+This is not a source-code defect fix and closes no DEFECTS.md entry — it is
+`BUILD-PLAN.md` step 30 (launch hardening) maintenance that happened to be
+agent-doable, genuinely unexecuted since August, and does not require
+reading another file for a marginal, likely-nonexistent bug. It carries the
+same risk profile as every other config-only change in this codebase: it can
+only make the gate stricter, never looser, so it cannot itself introduce a
+regression.
+
+`TZ=UTC make test` (full, after the change): **3200 passing, exit 0**
+(255 v2 vitest + 47 v2/api + 465 v3/api [+2 incomplete, PAY-1, by design;
++6 skipped] + 120 corpus-compiler + 470 engine + 73 fold-runner + 1770
+apps/web) — unchanged from v3-D393, independently re-derived from a fresh
+container. `check-test-floor.mjs`: **OK, 3200 >= floor 3200, margin 0**
+(was +1301). `npx vitest run test/check-test-floor-gate.test.ts`
+(apps/web): 10/10 green, confirming the gate's own test suite needed no
+change. `TZ=UTC make build`: the usual one-time `SecurityFatalError`
+Next.js CLI advisory nudge fired on the first invocation, not acted on
+(the same call every prior night has made); a plain retry built clean,
+exit 0, unchanged routes. `npm run gates` (apps/web): all green — locked-css
+OK (294 v1 lines byte-identical, 1 documented hunk); boundaries OK, 351
+files; fonts 2/6 present, degraded-but-non-blocking, pre-existing;
+corpus-morphology OK, 362 words; corpus-glyphs OK, 206 codepoints across 4
+artifacts. `npx tsc --noEmit` (apps/web): clean, exit 0. No PHP file
+touched this run, so `pint` has no diff to check. No `v1/**`/`v2/**` edit
+(`git status --porcelain -- v1 v2` empty before this commit; the usual
+stray `v2/tsconfig.tsbuildinfo` build-cache diff reverted first). No Arabic
+codepoint possible — the only changed file is `v3/TEST-FLOOR`, a single
+integer. No oracle/golden-log/fixture/snapshot regenerated — this run
+touched no test fixture, only a build-gate parameter and this
+documentation entry.
+
+Session start: the container's `origin/main` and detached `HEAD` already
+agreed exactly at `9ebe721` (v3-D393) after `git fetch` — no stale-local-
+`main` trap this run (`git checkout main && git reset --hard origin/main`
+confirmed clean, `git status` empty, before any exploration). `make setup`'s
+plain `v3/api` composer install failed exactly as every prior entry
+predicts (`symfony/*` v8.1.x need PHP >=8.4.1, sandbox ships 8.3.6); unlike
+some prior nights, `v3/api`'s own install had already been run standalone
+with `--ignore-platform-req=php` *before* `make setup`, so the only recovery
+needed was `.env`/`APP_KEY`/`migrate` by hand for `v3/api` (`v2/api`'s own
+`.env`/`APP_KEY`/migrations landed cleanly inside `make setup` itself this
+run). All five npm installs and both composer installs were run
+concurrently in the background rather than serialized, with no cache race
+this time (cache-state-dependent, as v3-D383/D387 already documented — not
+a structural guarantee either way).
+
+**NOT addressed, named for next run, unchanged:** every item on v3-D393's
+own list — H1 (Stripe MY business verification), H2 (surah 67 scene beats,
+human-only), H3 (qari booking), H5 (pager owner), H6 (human a11y pass), E6
+(a host + production DB), E7 (an SMTP account), E8 (Stripe replay fixtures,
+gated on H1). **Recommendation unchanged from v3-D393, now doubly true:**
+the next run should not default to another source-sweep night on its own
+either. If every human/infra item above is still untouched, look for
+another genuinely agent-doable, non-"read-everything-for-a-bug" task before
+falling back to a sweep — this run's own TEST-FLOOR fix is one example of
+what that can look like; it is very unlikely there is a second one of the
+same shape waiting, so a future run may have to report "stalled, nothing
+new to do" honestly rather than invent work.

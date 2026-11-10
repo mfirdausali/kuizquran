@@ -56,7 +56,48 @@ make dev     # SPA :5273, API :8000
 make test    # 3200 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 465 v3/api + 120 corpus-compiler
-             # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D393, 2026-11-09)
+             # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D394, 2026-11-10)
+             # NOTE (v3-D394, 2026-11-10): heeded v3-D393's own recommendation
+             # not to default to a seventeenth source-sweep night. Re-confirmed
+             # the H1/H2/H3/H5/H6/E6/E7/E8 human/infra list is still unmoved
+             # (scene beats still scaffold-only, Stripe fixtures still
+             # README-only, no DB host in this sandbox), then picked up a
+             # concrete, never-executed item instead: HANDOVER.md's own E10
+             # ("raise the test floor... or accept a deleted test no longer
+             # trips it") was closed in name (check-test-floor.mjs built,
+             # v3-D95) but TEST-FLOOR itself was bumped once, early, to 1899
+             # and never again despite the suite growing past 3200 since —
+             # a demonstrated, concrete gap: a synthetic 500-test deletion
+             # (apps/web 1770->1270) read green against the committed floor
+             # ("OK — 2700 >= floor 1899, +801 margin") and FAILED correctly
+             # once the floor was raised to 3200. Fixed: TEST-FLOOR 1899 ->
+             # 3200 (this run's own fresh-container-confirmed total, exact
+             # match to v3-D392/D393). No source/test file needed editing —
+             # check-test-floor-gate.test.ts's own "reads the REAL repo
+             # TEST-FLOOR file" case already reads it dynamically by design
+             # (v3-D95); reran after the bump, 10/10 green, unchanged. Margin
+             # is now exactly 0. `TZ=UTC make test`: 3200 passing, unchanged,
+             # independently re-derived from a fresh container, exit 0.
+             # `check-test-floor.mjs`: OK, 3200 >= floor 3200, margin 0 (was
+             # +1301). `TZ=UTC make build`: the usual one-time
+             # `SecurityFatalError` CLI nudge fired on first invocation, not
+             # acted on; plain retry built clean, exit 0, unchanged routes.
+             # `npm run gates`: all green, 351 files, unchanged. `npx tsc
+             # --noEmit`: clean. No PHP file touched, so `pint` had no diff.
+             # No `v1/**`/`v2/**` edit (the usual stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted first). No
+             # Arabic codepoint possible — the only changed file is
+             # `v3/TEST-FLOOR`, a single integer. No oracle/golden-log/
+             # fixture/snapshot regenerated. Session start: `origin/main` and
+             # detached `HEAD` already agreed exactly at `9ebe721` (v3-D393)
+             # after `git fetch` — no stale-local-`main` trap this run. NOT
+             # addressed, unchanged: every item on v3-D393's own list (H1/H2/
+             # H3/H5/H6/E6/E7/E8). Recommendation unchanged and now doubly
+             # true: the next run should not default to another source-sweep
+             # night either — look for a second agent-doable, non-sweep task
+             # first (unlikely one exists), and if none is found, report the
+             # build as stalled honestly rather than invent work. Full
+             # write-up: DECISIONS.md v3-D394.
              # NOTE (v3-D393, 2026-11-09): a sixteenth fresh-sweep night found
              # no confirmed defect. This run also re-checked HANDOVER.md's E6
              # ("fold-runner DB adapter") and E7 ("operational mailer") against
