@@ -43545,3 +43545,154 @@ falling back to a sweep — this run's own TEST-FLOOR fix is one example of
 what that can look like; it is very unlikely there is a second one of the
 same shape waiting, so a future run may have to report "stalled, nothing
 new to do" honestly rather than invent work.
+
+## v3-D395 (2026-11-10, nightly) — this sandbox has real Postgres 16 installed; started it and ran every previously-skipped Postgres/pcntl test and the backup-restore drill against it for real
+
+v3-D393/D394 concluded every remaining engineering gap is human/infra-gated
+and recommended against another blind source-sweep. Rather than re-sweeping
+(or inventing busywork), this run checked a premise nobody had checked
+before: whether "no Postgres in this sandbox" — the reason CLAUDE.md's own
+running test-count comment has carried **"6 skipped, Postgres/pcntl-gated,
+environment-dependent"** since v3-D116 (2026-08-21), and the reason
+LAUNCH-CHECKLIST.md gate 13 reads "GREEN (SQLite) / BLOCKED-ON-INFRA
+(Postgres)" — is actually true of *this* container.
+
+**It is not.** `pg_lsclusters` showed PostgreSQL 16.15 installed (`psql`,
+`pg_dump`, the `pdo_pgsql`/`pgsql` PHP extensions, `pcntl`/`posix` all
+present) with its cluster simply never started. No prior nightly entry
+records checking this — every entry that mentions the 6 skips treats them
+as a fixed environmental fact, not something to re-test each container.
+
+**What this run actually exercised, for the first time outside CI (and, for
+the backup-restore drill, for the first time anywhere — `grep -n
+"restore-drill" .github/workflows/ci.yml` finds nothing; the pgsql branch
+of `BackupRestoreDrillCommand` has never executed in any environment since
+it was written at step 30):**
+
+1. **Started the cluster** (`service postgresql start`), set the `postgres`
+   role's password to `postgres` to match `PerUserFoldLockTest`'s own
+   documented defaults (127.0.0.1:5432, db/user/password all `postgres` —
+   the official `postgres` Docker image's defaults, matching
+   `.github/workflows/ci.yml`'s service exactly).
+
+2. **`Tests\Unit\Support\PerUserFoldLockTest`** (5 tests) — previously 4 of
+   5 skipped with only basic Postgres reachable (the 5th,
+   `test_is_a_no_op_on_a_non_postgres_connection`, never needed Postgres and
+   always ran). All 5 now **PASS**, including
+   `test_same_user_id_serializes_across_processes_but_different_ids_never_
+   co…` — the genuine cross-process `pcntl_fork` mutual-exclusion proof for
+   `PerUserFoldLock`, run against a real second Postgres session, not two
+   PHP objects sharing one interpreter.
+
+3. **`Tests\Feature\Nightly\PerUserFoldLockWiringTest`** (2 tests) — these
+   need a SECOND, pre-migrated database (`imanapp_lock_test`, per the test's
+   own header: "this test never runs migrations itself") read via
+   `PGSQL_LOCK_TEST_WIRING_DATABASE`. Created it
+   (`CREATE DATABASE imanapp_lock_test`) and migrated it exactly as
+   `.github/workflows/ci.yml` does out of band. Both now **PASS for real**:
+   `test_atom_cache_rebuilder_waits_for_a_concurrently_held_same_user_lock`
+   (2.89s; baseline + the fork's 1800ms hold + the test's 1200ms margin) and
+   `test_determinism_check_waits_for_a_concurrently_held_same_user_lock`
+   (3.09s) — both measured against this run's OWN unlocked baseline, not a
+   fixed threshold (the file's own anti-vacuity discipline), proving
+   `AtomCacheRebuilder::rebuild()` and `DeterminismCheckCommand`'s
+   DB-sampling path genuinely route through `PerUserFoldLock::withLocks()`
+   rather than merely existing beside it unused.
+
+   `v3/api` PHPUnit, full suite: **471 passed, 2 incomplete (PAY-1, by
+   design), 0 skipped** — was 465 passed / 2 incomplete / **6 skipped**
+   every prior night. All 6 of the long-standing skips are these two test
+   files; none remain.
+
+4. **`php artisan backup:restore-drill` against a real Postgres database**
+   (`imanapp_backup_drill`, created + migrated the same way, then seeded
+   with 6 real users and 100 real events via factories so the drill
+   exercises more than its own 2 fixture rows). Ran the command's actual
+   `pgsql` branch (`pg_dump --data-only --no-owner` → encrypt → wipe →
+   decrypt → `psql -f` → verify) — the code path LAUNCH-CHECKLIST.md gate
+   13 has always listed as unproven. **Result: `DRILL PASSED`** — 108 rows
+   across 21 critical tables, restored row-for-row, the event-log wire
+   checksum byte-identical before/after (so a re-fold produces the same
+   atoms), zero foreign-key violations after the load, the encrypted
+   artifact genuinely opaque (a known plaintext needle absent from the
+   ciphertext), and the purge-aware property held through the REAL
+   `pdpa:purge-due` command (a genuine `AccountDeletionRequest` consumed,
+   the purged subject never resurrected by the restore + ledger
+   re-application, the non-purged "keeper" subject left untouched).
+
+   **Falsifiability check on the pgsql path specifically** (mirroring the
+   SQLite mutation-proof LAUNCH-CHECKLIST.md already records — "truncating
+   the dump to 90% → red"): re-ran the drill with `PATH` restricted to
+   exclude `pg_dump`. Result: `FAIL — dump produced nothing`, exit 1 — the
+   command correctly reports failure rather than a false green when its
+   external tool is unavailable, on the pgsql branch specifically, not only
+   the sqlite one.
+
+**What this does NOT close.** This is a throwaway local Postgres inside an
+ephemeral sandbox container, not a staging deployment — it proves the
+*dump/restore SQL mechanism* works against a real Postgres server, which is
+genuinely new evidence, but it is not gate 20 (a persistently-running host,
+a managed production database, `schedule:run` firing from cron, real
+learner data). LAUNCH-CHECKLIST.md gate 13 is edited below to say precisely
+this — "ran against SQLite AND a real local Postgres 16 server" — rather
+than either overclaiming "staging proven" or leaving the stale "BLOCKED-
+ON-INFRA (Postgres)" wording that this run shows is no longer the accurate
+reason the gate is open. Gates 3/4/10/19's Postgres-adjacent language is
+UNCHANGED by this entry: those genuinely need a host running `schedule:run`
+continuously against real learner data, which this run neither has nor
+claims to have produced.
+
+**Why this is not a source-code fix and closes no DEFECTS.md entry:** no
+production or test file changed. This is the same shape as v3-D394's
+TEST-FLOOR fix — real, agent-doable, previously-unexecuted build-plan-step-30
+maintenance, found by checking a premise instead of re-reading source for a
+marginal bug.
+
+`TZ=UTC make test` (full, final run, both Postgres databases live):
+**3206 passing** (was 3200 last night) — 255 v2 vitest + 47 v2/api + **471**
+v3/api (2 incomplete, **0** skipped, was 465/2/6) + 120 corpus-compiler +
+470 engine + 73 fold-runner + 1770 apps/web. `check-test-floor.mjs`: **OK —
+3206 >= floor 3200 (+6 margin)**. The floor is deliberately left at 3200,
+not raised to 3206: these 6 tests are legitimately environment-gated (they
+skip cleanly, by design, exactly as `.github/workflows/ci.yml`'s own
+service-container comment explains) and a future container without
+Postgres installed or started will correctly report 3200 again — raising
+the floor to 3206 would turn an honest, by-design skip into a false
+test-floor failure on any container that doesn't happen to have Postgres
+running, which is not what TEST-FLOOR exists to catch. `TZ=UTC make build`:
+exit 0, unchanged routes. `npm run gates`: all green, unchanged. `npx tsc
+--noEmit`: clean. `./vendor/bin/pint --test`: no PHP file edited, nothing to
+check. No `v1/**`/`v2/**` edit. No Arabic codepoint possible — only
+`v3/DECISIONS.md`, `v3/LAUNCH-CHECKLIST.md` and `v3/CLAUDE.md` changed, all
+prose. No oracle/golden-log/fixture/snapshot regenerated — nothing here
+touches a committed fixture; the two throwaway Postgres databases
+(`imanapp_lock_test`, `imanapp_backup_drill`) and their seeded rows live
+only in this container's local Postgres instance, never committed, and do
+not survive past this session.
+
+Session start: fresh container; `make setup` run by hand across both API
+projects (`v3/api` needed `--ignore-platform-req=php`, PHP 8.3.6 here vs.
+its `>=8.4.1` requirement, same as every prior entry) and all five npm
+projects; `.env`/`APP_KEY`/sqlite DBs created for both API projects.
+`origin/main` and detached `HEAD` agreed exactly at `f7485bc` (v3-D394)
+after `git fetch`; local `main` was stale at `18ff8bd` (v3-D383) — the
+recurring stale-local-`main` trap this file has recorded roughly fifty
+times since v3-D77 — caught via `git checkout -B main HEAD` before any
+exploration.
+
+**NOT addressed, named for next run, unchanged:** every item on v3-D393/
+D394's own list — H1 (Stripe), H2 (surah 67 scene beats, human-only), H3
+(qari booking), H5 (pager owner), H6 (human a11y pass), E6 (a *persistent*
+host + production DB — this run's local Postgres does not satisfy that),
+E7 (an SMTP account), E8 (Stripe replay fixtures). **Recommendation for the
+next run:** do not assume "no Postgres here" without checking
+`pg_lsclusters`/`which psql` first — this run's own container had it
+installed and merely stopped, and the prior sixteen nights' containers may
+or may not have; it is worth the ~10 seconds to check before accepting the
+skip. If Postgres genuinely is unavailable on a future container, 6 skips
+and a SQLite-only backup drill are the correct, honest, by-design result —
+not a regression. If another agent-doable, non-sweep, non-infra task
+surfaces, prefer it over both a source-sweep and over re-deriving this same
+finding on a container that already has Postgres running (check
+`pg_lsclusters` once, and if already `online`, this entry's work is already
+done for that container).

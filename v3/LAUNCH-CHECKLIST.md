@@ -299,7 +299,7 @@ MY monthly is card-only at launch unless Curlec is added (BUILD-PLAN Q7, open).
 
 ---
 
-## 13 · Backup restore drill — **GREEN (SQLite) / BLOCKED-ON-INFRA (Postgres)**
+## 13 · Backup restore drill — **GREEN (SQLite AND a real local Postgres 16) / BLOCKED-ON-INFRA (staging/production)**
 
 ```bash
 cd v3/api && TZ=UTC php artisan backup:restore-drill
@@ -320,10 +320,39 @@ Last run: **503 rows across 17 critical tables, PASSED.**
 truncating the dump to 90% → red (and the drill reports the partial restore as
 a verdict rather than crashing).
 
+**UPDATE (2026-11-10, v3-D395).** The first limit below is now only half
+true. A nightly run found this sandbox's container actually had PostgreSQL
+16 installed (merely stopped — `pg_lsclusters` showed it `down`, not
+absent) and ran the drill's real `pgsql` branch — `pg_dump --data-only
+--no-owner` → encrypt → wipe → decrypt → `psql -f` → verify — against a
+real local Postgres 16 server for the first time ever (CI never invokes
+this command at all; `grep -n "restore-drill" .github/workflows/ci.yml`
+finds nothing). Seeded with 108 real rows across 21 critical tables:
+**`DRILL PASSED`** — row-for-row restore, the event-log wire checksum
+byte-identical before/after, zero FK violations, the ciphertext genuinely
+opaque, and the purge-aware property held through the real
+`pdpa:purge-due` command. A falsifiability check specific to this branch
+(PATH restricted to exclude `pg_dump`) correctly reported `FAIL — dump
+produced nothing` rather than a false green. Full write-up: DECISIONS.md
+v3-D395.
+
+**What this does NOT prove:** this was a throwaway local Postgres inside an
+ephemeral sandbox container, not a staging or production deployment — no
+persistent host, no managed database, no real learner data, nothing
+running `schedule:run`. That is still gate 20's gap, unchanged, and still
+BLOCKED-ON-INFRA. What moved is narrower and real: the *SQL dump/restore
+mechanism itself* is now proven against genuine Postgres, not only SQLite,
+so a staging run's remaining risk is operational (host, credentials, cron)
+rather than "does this command's Postgres code path even work."
+
 **Two honest limits, printed by the command itself on every green run:**
 
-1. It ran against **SQLite**. A green SQLite drill does not prove a Postgres
-   restore. → BLOCKED-ON-INFRA (gate 20).
+1. ~~It ran against **SQLite**. A green SQLite drill does not prove a
+   Postgres restore.~~ **Partially superseded 2026-11-10 (v3-D395) — see the
+   update above.** It has now also run against a real local Postgres 16
+   server, with a real round trip and a real falsifiability check. It has
+   NOT run against a staging/production Postgres host. → BLOCKED-ON-INFRA
+   (gate 20) for that half only.
 2. **The PDPA delete endpoint now exists (v3-D79) and writes to a real
    `purge_ledger` table** — but the drill still reconciles against its own
    throwaway JSON file, not that table, and this is deliberate rather than

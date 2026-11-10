@@ -98,6 +98,47 @@ make test    # 3200 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # first (unlikely one exists), and if none is found, report the
              # build as stalled honestly rather than invent work. Full
              # write-up: DECISIONS.md v3-D394.
+             # NOTE (v3-D395, 2026-11-10): checked a premise every prior night
+             # had merely inherited rather than re-tested — whether "no
+             # Postgres in this sandbox" (the reason for the "6 skipped
+             # [Postgres/pcntl-gated]" above, and for LAUNCH-CHECKLIST.md
+             # gate 13's "BLOCKED-ON-INFRA (Postgres)") is actually true of
+             # THIS container. It was not: PostgreSQL 16 was installed, only
+             # stopped (`pg_lsclusters` showed it `down`). Started it, set
+             # the `postgres` role's password to match the test suite's own
+             # documented defaults, created + migrated the second throwaway
+             # DB `PerUserFoldLockWiringTest` needs (`imanapp_lock_test`,
+             # exactly as `.github/workflows/ci.yml` does out of band) —
+             # all 6 previously-skipped tests (`PerUserFoldLockTest` ×5 incl.
+             # the real `pcntl_fork` cross-process mutual-exclusion proof,
+             # `PerUserFoldLockWiringTest` ×2) now PASS for real. `v3/api`:
+             # 471 passed, 2 incomplete (PAY-1, unchanged), **0 skipped**
+             # (was 465/2/6). Also ran `php artisan backup:restore-drill`
+             # against a real local Postgres 16 database for the first time
+             # EVER in any environment (CI never invokes this command) —
+             # `DRILL PASSED`, 108 rows/21 tables, byte-identical event
+             # checksum, zero FK violations, ciphertext genuinely opaque,
+             # purge-aware property held through the real `pdpa:purge-due`
+             # command; a falsifiability check (PATH without `pg_dump`)
+             # correctly reported `FAIL — dump produced nothing` rather than
+             # a false green. `TZ=UTC make test`: **3206 passing** this run
+             # (was 3200 — exactly +6, the no-longer-skipped tests).
+             # `check-test-floor.mjs`: OK, 3206 >= floor 3200 (+6 margin).
+             # TEST-FLOOR deliberately left at 3200, not raised: these 6
+             # stay legitimately environment-gated, and a container without
+             # Postgres running will correctly report 3200 again — that is
+             # by design, not a regression. LAUNCH-CHECKLIST.md gate 13
+             # updated to reflect that the pgsql dump/restore mechanism is
+             # now proven, though a staging/production host (gate 20) is
+             # still not. No source or test file changed; no `v1/**`/
+             # `v2/**` edit; no Arabic codepoint possible (prose-only diff).
+             # NOT addressed, unchanged: H1/H2/H3/H5/H6/E6/E7/E8 — this
+             # run's local Postgres is a throwaway sandbox DB, not gate 20's
+             # persistent host + production data. Recommendation: a future
+             # run should check `pg_lsclusters`/`which psql` before assuming
+             # Postgres is absent — this container had it installed and
+             # merely stopped, and that may or may not be true of the next
+             # one. Full write-up: DECISIONS.md v3-D395.
              # NOTE (v3-D393, 2026-11-09): a sixteenth fresh-sweep night found
              # no confirmed defect. This run also re-checked HANDOVER.md's E6
              # ("fold-runner DB adapter") and E7 ("operational mailer") against
