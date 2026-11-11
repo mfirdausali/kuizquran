@@ -82,6 +82,50 @@ make test    # 3200 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # No source or test file touched — documentation only. NOT
              # addressed, unchanged: H1/H2/H3/H5/H6/E6/E7/E8. Full write-up:
              # DECISIONS.md v3-D398.
+             # NOTE (v3-D399, 2026-11-11, nightly): a nineteenth fresh-sweep
+             # night found no confirmed defect. Re-derived the full baseline
+             # independently rather than trusting v3-D398's own claim —
+             # caught the recurring stale-local-`main`/detached-`HEAD` trap
+             # again (`git checkout -B main HEAD`, `origin/main`/`HEAD`
+             # agreed exactly at `40232ac`). Tried five techniques not used
+             # by name before: a mention-count ranking corrected for a
+             # basename-extension mismatch the same technique's prior runs
+             # had (every "low-mention" file it surfaced was already
+             # individually confirmed correct in a named prior entry);
+             # `routes/api.php` read in full for a missing-auth-middleware
+             # gap specifically (none — every route outside three
+             # deliberately-public reads and the HMAC-authenticated Stripe
+             # webhook sits inside `auth:sanctum`, every `/admin/*` route
+             # inside both `auth:sanctum` and `admin`); five controllers/
+             # commands read end to end for the first time
+             # (`GlossDraftsController`, `AccountController`,
+             # `PurgeDueAccountsCommand`, `AdminUsersController::exportCsv`,
+             # `OverridesController::store`) hunting the "one decision,
+             # several call sites, drifted at one" shape this build has
+             # closed before — none found; `packages/engine/src/rotation.ts`'s
+             # own modular-arithmetic lap-boundary-collision proof
+             # re-derived by hand, confirmed correct, `stride()`'s fallback
+             # line confirmed unreachable dead code, harmless;
+             # `lib/sync/clockSkew.ts`'s wiring confirmed not gated behind
+             # push having anything to push. `TZ=UTC make test`: 3206
+             # passing, unchanged, independently re-derived from a fresh
+             # container (255 v2 vitest + 47 v2/api + 471 v3/api [2
+             # incomplete, 0 skipped] + 120 corpus-compiler + 470 engine +
+             # 73 fold-runner + 1770 apps/web). `check-test-floor.mjs`: OK,
+             # 3206 >= floor 3200 (+6 margin). `TZ=UTC make build`: the
+             # `SecurityFatalError` nudge fired nondeterministically twice
+             # this run (fail/succeed/fail/succeed across four bare
+             # invocations with zero source change), same shape as
+             # v3-D386/D392/D396, not acted on; final state exit 0, 30
+             # routes, unchanged. `npm run gates`: all green, 351 files,
+             # unchanged. `npx tsc --noEmit`: clean. No PHP file edited
+             # (read-only this run), no `v1/**`/`v2/**` edit (the usual
+             # stray `v2/tsconfig.tsbuildinfo` reverted first), no
+             # production or test file touched — documentation only. NOT
+             # addressed, unchanged: H1/H2/H3/H5/H6/E6/E7/E8. Three
+             # consecutive nights (v3-D393, D398, D399) now independently
+             # reach the same honest conclusion. Full write-up:
+             # DECISIONS.md v3-D399.
              # NOTE (v3-D397, 2026-11-11): another real CI gap, same shape as
              # v3-D396's — `backup:restore-drill`'s own `pgsql` branch
              # (pg_dump -> encrypt -> wipe -> decrypt -> psql -f -> verify)

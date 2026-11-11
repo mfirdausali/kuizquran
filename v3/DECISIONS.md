@@ -44119,3 +44119,142 @@ exhausted — don't re-check either without new evidence something changed.
 If no new agent-doable item has appeared, say so plainly, the way this
 entry and v3-D393 both did, rather than manufacturing an eighteenth source
 sweep for its own sake.
+
+## v3-D399 (2026-11-11, nightly) — a nineteenth fresh-sweep night found no confirmed defect; re-derived the full baseline from scratch
+
+Re-verified the repo state independently rather than trusting v3-D398's own
+claim of exhaustion. `git fetch origin main` showed `HEAD` already matched
+`origin/main` exactly at `40232ac` (v3-D398) but in DETACHED state, with
+local `main` stale 20 commits behind at `18ff8bd` (v3-D383) — the recurring
+stale-local-`main` trap, caught via `git checkout -B main HEAD` before any
+exploration, same as every recent entry.
+
+Re-read `v3/NIGHTLY.md`, `v3/CLAUDE.md` (rules + the tail of its own
+changelog), `v3/INVARIANTS.md`, `v3/DECISIONS.md`'s tail (v3-D380 through
+D398), `v3/DEFECTS.md` end to end (every B-/E-number CLOSED except PAY-1,
+BLOCKED-ON-INFRA by design), `v3/docs/BUILD-PLAN.md`'s milestone summary,
+`v3/HANDOVER.md` and `v3/LAUNCH-CHECKLIST.md`'s opening gates — confirmed
+the same conclusion v3-D393/D398 already reached: steps 1-26/29 are DONE,
+steps 27/28/30 and PAY-1 are genuinely blocked on human/infra work (H1-H6,
+E6-E8), none of which became agent-completable overnight.
+
+With the CI-wiring seam and the step-30 E6/E7 question both already marked
+exhausted by v3-D398, this run tried several FRESH candidate techniques
+rather than repeating either:
+
+1. **Mention-count ranking, redone with a basename-stem match** (the same
+   technique v3-D371/D383/D387/D391/D392 used, but corrected for the
+   `.php`/`.ts`/`.tsx` extension mismatch that technique's literal-basename
+   grep had — `BillingEvent.php` never matches a prose mention of
+   `BillingEvent` without the extension, which would have wrongly flagged
+   nine already-examined files as "zero mentions"). Corrected ranking
+   surfaced `parseQac.ts`, `InlineDemo.tsx`, `arabic.ts`, `TestHistoryPanel.tsx`,
+   `Objections.tsx`, `Container.tsx`, `loadClientCorpus.ts`, `multiSurah.ts`,
+   `not-found.tsx`, `identity-context.tsx`, `prdRank.ts` as the lowest-ranked
+   — cross-checked each against the changelog tail and confirmed every one
+   was already individually read and found correct in a named prior entry
+   (v3-D370/D371/D375/D383/D387/D392) — the technique itself is now
+   exhausted, not merely its results.
+2. **`routes/api.php` read in full**, specifically checking every route for a
+   missing `auth:sanctum`/`admin` middleware gap (an authorization-bypass
+   defect class never explicitly swept before by name, as distinct from the
+   route-shadowing-order checks v3-D375 already did). No gap found: every
+   route outside the three deliberately-public ones (`/overrides` GET,
+   `/verifications` GET, `/specs` GET — each named in its own comment as
+   public-by-design) and the Stripe webhook (HMAC-authenticated, not
+   session-authenticated, by design) sits inside the `auth:sanctum` group;
+   every `/admin/*` route sits inside both `auth:sanctum` AND `admin`.
+3. **Read five controllers/commands end to end for the first time this
+   build**, specifically hunting for the "one decision computed at several
+   call sites, drifted at one" shape this build has closed many times
+   (grace_until, stageWord, isGateKind): `GlossDraftsController.php` (the
+   draft -> reviewed -> merged transition table, the two independent locks
+   against a hashed language ever being authorable or merged) —
+   correct, no drift between `store()`'s un-review branch and `review()`'s
+   own transition table. `AccountController.php` (export/deletionStatus/
+   requestDeletion/restoreDeletion) — the admin-self-delete refusal
+   correctly checks `AdminAudit::where('actor_admin_id', ...)` directly
+   rather than trusting `adminRoles()` alone (already reasoned through in
+   its own docblock); the restore path scopes by `user_id` AND a
+   `hash_equals` token compare together, never token value alone. `App
+   \Console\Commands\PurgeDueAccountsCommand.php` (112 lines, first full
+   read) — the ledger-write-before-delete-in-one-transaction ordering holds,
+   a stale request with no matching user is dropped without fabricating a
+   ledger row, a per-user `restrictOnDelete` failure fails the whole command
+   loudly rather than being swallowed into an unrelated batch's success.
+   `AdminUsersController::exportCsv()` — every column is a hash, an ISO
+   timestamp, a 0/1 flag or an integer; no free-text field exists for a CSV-
+   formula-injection vector, and `fputcsv` escapes correctly regardless.
+   `OverridesController::store()` — the hash-recompute failure is reported
+   but never blocks the write, by design, matching `CorpusHashRecomputer`'s
+   own docblock exactly.
+4. **`packages/engine/src/rotation.ts` read and its modular-arithmetic
+   boundary-collision proof re-derived by hand** (`lapPerm`'s claim that
+   rotating a base permutation by `lap mod laneCount` never repeats a lane
+   at a lap boundary, for `laneCount >= 3`) — confirmed algebraically for
+   both the generic case and the lap-wraparound case; `stride()`'s fallback
+   `return 1` line is confirmed unreachable dead code for any `poolSize`
+   that reaches it (the loop's own upper bound always includes
+   `poolSize - 1`, always coprime with `poolSize`), harmless, not a defect.
+5. **`lib/sync/clockSkew.ts` + its wiring into `sync.ts`/`SyncStatus.tsx`**
+   read end to end, specifically checking whether the push half of a sync
+   cycle needs its own skew measurement (it does not: `syncCycle()` always
+   calls `pullFromServer()` unconditionally regardless of push's outcome, so
+   the skew measurement is never actually gated behind a push having
+   anything to push).
+
+No defect found by any of the five techniques. **Conclusion: no agent-doable
+engineering gap exists this run either** — the same honest outcome v3-D393
+and v3-D398 already reported, now independently re-derived a third time
+with three more candidate techniques exhausted (corrected mention-ranking,
+full-route-auth audit, rotation-math re-derivation) and added to the "don't
+re-check" list below.
+
+Fresh container; Postgres 16 installed but stopped (`pg_lsclusters` showed
+it `down`, same as v3-D395/397/398) — started it, created + migrated
+`imanapp_lock_test` and `imanapp_backup_drill` by hand, mirroring
+`.github/workflows/ci.yml`'s own out-of-band setup exactly. Both API
+projects' `.env`/`APP_KEY`/`bootstrap/cache`/`storage/framework/*`/
+`database.sqlite` were missing on the fresh checkout and created by hand;
+`v3/api`'s composer install needed `--ignore-platform-req=php` (PHP 8.3.6
+here vs. its `>=8.4.1` floor), run before `v2/api`'s to avoid the documented
+concurrent-install cache race. `TZ=UTC make test`: **3206 passing** — 255 v2
+vitest + 47 v2/api PHPUnit + 471 v3/api PHPUnit (2 incomplete, PAY-1, by
+design; 0 skipped, Postgres wired) + 120 corpus-compiler + 470 engine + 73
+fold-runner + 1770 apps/web — byte-identical composition to v3-D397/D398.
+`check-test-floor.mjs` (run via `make test` itself): `OK — 3206 >= floor
+3200 (+6 margin)`. `TZ=UTC make build`: the `SecurityFatalError` Next.js CLI
+security-advisory nudge fired NONDETERMINISTICALLY this run, same as
+v3-D386/D392/D396's own finding — first invocation failed, second
+succeeded (exit 0, 30 routes); a THIRD bare invocation (re-confirming the
+build is still clean, no source touched) failed again, a fourth succeeded —
+confirming this really is transient environment noise rather than "one
+retry is always enough," not acted on (upgrading the pinned Next.js major
+stays outside this run's mandate, the same call every prior night has
+made). `npm run gates` (apps/web): all green, 351 files, unchanged (294 v1
+lines byte-identical; 2/6 UI fonts present, degraded-but-non-blocking,
+pre-existing; 362 words; 206 codepoints). `npx tsc --noEmit` (apps/web):
+clean, exit 0. No PHP file was edited this run (every PHP file above was
+read only), so `pint` has no diff to check. No `v1/**`/`v2/**` edit — the
+usual stray `v2/tsconfig.tsbuildinfo` build-cache diff was reverted before
+this entry was written. No production or test file touched this run —
+documentation only, so no Arabic-codepoint sweep, mutation test, or
+oracle/golden-log/fixture/snapshot regeneration applies.
+
+**NOT addressed, unchanged:** H1 (Stripe MY business verification), H2
+(surah 67 scene beats), H3 (qari booking), H5 (pager owner), H6 (human a11y
+pass + Arabic visual QA), E6 (a persistent host + production DB), E7 (a
+real SMTP account), E8 (Stripe replay fixtures, gated on H1) — exactly as
+v3-D393 through v3-D398 left them.
+
+**Recommendation for the next run:** five more candidate techniques are now
+exhausted alongside v3-D398's CI-wiring/E6-E7 findings — corrected
+mention-count ranking, a full `routes/api.php` authorization-gap audit, the
+five controllers/commands named in point 3 above, `rotation.ts`'s own
+modular-arithmetic proof, and `clockSkew.ts`'s push/pull wiring. If a next
+run also finds nothing new after genuinely trying fresh ground (not
+re-treading any of the above), it should say so plainly rather than
+manufacture a twentieth sweep for its own sake — three consecutive nights
+reaching the same honest conclusion (v3-D393, D398, D399) is itself
+meaningful signal that this build may simply be done, engineering-wise,
+until a human clears H1-H6.
