@@ -57,6 +57,63 @@ make test    # 3200 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 465 v3/api + 120 corpus-compiler
              # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D394, 2026-11-10)
+             # NOTE (v3-D400, 2026-11-11, nightly): POST /auth/login and POST
+             # /auth/anonymous carried NO rate limit at all — every other
+             # unauthenticated, credential-adjacent route in routes/api.php
+             # (/forgot-password, /reset-password, the signed email-verify
+             # link, /admin/login) already carries `throttle:6,1` or stricter;
+             # these two had none. /auth/login is the actual password CHECK
+             # (not merely a reset REQUEST) — a real caller could brute-force
+             # any known email's password with zero friction; /auth/anonymous
+             # mints a real user row + Sanctum token on every call, unbounded.
+             # Found by re-grepping `routes/api.php` for `throttle` directly
+             # against the full route list, a fresh angle not used by name in
+             # any of v3-D393..D399's own technique lists. Fixed: both routes
+             # now carry the same `throttle:6,1` the other credential-adjacent
+             # routes already use. RED confirmed directly: two new
+             # `AuthRateLimitTest` cases (6 rapid attempts, then a 7th)
+             # against the unmodified routes failed exactly as predicted
+             # (`Expected... [429] but received 401`/`201`); mutation-verified
+             # by reverting `routes/api.php` alone (`git stash`, both new
+             # tests kept) — reproduced both failures identically; restored
+             # byte-identically, reran green. Checked every existing test
+             # calling either route for its own same-method call count before
+             # adding the throttle (max 2 per test method, well under the
+             # 6/min limit) — no existing test needed changing. `v3/api`
+             # PHPUnit: 473 passed (was 471, +2 exactly — Postgres wired,
+             # `imanapp_lock_test`/`imanapp_backup_drill` migrated by hand), 2
+             # incomplete (PAY-1, unchanged), 0 skipped. `TZ=UTC make test`:
+             # **3208 passing** (was 3206, +2; every other suite unchanged:
+             # 255 v2 vitest, 47 v2/api, 120 corpus-compiler, 470 engine, 73
+             # fold-runner, 1770 apps/web). `check-test-floor.mjs`: OK, 3208
+             # >= floor 3200 (+8 margin). `TZ=UTC make build`: the
+             # `SecurityFatalError` Next.js CLI nudge fired nondeterministically
+             # twice across four bare invocations this run
+             # (fail/succeed/fail/succeed), same shape as
+             # v3-D386/D392/D396/D399, not acted on; final state exit 0, 30
+             # routes, unchanged. `npm run gates`: all green, 350 files,
+             # unchanged. `npx tsc --noEmit`: clean. `./vendor/bin/pint
+             # --test`: `routes/api.php`'s one finding (`ordered_imports`)
+             # confirmed pre-existing — reproduced identically against the
+             # unmodified pre-fix version of the file (`git show
+             # 3b33df9:v3/api/routes/api.php`); no PHP style issue introduced
+             # by this diff. No `v1/**`/`v2/**` edit. No Arabic codepoint/`\u`
+             # escape/`fromCharCode`/`fromCodePoint` introduced — swept
+             # programmatically over the full diff (one changed route file,
+             # one new test file): CLEAN, every new string is a PHP
+             # identifier, an HTTP status integer, or a fixed English
+             # comment/assertion sentence. No oracle/golden-log/fixture/
+             # snapshot regenerated. Landed as two `wip` commits pushed to a
+             # temporary branch mid-run (this session's own stop hook needed
+             # uncommitted work resolved while verification was still in
+             # progress), then fast-forward merged onto `main` once every gate
+             # above had actually run green — see the now-fully-merged branch
+             # `nightly/v3-auth-ratelimit-wip`. NOT addressed, unchanged:
+             # H1/H2/H3/H5/H6/E6/E7/E8. This closes a genuine,
+             # previously-undiscovered gap rather than another sweep-night
+             # non-finding — the first such fix in several nights (v3-D397's
+             # CI-wiring gap, 2026-11-11, was the last). Full write-up:
+             # DECISIONS.md v3-D400.
              # NOTE (v3-D398, 2026-11-11, nightly): re-checked HANDOVER.md's
              # step-30 E6/E7 (both confirmed still code-complete, blocked only
              # on a persistent host+DB and a real SMTP account), read

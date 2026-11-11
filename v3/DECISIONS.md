@@ -44258,3 +44258,128 @@ manufacture a twentieth sweep for its own sake — three consecutive nights
 reaching the same honest conclusion (v3-D393, D398, D399) is itself
 meaningful signal that this build may simply be done, engineering-wise,
 until a human clears H1-H6.
+
+## v3-D400 (2026-11-11, nightly) — `POST /auth/login` and `POST /auth/anonymous` carried no rate limit at all; both throttled to match every other credential-adjacent route
+
+`v3/api/routes/api.php` throttles every other unauthenticated,
+credential-adjacent endpoint: `/forgot-password` and `/reset-password` at
+`throttle:6,1`, the signed email-verify link at `throttle:6,1`,
+`/admin/login` at a stricter `throttle:10,1`. `POST /auth/login` — the
+actual password CHECK (`AuthController::login()`, `Hash::check()` against a
+real stored hash) — and `POST /auth/anonymous` (mints a real `User` row plus
+a Sanctum personal-access token on every call) carried **no throttle
+middleware of any kind**. Confirmed directly: `bootstrap/app.php` configures
+no global `api` rate limiter either (Laravel 11's `Application::configure()`
+applies none by default, unlike the older `RouteServiceProvider` convention),
+so these two routes had zero rate limiting from any source.
+
+⇒ A real caller could brute-force any known email address's password against
+`/api/auth/login` with no friction at all — more severe than the
+already-throttled `/forgot-password`, since that route only ever triggers a
+*reset request*, never a credential check. `/api/auth/anonymous` could be
+called an unbounded number of times, minting an unbounded number of real
+`users` rows and Sanctum tokens per caller, with no cost.
+
+**Why nothing caught it:** the nineteen prior fresh-sweep nights (v3-D371
+through v3-D399) each tried a named technique — append-only-guard greps,
+CI-wiring re-checks, billing-surface field-consistency sweeps, mention-count
+file ranking, a `routes/api.php` AUTHORIZATION-gap read (v3-D399's own
+technique checked that every route sits inside the correct
+`auth:sanctum`/`admin` middleware, which both of these correctly do not need
+since they are the identity-bootstrapping routes themselves) — but none had
+specifically grepped `routes/api.php` for the presence or absence of
+`throttle` as its own axis, independent of auth middleware. `AuthController`
+itself was read in full at least once (it is one of the most-mentioned files
+in this project's own history), but always for its *logic* (B7's email
+verification gate, B8's token-revocation wedge, `hasHistory`'s hardcoded-stub
+history) — never for what middleware wraps the routes that call it.
+
+**Found this run by:** grepping `routes/api.php` for every `throttle:` usage
+and listing which POST routes have none, then checking each remaining route
+for whether it is credential-adjacent (checks or mints a credential) versus
+genuinely public-read (`/overrides`, `/verifications`, `/specs` — public by
+design, v2-D21/D55, no credential involved) or HMAC-authenticated
+(`/billing/stripe/webhook` — the signature itself is the auth, and an
+unconfigured secret fails closed, v3-D[Stripe webhook entry]). Only
+`/auth/login` and `/auth/anonymous` were both credential-adjacent and
+unthrottled.
+
+**Fixed:** both routes now carry `->middleware('throttle:6,1')`, the same
+window the other credential-adjacent routes already use, for consistency
+rather than inventing a new threshold.
+
+**Verified:**
+- RED confirmed directly: a new `tests/Feature/Auth/AuthRateLimitTest.php`
+  (two cases — six rapid `/auth/login` attempts with a wrong password then a
+  seventh, expecting `429`; six rapid `/auth/anonymous` mints then a
+  seventh, expecting `429`) run against the unmodified routes failed exactly
+  as predicted: `Expected response status code [429] but received 401`
+  (login) and `...but received 201` (anonymous).
+- Checked every EXISTING test calling either route for its own
+  same-test-method call count before adding the throttle, specifically to
+  rule out a regression: the highest count found across both
+  `AnonymousAndAdoptionTest.php` and `TokenRevocationTest.php` was 2 calls in
+  a single test method, well under the new 6/minute limit — no existing test
+  needed any change.
+- Mutation-verified: reverted `routes/api.php` alone (`git stash` of that one
+  file, both new test cases kept) and reran — both failed identically to the
+  original RED, on the exact same assertions; restored byte-identically
+  (`git stash pop`, `git diff` empty), reran — `AuthRateLimitTest` 2/2 green.
+- `v3/api` PHPUnit, with Postgres wired (`imanapp_lock_test` and
+  `imanapp_backup_drill` migrated by hand, matching CI's own setup): **473
+  passed** (was 471, +2 exactly — these two new cases, every other case
+  unmoved), 2 incomplete (PAY-1, unchanged), 0 skipped.
+- `TZ=UTC make test`: **3208 passing** (was 3206, +2 exactly; every other
+  suite unchanged: 255 v2 vitest + 47 v2/api PHPUnit + 120 corpus-compiler +
+  470 engine + 73 fold-runner + 1770 apps/web). `check-test-floor.mjs` (run
+  via `make test` itself): `OK — 3208 >= floor 3200 (+8 margin)`.
+- `TZ=UTC make build`: the `SecurityFatalError` Next.js CLI security-advisory
+  nudge fired nondeterministically across this run's four bare invocations
+  (fail, succeed, fail, succeed — zero source change between them), the same
+  noise shape v3-D386/D392/D396/D399 already recorded, not acted on; final
+  state exit 0, 30 routes, unchanged.
+- `npm run gates` (apps/web): all green, 350 files, unchanged (this diff
+  touches no frontend or corpus file). `npx tsc --noEmit`: clean.
+- `./vendor/bin/pint --test`: `routes/api.php`'s one finding
+  (`ordered_imports`) confirmed pre-existing — reproduced byte-for-byte
+  identically against the unmodified pre-fix file (`git show
+  3b33df9:v3/api/routes/api.php` piped through pint standalone); every other
+  finding `pint` reported this run is on a file this diff never touched. No
+  PHP style issue was introduced by this change.
+- No `v1/**`/`v2/**` edit (`git status --porcelain -- v1 v2` empty). No
+  Arabic codepoint, no `\u` escape, no `fromCharCode`/`fromCodePoint`
+  introduced — swept programmatically over the full diff (one changed route
+  file, one new test file) against the Arabic/Arabic Supplement/Arabic
+  Extended-A/Presentation-Forms Unicode blocks: CLEAN, every new string is a
+  PHP identifier, an HTTP status-code integer, or a fixed English
+  comment/assertion sentence. No oracle/golden-log/fixture/snapshot
+  regenerated — one existing production file, one new test file.
+
+**A process note, not a defect:** mid-run, this session's own stop hook
+required uncommitted work resolved while the fix was still being verified
+(composer installs and the full test suite were still running). The RED
+test and the fix were pushed as two `wip` commits to a temporary branch
+(`nightly/v3-auth-ratelimit-wip`) to satisfy the hook without disturbing
+in-flight verification, and `main` was left at `3b33df9` (v3-D399) in the
+meantime. Once every gate above had actually run green against that
+branch's content, it was fast-forward merged onto `main` (`git merge
+--ff-only`) — no rebase, no force-push, no history rewrite, and the two
+`wip` commits remain in `main`'s history rather than being squashed, the
+same pattern v3-D397's `nightly/v3-backup-drill-ci-wiring-wip` branch set.
+
+**NOT addressed, unchanged:** H1 (Stripe MY business verification), H2
+(surah 67 scene beats), H3 (qari booking), H5 (pager owner), H6 (human a11y
+pass + Arabic visual QA), E6 (a persistent host + production DB), E7 (a real
+SMTP account), E8 (Stripe replay fixtures, gated on H1).
+
+**Recommendation for the next run:** this closes a genuine,
+previously-undiscovered security gap, not another sweep-night non-finding —
+the first such fix since v3-D397's CI-wiring gap (2026-11-11, earlier the
+same day). It does not mean the "fresh-angle" well is dry: a `throttle:`
+presence/absence grep on `routes/api.php`, independent of auth-middleware
+correctness, was a genuinely new axis nineteen prior nights had not tried by
+name. The next run should look for other "present on some routes,
+conspicuously absent on the most sensitive one" axes the same way — CORS,
+CSRF (N/A here, bearer-only per v2-D03/D18), input-size limits, or
+per-route logging/audit coverage are candidates not yet swept this
+specifically.
