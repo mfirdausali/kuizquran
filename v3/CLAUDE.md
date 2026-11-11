@@ -57,6 +57,31 @@ make test    # 3200 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 465 v3/api + 120 corpus-compiler
              # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D394, 2026-11-10)
+             # NOTE (v3-D398, 2026-11-11, nightly): re-checked HANDOVER.md's
+             # step-30 E6/E7 (both confirmed still code-complete, blocked only
+             # on a persistent host+DB and a real SMTP account), read
+             # `claude.yml`/`v2-autobuild.yml` in full (legacy v2/@claude
+             # automation, no wiring gap, unrelated to v3's gates), re-read
+             # LAUNCH-CHECKLIST.md and DEFECTS.md end to end (every open item
+             # is BLOCKED-ON-HUMAN/INFRA, nothing agent-closable), and audited
+             # every JS project's vitest `include` glob for a silently-
+             # excluded test shape — found `v3/apps/web/vitest.config.ts`
+             # does not include `lib/**/*.test.tsx`, but zero such files
+             # exist today so nothing is currently skipped; recorded as a
+             # landmine, not fixed against a file that doesn't exist (no
+             # red-then-green to prove a speculative glob change). No
+             # agent-doable engineering gap found this run. `TZ=UTC make
+             # test` (fresh container, Postgres 16 started + lock-test +
+             # backup-drill databases created/migrated by hand): **3206
+             # passing**, unchanged from v3-D397 (255 v2 vitest + 47 v2/api +
+             # 471 v3/api [2 incomplete, 0 skipped] + 120 corpus-compiler +
+             # 470 engine + 73 fold-runner + 1770 apps/web).
+             # `check-test-floor.mjs`: OK, 3206 >= floor 3200 (+6 margin).
+             # `TZ=UTC make build`: the usual one-time `SecurityFatalError`
+             # nudge, not acted on; plain retry exit 0, 30 routes, unchanged.
+             # No source or test file touched — documentation only. NOT
+             # addressed, unchanged: H1/H2/H3/H5/H6/E6/E7/E8. Full write-up:
+             # DECISIONS.md v3-D398.
              # NOTE (v3-D397, 2026-11-11): another real CI gap, same shape as
              # v3-D396's — `backup:restore-drill`'s own `pgsql` branch
              # (pg_dump -> encrypt -> wipe -> decrypt -> psql -f -> verify)

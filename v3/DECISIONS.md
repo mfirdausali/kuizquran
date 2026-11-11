@@ -44033,3 +44033,89 @@ installing, the fix was first pushed to a branch
 — the same precedent v3-D379's `afb2098` set — and only merged to `main`
 once every gate above had actually run green against real Postgres, never
 before.
+
+## v3-D398 (2026-11-11, nightly) — re-verified E6/E7/CI-wiring exhaustion; no agent-doable engineering gap found this run
+
+Following v3-D397's own recommendation ("look elsewhere for a concrete,
+agent-doable, non-sweep task first — e.g. `claude.yml`/`v2-autobuild.yml`
+specifically... and failing that, report the build honestly as
+human/infra-stalled rather than default to another blind source sweep"),
+this run checked every remaining candidate before concluding there is
+nothing left to build:
+
+1. Re-read `HANDOVER.md`'s step-30 "WHAT IS LEFT" table and v3-D393's E6/E7
+   findings directly against the current code. Both are unchanged and still
+   code-complete: `DeterminismCheckCommand::sampleFromDatabase()` (E6, the
+   fold-runner DB adapter) and `DeterminismP1Alert`/`pageOnCall()` (E7, the
+   operational mailer) have no missing logic — only a persistent host with a
+   production database (E6) and a real SMTP account (E7) are absent, neither
+   of which this sandbox can create.
+2. Read `.github/workflows/claude.yml` and `.github/workflows/v2-autobuild.yml`
+   in full, as v3-D397 named. Both are legacy automation for v2's own
+   `@claude`-mention responder and its fully-autonomous phase-by-phase
+   orchestrator — unrelated to v3's build gates, and neither shows the
+   "gate exists but nothing calls it" shape that v3-D77/D78/D396/D397 each
+   found and fixed in `ci.yml`'s `js`/`php`/`test-floor`/`e2e` jobs. No new
+   wiring gap.
+3. Re-read `LAUNCH-CHECKLIST.md` end to end (all 23 gates + §A security
+   review). Every gate not already GREEN traces to gate 20 (hosting/staging,
+   BLOCKED-ON-INFRA) or a named human (qari, Malay reviewer, Stripe
+   verification, the a11y pass, Arabic visual QA) — nothing an agent could
+   close today.
+4. Re-read `DEFECTS.md` end to end. Every B- and E-numbered defect is
+   CLOSED except PAY-1, which is BLOCKED-ON-INFRA by design (zero Stripe
+   fixtures until a test-mode account exists) and correctly stays red
+   rather than passing vacuously.
+5. One technique not used by any prior sweep: audited every JS project's own
+   vitest/vite `include` glob for a silently-excluded test-file shape — the
+   same "a gate exists but doesn't cover what it claims to" bug class as
+   v3-D396's CI finding, applied to test *discovery* instead of CI wiring.
+   Found one latent, currently-inert gap: `v3/apps/web/vitest.config.ts`'s
+   `include` lists `lib/**/*.test.ts` but not `lib/**/*.test.tsx`, even
+   though the same file's own comment says a component test may live
+   anywhere under `lib/` and opt into `jsdom` per-file. `find lib -name
+   "*.test.tsx"` returns zero files today, so nothing is currently silently
+   excluded — this is a landmine for a future `.tsx` test under `lib/`, not
+   a live defect. Deliberately NOT "fixed": there is no file to verify the
+   glob change against, and widening it speculatively, with nothing
+   red-then-green to prove it does what it claims, is exactly the kind of
+   unverified change NIGHTLY.md's RED-before-green rule exists to prevent.
+   Recorded here so a future `.tsx` test added under `lib/` is not silently
+   skipped without anyone noticing why.
+
+**Conclusion: no agent-doable engineering gap exists this run.** Re-derived
+the full baseline fresh, not trusted from any prior entry. Fresh container;
+`make setup` ran both composer installs sequentially (`v3/api` needing
+`--ignore-platform-req=php`, PHP 8.3.6 here vs. its `>=8.4.1` floor) and all
+five npm installs in parallel; both API projects' `.env`/`APP_KEY`/
+`bootstrap/cache`/`storage/framework/*` were missing on the fresh checkout
+and created by hand. This sandbox's Postgres 16 was installed but stopped
+(`pg_lsclusters` showed it `down`, same as v3-D395/D397); started it,
+created+migrated `imanapp_lock_test` and `imanapp_backup_drill`. `TZ=UTC
+make build`: the usual one-time `SecurityFatalError` Next.js CLI
+security-advisory nudge fired on the first invocation, not acted on
+(upgrading the pinned Next.js major stays outside this run's mandate, the
+same call every prior night has made); a plain retry built clean, exit 0,
+30 routes. `TZ=UTC make test`: **3206 passing** — 255 v2 vitest + 47 v2/api
+PHPUnit + 471 v3/api PHPUnit (2 incomplete, PAY-1, by design; 0 skipped,
+Postgres wired — same shape as v3-D395/D397) + 120 corpus-compiler + 470
+engine + 73 fold-runner + 1770 apps/web. `check-test-floor.mjs`: `OK — 3206
+>= floor 3200 (+6 margin)`. No source or test file changed this run, so no
+mutation proof, Arabic-codepoint sweep, or oracle/golden-log/fixture/
+snapshot regeneration applies — this commit is documentation only, and
+`git status --porcelain -- v1 v2` was empty before it.
+
+**NOT addressed, unchanged:** H1 (Stripe MY business verification), H2
+(surah 67 scene beats, human-only by INVARIANTS.md Absolute B), H3 (qari
+booking), H5 (pager owner), H6 (human a11y pass + Arabic visual QA), E6 (a
+persistent host + production DB), E7 (a real SMTP account), E8 (Stripe
+replay fixtures, gated on H1) — exactly as v3-D393 through v3-D397 left
+them.
+
+**Recommendation for the next run:** the CI-wiring seam (`js`/`php`/
+`test-floor`/`e2e` in `ci.yml`, plus now `claude.yml`/`v2-autobuild.yml`)
+and the step-30 E6/E7 code-completeness question are both now genuinely
+exhausted — don't re-check either without new evidence something changed.
+If no new agent-doable item has appeared, say so plainly, the way this
+entry and v3-D393 both did, rather than manufacturing an eighteenth source
+sweep for its own sake.
