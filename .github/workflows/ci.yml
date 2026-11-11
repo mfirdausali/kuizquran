@@ -155,6 +155,25 @@ jobs:
         run: |
           psql -h 127.0.0.1 -U postgres -d postgres -c "CREATE DATABASE imanapp_lock_test;"
 
+      # v3-D395 ran `backup:restore-drill`'s real `pgsql` branch (pg_dump
+      # --data-only --no-owner → encrypt → wipe → decrypt → psql -f →
+      # verify) by hand in a sandbox for the first time ever, and found that
+      # NO environment — including this workflow — had ever exercised it:
+      # `BackupRestoreDrillTest` above runs the same command, but v3/api's
+      # phpunit.xml deliberately leaves its default connection as sqlite
+      # (v3-D120), so that test only ever drives the command's sqlite
+      # branch. A dedicated database, separate from `imanapp_lock_test`
+      # above: the drill's own `wipe()` step empties EVERY table on
+      # whatever connection it is pointed at, so sharing a database with
+      # PerUserFoldLockWiringTest's fixture rows would make the drill erase
+      # that test's own data if the jobs' ordering ever changed.
+      - name: Create the throwaway Postgres database for the backup-restore drill
+        if: steps.has.outputs.yes == 'true' && matrix.dir == 'v3/api'
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -U postgres -d postgres -c "CREATE DATABASE imanapp_backup_drill;"
+
       - uses: actions/setup-node@v4
         if: steps.has.outputs.yes == 'true' && matrix.dir == 'v3/api'
         with:
@@ -253,6 +272,34 @@ jobs:
             php artisan migrate --force
           fi
           php artisan test
+
+      # LAUNCH-CHECKLIST.md gate 13's own standing caveat, unchanged since
+      # v3-D395: "ran against SQLite AND a real local Postgres 16 server...
+      # It has NOT run against a staging/production Postgres host" — true
+      # of every environment so far, but the ONE thing a merge gate can
+      # prove (the dump/restore SQL mechanism itself, against a real
+      # Postgres server, on every PR) was still unproven here, same gap
+      # class as v3-D396's TEST-FLOOR fix: a real, agent-doable, previously-
+      # unexecuted CI wiring gap, not a source defect. Separate step from
+      # "Composer install + test" above so a drill failure is attributable
+      # on its own line rather than buried inside that step's log, and
+      # pointed at the dedicated `imanapp_backup_drill` database created
+      # earlier — never the sqlite connection `php artisan test` just used,
+      # and never `imanapp_lock_test`, which this drill's own `wipe()` would
+      # otherwise empty.
+      - name: Backup-restore drill against real Postgres
+        if: steps.has.outputs.yes == 'true' && matrix.dir == 'v3/api'
+        working-directory: v3/api
+        env:
+          DB_CONNECTION: pgsql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 5432
+          DB_DATABASE: imanapp_backup_drill
+          DB_USERNAME: postgres
+          DB_PASSWORD: postgres
+        run: |
+          php artisan migrate --force
+          php artisan backup:restore-drill
 
   # ---- The test-count floor gate (v3-D95/HANDOVER.md#E10) — v3-D396's own
   # finding: this workflow has NEVER invoked `check-test-floor.mjs`, the exact
