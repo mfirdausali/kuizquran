@@ -345,6 +345,18 @@ mechanism itself* is now proven against genuine Postgres, not only SQLite,
 so a staging run's remaining risk is operational (host, credentials, cron)
 rather than "does this command's Postgres code path even work."
 
+**UPDATE (2026-11-11, v3-D397).** The pgsql branch is no longer proven
+only by a one-off hand run in a sandbox. `.github/workflows/ci.yml`'s
+`php` job (v3/api leg) now creates a dedicated `imanapp_backup_drill`
+Postgres database and runs `backup:restore-drill` against it directly on
+every PR and every push to `main` — the merge gate itself now exercises
+this code path, not just an agent who happened to check `pg_lsclusters`.
+This still does not reach gate 20 (a persistent staging/production host):
+GitHub Actions' Postgres service container is itself ephemeral, created
+fresh per job run. What it closes is the gap between "proven once, by
+luck, in one sandbox" and "proven on every merge" — a regression in the
+command's `pgsql`-specific code paths can no longer land silently.
+
 **Two honest limits, printed by the command itself on every green run:**
 
 1. ~~It ran against **SQLite**. A green SQLite drill does not prove a

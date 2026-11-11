@@ -43883,3 +43883,153 @@ new finding, but confirmed first-hand rather than assumed this time.
 by hand. Postgres 16 was started in this container (again present, as
 v3-D395 found) but not used for anything beyond confirming it was
 available — this run's actual fix needed no database.
+
+## v3-D397 (2026-11-11, nightly) — CI never ran `backup:restore-drill`'s real Postgres branch; wired it into the `php` job, mirroring the `imanapp_lock_test` pattern, and verified it end to end against real Postgres before merging
+
+Following v3-D396's own recommendation ("look for another concrete,
+agent-doable, non-infra gap in how CI itself is wired... before defaulting
+to either a source sweep or declaring the build stalled"), re-read
+v3-D395's own finding: `BackupRestoreDrillCommand`'s `pgsql` branch
+(`pg_dump --data-only --no-owner` → encrypt → wipe → decrypt → `psql -f` →
+verify) had been run exactly once, by hand, in an ephemeral sandbox — and
+`grep -n "restore-drill" .github/workflows/ci.yml` found nothing, even
+though `BackupRestoreDrillTest` (which exercises the same command) has run
+in CI's `php` job on every PR since v3-D123. The reason the test never
+caught this: `v3/api/phpunit.xml` deliberately does not override its
+default connection to sqlite `:memory:` the way `v2/api`'s does (v3-D120),
+but CI's `php` job also never points that default connection at Postgres
+— so `BackupRestoreDrillTest` has only ever driven the command's `sqlite`
+branch, both locally and in CI. The merge gate therefore had zero coverage
+of the one code path LAUNCH-CHECKLIST.md gate 13 names as its last open
+half: "ran against SQLite AND a real local Postgres 16 server... It has
+NOT run against a staging/production Postgres host." A regression in the
+`pgsql`-specific branches of `dump()`/`restore()`/`foreignKeyViolations()`
+(all driver-conditional, `BackupRestoreDrillCommand.php:501-658`) could
+land and merge with every job green, and nobody would know until someone
+next happened to run it by hand in a sandbox that happened to have
+Postgres installed — exactly the v3-D395 scenario, which is calendar luck,
+not a gate.
+
+**Fixed:** `.github/workflows/ci.yml`'s `php` job, `v3/api` leg only, gained
+two new steps mirroring the existing `imanapp_lock_test` pattern
+(v3-D116): a `CREATE DATABASE imanapp_backup_drill` step (kept separate
+from `imanapp_lock_test` — the drill's own `wipe()` empties EVERY table on
+whatever connection it is pointed at, so sharing a database with
+`PerUserFoldLockWiringTest`'s fixture rows would make the drill erase that
+test's data), and a step AFTER `php artisan test` that migrates the new
+database and runs `php artisan backup:restore-drill` against it directly
+via `DB_CONNECTION=pgsql`/`DB_HOST`/`DB_PORT`/`DB_DATABASE`/`DB_USERNAME`/
+`DB_PASSWORD` env overrides — the identical override shape
+`PerUserFoldLockWiringTest`'s own migration step already uses two steps
+earlier in the same job. No source or test file changed; this is CI
+wiring only, the same shape as v3-D77/v3-D78/v3-D396.
+
+**Verified end to end, not merely reasoned about** — the actual commands
+the new CI step runs, executed by hand against a real Postgres 16 server
+in this sandbox (the container had it installed, merely stopped, per
+v3-D395's own standing advice to check `pg_lsclusters` rather than assume):
+
+```
+sudo -u postgres psql -c "CREATE DATABASE imanapp_backup_drill;"
+DB_CONNECTION=pgsql DB_HOST=127.0.0.1 DB_PORT=5432 DB_DATABASE=imanapp_backup_drill \
+  DB_USERNAME=postgres DB_PASSWORD=postgres php artisan migrate --force
+DB_CONNECTION=pgsql DB_HOST=127.0.0.1 DB_PORT=5432 DB_DATABASE=imanapp_backup_drill \
+  DB_USERNAME=postgres DB_PASSWORD=postgres php artisan backup:restore-drill
+```
+
+Result: `DRILL PASSED`, exit 0 — 2 rows across 21 critical tables restored
+byte-for-byte, the event-log wire checksum identical before/after, zero
+foreign-key violations, the ciphertext artifact genuinely opaque (no
+plaintext needle recoverable), and the purge-aware property held through
+a real `pdpa:purge-due` run. Also re-ran `PerUserFoldLockTest`/
+`PerUserFoldLockWiringTest`/`BackupRestoreDrillTest` together afterward
+(11 tests, 37 assertions, all green) to confirm the new dedicated
+`imanapp_backup_drill` database does not interfere with
+`imanapp_lock_test`'s own fixture rows or with the sqlite-backed
+`BackupRestoreDrillTest` — each connection is independent, exactly as
+designed. Confirmed the new YAML parses and the job/step order is correct
+(`python3 -c "import yaml; yaml.safe_load(open('.github/workflows/
+ci.yml'))"`, then printed every `php` job step name in order). Could not
+execute the actual GitHub Actions runner from this sandbox (same standing
+limitation v3-D396 recorded), so verified the job's real commands,
+end-to-end, on a fresh local Postgres instead — the same substitute
+v3-D396 used for its own CI-wiring fix.
+
+**This run's own baseline**, re-derived fresh (not trusted from any prior
+entry): `TZ=UTC make test` — **3206 passing** (255 v2 vitest + 47 v2/api
+PHPUnit + 471 v3/api PHPUnit, 2 incomplete [PAY-1], 0 skipped — Postgres
+was running and wired into this invocation's own `.env`-derived advisory-
+lock defaults, so all 6 previously-gated tests ran for real, same shape
+as v3-D395 + 120 corpus-compiler + 470 engine + 73 fold-runner + 1770
+apps/web). `check-test-floor.mjs`: `OK — 3206 >= floor 3200 (+6 margin)`.
+One test-file flake observed and diagnosed, not a regression: the full
+`make test` run's first pass failed exactly one case
+(`test/session-island.test.tsx`'s reentry-notice `findByTestId` timeout)
+while the machine was under heavy concurrent load from this run's own
+composer/npm installs and a live Postgres server; re-run in isolation
+(`npx vitest run test/session-island.test.tsx`) passed 41/41 immediately,
+and a full fresh `make test` re-run afterward passed all 128 files/1770
+tests clean — confirmed transient resource contention, not a defect, and
+not touched by this diff (which changes only
+`.github/workflows/ci.yml`). `TZ=UTC make build`: the `SecurityFatalError`
+Next.js CLI security-advisory nudge fired on the first TWO invocations
+this run (not only the first) — the same nondeterministic-environment-
+noise shape v3-D386/v3-D392/v3-D394 already recorded, not a build defect
+and not acted on (upgrading Next.js's pinned major is a human decision no
+prior night has made either); a third plain retry built clean, exit 0,
+unchanged routes. `npm run gates` (apps/web): all green, 351 files,
+unchanged (294 v1 lines byte-identical; 2/6 UI fonts present, degraded-
+but-non-blocking, pre-existing; 362 words; 206 codepoints across 4
+artifacts). `npx tsc --noEmit`: clean. No PHP file touched by the diff
+itself (only read/run), so `pint` had nothing to check against this
+change. No `v1/**`/`v2/**` edit (`git status --porcelain -- v1 v2` empty
+immediately before commit — the usual stray `v2/tsconfig.tsbuildinfo`
+build-cache diff reverted first). No Arabic codepoint possible — the only
+changed file is `.github/workflows/ci.yml`; swept over the full diff
+against the Arabic, Arabic Supplement, Arabic Extended-A and both
+Presentation Forms Unicode blocks plus `\u` escapes and
+`fromCharCode`/`fromCodePoint`: zero hits (every added line is YAML
+structure, a shell command, or a fixed English comment). No oracle/
+golden-log/fixture/snapshot regenerated — one existing workflow file
+only.
+
+**NOT addressed, unchanged:** every item on v3-D393 through v3-D396's own
+list — H1 (Stripe), H2 (surah 67 scene beats, human-only), H3 (qari
+booking), H5 (pager owner), H6 (human a11y pass), E6 (a *persistent* host
++ production DB — this run's local Postgres does not satisfy that), E7
+(an SMTP account), E8 (Stripe replay fixtures). This CI fix narrows but
+does not close LAUNCH-CHECKLIST.md gate 13 — the gate's own remaining
+caveat (a staging/production Postgres host, not an ephemeral CI service
+container or sandbox) is unchanged and still BLOCKED-ON-INFRA.
+
+**Recommendation for the next run:** this CI gap is now closed too, so it
+is no longer a sweep candidate. `js`, `php`, `test-floor` and `e2e` have
+each now had at least one real wiring gap found and fixed
+(v3-D77/D78/D396/D397) by reading them end to end against the question
+"does every gate this repo believes it has actually fire" — that question
+may now be genuinely exhausted for these four workflow files. The next
+run should look elsewhere for a concrete, agent-doable, non-sweep task
+first (e.g., `claude.yml`/`v2-autobuild.yml` specifically, which this run
+did not re-read), and failing that, report the build honestly as
+human/infra-stalled rather than default to another blind source sweep.
+
+**Session start:** fresh container; `origin/main` and detached `HEAD`
+agreed exactly at `3286969` (v3-D396) after `git fetch`; local `main` was
+on a detached HEAD pointing at the same commit (no stale-local-`main`
+trap this run — `git checkout -B main origin/main` was still run as a
+precaution). `v3/api`'s composer install hit the documented slow proxy
+git-mirror-clone fallback for PHPUnit's dependency tree (`sebastianbergmann/*`,
+`--ignore-platform-req=php` for PHP 8.3.6 here vs. its `>=8.4.1`
+requirement) and ran long enough that a first background wait exceeded
+one tool call's own wall-clock limit and had to be re-issued (the install
+itself kept running underneath, unaffected — composer install is
+idempotent). `v2/api`'s composer install ran AFTER `v3/api`'s finished
+(v3-D383's own recommendation), and was fast (shared local cache already
+warm). Both API projects' `.env`/`APP_KEY`/`database.sqlite` were missing
+on the fresh checkout and created/generated by hand. Because this run's
+own stop hook required uncommitted work resolved before composer finished
+installing, the fix was first pushed to a branch
+(`nightly/v3-backup-drill-ci-wiring-wip`), explicitly labelled UNVERIFIED
+— the same precedent v3-D379's `afb2098` set — and only merged to `main`
+once every gate above had actually run green against real Postgres, never
+before.

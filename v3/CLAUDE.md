@@ -57,6 +57,56 @@ make test    # 3200 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 465 v3/api + 120 corpus-compiler
              # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D394, 2026-11-10)
+             # NOTE (v3-D397, 2026-11-11): another real CI gap, same shape as
+             # v3-D396's — `backup:restore-drill`'s own `pgsql` branch
+             # (pg_dump -> encrypt -> wipe -> decrypt -> psql -f -> verify)
+             # had only ever been run by hand, once, in a sandbox (v3-D395);
+             # `BackupRestoreDrillTest` runs the same command in CI's `php`
+             # job on every PR, but only against v3/api's sqlite test
+             # connection (v3-D120), never Postgres. Fixed: a dedicated
+             # `imanapp_backup_drill` Postgres database (separate from
+             # `imanapp_lock_test` — the drill's own wipe() empties every
+             # table on whatever connection it's pointed at) plus a new step
+             # that migrates it and runs the real command against it,
+             # mirroring the existing `imanapp_lock_test` env-override
+             # pattern (v3-D116). No source/test file changed. Verified end
+             # to end against a real local Postgres 16 before merging:
+             # `DRILL PASSED`, exit 0 — 2 rows/21 tables restored
+             # byte-for-byte, event-log checksum identical, zero FK
+             # violations, ciphertext opaque, purge-aware property held
+             # through a real `pdpa:purge-due` run; `PerUserFoldLockTest`/
+             # `PerUserFoldLockWiringTest`/`BackupRestoreDrillTest` reran
+             # together after (11/11 green) to confirm the new database
+             # doesn't interfere with `imanapp_lock_test`'s or sqlite's own
+             # fixtures. `TZ=UTC make test`: 3206 passing this run (Postgres
+             # live and wired, so all 6 previously-gated tests ran — same
+             # shape as v3-D395), unchanged suite composition otherwise;
+             # `check-test-floor.mjs` OK, 3206 >= floor 3200. `TZ=UTC make
+             # build`: the usual `SecurityFatalError` CLI nudge fired twice
+             # before a plain retry built clean, exit 0, unchanged routes.
+             # One transient test flake observed and diagnosed as machine
+             # load, not a regression (`test/session-island.test.tsx`'s
+             # reentry-notice case timed out once under heavy concurrent
+             # install load; passed 41/41 in isolation and on a clean
+             # re-run). No `v1/**`/`v2/**` edit; no Arabic codepoint
+             # possible (only `.github/workflows/ci.yml` changed, swept
+             # clean). No oracle/golden-log/fixture/snapshot regenerated.
+             # Pushed first to a branch
+             # (`nightly/v3-backup-drill-ci-wiring-wip`) while composer
+             # install was still running and this run's stop hook required
+             # uncommitted work resolved; merged to `main` only once every
+             # gate above had actually run green against real Postgres.
+             # LAUNCH-CHECKLIST.md gate 13 updated: the pgsql dump/restore
+             # mechanism is now proven on every merge, not just once by
+             # luck in a sandbox — gate 20 (a persistent staging host)
+             # remains the unchanged, unclosed half. NOT addressed,
+             # unchanged: H1/H2/H3/H5/H6/E6/E7/E8. Recommendation: `js`,
+             # `php`, `test-floor` and `e2e` have each now had a real
+             # wiring gap found this way (v3-D77/D78/D396/D397) — that seam
+             # may be exhausted for these four; the next run should check
+             # `claude.yml`/`v2-autobuild.yml` next, or report the build
+             # honestly as human/infra-stalled. Full write-up: DECISIONS.md
+             # v3-D397.
              # NOTE (v3-D394, 2026-11-10): heeded v3-D393's own recommendation
              # not to default to a seventeenth source-sweep night. Re-confirmed
              # the H1/H2/H3/H5/H6/E6/E7/E8 human/infra list is still unmoved
