@@ -33,8 +33,17 @@ use Illuminate\Support\Facades\Route;
 // cookie session would (a bearer token is never auto-attached by the
 // browser, so there's no CSRF surface to guard against on these routes).
 
-Route::post('/auth/anonymous', [AuthController::class, 'anonymous']);
-Route::post('/auth/login', [AuthController::class, 'login']);
+// v3-D400: every other unauthenticated, credential-adjacent endpoint below
+// carries a throttle (forgot-password/reset-password/admin-login at
+// 6,1/6,1/10,1) — these two carried none. /auth/login is the actual
+// password CHECK, the single most security-sensitive unauthenticated route
+// in this file, more so than a reset REQUEST; /auth/anonymous mints a real
+// user row + Sanctum token on every call. Both throttled to the SAME 6,1
+// window the other credential-adjacent routes already use, for consistency.
+Route::post('/auth/anonymous', [AuthController::class, 'anonymous'])
+    ->middleware('throttle:6,1');
+Route::post('/auth/login', [AuthController::class, 'login'])
+    ->middleware('throttle:6,1');
 
 Route::post('/forgot-password', [PasswordResetController::class, 'sendResetLink'])
     ->middleware('throttle:6,1');
