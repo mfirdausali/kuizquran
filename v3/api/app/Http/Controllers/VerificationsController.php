@@ -57,9 +57,23 @@ class VerificationsController extends Controller
             $frontier[$ayah] = $status;
         }
 
+        // v3-D403: this route is deliberately PUBLIC and unauthenticated —
+        // the frontier itself is a transparency metric (class docblock).
+        // `verifiedBy` stores the reviewer's email DIRECTLY (unlike
+        // `Override.editorEmail`, resolved off a relation) and `note` is
+        // free text — both exist only for the workbench's admin-only
+        // history views (`OverrideEditor.tsx`/`QariMode.tsx`), never read
+        // for frontier logic above. Serving them unconditionally leaked
+        // every qari/admin's email to the open internet.
+        // See OverridesController's identical note: the guard must be named
+        // explicitly, or `$request->user()` resolves the session-based
+        // "web" default guard and never sees a Bearer-token caller at all —
+        // including a legitimate admin.
+        $isAdmin = (bool) $request->user('sanctum')?->isAdmin();
+
         return response()->json([
             'frontier' => $frontier,
-            'verifications' => $verifications->flatten()->map(fn (AyahVerification $r) => $this->toWire($r)),
+            'verifications' => $verifications->flatten()->map(fn (AyahVerification $r) => $this->toWire($r, $isAdmin)),
         ]);
     }
 
@@ -101,10 +115,19 @@ class VerificationsController extends Controller
             'created_at' => (int) round(microtime(true) * 1000),
         ]);
 
-        return response()->json(['verification' => $this->toWire($row)], 201);
+        // store() is admin-gated (`->middleware('admin')`) — the caller is
+        // always a verified admin, so the response to their own write
+        // always carries the admin-only fields.
+        return response()->json(['verification' => $this->toWire($row, true)], 201);
     }
 
-    private function toWire(AyahVerification $r): array
+    /**
+     * @param  bool  $isAdmin  v3-D403: `verifiedBy`/`note` are display-only for
+     *                         the workbench's admin history views — the frontier logic above
+     *                         never reads either — so a non-admin caller of this public route
+     *                         gets `null` for both instead of every qari/admin's email.
+     */
+    private function toWire(AyahVerification $r, bool $isAdmin): array
     {
         return [
             'id' => $r->id,
@@ -114,8 +137,8 @@ class VerificationsController extends Controller
             'contentHash' => $r->content_hash,
             'hashSpecVersion' => $r->hash_spec_version,
             'reviewerKind' => $r->reviewer_kind,
-            'verifiedBy' => $r->verified_by,
-            'note' => $r->note,
+            'verifiedBy' => $isAdmin ? $r->verified_by : null,
+            'note' => $isAdmin ? $r->note : null,
             'createdAt' => $r->created_at,
         ];
     }

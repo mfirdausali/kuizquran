@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Verifications;
 
+use App\Models\AdminRole;
 use App\Models\AyahVerification;
 use App\Models\CorpusAyahHash;
 use App\Models\User;
@@ -42,9 +43,9 @@ class VerificationsTest extends TestCase
     {
         $admin = User::factory()->create(['email' => 'qari-admin@example.com']);
         Config::set('admin.emails', ['admin@example.com', 'qari-admin@example.com']);
-        \App\Models\AdminRole::create([
+        AdminRole::create([
             'user_id' => $admin->id,
-            'role' => \App\Models\AdminRole::QARI,
+            'role' => AdminRole::QARI,
             'granted_at' => (int) round(microtime(true) * 1000),
             'granted_by' => 'test-fixture',
         ]);
@@ -323,5 +324,62 @@ class VerificationsTest extends TestCase
             $doc,
             'the app role still needs INSERT and SELECT, or a qari sign-off could never be written',
         );
+    }
+
+    // ───────────── the public-leak gap (v3-D403) ──────────
+
+    /**
+     * `GET /api/verifications` has NO `auth:sanctum` middleware — it is
+     * reachable by literally anyone, same as `/api/overrides` (both are
+     * documented PUBLIC reads, class docblock). `verified_by` stores the
+     * reviewer's email DIRECTLY (unlike `Override.editorEmail`, which is
+     * resolved off a relation) and `note` is free text — neither is read by
+     * the frontier logic above; both exist only for the workbench's
+     * admin-only history views (`OverrideEditor.tsx`/`QariMode.tsx`). Before
+     * this fix, every qari/admin's email who ever signed a verification was
+     * readable by an anonymous GET with zero credentials.
+     */
+    public function test_an_unauthenticated_read_never_exposes_the_reviewers_identity(): void
+    {
+        // Seeded directly (never through an authenticated HTTP call) --
+        // see OverridesTest's identical note: Laravel's testing HTTP kernel
+        // caches a resolved guard's user for the rest of the TEST METHOD,
+        // Bearer header or not, so routing the seed through an authenticated
+        // postJson() first would make a later "unauthenticated" GET in the
+        // SAME test silently inherit that cached identity -- a testing-
+        // harness artifact, not something that can happen across real,
+        // separate production requests, but it would make this assertion
+        // pass for the wrong reason either way.
+        $this->seedHash(12, 4, 'hash-a');
+        AyahVerification::create([
+            'surah' => 12, 'ayah' => 4, 'tier' => 'qari', 'content_hash' => 'hash-a',
+            'hash_spec_version' => 1, 'reviewer_kind' => 'human',
+            'verified_by' => 'qari-admin@example.com',
+            'note' => 'confirmed with the qari on a call', 'created_at' => 1000,
+        ]);
+
+        // No Authorization header at all.
+        $response = $this->getJson('/api/verifications?surah=12')->assertOk();
+
+        $this->assertNull($response->json('verifications.0.verifiedBy'));
+        $this->assertNull($response->json('verifications.0.note'));
+        // The frontier itself — the actual transparency metric — is untouched.
+        $this->assertSame('verified', $response->json('frontier.4.qari'));
+        $this->assertSame('qari', $response->json('verifications.0.tier'));
+    }
+
+    /** An admin re-reading on the SAME authenticated request their own
+     *  history still gets the identity — this is "admin-only", not
+     *  "never ships again". */
+    public function test_an_admin_read_still_exposes_the_reviewers_identity(): void
+    {
+        $this->seedHash(12, 4, 'hash-a');
+        $headers = $this->qariAdminHeaders();
+        $this->postJson('/api/verifications', [
+            'surah' => 12, 'ayah' => 4, 'tier' => 'qari', 'reviewerKind' => 'human',
+        ], $headers)->assertCreated();
+
+        $response = $this->getJson('/api/verifications?surah=12', $headers)->assertOk();
+        $this->assertSame('qari-admin@example.com', $response->json('verifications.0.verifiedBy'));
     }
 }

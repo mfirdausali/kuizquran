@@ -21,14 +21,12 @@ class EnsureIsAdmin
     public function handle(Request $request, Closure $next): Response
     {
         $user = $request->user();
-        $allow = config('admin.emails', []);
 
-        if (! $user || ! $user->hasVerifiedEmail()) {
-            return response()->json(['error' => 'forbidden'], 403);
-        }
-
-        $email = strtolower(trim($user->email ?? ''));
-        if ($email === '' || ! in_array($email, $allow, true)) {
+        // v3-D403: the allowlist+verified-email test itself now lives on
+        // User::isAdmin() so OverridesController/VerificationsController can
+        // ask the identical question on their public GET routes without a
+        // second, driftable copy of this logic.
+        if (! $user || ! $user->isAdmin()) {
             return response()->json(['error' => 'forbidden'], 403);
         }
 

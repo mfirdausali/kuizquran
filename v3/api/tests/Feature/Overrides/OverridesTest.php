@@ -141,8 +141,85 @@ class OverridesTest extends TestCase
 
         $this->assertSame('admin@example.com', $response->json('override.editorEmail'));
 
-        $indexResponse = $this->getJson('/api/overrides?surah=12')->assertOk();
+        // v3-D403: an admin re-reading their own history (same workbench
+        // session, same Bearer token) still gets the email — the route is
+        // public, not "editorEmail never ships again".
+        $indexResponse = $this->getJson('/api/overrides?surah=12', $headers)->assertOk();
         $this->assertSame('admin@example.com', $indexResponse->json('overrides.0.editorEmail'));
+    }
+
+    /**
+     * v3-D403: this route has NO `auth:sanctum` middleware at all (see the
+     * class docblock — "every client, including an anonymous not-yet-synced
+     * device" must reach it) — so it is reachable by literally anyone, with
+     * no Bearer token whatsoever. `editorEmail`/`editorId`/`note` exist only
+     * to populate `OverrideEditor.tsx`'s admin-only history list;
+     * `applyOverrides()` (the one consumer every real caller of this route
+     * is actually serving) never reads any of the three. Before this fix,
+     * every admin's email address — the same ADMIN_EMAILS address B7's own
+     * fix and PasswordResetController's "deliberately uniform response"
+     * both exist to keep an attacker from enumerating — was readable by an
+     * anonymous GET with zero credentials.
+     */
+    public function test_an_unauthenticated_read_never_exposes_the_editors_identity(): void
+    {
+        // Seeded directly (never through an authenticated HTTP call) --
+        // Laravel's testing HTTP kernel caches a resolved guard's user for
+        // the rest of the TEST METHOD, Bearer header or not (the guard
+        // instance, and RequestGuard::user()'s own cache, persist across
+        // postJson/getJson calls sharing one $this->app, a testing-harness
+        // artifact that never happens across real, separate production
+        // requests). Going through postJson(...,$adminHeaders) first would
+        // resolve-and-cache the admin on this test's shared guard, and the
+        // later "unauthenticated" GET would silently inherit it -- passing
+        // for the wrong reason. Seeding via Eloquent means NO request in
+        // this test method ever authenticates, so the GET below is
+        // genuinely, not just nominally, anonymous.
+        $admin = User::factory()->create(['email' => 'admin@example.com']);
+        Override::create([
+            'surah' => 12, 'ayah' => 4, 'position' => 1, 'question_type' => 'S1',
+            'field' => 'gloss', 'payload' => ['lang' => 'en', 'text' => 'when'],
+            'editor_id' => $admin->id, 'note' => 'confirmed with the qari on a call',
+            'created_at' => 1000,
+        ]);
+
+        // No Authorization header at all -- the exact anonymous-device shape
+        // this route's own docblock says it must serve.
+        $response = $this->getJson('/api/overrides?surah=12')->assertOk();
+
+        $this->assertNull($response->json('overrides.0.editorEmail'));
+        $this->assertNull($response->json('overrides.0.editorId'));
+        $this->assertNull($response->json('overrides.0.note'));
+        // The fields a learner's device actually needs are untouched.
+        $this->assertSame('gloss', $response->json('overrides.0.field'));
+        $this->assertSame(['lang' => 'en', 'text' => 'when'], $response->json('overrides.0.payload'));
+    }
+
+    /**
+     * A signed-in but non-admin caller (an ordinary learner's own Bearer
+     * token, e.g. from an adopted account) must not be treated as "has
+     * credentials, so show the PII" either -- only User::isAdmin()'s
+     * allowlist+verified-email test grants it, same as EnsureIsAdmin.
+     * Same seed-directly reasoning as the test above: this is the only
+     * authenticated call in this test method, so the guard the learner's
+     * own token resolves is genuinely theirs, not an admin's left over from
+     * an earlier call.
+     */
+    public function test_an_authenticated_non_admin_read_never_exposes_the_editors_identity(): void
+    {
+        $admin = User::factory()->create(['email' => 'admin@example.com']);
+        Override::create([
+            'surah' => 12, 'ayah' => 4, 'position' => 1, 'question_type' => 'S1',
+            'field' => 'gloss', 'payload' => ['lang' => 'en', 'text' => 'when'],
+            'editor_id' => $admin->id, 'created_at' => 1000,
+        ]);
+
+        $learner = User::factory()->create(['email' => 'learner@example.com']);
+        $learnerToken = $learner->createToken('device')->plainTextToken;
+
+        $response = $this->getJson('/api/overrides?surah=12', ['Authorization' => 'Bearer '.$learnerToken])->assertOk();
+
+        $this->assertNull($response->json('overrides.0.editorEmail'));
     }
 
     public function test_rows_are_append_only_a_correction_is_a_new_row(): void

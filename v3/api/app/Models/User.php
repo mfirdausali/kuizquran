@@ -6,6 +6,7 @@ use Database\Factories\UserFactory;
 use Illuminate\Auth\MustVerifyEmail;
 use Illuminate\Contracts\Auth\MustVerifyEmail as MustVerifyEmailContract;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
@@ -73,7 +74,7 @@ class User extends Authenticatable implements MustVerifyEmailContract
     }
 
     /** The learner's event log. Append-only; nothing here ever deletes it. */
-    public function events(): \Illuminate\Database\Eloquent\Relations\HasMany
+    public function events(): HasMany
     {
         return $this->hasMany(Event::class);
     }
@@ -91,5 +92,26 @@ class User extends Authenticatable implements MustVerifyEmailContract
     public function hasAdminRole(string $role): bool
     {
         return in_array($role, $this->adminRoles(), true);
+    }
+
+    /**
+     * DEFECTS.md#B7's exact two-part test (verified email AND allowlist
+     * membership), extracted so `EnsureIsAdmin` and any controller that
+     * needs to know "is the CALLER an admin" (not "is this route
+     * admin-gated") share one implementation rather than two copies that
+     * can drift. See v3-D403 — `OverridesController`/`VerificationsController`
+     * read this on their public GET routes to decide whether to include
+     * admin-only display fields (editor/verifier email, free-text notes).
+     */
+    public function isAdmin(): bool
+    {
+        if (! $this->hasVerifiedEmail()) {
+            return false;
+        }
+
+        $allow = config('admin.emails', []);
+        $email = strtolower(trim($this->email ?? ''));
+
+        return $email !== '' && in_array($email, $allow, true);
     }
 }

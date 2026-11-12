@@ -36,7 +36,23 @@ class OverridesController extends Controller
         // override history.
         $rows = Override::where('surah', $surah)->with('editor')->orderBy('created_at')->orderBy('id')->get();
 
-        return response()->json(['overrides' => $rows->map(fn (Override $r) => $this->toWire($r))]);
+        // v3-D403: this route is deliberately PUBLIC and unauthenticated
+        // (see class docblock) — ANY caller, including the open internet,
+        // reaches it. `editorId`/`editorEmail`/`note` exist only for
+        // `OverrideEditor.tsx`'s admin-only history list (applyOverrides()
+        // never reads them); serving them unconditionally leaked every
+        // admin's email address — exactly the ADMIN_EMAILS enumeration B7's
+        // own fix and PasswordResetController's "deliberately uniform
+        // response" exist to prevent, through a different door — to anyone
+        // with no credentials at all.
+        // `$request->user()` with no guard name resolves `auth.defaults.guard`
+        // ("web", session-based) — never the Bearer token a Sanctum caller
+        // actually sends on a route with no `auth:sanctum` middleware. The
+        // guard must be named explicitly, or every admin caller (including
+        // the workbench's own OverrideEditor.tsx) would see `null` too.
+        $isAdmin = (bool) $request->user('sanctum')?->isAdmin();
+
+        return response()->json(['overrides' => $rows->map(fn (Override $r) => $this->toWire($r, $isAdmin))]);
     }
 
     public function store(Request $request): JsonResponse
@@ -78,10 +94,21 @@ class OverridesController extends Controller
         // override write itself — see CorpusHashRecomputer's own docblock.
         $hashRecompute = app(CorpusHashRecomputer::class)->recompute($validated['surah']);
 
-        return response()->json(['override' => $this->toWire($row), 'hashRecompute' => $hashRecompute], 201);
+        // store() is admin-gated (`->middleware('admin')`) — the caller is
+        // always a verified admin, so the response to their own write
+        // always carries the admin-only fields.
+        return response()->json(['override' => $this->toWire($row, true), 'hashRecompute' => $hashRecompute], 201);
     }
 
-    private function toWire(Override $r): array
+    /**
+     * @param  bool  $isAdmin  v3-D403: `editorId`/`editorEmail`/`note` are
+     *                         display-only for `OverrideEditor.tsx`'s admin history list —
+     *                         `applyOverrides()` never reads them (engine/src/overrides.ts's own
+     *                         docblock) — so an unauthenticated/non-admin caller of this public
+     *                         route gets `null` for all three rather than every admin's email
+     *                         and free-text note.
+     */
+    private function toWire(Override $r, bool $isAdmin): array
     {
         return [
             'id' => $r->id,
@@ -91,7 +118,7 @@ class OverridesController extends Controller
             'questionType' => $r->question_type,
             'field' => $r->field,
             'payload' => $r->payload,
-            'editorId' => $r->editor_id,
+            'editorId' => $isAdmin ? $r->editor_id : null,
             // `Override::editor()` has existed since this table shipped
             // (v2-D21/D55) with no reader anywhere — `editorId` alone is not
             // something an admin reading `OverrideEditor.tsx`'s history list
@@ -101,9 +128,10 @@ class OverridesController extends Controller
             // NEW row, never edited, so there is no stale-snapshot risk in
             // reading the editor's CURRENT email off the relation. `null`
             // when the editor account no longer exists — a append-only row
-            // is never re-attributed to fill the gap.
-            'editorEmail' => $r->editor?->email,
-            'note' => $r->note,
+            // is never re-attributed to fill the gap. Also `null` for any
+            // non-admin caller, per the same rule as `editorId` above.
+            'editorEmail' => $isAdmin ? $r->editor?->email : null,
+            'note' => $isAdmin ? $r->note : null,
             'createdAt' => $r->created_at,
         ];
     }

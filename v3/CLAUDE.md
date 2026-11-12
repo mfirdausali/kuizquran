@@ -57,6 +57,121 @@ make test    # 3200 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 465 v3/api + 120 corpus-compiler
              # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D394, 2026-11-10)
+             # NOTE (v3-D403, 2026-11-12, nightly): `GET /api/overrides` and
+             # `GET /api/verifications` are deliberately PUBLIC — no
+             # `auth:sanctum` middleware at all, reachable by anyone,
+             # because an anonymous not-yet-synced device needs them to
+             # build correct questions (class docblocks, unchanged since
+             # step 15). `OverridesController::toWire()`'s `editorEmail`
+             # and `VerificationsController::toWire()`'s `verifiedBy` both
+             # exist ONLY to populate the workbench's admin-only history
+             # views (`OverrideEditor.tsx`/`QariMode.tsx`) — `applyOverrides()`
+             # and the frontier logic above never read either — but both
+             # controllers served them UNCONDITIONALLY, so every admin and
+             # qari's real email address (the identical ADMIN_EMAILS value
+             # B7's own fix and `PasswordResetController`'s "deliberately
+             # uniform response" both exist to keep an attacker from
+             # enumerating) was readable by a plain anonymous
+             # `curl /api/overrides?surah=12`, zero credentials, same for
+             # `/api/verifications`; `note` free text (unscanned for PII,
+             # unlike `AdminRevealController`'s own `scanFreeText` guard on
+             # its reveal-reason field) leaked the same way. Security-shaped,
+             # same family as v3-D400/D401, found by extending their own
+             # angle — not another rate-limit/timing check on an auth route,
+             # but "what other public, unauthenticated route serves an
+             # admin's PII" — to the two other genuinely public GET routes
+             # in `routes/api.php` (`/specs` carries only a numeric
+             # `authorId`, not an email — checked, not a fourth instance).
+             # Fixed: `User::isAdmin()` (the identical allowlist+verified-
+             # email test `EnsureIsAdmin` already enforced, extracted so it
+             # has one implementation, not two that can drift — the
+             # middleware now delegates to it) lets both controllers ask
+             # "is THIS caller an admin" on their own public routes; `toWire()`
+             # on each now takes an `$isAdmin` bool and nulls
+             # `editorId`/`editorEmail`/`note` (Overrides) or
+             # `verifiedBy`/`note` (Verifications) for anyone who isn't one.
+             # A genuine, separate defect surfaced while wiring the admin
+             # check itself: `$request->user()` with no guard name resolves
+             # `auth.defaults.guard` ("web", session-based) — on a route
+             # with no `auth:sanctum` middleware this is ALWAYS null, token
+             # or not, so the naive fix would have also hidden the PII from
+             # the workbench's own legitimate admin callers. Fixed by naming
+             # the guard explicitly: `$request->user('sanctum')`. RED
+             # confirmed directly, twice: first the straightforward case
+             # (new tests against the unmodified controllers failed exactly
+             # as predicted, `'admin@example.com' is null` / `'qari-admin@
+             # example.com' is null`); then a SECOND, genuinely novel defect
+             # in the verification method itself — the first version of the
+             # "unauthenticated" tests seeded their override/verification
+             # row through an authenticated `postJson(...,$adminHeaders)`
+             # call before the "unauthenticated" `getJson`, and Laravel's
+             # testing HTTP kernel caches a resolved guard's user for the
+             # rest of the TEST METHOD regardless of whether a later
+             # in-method request carries no token at all (`RequestGuard
+             # ::user()`'s own cache, plus `AuthManager`'s per-name guard-
+             # instance cache, both persist across `postJson`/`getJson`
+             # calls sharing one `$this->app` — a testing-harness artifact
+             # that cannot happen across real, separate production
+             # requests, each of which boots a fresh application) — so the
+             # FIRST version of these tests passed even against the
+             # unmodified, leaking controllers, for the wrong reason
+             # (inherited cached admin, not a genuinely anonymous request).
+             # Caught by writing a standalone debug route and replaying the
+             # exact call sequence by hand before trusting the test green;
+             # fixed by seeding the override/verification row directly via
+             # Eloquent in both "unauthenticated" tests, so no request in
+             # either test method ever authenticates at all. Mutation-
+             # verified the real fix on the corrected tests: reverting the
+             # four production files alone (`git stash` of
+             # `User.php`+`EnsureIsAdmin.php`+`OverridesController.php`+
+             # `VerificationsController.php`, every test file kept)
+             # reproduced the identical 3 failures; restored byte-
+             # identically, reran green. Every existing admin-surface test
+             # that depends on `EnsureIsAdmin`'s behaviour (168 tests across
+             # `AdminAccessTest` and ten other admin Feature test files) was
+             # rerun after the middleware's refactor and is unmoved — the
+             # delegation to `User::isAdmin()` changed nothing observable.
+             # `v3/api` PHPUnit: **474 passed** (was 470, +4 exactly — two
+             # new cases each on `OverridesTest`/`VerificationsTest`), 2
+             # incomplete (PAY-1, unchanged), 6 skipped (unchanged,
+             # Postgres-gated, no Postgres in this sandbox). `TZ=UTC make
+             # test`: **3211 passing** (was 3207, +4; every other suite
+             # unchanged: 255 v2 vitest, 47 v2/api, 120 corpus-compiler, 470
+             # engine, 73 fold-runner, 1772 apps/web). `check-test-floor.mjs`:
+             # OK, 3211 >= floor 3200 (+11 margin). `TZ=UTC make build`: the
+             # usual one-time `SecurityFatalError` Next.js CLI nudge fired
+             # on the first invocation, not acted on; plain retry built
+             # clean, exit 0, unchanged routes. `npm run gates`: all green,
+             # 351 files, unchanged (294 v1 lines byte-identical; 2/6 UI
+             # fonts present, degraded-but-non-blocking, pre-existing; 362
+             # words; 206 codepoints). `npx tsc --noEmit`: clean.
+             # `./vendor/bin/pint --test`: four findings on first run
+             # (`fully_qualified_strict_types`/`unary_operator_spaces`/
+             # `not_operator_with_successor_space`/`ordered_imports` on
+             # `User.php`; `phpdoc_align` on both controllers;
+             # `fully_qualified_strict_types`/`ordered_imports` on
+             # `VerificationsTest.php`) — all on lines this diff itself
+             # added, auto-fixed with `./vendor/bin/pint`, content
+             # unchanged, every test above rerun green after. No
+             # `v1/**`/`v2/**` edit (`git status --porcelain -- v1 v2`
+             # empty). No Arabic codepoint/`\u` escape/`fromCharCode`/
+             # `fromCodePoint` introduced — swept programmatically over the
+             # full diff (six PHP files): CLEAN, every new string is a PHP
+             # identifier, an HTTP guard name, a fixed English comment, or
+             # a test-fixture email address. No oracle/golden-log/fixture/
+             # snapshot regenerated — four existing production files and
+             # two existing test files only. One transient false alarm
+             # during this run, diagnosed and not a regression: an
+             # unrelated `PaywallBoundaryTest` failure ("no such table:
+             # entitlements") on one `make test` invocation was reproduced
+             # only when a direct, manual `php artisan test` run was
+             # launched concurrently against the SAME sqlite file while a
+             # background `make test` was still running its own `php
+             # artisan test` against it — a process race between two
+             # testers sharing one database file, not a code defect; a
+             # clean, uncontended rerun immediately after was green with
+             # the exact expected +4 delta. NOT addressed, unchanged: every
+             # item on the standing H1/H2/H3/H5/H6/E6/E7/E8 list.
              # NOTE (v3-D402, 2026-11-12, nightly): checked the repository's
              # ACTUAL GitHub Actions status for the first time in this
              # build's nightly history — not a source sweep — and found

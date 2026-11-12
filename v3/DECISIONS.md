@@ -44675,3 +44675,205 @@ color-breaking shape this run did not reproduce (e.g. `php artisan test`'s
 own Pest/Collision reporter under `GITHUB_ACTIONS`, which `v3/api`'s
 `phpunit-human` regex happened to tolerate here by coincidence on THIS
 run's particular test mix, not by a confirmed general proof).
+
+## v3-D403 (2026-11-12, nightly) — `GET /api/overrides` and `GET /api/verifications` served every admin/qari's real email address to anyone, with zero credentials
+
+**Found by extending v3-D400/D401's own angle**, not repeating it: those two
+nights found a missing rate limit and a timing oracle on *authenticated*
+credential paths. This run asked the adjacent question — "what OTHER public,
+unauthenticated route might leak an admin's identity" — and read the two other
+genuinely public GET routes in `routes/api.php` (`/overrides`, `/verifications`
+— `/specs` was checked too and is clean, see "Scope" below).
+
+**The defect.** `routes/api.php` registers both routes with **no `auth:sanctum`
+middleware at all** — deliberately, by design: an anonymous, not-yet-synced
+learner device needs them to build correct questions before it has ever
+authenticated (both controllers' own class docblocks say so, unchanged since
+build-plan step 15). But `OverridesController::toWire()` returned
+`editorEmail` (resolved off the `editor()` relation) and `VerificationsController
+::toWire()` returned `verifiedBy` (stored directly on the row) **unconditionally
+to every caller** — plus a free-text `note` field on each, never scanned for
+PII the way `AdminRevealController::reveal()`'s own `reason_text` field already
+is (`AdminAudit::scanFreeText()`). Neither field is read by any real consumer of
+these routes:
+
+- `packages/engine/src/overrides.ts#applyOverrides()` (the ONLY logic consumer
+  of `/overrides`) never reads `editorId`/`editorEmail`/`note` — its own
+  `QuestionOverride` interface doc comment already calls `editorEmail`
+  "Display-only; `applyOverrides` itself never reads this."
+- `VerificationsController::index()`'s own frontier-computation loop (the
+  actual GATE-A transparency metric this route exists to serve) never reads
+  `verified_by`/`note` either — only `tier`/`content_hash`/`ingested_at`.
+- The ONLY real reader of either field anywhere in the frontend is the
+  workbench's own admin-only history UI — `OverrideEditor.tsx` (reads
+  `editorEmail`) and `QariMode.tsx`/`lib/workbench/frontier.ts` (read
+  `verifiedBy`) — both reached only from `/workbench`, which itself sits
+  behind `admin` middleware; the LEAK was never "the workbench can see this,"
+  it was "so can an anonymous `curl`."
+
+⇒ Before this fix, `curl https://<host>/api/overrides?surah=12` with **zero
+Authorization header** returned every admin who had ever written an override
+for that surah, by email — the exact `ADMIN_EMAILS` value B7's own fix
+(claiming an admin email requires verified-email ownership) and
+`PasswordResetController::sendResetLink()`'s own "deliberately uniform
+response... enumeration would let an attacker map ADMIN_EMAILS addresses to
+registered accounts" comment both exist to keep out of reach of an
+unauthenticated caller, leaking through a completely different, unguarded
+door. `GET /api/verifications?surah=12` leaked every qari's email the same way,
+plus whatever free-text note an admin had written about a sign-off or an
+override, unscreened.
+
+**Scope, deliberately narrow.** `GET /api/specs` is the third public GET route
+in this file (`SpecsController::index()`); its `toWire()` returns only `authorId`
+(a bare integer, never resolved to an email) — checked and confirmed NOT a
+fourth instance. No other public, unauthenticated route in `routes/api.php`
+returns a `->email` field or an admin-authored free-text note; the three
+public GET routes (`/overrides`, `/verifications`, `/specs`) are the complete
+set, per the route list read at the top of this file.
+
+**Fixed.** `App\Models\User` gained `isAdmin(): bool` — the identical
+allowlist-membership-AND-verified-email test `EnsureIsAdmin` already enforced,
+extracted into one place so the middleware and these two controllers share an
+implementation rather than each carrying their own copy that can drift (the
+middleware now delegates to it; `EnsureIsAdmin::handle()`'s own behavior is
+byte-identical, confirmed by rerunning every existing admin-surface test that
+exercises it — 168 tests across `AdminAccessTest` and ten other admin Feature
+test files, all green, unmoved). Both controllers' `index()` now compute
+`$isAdmin = (bool) $request->user('sanctum')?->isAdmin();` and pass it to a
+`toWire(Row $r, bool $isAdmin)` that nulls the admin-only fields
+(`editorId`/`editorEmail`/`note` for Overrides; `verifiedBy`/`note` for
+Verifications) whenever `$isAdmin` is false — a non-admin or anonymous caller
+gets `null` for all of them, never the real value; `store()`'s own response to
+the admin who just wrote the row is unaffected (`store()` is behind the `admin`
+middleware already, so its caller is always a verified admin — it always passes
+`true`).
+
+**A second, genuinely separate defect surfaced while wiring the admin check
+itself**, caught before it ever reached a committed fix: `$request->user()`
+with no guard name resolves `config('auth.defaults.guard')` — `"web"`,
+session-based — not the Sanctum Bearer-token guard, on any route that carries
+no `auth:sanctum` middleware (confirmed directly with a throwaway debug route:
+`$request->user()` returned `null` even with a valid Bearer token attached,
+while `$request->user('sanctum')` correctly resolved the token's owner). Had
+this shipped as the naive `$request->user()?->isAdmin()`, it would have hidden
+`editorEmail`/`verifiedBy` from EVERY caller including the workbench's own
+legitimate admin, not just from the public — a correctness regression, not a
+security fix. Caught by writing `tests/Feature/Overrides/DebugUserResolveTest.php`
+(a throwaway scratch test, deleted before this commit — never shipped) that
+registered a one-off `/debug-user` route and printed both `$request->user()`
+and `$request->user('sanctum')` side by side under a real Bearer token. Fixed
+by naming the guard explicitly everywhere this run added a `$request->user()`
+call on an unmiddlewared route.
+
+**A third defect — this time in the FIRST draft of this run's own tests, not in
+production code — was caught the same way, by distrust rather than by a green
+run.** The first version of the "unauthenticated read" tests seeded their
+override/verification row by going through an authenticated `postJson(...,
+$adminHeaders)` call BEFORE the "unauthenticated" `getJson` in the same test
+method — and those tests PASSED even against the unmodified, still-leaking
+controllers. The cause: Laravel's testing HTTP kernel shares one application
+container (`$this->app`) across every `postJson`/`getJson` call within a single
+test method, and `Illuminate\Auth\RequestGuard::user()` caches its resolved
+user (`$this->user = $this->user ?: call_user_func(...)`) for the life of the
+guard instance, which `AuthManager` itself caches by guard name — so a guard
+resolved-with-a-token on an EARLIER call in the same test stays resolved to
+that same user on a LATER call in the same test even when that later request
+carries no Authorization header at all. This is a pure testing-harness
+artifact: a real production deployment boots a fresh application per request,
+with no cross-request guard cache to inherit from. Reproduced directly with a
+second throwaway debug test (`test_debug_sequence_like_real_test`, also
+deleted, never shipped) that replayed the exact call sequence and printed the
+"unauthenticated" response body, which showed the admin's email anyway.
+**Fixed by rewriting both "unauthenticated" tests to seed their row directly
+via Eloquent** (`Override::create(...)` / `AyahVerification::create(...)`)
+instead of through an authenticated HTTP call — no request in either test
+method ever authenticates, so the final `getJson` with no header is genuinely,
+not just nominally, anonymous.
+
+**Verified, in order:**
+1. RED confirmed directly, twice (once for the naive seeding, once after the
+   seeding fix): the corrected tests, run against the unmodified four
+   production files, failed exactly as predicted —
+   `Failed asserting that 'admin@example.com' is null.` (Overrides, both the
+   fully-anonymous and the authenticated-non-admin case) and
+   `Failed asserting that 'qari-admin@example.com' is null.` (Verifications).
+2. Mutation-verified: `git stash` of exactly the four production files
+   (`User.php`, `EnsureIsAdmin.php`, `OverridesController.php`,
+   `VerificationsController.php`; every test file kept) reproduced the
+   identical three failures; `git stash pop` restored them byte-identically
+   (`git diff` empty on those four paths before the restore was confirmed),
+   reran — green again.
+3. The full admin-surface regression sweep (`php artisan test --filter=Admin`,
+   168 tests across `AdminAccessTest`, `AdminBillingTest`, `AdminRevealController`'s
+   own feature tests, the flag-plane/gloss-draft/content-freeze/health
+   controllers, and both touched controllers' own `write requires admin`
+   cases) is unmoved by the `EnsureIsAdmin` refactor.
+4. `./vendor/bin/pint --test` found four pre-existing-shape-but-newly-introduced
+   findings on lines this diff itself added (`fully_qualified_strict_types`/
+   `unary_operator_spaces`/`not_operator_with_successor_space`/`ordered_imports`
+   on `User.php`; `phpdoc_align` on both controllers;
+   `fully_qualified_strict_types`/`ordered_imports` on `VerificationsTest.php`)
+   — auto-fixed with `./vendor/bin/pint`, content unaffected (confirmed by
+   rerunning the full targeted test filter afterward, still green), `pint
+   --test` clean on a second pass.
+
+**Numbers.** `v3/api` PHPUnit: **474 passed** (was 470, +4 exactly — two new
+cases each on `OverridesTest`/`VerificationsTest`), 2 incomplete (PAY-1,
+unchanged), 6 skipped (unchanged — Postgres-gated, no Postgres running in this
+sandbox). `TZ=UTC make test`: **3211 passing** (was 3207 this run's own fresh
+baseline, independently re-derived from a clean container before any change;
++4; every other suite unchanged: 255 v2 vitest, 47 v2/api, 120 corpus-compiler,
+470 engine, 73 fold-runner, 1772 apps/web). `check-test-floor.mjs`: OK, 3211 >=
+floor 3200 (+11 margin). `TZ=UTC make build`: the usual one-time
+`SecurityFatalError` Next.js CLI nudge fired on the first invocation, not acted
+on (upgrading the pinned Next.js major is outside this run's mandate, the same
+call every prior night recording this nudge has made); plain retry built
+clean, exit 0, unchanged routes. `npm run gates`: all green, 351 files,
+unchanged (294 v1 lines byte-identical; 2/6 UI fonts present,
+degraded-but-non-blocking, pre-existing; 362 words; 206 codepoints). `npx tsc
+--noEmit`: clean. No `v1/**`/`v2/**` edit (`git status --porcelain -- v1 v2`
+empty throughout). No Arabic codepoint, no `\u` escape, no
+`fromCharCode`/`fromCodePoint` introduced — swept programmatically over the
+full diff (six changed PHP files): CLEAN, every new string is a PHP
+identifier, an HTTP guard name (`'sanctum'`), a fixed English comment, or a
+test-fixture email address (`admin@example.com`/`learner@example.com`/
+`qari-admin@example.com`, all pre-existing fixture conventions in these same
+test files). No oracle/golden-log/fixture/snapshot regenerated — four existing
+production files and two existing test files only; the two throwaway debug
+test files used to diagnose the guard-resolution and testing-harness issues
+above were deleted before this commit and never shipped.
+
+**One transient false alarm during this run, diagnosed and not a regression:**
+a `PaywallBoundaryTest` failure (`SQLSTATE[HY000]: ... no such table:
+entitlements`) appeared on one `make test` invocation, caused by a manual,
+foreground `php artisan test` run launched (by this same session, for its own
+debugging) concurrently against the SAME sqlite file while a background `make
+test` was still mid-run against it — two testers racing one database file, not
+a code defect. A clean, uncontended rerun immediately after was green with
+the exact expected `+4` delta, confirming the race diagnosis rather than
+assuming it.
+
+**Session start:** fresh container, no `node_modules`/`vendor`/compiled corpus
+anywhere. `HEAD` was detached, exactly matching `origin/main`'s real tip
+(`72b3d25`, v3-D402) after `git fetch` — no stale-local-`main` trap this run,
+though local `main` was still reset onto `HEAD` via `git checkout -B main
+HEAD` as the standing precaution. `v3/api`'s composer install ran first
+(`--ignore-platform-req=php`, PHP 8.3.6 here vs. its `>=8.4.1` requirement),
+then `v2/api`'s sequentially after it (avoiding the documented concurrent-
+install cache race), while all five npm installs ran in parallel with each
+other and with the PHP installs. `v2/api` needed `bootstrap/cache`+`storage/
+framework/{cache,sessions,views}`+`storage/logs` created by hand before its
+composer install's `package:discover` step would run (no tracked `.gitignore`
+in that tree, unlike `v3/api`'s). Both API projects' `.env`/`APP_KEY`/
+`database.sqlite` were missing on the fresh checkout and created/generated by
+hand.
+
+**NOT addressed, unchanged:** every item on the standing H1/H2/H3/H5/H6/
+E6/E7/E8 list (Stripe MY verification, surah 67 scene beats, the qari booking
+window, the pager owner, the human a11y pass, the fold-runner DB adapter +
+staging host, the operational mailer, Stripe replay fixtures). The
+public-GET-route PII-leak angle used here is now a candidate to consider
+exhausted for `/overrides`/`/verifications`/`/specs` specifically — a future
+run should look for the next genuinely public, unauthenticated route (if any
+exists beyond these three and the Stripe webhook, which is HMAC-authenticated
+by the raw body itself) rather than re-checking these three again.
