@@ -74,7 +74,23 @@ if (!logPath) fail("usage: check-test-floor.mjs <log-file> [--json] [--floor-fil
 if (!existsSync(logPath)) fail(`log file not found: ${logPath}`);
 if (!existsSync(floorFile)) fail(`floor file not found: ${floorFile}`);
 
-const log = readFileSync(logPath, "utf8");
+// v3-D402: GitHub Actions sets `GITHUB_ACTIONS` in the job environment, and
+// the color-detection libraries vitest/chalk use (`supports-color` and its
+// relatives) special-case that variable to force ANSI color codes on at full
+// level even though stdout here is a pipe, not a TTY — the whole point being
+// that GitHub's own log viewer renders ANSI nicely. A plain local shell run
+// (no `GITHUB_ACTIONS` set) gets the ordinary no-TTY-means-no-color behavior,
+// so every locally-run `make test` prints these exact summary lines with no
+// escape codes at all. The regexes below anchor on literal text immediately
+// adjacent to "Tests"/"Test Files" and the digits that follow — an escape
+// sequence sitting between them (as real CI output has) breaks every one of
+// them silently, which is why this gate has read every real CI run since
+// v3-D396 as "6 suites MISSING" while reading every local run as green.
+// Stripping SGR codes before any matching makes the parse robust to BOTH
+// shapes, rather than merely reproducing whichever shape happened to be
+// tested locally last.
+const ANSI = /\x1b\[[0-9;]*m/g;
+const log = readFileSync(logPath, "utf8").replace(ANSI, "");
 const floorRaw = readFileSync(floorFile, "utf8").trim();
 const floor = parseInt(floorRaw, 10);
 if (!Number.isInteger(floor) || floor <= 0) {

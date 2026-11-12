@@ -132,6 +132,110 @@ function buildLog(counts: Record<Suite, number | null>): string {
   return parts.join("\n");
 }
 
+/** Wraps `text` in the exact SGR codes vitest's own reporter emits around a
+ *  passing summary line (dim-open, bold-open, green-open, ..., resets) — not
+ *  invented, reproduced byte-for-byte from a real GitHub Actions job log
+ *  (run 43247998993, job "test-floor") captured via the GitHub API. */
+function ansiTests(n: number): string {
+  return `\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m${n} passed\u001b[39m\u001b[22m\u001b[90m (${n})\u001b[39m`;
+}
+function ansiTestFiles(n: number): string {
+  return `\u001b[2m Test Files \u001b[22m \u001b[1m\u001b[32m${n} passed\u001b[39m\u001b[22m\u001b[90m (${n})\u001b[39m`;
+}
+
+/** Same seven-suite shape as `buildLog()`, but every vitest "Tests N passed
+ *  (N)" / "Test Files N passed (N)" line carries the real ANSI color codes
+ *  GitHub Actions' runner forces vitest to emit (`supports-color`'s own
+ *  `GITHUB_ACTIONS` special-case: colour level 3 even though stdout is a
+ *  pipe, not a TTY) — the exact shape that is ABSENT when the same command
+ *  runs in a plain local shell with no `GITHUB_ACTIONS` env var, which is
+ *  why every prior local `make test` run read this gate as green while the
+ *  real CI job (run 43247998993 onward) has failed it on every single push
+ *  since the test-floor job was wired at v3-D396. */
+function buildColoredLog(counts: Record<Suite, number | null>): string {
+  const parts: string[] = [];
+  if (counts.v2 !== null) {
+    parts.push("cd v2 && npm test", "", ` ${ansiTestFiles(38)}`, ansiTests(counts.v2 as number), "");
+  }
+  if (counts.v2api !== null) {
+    parts.push(
+      "cd v2/api && php artisan test",
+      `{"tool":"phpunit","result":"passed","tests":${counts.v2api},"passed":${counts.v2api},"assertions":144,"duration_ms":1349}`,
+      "",
+    );
+  }
+  if (counts.v3api !== null) {
+    parts.push(
+      "cd v3/api && php artisan test",
+      "  ✓ an admin granted the qari role may sign the qari tier                0.02s",
+      "",
+      `  Tests:    2 incomplete, ${counts.v3api} passed (901 assertions)`,
+      "  Duration: 14.09s",
+      "",
+    );
+  }
+  if (counts.corpus !== null) {
+    parts.push(
+      "cd v3/packages/corpus-compiler && npm test",
+      "",
+      ` ${ansiTestFiles(11)}`,
+      ansiTests(counts.corpus as number),
+      "",
+    );
+  }
+  if (counts.engine !== null) {
+    parts.push(
+      "cd v3/packages/engine && npm test",
+      "",
+      ` ${ansiTestFiles(43)}`,
+      ansiTests(counts.engine as number),
+      "",
+    );
+  }
+  if (counts.fold !== null) {
+    parts.push(
+      "cd v3/worker/fold-runner && npm test",
+      "",
+      ` ${ansiTestFiles(7)}`,
+      ansiTests(counts.fold as number),
+      "",
+    );
+  }
+  if (counts.web !== null) {
+    parts.push(
+      "cd v3/apps/web && npm test",
+      "",
+      ` ${ansiTestFiles(42)}`,
+      ansiTests(counts.web as number),
+      "",
+    );
+  }
+  return parts.join("\n");
+}
+
+function coloredFixture(opts: { floor: number; counts?: Partial<Record<Suite, number | null>> }): {
+  logPath: string;
+  floorArgs: string[];
+} {
+  const dir = mkdtempSync(path.join(tmpdir(), "test-floor-colored-"));
+  temps.push(dir);
+  const counts: Record<Suite, number | null> = {
+    v2: 255,
+    v2api: 47,
+    v3api: 272,
+    corpus: 111,
+    engine: 417,
+    fold: 61,
+    web: 727,
+    ...opts.counts,
+  };
+  const logPath = path.join(dir, "make-test.log");
+  writeFileSync(logPath, buildColoredLog(counts));
+  const floorFile = path.join(dir, "TEST-FLOOR");
+  writeFileSync(floorFile, `${opts.floor}\n`);
+  return { logPath, floorArgs: ["--floor-file", floorFile] };
+}
+
 const REAL_TOTAL = 255 + 47 + 272 + 111 + 417 + 61 + 727; // 1890, v3-D94's own documented number
 
 describe("check-test-floor.mjs — the gate", () => {
@@ -212,6 +316,25 @@ describe("check-test-floor.mjs — the gate", () => {
     const { code, out } = run([logPath, ...floorArgs]);
     expect(code).toBe(1);
     expect(out).toContain(String(REAL_TOTAL));
+  });
+
+  it("v3-D402 — passes on the REAL CI log shape: vitest's own ANSI color codes around every summary line, which GitHub Actions' GITHUB_ACTIONS env var forces on even though stdout is a pipe, not a TTY (every local `make test` run has no GITHUB_ACTIONS set, so this shape never appeared locally — exactly why this gate has silently failed every CI run since v3-D396 despite reporting green on every agent's own machine)", () => {
+    const { logPath, floorArgs } = coloredFixture({ floor: REAL_TOTAL });
+    const { out, code } = run([logPath, ...floorArgs]);
+    expect(code).toBe(0);
+    expect(out).toContain(String(REAL_TOTAL));
+    expect(out).toMatch(/OK/);
+  });
+
+  it("v3-D402 — a colored log still catches a real shrink, not just a colored pass — the fix must strip color, not merely tolerate it on the happy path", () => {
+    const { logPath, floorArgs } = coloredFixture({
+      floor: REAL_TOTAL,
+      counts: { web: 727 - 5 },
+    });
+    const { out, code } = run([logPath, ...floorArgs]);
+    expect(code).toBe(1);
+    expect(out).toContain(String(REAL_TOTAL - 5));
+    expect(out).toMatch(/FAIL/);
   });
 
   it("fails loudly, not silently, on a missing floor file", () => {

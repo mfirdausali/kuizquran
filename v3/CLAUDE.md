@@ -57,6 +57,68 @@ make test    # 3200 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 465 v3/api + 120 corpus-compiler
              # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D394, 2026-11-10)
+             # NOTE (v3-D402, 2026-11-12, nightly): checked the repository's
+             # ACTUAL GitHub Actions status for the first time in this
+             # build's nightly history — not a source sweep — and found
+             # every CI run on `main` back through v3-D396's own commit has
+             # `conclusion: "failure"`, including last night's v3-D401
+             # commit, which this file's own note (above) reported fully
+             # green. `js`/`php (v2/api)`/`php (v3/api)`/`e2e` are genuinely
+             # green every run; only `test-floor` fails, at its one real
+             # step. Root cause confirmed from the real captured CI log:
+             # GitHub Actions sets `GITHUB_ACTIONS`, which the
+             # color-detection libraries vitest/chalk use
+             # (`supports-color`) special-case to force ANSI color even
+             # though stdout is a pipe — so every vitest suite's "Tests N
+             # passed (N)" summary line in the real CI log carries SGR
+             # escape codes between "Tests" and the digits, breaking
+             # `check-test-floor.mjs`'s regexes outright, even though the
+             # suite genuinely passed and its summary line is right there
+             # in the log. No local shell (including every prior nightly
+             # agent's own sandbox) sets `GITHUB_ACTIONS`, so this has
+             # always read green locally while failing on every real CI
+             # run — the same "verification that runs on the author's
+             # machine is not verification" shape as v3-D77/D396/D397, one
+             # level deeper: the gate itself, not its wiring. Fixed:
+             # `check-test-floor.mjs` strips ANSI SGR sequences
+             # (`/\x1b\[[0-9;]*m/g`) from the whole log before any marker
+             # search or extraction. RED confirmed directly: two new
+             # `check-test-floor-gate.test.ts` cases reproduce the real
+             # colored shape byte-for-byte (captured from the actual GitHub
+             # API response) and failed against the unmodified script
+             # exactly as the real CI run did (five suites MISSING,
+             # identical report); restored the fix, reran — 12/12 green
+             # (was 10, +2), and reconfirmed holding under
+             # `GITHUB_ACTIONS=true FORCE_COLOR=1` directly (the actual
+             # triggering env var), not only the synthetic fixture. `apps/
+             # web` vitest: 1772 passing (was 1770, +2). `TZ=UTC make test`
+             # (fresh container, Postgres 16 started + both throwaway DBs
+             # created/migrated by hand): **3213 passing** (255 v2 vitest +
+             # 47 v2/api + 476 v3/api [+6 over v3-D401's 470 — Postgres-
+             # gated tests ran instead of skipping, same shape as v3-D395;
+             # 2 incomplete PAY-1, 0 skipped] + 120 corpus-compiler + 470
+             # engine + 73 fold-runner + 1772 apps/web). `check-test-
+             # floor.mjs` itself: OK — 3213 >= floor 3200 (+13 margin).
+             # `TZ=UTC make build`: the usual nondeterministic
+             # `SecurityFatalError` Next.js CLI nudge fired once, not acted
+             # on; plain retry built clean, exit 0, 30 routes. `npm run
+             # gates`: all green, 351 files, unchanged. `npx tsc --noEmit`:
+             # clean. `./vendor/bin/pint --test`: no PHP file touched by
+             # this diff at all — every finding is on a file this diff
+             # does not touch. No `v1/**`/`v2/**` edit (the usual stray
+             # `v2/tsconfig.tsbuildinfo` reverted first). No Arabic
+             # codepoint possible — the only `\u` sequences in the diff are
+             # the literal `\x1b`/`\u001b` ANSI escape itself, swept
+             # programmatically against every Arabic Unicode block: zero
+             # hits. No oracle/golden-log/fixture/snapshot regenerated —
+             # one script, one test file. **Not yet confirmed: whether this
+             # actually turns the real `test-floor` GitHub Actions job
+             # green** — only observable on the next real push, which this
+             # run performs; the next run should check this commit's own
+             # Actions status directly before assuming it's closed, and
+             # should make checking real CI status a standing step of
+             # every future nightly run, not only local `make test`/`make
+             # build`. Full write-up: DECISIONS.md v3-D402.
              # NOTE (v3-D401, 2026-11-12, nightly): `AuthController::login()`
              # carried the IDENTICAL timing-oracle gap
              # `Admin\AdminAuthController::login()` was built to close (that

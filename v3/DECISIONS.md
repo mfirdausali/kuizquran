@@ -44529,3 +44529,149 @@ previously-undiscovered security gap rather than another sweep-night
 non-finding — the second such fix in two consecutive nights (v3-D400),
 following eighteen non-finding nights (v3-D379 through v3-D399) before
 that.
+
+---
+
+## v3-D402 (2026-11-12, nightly) — the `test-floor` CI job has failed on every single run since it was wired at v3-D396; `check-test-floor.mjs` cannot parse its own target's real GitHub Actions log
+
+Every nightly entry since v3-D396 has reported `check-test-floor.mjs: OK`
+and treated the CI merge gate as settled. **None of them had actually looked
+at GitHub's own Actions UI or API for this repository.** Doing so this run
+(`mcp__github__actions_list`/`get_job_logs` against `mfirdausali/kuizquran`)
+showed the opposite: every CI run on `main` back through run #402
+(v3-D396's own commit) has `conclusion: "failure"` — including the run for
+last night's own v3-D401 commit (`2c7d78c`), which this run's own nightly
+note reported as fully green. The `js`, `php (v2/api)`, `php (v3/api)` and
+`e2e` jobs are genuinely green on every run; only `test-floor` fails, every
+time, at its one real step: `make test (enforces TEST-FLOOR via
+check-test-floor.mjs)`.
+
+**Root cause, confirmed directly from the real captured CI log** (job
+131287705499, run 43247998993 — `v3-D401`'s own commit): the job's `make
+test` step runs every suite and every one of them actually passes — the
+log shows `apps/web`'s own vitest reporter printing `Tests  1770 passed
+(1770)` in full — but `check-test-floor.mjs`'s own report, computed from
+that SAME log one line later, reads:
+
+```
+    470  v3/api PHPUnit
+  MISSING  v2 vitest (marker found, no summary line matched)
+  MISSING  v2/api PHPUnit (marker found, no summary line matched)
+  MISSING  corpus-compiler (marker found, no summary line matched)
+  MISSING  engine (marker found, no summary line matched)
+  MISSING  fold-runner (marker found, no summary line matched)
+  MISSING  apps/web (marker found, no summary line matched)
+
+  total: 470   floor: 3200
+
+test-floor: FAIL — 6 suite(s) not found in the log
+```
+
+Six of the seven suites' summary lines are present in the log — their
+marker is found, the text is right there — yet the regex match fails. The
+cause is ANSI color: GitHub Actions sets `GITHUB_ACTIONS` in every job's
+environment, and the color-detection libraries vitest/chalk use
+(`supports-color` and relatives) special-case that variable to force color
+level 3 **even though stdout is a pipe, not a TTY** — the whole point being
+that GitHub's own log viewer renders ANSI. A plain local shell (this
+sandbox included, and every prior nightly agent's own sandbox) has no
+`GITHUB_ACTIONS` set, so the ordinary no-TTY-means-no-color rule applies
+and `npm test`'s output is plain text. `check-test-floor.mjs`'s regexes
+(`/^\s*Tests\s+(\d+) passed \(\d+\)\s*$/m` etc.) anchor on literal
+characters immediately adjacent to "Tests"/"Test Files" and the digits —
+an SGR escape sequence sitting between them (real shape:
+`\x1b[2m      Tests \x1b[22m \x1b[1m\x1b[32m1770 passed\x1b[39m\x1b[22m\x1b[90m
+(1770)\x1b[39m`) breaks `\s+(\d+)` outright, since `\x1b` is not whitespace.
+`v3/api PHPUnit` is the one suite that still matched — its `phpunit-human`
+regex (`/Tests:\s*(?:\d+\s+\w+,\s*)*?(\d+)\s+passed/`) happens to tolerate
+the one color break Collision's reporter inserts there, by coincidence, not
+by design; every genuine `vitest`-kind suite failed identically.
+
+**This is the same recurring bug class this build keeps finding** —
+"verification that runs on the author's machine is not verification"
+(v3-D77's missing corpus-compile step, v3-D396's own "CI never invoked this
+gate at all," v3-D397's backup-drill-never-run-against-real-Postgres) — this
+time one level deeper: the gate CLAUDE.md/HANDOVER.md call "the ONLY thing
+stopping 'merge everything' from merging broken code" has itself been
+broken, silently, on literally every commit for two days, because every
+verification of it (every nightly entry's own "`check-test-floor.mjs: OK`"
+line) ran on a local shell that can never reproduce the one environment
+variable that breaks it.
+
+**Found this run by:** checking the actual GitHub Actions status of the
+repository for the first time in this build's nightly history — not a
+source-code sweep technique, but simply looking at a surface (the real CI
+dashboard) that every prior run's own "make test"/"make build" discipline
+had never once consulted.
+
+**Fixed:** `v3/scripts/check-test-floor.mjs` now strips ANSI SGR escape
+sequences (`/\x1b\[[0-9;]*m/g`) from the whole log before any marker search
+or summary-line extraction, so the parse is robust to either shape (colored
+or not) rather than merely matching whichever shape happened to be tested
+locally last.
+
+**Verified:**
+- RED confirmed directly: two new `check-test-floor-gate.test.ts` cases
+  build a synthetic log reproducing the real colored shape byte-for-byte
+  (captured from the actual GitHub API response for job 131287705499) —
+  against the unmodified script both failed exactly as the real CI run did
+  (`expected 1 to be +0`, and the five-suites-MISSING report verbatim,
+  including the identical `v2/api PHPUnit`/`v3/api PHPUnit` partial match).
+  Restored the fix and reran: `check-test-floor-gate.test.ts` 12/12 green
+  (was 10, +2).
+- Mutation is the revert itself — the fix is a single `.replace()` added
+  immediately after `readFileSync`; removing that one line reproduces the
+  exact two failures above, confirmed by temporarily removing it and
+  rerunning (both new cases fail with the identical MISSING-suite report);
+  restored byte-identically.
+- `apps/web` vitest: **1772 passing** (was 1770, +2 — exactly these two
+  cases). `TZ=UTC make test` (fresh container, Postgres 16 started,
+  `imanapp_lock_test`/`imanapp_backup_drill` created and migrated by hand):
+  **3213 passing** (255 v2 vitest + 47 v2/api + 476 v3/api [+6 over
+  v3-D401's 470 — the Postgres-gated tests ran instead of skipping, same
+  shape as v3-D395; 2 incomplete PAY-1, 0 skipped] + 120 corpus-compiler +
+  470 engine + 73 fold-runner + 1772 apps/web). `check-test-floor.mjs`
+  itself, run as part of that `make test`: **OK — 3213 >= floor 3200 (+13
+  margin)** — the real, local-only confirmation every prior night already
+  had; what changes here is that the PARSER is now the same one that will
+  actually run cleanly under `GITHUB_ACTIONS=1` too, verified directly:
+  `GITHUB_ACTIONS=true FORCE_COLOR=1 npx vitest run --reporter=default
+  test/check-test-floor-gate.test.ts` (forcing the exact env var that
+  triggers the real bug) — 12/12 still green, confirming the fix holds
+  under the actual triggering condition, not just the synthetic fixture.
+  `TZ=UTC make build`: the usual nondeterministic `SecurityFatalError`
+  Next.js CLI advisory nudge fired once, not acted on (same documented
+  noise as v3-D386/D392/D396/D399/D400); plain retry built clean, exit 0,
+  30 routes. `npm run gates`: all green, 351 files, unchanged (294 v1
+  lines byte-identical; 2/6 UI fonts present, degraded-but-non-blocking,
+  pre-existing; fonts/boundaries/corpus-morphology/corpus-glyphs OK). `npx
+  tsc --noEmit`: clean. `./vendor/bin/pint --test`: every finding is on a
+  file this diff does not touch (confirmed: the two changed files,
+  `check-test-floor.mjs` and `check-test-floor-gate.test.ts`, appear in
+  neither list) — no PHP file changed by this diff at all. No `v1/**`/
+  `v2/**` edit (the usual stray `v2/tsconfig.tsbuildinfo` build-cache diff
+  reverted before committing). No Arabic codepoint/`\u`-escape/
+  `fromCharCode`/`fromCodePoint` introduced — swept programmatically over
+  the full diff: the only `\u` sequences are the literal `\x1b`/`\u001b`
+  ANSI escape in the fix and its test fixture, far outside every Arabic
+  Unicode block (U+0600–06FF, U+0750+, U+FB50–FDFF, U+FE70–FEFF), confirmed
+  by the same block-ranged grep every prior entry uses: zero hits. No
+  oracle/golden-log/fixture/snapshot regenerated — one script, one test
+  file.
+
+**Not yet confirmed:** whether this fix actually turns the real
+`test-floor` GitHub Actions job green, since that can only be observed on
+the next real push to `main` and this session cannot trigger a workflow run
+without pushing. The next run should check the Actions status of this
+commit directly (`mcp__github__actions_list` / the repository's Actions
+tab) before assuming this is closed, and should make checking real CI
+status — not just local `make test`/`make build` — a standing step of every
+future nightly run; this gap went unnoticed for two days specifically
+because no run before this one ever looked.
+
+**Recommendation for the next run:** verify this commit's own `test-floor`
+job on GitHub Actions goes green. If it does not, re-check for a SECOND
+color-breaking shape this run did not reproduce (e.g. `php artisan test`'s
+own Pest/Collision reporter under `GITHUB_ACTIONS`, which `v3/api`'s
+`phpunit-human` regex happened to tolerate here by coincidence on THIS
+run's particular test mix, not by a confirmed general proof).
