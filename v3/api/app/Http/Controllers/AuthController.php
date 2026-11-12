@@ -86,6 +86,21 @@ class AuthController extends Controller
      *  a fresh token for that account; does not touch the caller's prior
      *  identity — any not-yet-synced local events simply sync under
      *  whichever account is signed in when the outbox next flushes. */
+    /**
+     * A real bcrypt hash of a value nobody knows, used to burn the same CPU on
+     * the no-such-user/no-password path that a real verification would —
+     * the identical timing-oracle fix as `Admin\AdminAuthController::login()`,
+     * applied here: skipping `Hash::check()` on an early return leaks account
+     * existence through response time (~1ms vs ~250ms), not the response
+     * body (which is already the same generic message either way).
+     */
+    private static ?string $dummyHash = null;
+
+    private function dummyHash(): string
+    {
+        return self::$dummyHash ??= Hash::make(bin2hex(random_bytes(16)));
+    }
+
     public function login(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
@@ -97,7 +112,12 @@ class AuthController extends Controller
         }
 
         $user = User::where('email', $request->string('email'))->first();
-        if (! $user || ! $user->password || ! Hash::check($request->string('password'), $user->password)) {
+
+        // ALWAYS run the hash comparison, whether or not a user/password
+        // exists. This must never become conditional.
+        $passwordOk = Hash::check($request->string('password'), $user?->password ?? $this->dummyHash());
+
+        if (! $user || ! $user->password || ! $passwordOk) {
             return response()->json(['error' => 'invalid credentials'], 401);
         }
 

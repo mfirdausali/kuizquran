@@ -44383,3 +44383,149 @@ conspicuously absent on the most sensitive one" axes the same way — CORS,
 CSRF (N/A here, bearer-only per v2-D03/D18), input-size limits, or
 per-route logging/audit coverage are candidates not yet swept this
 specifically.
+
+## v3-D401 (2026-11-12, nightly) — `AuthController::login()` carried the identical timing-oracle gap `AdminAuthController::login()` was built to close; the sibling controller never got the fix
+
+`v3/api/app/Http/Controllers/Admin/AdminAuthController.php`'s own docblock
+(build-plan step 24, M8) is explicit: "the password hash must be verified
+EVEN WHEN the account does not exist... A naive implementation returns
+early on 'no such user', skipping bcrypt — and bcrypt at cost 12 takes
+~250ms while an early return takes ~1ms. That 250x timing difference IS
+the oracle, reintroduced through the side channel after being carefully
+closed in the response body." It fixes this with a `dummyHash()` helper
+(a real bcrypt hash of a random value, computed once per boot) that
+`Hash::check()` always runs against when no real user/password exists —
+proven by `AdminAuthOracleTest::test_the_password_hash_is_verified_even_when_the_account_does_not_exist`,
+which mocks `Hash::check` and asserts it is called exactly once even on the
+no-such-user path.
+
+The ordinary learner login (`AuthController::login()` — the actual
+password CHECK v3-D400 just rate-limited last night, as distinct from a
+mere reset REQUEST) never received this fix:
+
+```php
+$user = User::where('email', $request->string('email'))->first();
+if (! $user || ! $user->password || ! Hash::check($request->string('password'), $user->password)) {
+    return response()->json(['error' => 'invalid credentials'], 401);
+}
+```
+
+The `! $user || ! $user->password` clauses short-circuit before
+`Hash::check()` ever runs, on BOTH routes to the gap `AdminAuthController`
+already names (no such account; an account that exists but has no password
+set — e.g. an anonymous row never adopted). ⇒ A caller measuring response
+time against `/api/auth/login` can distinguish "no account at this email"
+(~1ms, no bcrypt) from "an account exists at this email" (~250ms, a real
+`Hash::check` runs) — the response BODY is already identical either way
+(`'invalid credentials'`, 401), so this is purely a timing side channel,
+letting an attacker enumerate which emails have registered accounts on the
+product, independent of and in addition to last night's rate-limiting fix
+(which slows brute-forcing a known email's password, but does nothing
+against measuring ~6 requests' worth of timing to learn whether an email
+exists at all).
+
+**Why nothing caught it:** every prior sweep that read `AuthController.php`
+did so for its *logic* (v3-D400's own note: B7's email verification, B8's
+token wedge, `hasHistory`'s stub-vs-real history) — this is the fourth
+time this exact file was read in full and the first time anyone compared
+it line-by-line against its sibling `AdminAuthController.php`, which
+carries the identical shape (allowlist check, generic denial, Sanctum
+token mint) MINUS the admin-specific allowlist/role checks. The two
+controllers were never diffed against each other because one lives under
+`Admin/` and the other does not — directory boundaries, not a defect
+search, had kept them apart.
+
+**Found this run by:** re-reading `DEFECTS.md`/`CLAUDE.md`'s own closed-gap
+history for anything shaped like "a security property proven on ONE route,
+never checked on its structurally-identical sibling" — the exact
+`WebhookHandler.php` four-call-site "one decision, several copies, drifted
+at one" shape v3-D383/D384/D391 closed on the billing surface, applied
+here to the auth surface instead of re-running the billing sweep a sixth
+time. `AdminAuthController::login()`'s own docblock essentially names the
+defect class and the fix; the only work was noticing `AuthController::
+login()` — a different controller, same product, same `Hash`/`User` model
+— never inherited it.
+
+**Fixed:** `AuthController` gained the identical `dummyHash()` private
+helper (duplicated, not extracted to a shared trait — two five-line
+call sites do not yet justify a new abstraction, and the two controllers
+differ enough elsewhere — admin allowlist/role checks, `whoami()` — that a
+shared base class would carry more than this one concern). `login()` now
+always calls `Hash::check($password, $user?->password ?? $this->dummyHash())`
+before branching on `! $user || ! $user->password || ! $passwordOk`, so
+every failure path burns the identical bcrypt cost.
+
+**Verified:**
+- RED confirmed directly: `tests/Feature/Auth/AuthLoginTimingOracleTest.php`,
+  mirroring `AdminAuthOracleTest`'s own technique — `Hash::check` mocked to
+  count calls, asserted to run exactly once even when no user exists, and
+  separately when a user exists but has no password set. Against the
+  unmodified controller both cases failed (`Failed asserting that 0 is
+  identical to 1`) — zero hash calls on either early-return path. A third,
+  non-regression case (a real login with the right password) passed
+  unmodified, proving the suite does not pass vacuously.
+- Mutation-verified: reverted `AuthController.php` alone (`git stash` of
+  that one file, the test file kept) and reran — both failures reproduced
+  identically; restored byte-identically (`git stash pop`, `git diff`
+  empty against the fix), reran green.
+- Full `Auth` filter: 60/60 green (was 57 — +3, these three new cases; no
+  existing login/register/logout/me/password-reset/email-verification case
+  moved). `v3/api` PHPUnit (fresh container, Postgres not running so the 6
+  Postgres-gated cases skip, matching this sandbox's standing baseline):
+  **470 passed**, 2 incomplete (PAY-1, unchanged), 6 skipped (unchanged).
+  `TZ=UTC make test`: **3205 passing** (255 v2 vitest + 47 v2/api + 470
+  v3/api + 120 corpus-compiler + 470 engine + 73 fold-runner + 1770
+  apps/web). `check-test-floor.mjs`: OK, 3205 >= floor 3200 (+5 margin).
+  `TZ=UTC make build`: the usual one-time `SecurityFatalError` Next.js CLI
+  nudge fired on the first invocation, not acted on; a plain retry built
+  clean, exit 0, 30 routes, unchanged. `npm run gates`: all green, 351
+  files, unchanged (294 v1 lines byte-identical; 2/6 UI fonts present,
+  degraded-but-non-blocking, pre-existing). `npx tsc --noEmit`: clean.
+  `./vendor/bin/pint --test`: neither changed file (`AuthController.php`,
+  the new test file) appears in the findings list — every finding
+  reported is confirmed pre-existing on files this diff does not touch.
+  No `v1/**`/`v2/**` edit (the usual stray `v2/tsconfig.tsbuildinfo`
+  build-cache diff reverted before committing, confirmed empty after). No
+  Arabic codepoint/`\u` escape/`fromCharCode`/`fromCodePoint` introduced —
+  swept programmatically over the full diff (one changed controller, one
+  new test file): CLEAN, every new string is a PHP identifier, an email
+  fixture address, or a fixed English comment/assertion sentence. No
+  oracle/golden-log/fixture/snapshot regenerated.
+
+**Session start:** fresh container; `origin/main`/detached `HEAD` agreed
+exactly at `1a3c75b` (v3-D400) after `git fetch` — no stale-local-`main`
+trap this run, `git checkout -B main HEAD` run as the standing precaution
+anyway. `v3/api`'s composer install needed `--ignore-platform-req=php`
+(PHP 8.3.6 here vs. `symfony/*`'s locked `>=8.4.1`), same as every recent
+entry. A new friction this run: five `npm install` invocations launched
+concurrently across separate npm projects (`v2`, `v3/packages/corpus-
+compiler`, `v3/packages/engine`, `v3/worker/fold-runner`, `v3/apps/web`)
+raced on something shared (likely the npm cache) and four of the five
+silently produced an EMPTY `node_modules` with exit code 0 and no error
+output — only `v2`'s succeeded. Not caught until `make test`/`make build`
+failed downstream (`tsc` missing `@types/node`; `AtomCacheRebuilder`
+reporting `fold-runner not runnable: expected .../node_modules/.bin/
+vite-node`) well after the fact. Recovered by re-running each `npm
+install` sequentially, which succeeded cleanly every time. Recorded here
+because this is the FIRST time this exact failure mode (concurrent `npm
+install`, not `composer install`) has been named in this file — prior
+entries only ever recorded the concurrent-COMPOSER-install cache race
+(v3-D383) between `v2/api` and `v3/api`. A future run should install the
+five npm projects sequentially, or at least verify each `node_modules`
+directory is non-empty before trusting a "done" marker, rather than
+trusting a zero exit code from a background job alone.
+
+**NOT addressed, unchanged:** H1/H2/H3/H5/H6/E6/E7/E8 — every human/
+infra-gated item named across v3-D379 through v3-D400 is still exactly
+where it was. **Recommendation for the next run:** the "present on some
+routes, conspicuously absent on its structurally identical sibling" axis
+that found this (named at the end of v3-D400) may still have instances —
+CSRF is N/A (bearer-only, v2-D03/D18) and rate limiting is now closed
+(v3-D400), but input-size limits and per-route audit-logging coverage are
+still unswept this specifically; `AdminAuthController`/`AuthController`
+have no other un-diffed sibling pair in this codebase, so this particular
+axis is likely exhausted for THIS pair. This closes a genuine,
+previously-undiscovered security gap rather than another sweep-night
+non-finding — the second such fix in two consecutive nights (v3-D400),
+following eighteen non-finding nights (v3-D379 through v3-D399) before
+that.

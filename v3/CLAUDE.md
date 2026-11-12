@@ -57,6 +57,63 @@ make test    # 3200 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 465 v3/api + 120 corpus-compiler
              # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D394, 2026-11-10)
+             # NOTE (v3-D401, 2026-11-12, nightly): `AuthController::login()`
+             # carried the IDENTICAL timing-oracle gap
+             # `Admin\AdminAuthController::login()` was built to close (that
+             # controller's own docblock: "the password hash must be verified
+             # EVEN WHEN the account does not exist... skipping bcrypt...
+             # reintroduces the oracle through the side channel"). The
+             # ordinary learner login never got this fix: `! $user || !
+             # $user->password || ! Hash::check(...)` short-circuits BEFORE
+             # `Hash::check()` runs on both the no-such-account and
+             # no-password-set paths, so a request against a real email runs
+             # a genuine bcrypt comparison (~250ms) while one against a
+             # non-existent email returns in ~1ms — a timing side channel
+             # that lets a caller enumerate which emails have accounts,
+             # independent of (and not fixed by) last night's v3-D400 rate
+             # limit, which only slows brute-forcing a KNOWN email's
+             # password. Found by comparing `AuthController.php` against its
+             # structurally identical, never-before-diffed sibling
+             # `AdminAuthController.php` — the "present on some routes,
+             # absent on its sibling" axis v3-D400 named as a candidate.
+             # Fixed: `AuthController` gained the identical `dummyHash()`
+             # helper (duplicated, not shared — the two controllers differ
+             # enough elsewhere that a shared base wasn't worth it for one
+             # concern); `login()` now always runs `Hash::check()` against
+             # a real or dummy hash before branching. RED confirmed directly
+             # (`AuthLoginTimingOracleTest`, mirroring `AdminAuthOracleTest`'s
+             # own Hash::check-call-count technique — a wall-clock assertion
+             # would be flaky in CI): both new cases failed with zero hash
+             # calls against the unmodified controller; mutation-verified by
+             # reverting `AuthController.php` alone — reproduced identically;
+             # restored byte-identically, reran green. `Auth` filter: 60/60
+             # green (was 57, +3). `v3/api` PHPUnit: 470 passed (no Postgres
+             # this run), 2 incomplete (PAY-1), 6 skipped. `TZ=UTC make
+             # test`: **3205 passing** (255 v2 vitest + 47 v2/api + 470
+             # v3/api + 120 corpus-compiler + 470 engine + 73 fold-runner +
+             # 1770 apps/web). `check-test-floor.mjs`: OK, 3205 >= floor 3200
+             # (+5 margin). `TZ=UTC make build`: the usual one-time
+             # `SecurityFatalError` nudge, not acted on; plain retry built
+             # clean, exit 0, 30 routes. `npm run gates`: all green, 351
+             # files, unchanged. `npx tsc --noEmit`: clean. `./vendor/bin/
+             # pint --test`: neither changed file appears in the findings —
+             # all pre-existing, confirmed against files this diff doesn't
+             # touch. No `v1/**`/`v2/**` edit (the usual stray
+             # `v2/tsconfig.tsbuildinfo` reverted first). No Arabic
+             # codepoint/`\u`/`fromCharCode`/`fromCodePoint` introduced —
+             # swept programmatically, CLEAN. No oracle/golden-log/fixture/
+             # snapshot regenerated. A new environment friction this run:
+             # five concurrent `npm install` invocations across separate
+             # projects raced (likely on the npm cache) and four of five
+             # silently left an EMPTY `node_modules` with exit 0 — only
+             # caught downstream when `tsc`/the fold-runner failed; fixed by
+             # re-running each sequentially. A future run should install
+             # the five npm projects sequentially, or verify each
+             # `node_modules` is non-empty before trusting a "done" marker.
+             # NOT addressed, unchanged: H1/H2/H3/H5/H6/E6/E7/E8. Second
+             # genuine fix in two consecutive nights, after eighteen
+             # non-finding nights (v3-D379..D399) before v3-D400. Full
+             # write-up: DECISIONS.md v3-D401.
              # NOTE (v3-D400, 2026-11-11, nightly): POST /auth/login and POST
              # /auth/anonymous carried NO rate limit at all — every other
              # unauthenticated, credential-adjacent route in routes/api.php
