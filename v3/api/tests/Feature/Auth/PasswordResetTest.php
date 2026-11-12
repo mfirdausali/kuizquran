@@ -94,4 +94,41 @@ class PasswordResetTest extends TestCase
             'password_confirmation' => 'does-not-match',
         ])->assertStatus(422);
     }
+
+    /**
+     * v3-D404: the two rejected-reset reasons — "this email has no account"
+     * vs "this email has an account but the token is wrong" — must read
+     * IDENTICALLY, the same uniform-response discipline
+     * `test_send_reset_link_is_silent_for_an_unknown_email` already proves
+     * for the send-link half. Laravel's password broker returns a
+     * DIFFERENT status string for each (`passwords.user` vs
+     * `passwords.token`), and the controller must not let that difference
+     * reach the response body — otherwise a bogus token submitted against
+     * a guessed email enumerates ADMIN_EMAILS-shaped accounts exactly the
+     * way `sendResetLink`'s own comment says it must not.
+     */
+    public function test_reset_error_message_is_identical_whether_or_not_the_email_has_an_account(): void
+    {
+        User::factory()->create(['email' => 'learner@example.com', 'password' => bcrypt('old-password')]);
+
+        $knownEmailResponse = $this->postJson('/api/reset-password', [
+            'token' => 'not-a-real-token',
+            'email' => 'learner@example.com',
+            'password' => 'new-password-123',
+            'password_confirmation' => 'new-password-123',
+        ])->assertStatus(422);
+
+        $unknownEmailResponse = $this->postJson('/api/reset-password', [
+            'token' => 'not-a-real-token',
+            'email' => 'nobody@example.com',
+            'password' => 'new-password-123',
+            'password_confirmation' => 'new-password-123',
+        ])->assertStatus(422);
+
+        $this->assertSame(
+            $knownEmailResponse->json('error'),
+            $unknownEmailResponse->json('error'),
+            'a bogus token must be rejected with the SAME message regardless of whether the email is registered'
+        );
+    }
 }
