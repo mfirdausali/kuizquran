@@ -44877,3 +44877,107 @@ exhausted for `/overrides`/`/verifications`/`/specs` specifically — a future
 run should look for the next genuinely public, unauthenticated route (if any
 exists beyond these three and the Stripe webhook, which is HMAC-authenticated
 by the raw body itself) rather than re-checking these three again.
+
+## v3-D404 (2026-11-13, nightly) — `check-test-floor.mjs` still missed `v2/api` PHPUnit on real CI; v3-D402's ANSI-strip fix was never actually confirmed against the next push
+
+**Checked v3-D402's own explicit follow-up instruction directly, rather than
+assuming it had landed**: "Not yet confirmed: whether this actually turns the
+real `test-floor` GitHub Actions job green... the next run should check this
+commit's own Actions status directly before assuming it's closed." It had
+not. `mcp__github__actions_list`/`get_job_logs` against the real repository
+showed every CI run on `main` since v3-D396's own commit still carries
+`conclusion:"failure"`, including commit `87cc347` (v3-D403's own push, made
+*after* the ANSI fix) — on the exact same `test-floor` job, the exact same
+step, with a *different* failure line than v3-D402 fixed:
+
+```
+MISSING  v2/api PHPUnit (marker found, no summary line matched)
+total: 3164   floor: 3200
+```
+
+**Root cause**, confirmed directly against the real vendored dependency
+(`v3/api`... no — `v2/api/vendor/laravel/pao/src/Autoload.php`):
+`AgentDetector::detect()` only sets `isAgent: true` when the invoking shell
+carries `CLAUDECODE`/`AI_AGENT`-shaped environment variables. Every
+local/sandbox run of this gate ever recorded in this build's history —
+including the one that "confirmed" v3-D402's fix — is exactly that kind of
+shell (`CLAUDECODE=1`, `AI_AGENT=claude-code_2-1-323_agent`, confirmed by
+direct `env | grep` in this sandbox), so `laravel/pao` has always compacted
+`v2/api`'s `php artisan test` to its one-line JSON summary in every
+environment this gate's own `phpunit-json` kind was ever tested against. A
+bare `ubuntu-latest` GitHub Actions runner carries neither variable, so
+`AgentDetector` reports `isAgent: false` there, and `laravel/pao` falls
+through to Pest's ordinary colored human-readable summary instead —
+confirmed byte-for-byte from the real CI log (run `43291913304`, job
+`test-floor`, fetched via the GitHub API):
+
+```
+Tests:    47 passed (144 assertions)
+```
+
+— a shape `check-test-floor.mjs`'s `phpunit-json` kind had no regex for at
+all, so `extractCount` returned `null` and the suite read as `MISSING`, not
+merely undercounted. This is the identical "verification that runs on the
+author's machine is not verification" shape as v3-D77/D396/D397/D402, one
+level deeper again: even the FIX for that exact class of bug was itself
+re-verified only against this sandbox's own agent-detected shell, never
+against a real CI log, which is exactly why it shipped still broken.
+
+**Fixed:** `extractCount`'s `phpunit-json` branch now tries the JSON pattern
+first and falls back to the same human-readable regex `v3/api`'s own
+`phpunit-human` kind already uses, so the parse is correct regardless of
+whether a given run's own shell happens to be flagged as an agent — the same
+"handle both shapes, not just the one this run produced" principle v3-D402
+applied to ANSI color, now applied to the JSON/human-summary split itself.
+
+**Verified:**
+- RED confirmed directly: a new `check-test-floor-gate.test.ts` case
+  (`v3-D404`) reproduces the real captured CI shape — `v2/api` printing
+  Pest's human summary instead of JSON — and failed against the unmodified
+  script exactly as the real CI run did (`out` contained `MISSING`, total
+  `1843` against a floor of `1890`, i.e. `v2/api`'s 47 tests silently
+  dropped from the count).
+- Mutation-verified: reverting `check-test-floor.mjs` alone (`git stash`,
+  the new test kept) reproduced the identical failure; restored
+  byte-identically (`git stash pop`, `git diff` empty), reran — 13/13 green
+  (was 12, +1).
+- `TZ=UTC make test`: **3218 passing** (was 3217, +1 exactly this new test;
+  every other suite unchanged: 255 v2 vitest, 47 v2/api, 480 v3/api [+6 over
+  the no-Postgres baseline, Postgres live this run — same shape as
+  v3-D395/D402], 120 corpus-compiler, 470 engine, 73 fold-runner, 1773
+  apps/web). `check-test-floor.mjs` itself: OK, 3218 >= floor 3200 (+18
+  margin). `TZ=UTC make build`: the usual one-time `SecurityFatalError`
+  Next.js CLI nudge fired on the first invocation, not acted on; plain retry
+  built clean, exit 0, 30 routes (unchanged). `npm run gates`: all green,
+  350 files, unchanged (294 v1 lines byte-identical; 2/6 UI fonts present,
+  degraded-but-non-blocking, pre-existing; morphology/glyphs OK). `npx tsc
+  --noEmit`: clean. No PHP file touched by this diff at all, so `pint` does
+  not apply. No `v1/**`/`v2/**` edit (the usual stray
+  `v2/tsconfig.tsbuildinfo` build-cache diff reverted first). No Arabic
+  codepoint/`\u` escape/`fromCharCode`/`fromCodePoint` introduced — swept
+  programmatically over the full diff (one script, one test file): CLEAN,
+  every new string is a JavaScript/TypeScript identifier, an integer, a
+  captured ANSI-stripped log line, or a fixed English comment/assertion
+  sentence. No oracle/golden-log/fixture/snapshot regenerated.
+
+**Session-start note:** `HEAD` was detached, exactly at `origin/main`'s real
+tip (`87cc347`, v3-D403) after `git fetch` — local `main` was stale one
+commit behind, the recurring stale-local-`main` trap this file has recorded
+dozens of times since v3-D77 — caught via `git checkout -B main HEAD` before
+any exploration, per this run's own `NIGHTLY.md` brief. This sandbox had
+Postgres 16 installed but stopped (the same recurring shape as v3-D395);
+started it, created/migrated both throwaway databases
+(`imanapp_lock_test`/`imanapp_backup_drill`) by hand, matching
+`.github/workflows/ci.yml`'s own out-of-band setup.
+
+**Not yet confirmed, named for the next run:** whether this actually turns
+the real `test-floor` GitHub Actions job green end to end — only observable
+on the next real push, which this commit performs. Given this is the SECOND
+consecutive attempt at the identical job (v3-D402 was the first, and shipped
+still broken despite being "confirmed" by every gate this sandbox can run),
+the next run should check this commit's own Actions status directly via the
+GitHub API — not `make test` locally, which cannot reproduce
+`AgentDetector::detect()`'s real-CI-vs-agent-shell divergence — before
+trusting that `test-floor` is closed. If it still fails, read the job's own
+log for whatever summary-line shape is missing THIS time rather than
+assuming the same root cause recurs.
