@@ -45409,3 +45409,11 @@ finished cleanly on the second attempt, and the follow-on `v2/api` install
 reused that now-warm cache and finished quickly. A future run should start
 composer installs with generous background-timeout headroom from the
 first attempt, rather than discovering the default is too short.
+
+**v3-D407 CONFIRMED CLOSED (2026-11-13, same run).** Checked the real
+GitHub Actions status directly after pushing, per v3-D402/D404/D405/D406's
+own standing instruction — not assumed. Run `43510953313` (commit
+`f062340`, this fix) shows all five jobs `success`: `js` (2m37s), `php
+(v2/api)` (38s), `e2e` (2m3s), `php (v3/api)` (1m23s), `test-floor`
+(2m17s). Overall run `status: "completed"`, `conclusion: "success"`. CI
+stayed green across this push.
