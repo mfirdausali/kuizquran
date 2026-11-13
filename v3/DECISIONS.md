@@ -45261,3 +45261,10 @@ verification, surah 67 scene beats, qari booking, the pager owner, the
 human a11y pass, the fold-runner's production DB host, the operational
 mailer, and the Stripe replay fixtures. None became agent-completable this
 run.
+
+**v3-D406 CONFIRMED CLOSED (2026-11-13, same run).** Checked the real GitHub
+Actions status directly after pushing, per v3-D402/D404/D405's own standing
+instruction — not assumed. Run `43493116605` (commit `e5ff9eb`, this fix)
+shows all five jobs `success`: `js`, `php (v2/api)`, `php (v3/api)`, `e2e`,
+`test-floor`. Overall run `conclusion: "success"`. CI stayed green across
+this push.
