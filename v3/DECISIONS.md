@@ -45136,3 +45136,12 @@ operator-typed free text reaches it) or is a different field shape entirely
 pass; a future run should not re-grep this exact pattern again.
 
 **NOT addressed, unchanged:** every item on the standing H1-H6/E6-E8 list.
+
+**v3-D405 CONFIRMED CLOSED (2026-11-13, same run).** Checked the real GitHub
+Actions status directly after pushing, per v3-D402/D404's own standing
+instruction — not assumed. Run `43472830411` (commit `333b584`, this fix)
+shows all five jobs `success`: `js`, `php (v2/api)`, `php (v3/api)`, `e2e`,
+`test-floor` (`make test` exiting 0 at 3m23s on the real runner, Postgres
+wired). Overall run `conclusion: "success"`. CI stayed green across this
+push — the first fix landed since v3-D404's own first-ever green run, and
+it did not regress that.
