@@ -44981,3 +44981,27 @@ GitHub API — not `make test` locally, which cannot reproduce
 trusting that `test-floor` is closed. If it still fails, read the job's own
 log for whatever summary-line shape is missing THIS time rather than
 assuming the same root cause recurs.
+
+**v3-D404 CONFIRMED CLOSED (2026-11-13, same run).** Checked the real GitHub
+Actions status directly, per this entry's own standing instruction and per
+v3-D402's own skipped follow-through — not assumed. Run `43454442286`
+(commit `a2a0349`, this fix) shows **all five jobs green**: `js`, `php
+(v2/api)`, `php (v3/api)`, `e2e`, and — for the first time since the
+`test-floor` job was wired at v3-D396 — **`test-floor` itself: conclusion
+`success`**, `make test` exiting 0 in 2m19s. This is the first fully-green
+CI run on `main` in this build's recorded history.
+
+One unrelated job failure surfaced on the very next push (`4547d0b`, a
+docs-only commit with zero production/test diff): `test-floor` failed again
+on run `43454573271`, but on a different, already-known cause —
+`test/session-island.test.tsx`'s `v3-D217` reentry-notice case timed out
+waiting for `[data-testid="reentry-notice"]`, the identical flake v3-D397
+already recorded ("timed out once under heavy concurrent install load;
+passed 41/41 in isolation and on a clean re-run"). Confirmed this is not a
+regression from this fix: the failing commit carries no change to
+`check-test-floor.mjs`, `session-island.test.tsx`, or any file the session
+loop touches relative to the confirmed-green `a2a0349` — DECISIONS.md and
+NIGHTLY.md only. Not re-fixed here (no reproducible failure to write a RED
+test against — it is a timing flake under CI load, the same shape already
+accepted at v3-D397); named for a future run in case it recurs often enough
+to be worth a `waitFor` timeout bump in that one test.
