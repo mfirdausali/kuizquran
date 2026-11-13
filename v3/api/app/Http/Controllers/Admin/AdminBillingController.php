@@ -6,6 +6,7 @@ use App\Billing\EntitlementMachine;
 use App\Billing\EntitlementState;
 use App\Billing\EntitlementTier;
 use App\Http\Controllers\Controller;
+use App\Models\AdminAudit;
 use App\Models\Entitlement;
 use App\Models\EntitlementTransition;
 use Illuminate\Http\JsonResponse;
@@ -100,6 +101,32 @@ class AdminBillingController extends Controller
         $reason = trim((string) $request->input('reason', ''));
         if (mb_strlen($reason) < 10) {
             return response()->json(['error' => 'reason must be at least 10 characters'], 422);
+        }
+
+        // v3-D406: `entitlement_transitions.reason` is stored verbatim in an
+        // APPEND-ONLY table (`EntitlementTransition`'s own `booted()` guard)
+        // with no PDPA purge relief on the CONTENT of this column — only
+        // `user_id`'s `cascadeOnDelete()` removes the row, and only once the
+        // whole account is purged. The identical unpurgeable-PII shape
+        // `AdminRevealController::reveal()`'s own `reason_text`,
+        // `FlagController::enable()`'s own `reason`, and
+        // `OverridesController::store()`/`VerificationsController::store()`'s
+        // own `note` already guard with `AdminAudit::scanFreeText()`
+        // (v3-D405) — never wired on this fourth free-text write path until
+        // now, because v3-D405's own sweep grepped `app/Http/Controllers` for
+        // a literal `->reason`/`->note` write and this controller passes
+        // `$reason` as a positional argument into `EntitlementMachine::apply()`
+        // instead, which is where the actual `EntitlementTransition::create()`
+        // write lives — the same "shallow grep misses the real call site"
+        // shape this build's own history already names (v3-D372's
+        // `AyahVerification` find).
+        $piiWarnings = AdminAudit::scanFreeText($reason);
+        if ($piiWarnings !== [] && ! $request->boolean('acknowledge_pii_warning')) {
+            return response()->json([
+                'error' => 'reason appears to contain identifying information',
+                'detected' => $piiWarnings,
+                'hint' => 'Reference the pseudonym, not the person. Re-submit with acknowledge_pii_warning=true if this is intentional.',
+            ], 422);
         }
 
         $changes = [];

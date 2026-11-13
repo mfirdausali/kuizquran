@@ -3,6 +3,8 @@
 namespace Tests\Feature\Admin;
 
 use App\Billing\EntitlementMachine;
+use App\Billing\EntitlementState;
+use App\Billing\EntitlementTier;
 use App\Http\Controllers\Admin\Pseudonymizer;
 use App\Models\Entitlement;
 use App\Models\EntitlementTransition;
@@ -72,8 +74,8 @@ class AdminBillingTest extends TestCase
         ]);
 
         $machine = app(EntitlementMachine::class);
-        $machine->apply($entitlement, ['state' => \App\Billing\EntitlementState::Active, 'tier' => \App\Billing\EntitlementTier::Monthly], EntitlementMachine::CAUSE_WEBHOOK, 1_700_000_000_000, 'evt_first', 'system', null, 1_700_000_000_000);
-        $machine->apply($entitlement->fresh(), ['state' => \App\Billing\EntitlementState::Grace], EntitlementMachine::CAUSE_WEBHOOK, 1_700_000_005_000, 'evt_second', 'system', null, 1_700_000_005_000);
+        $machine->apply($entitlement, ['state' => EntitlementState::Active, 'tier' => EntitlementTier::Monthly], EntitlementMachine::CAUSE_WEBHOOK, 1_700_000_000_000, 'evt_first', 'system', null, 1_700_000_000_000);
+        $machine->apply($entitlement->fresh(), ['state' => EntitlementState::Grace], EntitlementMachine::CAUSE_WEBHOOK, 1_700_000_005_000, 'evt_second', 'system', null, 1_700_000_005_000);
 
         $entries = $this->getJson('/api/admin/billing')->assertOk()->json('entries');
 
@@ -441,6 +443,70 @@ class AdminBillingTest extends TestCase
         ])->assertOk();
 
         $this->assertSame(1_700_086_400_000, $entitlement->fresh()->grace_until);
+    }
+
+    // ═══════ v3-D406 — `reason` is unscanned, unpurgeable PII in an append-only row ═══════
+    //
+    // `entitlement_transitions` is APPEND-ONLY (`EntitlementTransition`'s own
+    // `booted()` guard) with no PDPA purge relief on `reason` itself (only
+    // `user_id`'s `cascadeOnDelete()` removes the row, and only once the whole
+    // account is purged) — the identical unpurgeable-PII shape
+    // `AdminRevealController::reveal()`'s own `reason_text`,
+    // `FlagController::enable()`'s own `reason`, and
+    // `OverridesController::store()`/`VerificationsController::store()`'s own
+    // `note` already guard with `AdminAudit::scanFreeText()` (v3-D405) — never
+    // wired on this fourth write path's own free-text `reason` until now.
+    //
+    // MUTATION: remove the `scanFreeText` check from
+    // `AdminBillingController::override()`.
+
+    public function test_override_rejects_a_reason_containing_an_email_unless_acknowledged(): void
+    {
+        $this->admin();
+        $learner = $this->learner();
+        Entitlement::create(['user_id' => $learner->id, 'state' => 'active', 'tier' => 'monthly', 'state_version' => 0]);
+
+        $response = $this->postJson("/api/admin/billing/{$learner->id}/override", [
+            'state' => 'lapsed_review_only',
+            'reason' => 'confirmed by email from sitipah.rahman@example.com, refund approved',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonFragment(['detected' => ['email-shaped string']]);
+        $this->assertDatabaseCount('entitlement_transitions', 0);
+        $this->assertSame('active', Entitlement::where('user_id', $learner->id)->first()->state->value);
+    }
+
+    public function test_override_reason_pii_warning_is_overridable_with_explicit_acknowledgement(): void
+    {
+        $this->admin();
+        $learner = $this->learner();
+        Entitlement::create(['user_id' => $learner->id, 'state' => 'active', 'tier' => 'monthly', 'state_version' => 0]);
+        $reason = 'confirmed by email from sitipah.rahman@example.com, refund approved';
+
+        $response = $this->postJson("/api/admin/billing/{$learner->id}/override", [
+            'state' => 'lapsed_review_only',
+            'reason' => $reason,
+            'acknowledge_pii_warning' => true,
+        ]);
+
+        $response->assertOk()->assertJson(['applied' => true, 'state' => 'lapsed_review_only']);
+        $this->assertDatabaseHas('entitlement_transitions', ['user_id' => $learner->id, 'reason' => $reason]);
+    }
+
+    /** A clean, ordinary reason (no PII-shaped pattern) must get zero new friction. */
+    public function test_override_with_a_clean_reason_is_unaffected(): void
+    {
+        $this->admin();
+        $learner = $this->learner();
+        Entitlement::create(['user_id' => $learner->id, 'state' => 'active', 'tier' => 'monthly', 'state_version' => 0]);
+
+        $this->postJson("/api/admin/billing/{$learner->id}/override", [
+            'state' => 'lapsed_review_only',
+            'reason' => 'refund confirmed manually per support ticket 5524',
+        ])->assertOk()->assertJson(['applied' => true, 'state' => 'lapsed_review_only']);
+
+        $this->assertDatabaseCount('entitlement_transitions', 1);
     }
 
     // ---- show() — v3-D279. `override()`'s own 409 says "Re-read and retry",

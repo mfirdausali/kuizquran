@@ -45145,3 +45145,119 @@ shows all five jobs `success`: `js`, `php (v2/api)`, `php (v3/api)`, `e2e`,
 wired). Overall run `conclusion: "success"`. CI stayed green across this
 push — the first fix landed since v3-D404's own first-ever green run, and
 it did not regress that.
+
+## v3-D406 (2026-11-13, nightly) — `AdminBillingController::override()`'s free-text `reason` was unscanned, unpurgeable PII in the append-only `entitlement_transitions` table
+
+**The gap.** `entitlement_transitions` is APPEND-ONLY (`EntitlementTransition`'s
+own `booted()` guard throws on `updating`/`deleting`) with no PDPA purge
+relief on the column itself — only `user_id`'s database-level
+`cascadeOnDelete()` removes the row, and only once the whole account is
+purged. `AdminBillingController::override()` lets a support admin type any
+free text, at least 10 characters, with **no PII scan**, and that text is
+passed straight into `EntitlementMachine::apply(..., $reason)`, which writes
+it verbatim into `entitlement_transitions.reason`. `AdminBillingController
+::index()` then serves that column raw to every admin who loads
+`GET /api/admin/billing` — no pseudonymization, no redaction, same as every
+other field on that row.
+
+This is the identical shape v3-D405 fixed the same night for `FlagController
+::enable()`'s `reason`, `OverridesController::store()`'s `note`, and
+`VerificationsController::store()`'s `note` — all guarded with
+`AdminAudit::scanFreeText()` before the write. v3-D405's own "Scope,
+deliberately not widened further" section explicitly named
+`AdminBillingController` as checked and ruled safe ("writes a fixed,
+hardcoded string... or is a different field shape entirely"). That
+conclusion was wrong for `override()`: the check that reached that
+conclusion was a grep for a literal `->reason`/`->note` property write
+inside `app/Http/Controllers`, and `AdminBillingController::override()`
+never writes `->reason` itself — it hands `$reason` to `EntitlementMachine
+::apply()` as a positional constructor-style argument, and the actual
+`EntitlementTransition::create([..., 'reason' => $reason, ...])` call lives
+inside `app/Billing/EntitlementMachine.php`, a different file the grep never
+looked at. This is the same "a shallow, mechanical sweep misses the real
+call site one layer away" class this build's own history already names —
+v3-D372 found `AyahVerification`'s missing append-only guard the same way,
+after a directory-level "thin models, no logic" heuristic had skipped past
+it. Found this run by reading `AdminBillingController`'s `override()` method
+end to end (not by re-running v3-D405's own grep) as part of a broader pass
+checking every admin write-and-read-back surface for the PII-leak and
+missing-scan shapes v3-D400–D405 established, and then tracing `$reason`
+through to its actual storage call rather than trusting the controller file
+alone.
+
+**Fixed**, identically to v3-D405's own three sites: `AdminAudit::
+scanFreeText($reason)` runs right after the length check and before
+`$changes` is built; a non-empty result without `acknowledge_pii_warning:
+true` in the request returns 422 with `detected` (the pattern names) and the
+same hint to reference the pseudonym instead. A clean reason (no PII
+pattern) proceeds exactly as before, with zero added friction, and the
+override with `acknowledge_pii_warning: true` still lands the text verbatim
+— advisory, never a hard block, matching every other site's contract.
+
+**Verified:**
+- RED confirmed directly: a new case (`test_override_rejects_a_reason_
+  containing_an_email_unless_acknowledged`) posts a reason containing an
+  email-shaped string and asserts 422 + `detected: ['email-shaped string']`
+  + zero new `entitlement_transitions` rows + the entitlement's `state`
+  unchanged. Run against the unmodified controller: `Expected response
+  status code [422] but received 200`; `1 failed, 24 passed`.
+- Mutation-verified: `git stash` of `AdminBillingController.php` alone (both
+  new test files kept) reproduced the identical single failure; `git stash
+  pop` restored it byte-identically (`git diff` empty before the restore was
+  confirmed); reran — 25/25 green again.
+- A second case proves the override path: the SAME PII-bearing reason with
+  `acknowledge_pii_warning: true` succeeds and the text lands verbatim in
+  `entitlement_transitions.reason`. A third case proves an ordinary,
+  PII-free reason (`'refund confirmed manually per support ticket 5524'`)
+  gets zero new friction — one new `entitlement_transitions` row, as before.
+- Full regression sweep, `AdminBillingTest`: 25 tests, 79 assertions, all
+  green, zero other case moved — every pre-existing fixture reason
+  (`'refund per support ticket 9911'`, `'goodwill lifetime grant per ticket
+  4471'`, etc.) is clean under `scanFreeText` by construction, confirming no
+  false positive on an ordinary ticket-reference reason.
+
+**Numbers.** `v3/api` PHPUnit: **490 passed** (was 487 at v3-D405's own
+Postgres-live baseline, +3 exactly), 2 incomplete (PAY-1, unchanged), 0
+skipped (Postgres wired this run — `imanapp_lock_test` created and migrated
+by hand, mirroring `ci.yml`). `TZ=UTC make test`: **3228 passing** (was
+3225, +3; every other suite unchanged: 255 v2 vitest, 47 v2/api, 120
+corpus-compiler, 470 engine, 73 fold-runner, 1773 apps/web).
+`check-test-floor.mjs`: OK, 3228 >= floor 3200 (+28 margin). `TZ=UTC make
+build`: the usual one-time `SecurityFatalError` Next.js CLI nudge fired on
+the first invocation, not acted on (upgrading the pinned Next.js major
+stays outside this run's mandate, the same call every prior night has
+made); plain retry built clean, exit 0, 30 routes (unchanged). `npm run
+gates`: all green, 351 files, unchanged (294 v1 lines byte-identical; 2/6
+UI fonts present, degraded-but-non-blocking, pre-existing; 362 words; 206
+codepoints). `npx tsc --noEmit`: clean. `./vendor/bin/pint --test`: one
+pre-existing finding on the touched test file (`fully_qualified_strict_types`
+/`ordered_imports`, on two lines this run did not write — a pre-existing
+inline `\App\Billing\X::` instead of an import, two call sites earlier in
+the same file), auto-fixed with `./vendor/bin/pint`, content unaffected,
+reran clean (`{"result":"passed"}`) on both touched files. No `v1/**`/
+`v2/**` edit (`git status --porcelain -- v1 v2` empty — the usual stray
+`v2/tsconfig.tsbuildinfo` build-cache diff reverted first). No Arabic
+codepoint, no `\u` escape, no `fromCharCode`/`fromCodePoint` introduced —
+swept the diff programmatically over the Arabic/Arabic Supplement/Arabic
+Extended-A/Presentation-Forms blocks: CLEAN, zero hits; every new string is
+a PHP identifier, an HTTP status integer, or a fixed English comment/
+assertion/fixture sentence. No oracle/golden-log/fixture/snapshot
+regenerated — one existing production file and one existing test file only.
+
+**Scope, deliberately not widened further.** Re-checked the other
+candidates v3-D405's own write-up named safe (`ContentFreezeController`,
+`GlossDraftsController`, `FlagAuditController`, `PurgeLedgerController`,
+`StripeSettingsController`, `SystemHealthController`, `AdminAuditController`)
+by tracing each one's own free-text field to its actual storage call this
+time, the same way this run found `AdminBillingController`'s gap — none
+passes operator-typed free text through an intermediate class the way
+`override()` does; each either writes a fixed, hardcoded string or has no
+free-text field reaching an append-only, unpurgeable store. Confirmed
+exhausted for this exact pattern; a future run should not re-grep it again.
+
+**NOT addressed, unchanged:** every item on the standing H1-H6/E6-E8 list
+(v3-D393/D398/D399 and every night since) — Stripe MY business
+verification, surah 67 scene beats, qari booking, the pager owner, the
+human a11y pass, the fold-runner's production DB host, the operational
+mailer, and the Stripe replay fixtures. None became agent-completable this
+run.

@@ -57,6 +57,56 @@ make test    # 3200 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 465 v3/api + 120 corpus-compiler
              # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D394, 2026-11-10)
+             # NOTE (v3-D406, 2026-11-13, nightly): `AdminBillingController
+             # ::override()`'s free-text `reason` (an admin manually
+             # correcting a learner's billing state) was stored verbatim,
+             # unscanned, into the APPEND-ONLY `entitlement_transitions`
+             # table, then served raw by `index()` to every admin — the
+             # identical unpurgeable-PII shape v3-D405 fixed in
+             # `FlagController`/`OverridesController`/`VerificationsController`
+             # the SAME night, but missed here: v3-D405's own sweep grepped
+             # `app/Http/Controllers` for a literal `->reason`/`->note`
+             # write, and this controller passes `$reason` as a positional
+             # argument into `EntitlementMachine::apply()`, which is where
+             # the real `EntitlementTransition::create()` call lives — the
+             # same "shallow grep misses the real call site" shape this
+             # build's history already names (v3-D372). Fixed identically:
+             # `AdminAudit::scanFreeText($reason)` before the write, 422 +
+             # `detected` unless `acknowledge_pii_warning=true`. RED
+             # confirmed directly: a new case posting a reason containing an
+             # email-shaped string failed against the unmodified controller
+             # (`200`, not `422`); mutation-verified by reverting the
+             # controller change alone (test file kept) — the identical
+             # single failure reproduced; restored byte-identically. Two
+             # more cases: the same reason succeeds with
+             # `acknowledge_pii_warning=true` and lands verbatim; a clean,
+             # ordinary reason gets zero new friction. `v3/api` PHPUnit:
+             # **490 passed** (was 487 at v3-D405's own Postgres-live
+             # baseline, +3 exactly), 2 incomplete (PAY-1, unchanged), 0
+             # skipped (Postgres wired). `TZ=UTC make test`: **3228 passing**
+             # (was 3225, +3; every other suite unchanged: 255 v2 vitest, 47
+             # v2/api, 120 corpus-compiler, 470 engine, 73 fold-runner, 1773
+             # apps/web). `check-test-floor.mjs`: OK, 3228 >= floor 3200
+             # (+28 margin). `TZ=UTC make build`: the usual one-time
+             # `SecurityFatalError` Next.js CLI nudge fired on the first
+             # invocation, not acted on; plain retry built clean, exit 0, 30
+             # routes (unchanged). `npm run gates`: all green, 351 files,
+             # unchanged. `npx tsc --noEmit`: clean. `./vendor/bin/pint
+             # --test`: one pre-existing style finding on the touched test
+             # file (`fully_qualified_strict_types`/`ordered_imports` on two
+             # lines I did not write), auto-fixed, content unaffected,
+             # reran clean. No `v1/**`/`v2/**` edit (the usual stray
+             # `v2/tsconfig.tsbuildinfo` diff reverted first). No Arabic
+             # codepoint introduced (swept the diff directly: 0 hits). No
+             # oracle/golden-log/fixture/snapshot regenerated. Session
+             # start: fresh container; both Laravel apps' composer installs
+             # hit the documented slow proxy git-mirror fallback;
+             # `v3/api` needed `--ignore-platform-req=php`; Postgres 16 was
+             # installed but stopped, started it, created + migrated
+             # `imanapp_lock_test` by hand (mirroring `ci.yml`); local `main`
+             # was detached exactly at `origin/main`'s real tip (`b71189a`,
+             # v3-D405) — fixed with `git checkout -B main HEAD` before any
+             # exploration. Full detail: DECISIONS.md v3-D406.
              # NOTE (v3-D403, 2026-11-12, nightly): `GET /api/overrides` and
              # `GET /api/verifications` are deliberately PUBLIC — no
              # `auth:sanctum` middleware at all, reachable by anyone,
