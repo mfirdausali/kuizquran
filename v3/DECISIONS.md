@@ -45268,3 +45268,144 @@ instruction — not assumed. Run `43493116605` (commit `e5ff9eb`, this fix)
 shows all five jobs `success`: `js`, `php (v2/api)`, `php (v3/api)`, `e2e`,
 `test-floor`. Overall run `conclusion: "success"`. CI stayed green across
 this push.
+
+## v3-D407 (2026-11-13, nightly) — `GlossDraftsController::review()`'s free-text `note` was unscanned, unpurgeable PII in the append-only `gloss_draft_reviews` table
+
+Checked the real GitHub Actions status first, per v3-D402/D404/D405/D406's
+own standing instruction: `mcp__github__actions_list` against the real
+repository shows the current `main` tip (`2b50696`, v3-D406's own close) has
+`conclusion: "success"` on every job. With the CI-wiring seam and the
+billing/grace_until seam both exhausted and `HANDOVER.md`'s own "WHAT IS
+LEFT" table (E6/E7/E8, H1-H6) unchanged and still entirely human/infra-gated,
+this run continued the PII-scan sweep v3-D405/D406 opened — specifically
+re-testing v3-D406's own claim that it had re-checked every candidate
+v3-D405 named safe "by tracing each one's own free-text field to its actual
+storage call", including `GlossDraftsController`.
+
+**That claim was wrong.** `GlossDraftsController::review()` validates
+`'note' => ['nullable', 'string']` and writes it straight into
+`GlossDraftReview::create([..., 'note' => $validated['note'] ?? null, ...])`
+— no intermediate class, no indirection, in the very method that handles
+the HTTP request. `gloss_draft_reviews` is APPEND-ONLY
+(`GlossDraftReview::booted()`'s own `updating`/`deleting` guards, closed at
+v3-D373) with no PDPA purge relief on `note` itself. The row is then served
+back unconditionally: `GlossDraftsController::toWire()` maps every
+`GlossDraftReview` into `reviews[].note` with no redaction, read by any
+admin who loads `GET /api/admin/gloss-drafts` (admin-gated for reads, unlike
+`/overrides`/`/verifications`, but PII stored forever in an audit trail
+every admin can browse is still exactly the edge-case-#149 harm
+`AdminAudit::scanFreeText()` exists to catch — admin-only readership was
+never the condition for v3-D403/D405/D406's own fixes either).
+
+**Why v3-D406 missed it despite directly re-checking this file.** v3-D406's
+own text says each remaining candidate "either writes a fixed, hardcoded
+string or has no free-text field reaching an append-only, unpurgeable
+store." `GlossDraftsController` genuinely has BOTH shapes in one file:
+`store()`'s auto-un-review branch writes a hardcoded string
+(`'text edited after review — approval was for different bytes'`) into the
+very same `GlossDraftReview` table — that IS safe, exactly as v3-D406
+described. But `review()`'s own direct `$validated['note']` write, four
+lines away in the same controller, is the opposite shape entirely:
+genuinely operator-typed, with no hardcoding at all. A re-check that read
+`store()`'s shape and generalized it to the whole controller, without
+separately tracing `review()`'s own write, reaches exactly v3-D406's wrong
+conclusion. Found this run by reading `GlossDraftsController.php` end to
+end for this specific question (not re-running v3-D405/D406's own grep
+patterns) — the same "a file can carry two different shapes of the thing
+you're checking for, and checking one instance clears neither nor both" gap
+this build's history keeps re-discovering in new forms.
+
+**Fixed**, identically to v3-D405/D406's own four sites: `AdminAudit
+::scanFreeText($validated['note'] ?? null)` runs in `review()`, after the
+merge-refusal/illegal-transition/empty-draft checks and before the row is
+created; a non-empty result without `acknowledge_pii_warning=true` in the
+request returns 422 with `detected` (the pattern names) and the same hint
+to reference the pseudonym instead. A clean note (no PII pattern) proceeds
+exactly as before, zero added friction — including the pre-existing
+`'checked against Basmeih'` / `'wrong register — too formal'` fixtures
+already in this test file, and `store()`'s own hardcoded auto-un-review
+note, none of which trip the scan.
+
+**Verified:**
+- RED confirmed directly: a new case
+  (`test_a_review_note_containing_an_email_is_rejected_unless_acknowledged`)
+  posts a `review()` call with a `note` containing an email-shaped string
+  and asserts 422 + `detected: ['email-shaped string']` + zero new
+  `GlossDraftReview` rows + the draft's `status` left at `draft` (the
+  rejected transition must not have applied either). Run against the
+  unmodified controller: `Expected response status code [422] but received
+  200.`; `1 failed, 15 passed (62 assertions)`.
+- Mutation-verified: `git stash` of `GlossDraftsController.php` alone (both
+  new test cases kept) reproduced the identical single failure; `git stash
+  pop` restored it byte-identically (`git diff` on that file empty before
+  the restore was confirmed); reran — green again.
+- A second case
+  (`test_a_review_note_pii_warning_is_overridable_with_explicit_acknowledgement`)
+  proves the override path: the same PII-bearing note with
+  `acknowledge_pii_warning: true` succeeds and lands verbatim in
+  `gloss_draft_reviews.note` — advisory, never a hard block, matching every
+  other site's contract.
+- Full regression sweep, `GlossDraftsTest`: **16 tests, 65 assertions, all
+  green** (was 14/57) — the two existing cases that already assert on
+  review-history `note` values (`test_a_rejection_note_is_readable_back_
+  through_the_index`, `test_editing_after_review_records_the_auto_un_
+  review_note_in_history`) are unmoved, confirming no false positive on an
+  ordinary note.
+
+**Numbers.** `v3/api` PHPUnit: **492 passed** (was 490 at v3-D406's own
+Postgres-live baseline, +2 exactly), 2 incomplete (PAY-1, unchanged), 0
+skipped (Postgres wired this run — `imanapp_lock_test` created and migrated
+by hand, mirroring `ci.yml`). `TZ=UTC make test`: **3230 passing** (was
+3228, +2; every other suite unchanged: 255 v2 vitest, 47 v2/api, 120
+corpus-compiler, 470 engine, 73 fold-runner, 1773 apps/web).
+`check-test-floor.mjs`: OK, 3230 >= floor 3200 (+30 margin). `TZ=UTC make
+build`: the usual one-time `SecurityFatalError` Next.js CLI nudge fired on
+the first invocation, not acted on (upgrading the pinned Next.js major
+stays outside this run's mandate, the same call every prior night has
+made); plain retry built clean, exit 0, 30 routes (unchanged). `npm run
+gates`: all green, 351 files, unchanged (294 v1 lines byte-identical; 2/6
+UI fonts present, degraded-but-non-blocking, pre-existing; 362 words; 206
+codepoints). `npx tsc --noEmit`: clean. `./vendor/bin/pint --test`, scoped
+to the two touched files: `{"result":"passed"}`. No `v1/**`/`v2/**` edit
+(`git status --porcelain -- v1 v2` empty — the usual stray
+`v2/tsconfig.tsbuildinfo` build-cache diff reverted first). No Arabic
+codepoint, no `\u` escape, no `fromCharCode`/`fromCodePoint` introduced —
+swept the diff programmatically over the Arabic/Arabic Supplement/Arabic
+Extended-A/Presentation-Forms Unicode blocks: CLEAN, zero hits; every new
+string is a PHP identifier, an HTTP status integer, a fixed English
+comment/assertion/fixture sentence, or the test-fixture email address
+`sitipah.rahman@example.com` (the same address v3-D405's own
+`OverridesTest` fixture already uses — not a new or duplicated real
+identity). No oracle/golden-log/fixture/snapshot regenerated — one existing
+production file and one existing test file only.
+
+**Scope, deliberately not widened further.** `GlossDraft.note` itself (the
+editable-draft table `store()` writes, not `gloss_draft_reviews`) was left
+unscanned, same as every other editable, non-append-only field this
+build's PII-scan sweep has deliberately excluded — the harm this fix
+targets is specifically an append-only, unpurgeable store, and
+`GlossDraft` rows remain correctable by a later `store()` call. The CLI-only
+`nightly:window --start --reason=` (`NightlyWindowCommand`) was checked and
+ruled out of scope: it overwrites a single current-state row
+(`NightlyWindow::current()->fill(...)->save()`), not an append-only
+history table, and is reachable only by a human with shell access to the
+machine, not any HTTP admin surface.
+
+**NOT addressed, unchanged:** every item on the standing H1-H6/E6-E8 list
+(v3-D393/D398/D399 and every night since) — Stripe MY business
+verification, surah 67 scene beats, qari booking, the pager owner, the
+human a11y pass, the fold-runner's production DB host, the operational
+mailer, and the Stripe replay fixtures. None became agent-completable this
+run.
+
+**A new environment friction, worth naming for a future run:** this
+session's `v3/api` composer install was killed once by the harness's own
+default background-task timeout (10 minutes) mid-install, since the
+documented slow proxy git-mirror-clone fallback for `phpunit/phpunit`'s own
+dependency tree routinely runs longer than that on a fresh container.
+Restarting the same command with an explicit, much longer background
+timeout (and reusing the partially-populated `~/.cache/composer/vcs`)
+finished cleanly on the second attempt, and the follow-on `v2/api` install
+reused that now-warm cache and finished quickly. A future run should start
+composer installs with generous background-timeout headroom from the
+first attempt, rather than discovering the default is too short.

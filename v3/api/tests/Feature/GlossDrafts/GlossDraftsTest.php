@@ -279,6 +279,61 @@ class GlossDraftsTest extends TestCase
         $this->assertSame('DIFFERENT text', $row['reviews'][1]['textAtReview']);
     }
 
+    // ═══════ v3-D407 — `review()`'s `note` is unscanned, unpurgeable PII in the
+    // APPEND-ONLY `gloss_draft_reviews` table ═══════
+    //
+    // `gloss_draft_reviews` is APPEND-ONLY (`GlossDraftReview`'s own `booted()`
+    // guard, v3-D373) with no PDPA purge relief on `note` — the identical
+    // unpurgeable-PII shape v3-D405/D406 already fixed on
+    // `FlagController::enable()`'s `reason`, `OverridesController::store()`'s
+    // `note`, `VerificationsController::store()`'s `note` and
+    // `AdminBillingController::override()`'s `reason`, never wired on THIS
+    // write path's own free-text `note` — passed straight from
+    // `review()`'s own validated input into `GlossDraftReview::create()`,
+    // never through `store()`'s hardcoded auto-un-review string.
+    //
+    // MUTATION: remove the `scanFreeText` check from `GlossDraftsController::review()`.
+
+    public function test_a_review_note_containing_an_email_is_rejected_unless_acknowledged(): void
+    {
+        $headers = $this->adminHeaders();
+        $created = $this->withHeaders($headers)->postJson('/api/admin/gloss-drafts', [
+            'surah' => 12, 'ayah' => 11, 'position' => 1,
+            'lang' => 'ms', 'text' => 'a draft to reject', 'authorKind' => 'human',
+        ])->assertStatus(201);
+        $id = $created->json('draft.id');
+
+        $response = $this->withHeaders($headers)->postJson("/api/admin/gloss-drafts/{$id}/review", [
+            'toStatus' => 'reviewed', 'actorKind' => 'human',
+            'note' => 'flagged by a learner, sitipah.rahman@example.com, via support',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonFragment(['detected' => ['email-shaped string']]);
+        $this->assertSame(0, GlossDraftReview::count());
+        $this->assertSame('draft', GlossDraft::find($id)->status, 'the rejected transition must not have applied either');
+    }
+
+    public function test_a_review_note_pii_warning_is_overridable_with_explicit_acknowledgement(): void
+    {
+        $note = 'flagged by a learner, sitipah.rahman@example.com, via support';
+        $headers = $this->adminHeaders();
+        $created = $this->withHeaders($headers)->postJson('/api/admin/gloss-drafts', [
+            'surah' => 12, 'ayah' => 12, 'position' => 1,
+            'lang' => 'ms', 'text' => 'a draft to approve', 'authorKind' => 'human',
+        ])->assertStatus(201);
+        $id = $created->json('draft.id');
+
+        $response = $this->withHeaders($headers)->postJson("/api/admin/gloss-drafts/{$id}/review", [
+            'toStatus' => 'reviewed', 'actorKind' => 'human',
+            'note' => $note,
+            'acknowledge_pii_warning' => true,
+        ]);
+
+        $response->assertOk();
+        $this->assertDatabaseHas('gloss_draft_reviews', ['gloss_draft_id' => $id, 'note' => $note]);
+    }
+
     // ───────────── the append-only gap: no structural enforcement at all ──────────
 
     /**

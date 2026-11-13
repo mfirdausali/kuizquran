@@ -57,6 +57,95 @@ make test    # 3200 passing (+2 incomplete, 6 skipped [Postgres/pcntl-gated,
              # environment-dependent], PAY-1, by design), typechecks first.
              # 255 v2 vitest + 47 v2/api + 465 v3/api + 120 corpus-compiler
              # + 470 engine + 73 fold-runner + 1770 apps/web. (v3-D394, 2026-11-10)
+             # NOTE (v3-D407, 2026-11-13, nightly): `GlossDraftsController
+             # ::review()`'s free-text `note` (a reviewer's reject/approve
+             # annotation on a drafted Malay gloss) was stored verbatim,
+             # unscanned, into the APPEND-ONLY `gloss_draft_reviews` table
+             # (`GlossDraftReview`'s own `booted()` guard, v3-D373) — the
+             # identical unpurgeable-PII shape v3-D405/D406 already closed
+             # on `FlagController::enable()`'s `reason`,
+             # `OverridesController::store()`'s `note`,
+             # `VerificationsController::store()`'s `note` and
+             # `AdminBillingController::override()`'s `reason`, missed here
+             # because v3-D406's own re-check of this exact controller
+             # concluded it was safe ("none... has no free-text field
+             # reaching an append-only, unpurgeable store") — wrong for
+             # `review()` specifically: its `note` is genuinely operator-
+             # typed (validated `['nullable','string']`) and written
+             # directly into `GlossDraftReview::create()` inside the SAME
+             # controller method, not through an intermediate class the
+             # way `AdminBillingController::override()`'s was — so the
+             # "shallow grep misses the real call site" reasoning v3-D406
+             # itself diagnosed did not even apply here; this was a plain
+             # misreading of the controller's own `store()` method (whose
+             # auto-un-review `note` IS a hardcoded string) as covering
+             # `review()` too (whose `note` is not). Confirmed reachable
+             # and read back: the append-only row's `note` is served
+             # unconditionally through `toWire()`'s `reviews[].note` to
+             # every admin who loads `GET /api/admin/gloss-drafts`. Fixed
+             # identically to v3-D405/D406's own four sites: `AdminAudit
+             # ::scanFreeText($validated['note'])` runs after the
+             # transition-table/empty-draft checks and before the row is
+             # written; a non-empty result without
+             # `acknowledge_pii_warning=true` returns 422 + `detected` +
+             # the same hint to reference the pseudonym instead. RED
+             # confirmed directly: a new case posting a review `note`
+             # containing an email-shaped string failed against the
+             # unmodified controller (`200`, not `422`); mutation-verified
+             # by reverting the controller change alone (both new test
+             # cases kept) — the identical single failure reproduced;
+             # restored byte-identically. A second case proves the
+             # override path (`acknowledge_pii_warning: true` lands the
+             # note verbatim); every pre-existing clean-note fixture in
+             # this file (`'checked against Basmeih'`, `'wrong register —
+             # too formal'`, the auto-un-review's own hardcoded string)
+             # reran clean, zero new friction. `v3/api` PHPUnit: **492
+             # passed** (was 490 at v3-D406's own Postgres-live baseline,
+             # +2 exactly), 2 incomplete (PAY-1, unchanged), 0 skipped
+             # (Postgres wired). `TZ=UTC make test`: **3230 passing** (was
+             # 3228, +2; every other suite unchanged: 255 v2 vitest, 47
+             # v2/api, 120 corpus-compiler, 470 engine, 73 fold-runner,
+             # 1773 apps/web). `check-test-floor.mjs`: OK, 3230 >= floor
+             # 3200 (+30 margin). `TZ=UTC make build`: the usual one-time
+             # `SecurityFatalError` Next.js CLI nudge fired on the first
+             # invocation, not acted on; plain retry built clean, exit 0,
+             # 30 routes (unchanged). `npm run gates`: all green, 351
+             # files, unchanged (294 v1 lines byte-identical; 2/6 UI fonts
+             # present, degraded-but-non-blocking, pre-existing; 362 words;
+             # 206 codepoints). `npx tsc --noEmit`: clean. `./vendor/bin/
+             # pint --test`, scoped to the two touched files: `{"result":
+             # "passed"}`. No `v1/**`/`v2/**` edit (the usual stray
+             # `v2/tsconfig.tsbuildinfo` build-cache diff reverted first).
+             # No Arabic codepoint, no `\u` escape, no `fromCharCode`/
+             # `fromCodePoint` introduced — swept programmatically over the
+             # full diff (one changed production file, one changed test
+             # file): CLEAN, every new string is a PHP identifier, an HTTP
+             # status integer, a fixed English comment/assertion sentence,
+             # or a test-fixture email address
+             # (`sitipah.rahman@example.com`, the same address v3-D405's
+             # own `OverridesTest` fixture already uses). No oracle/
+             # golden-log/fixture/snapshot regenerated — one existing
+             # production file and one existing test file only. Session
+             # start: fresh container; `v3/api`'s composer install hit the
+             # documented slow proxy git-mirror fallback (needed
+             # `--ignore-platform-req=php`, PHP 8.3.6 here vs. its
+             # `>=8.4.1` requirement) and was killed once by this
+             # session's own default background-task timeout mid-install
+             # — restarted with a longer timeout and finished clean the
+             # second time; a future run should give a composer install
+             # generous background-timeout headroom (the harness default
+             # was not enough here) rather than assume a short default
+             # suffices. `v2/api`'s composer install ran sequentially
+             # after (reusing the now-warm git-mirror cache, much faster)
+             # per the standing recommendation to avoid the shared
+             # `~/.cache/composer/vcs` concurrent-install race. Postgres 16
+             # was installed but stopped; started it, `imanapp_lock_test`
+             # created and migrated by hand, mirroring `ci.yml`. Local
+             # `main` was detached exactly at `origin/main`'s real tip
+             # (`2b50696`, v3-D406) — fixed with `git checkout -B main
+             # origin/main` before any exploration. NOT addressed,
+             # unchanged: every item on the standing H1-H6/E6-E8 list. Full
+             # detail: DECISIONS.md v3-D407.
              # NOTE (v3-D406, 2026-11-13, nightly): `AdminBillingController
              # ::override()`'s free-text `reason` (an admin manually
              # correcting a learner's billing state) was stored verbatim,

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AdminAudit;
 use App\Models\GlossDraft;
 use App\Models\GlossDraftReview;
 use Illuminate\Http\JsonResponse;
@@ -259,6 +260,26 @@ class GlossDraftsController extends Controller
         // count that inflates the review surface's progress with nothing.
         if ($to === GlossDraft::REVIEWED && ($row->text === null || trim($row->text) === '')) {
             return response()->json(['error' => 'nothing to review — this coordinate has no authored text'], 422);
+        }
+
+        // v3-D407: `gloss_draft_reviews` is APPEND-ONLY (`GlossDraftReview`'s
+        // own `booted()` guard, v3-D373) with no PDPA purge relief on `note`
+        // — the identical unpurgeable-PII shape v3-D405/D406 already guarded
+        // with `AdminAudit::scanFreeText()` on `FlagController::enable()`'s
+        // `reason`, `OverridesController::store()`'s `note`,
+        // `VerificationsController::store()`'s `note` and
+        // `AdminBillingController::override()`'s `reason` — never wired on
+        // THIS write path's own free-text `note`, which `store()`'s own
+        // hardcoded auto-un-review note never passes through (it is a fixed
+        // string, not operator input) but this method's own `$validated['note']`
+        // genuinely is.
+        $piiWarnings = AdminAudit::scanFreeText($validated['note'] ?? null);
+        if ($piiWarnings !== [] && ! $request->boolean('acknowledge_pii_warning')) {
+            return response()->json([
+                'error' => 'note appears to contain identifying information',
+                'detected' => $piiWarnings,
+                'hint' => 'Reference the pseudonym, not the person. Re-submit with acknowledge_pii_warning=true if this is intentional.',
+            ], 422);
         }
 
         $now = (int) round(microtime(true) * 1000);
