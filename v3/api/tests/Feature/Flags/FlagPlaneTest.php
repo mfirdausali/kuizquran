@@ -543,4 +543,79 @@ class FlagPlaneTest extends TestCase
         $this->assertNull($row['killedBy']);
         $this->assertNull($row['ackBy']);
     }
+
+    // ═══════ v3-D405 — the ramp ceremony's `reason` is unscanned, unpurgeable PII ═══════
+
+    /**
+     * `flag_ramp_audit` is APPEND-ONLY (`FlagRampAudit`'s own docblock: "an
+     * editable kill/ramp trail is not a trail") with no PDPA purge-cascade
+     * relief on its `reason` column — the identical "unpurgeable PII in an
+     * append-only table" shape `AdminAudit::scanFreeText()` exists to guard
+     * on `reveal_identity`'s own free-text reason
+     * (`AdminRevealController::reveal()`), never wired here.
+     *
+     * MUTATION: remove the `scanFreeText` check from `FlagController::enable()`.
+     */
+    public function test_a_reason_containing_an_email_is_rejected_unless_acknowledged(): void
+    {
+        $this->admin();
+        $key = 'experiments.scheduler_v2';
+
+        $response = $this->postJson("/api/admin/flags/{$key}/enable", [
+            'reason' => 'approved after a call with ahmad.zaki@example.com about the rollout',
+            'typed_flag_name' => $key,
+            'acknowledges_retention_risk' => true,
+            'acknowledges_no_dark_pattern' => true,
+            'version' => 0,
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonFragment(['detected' => ['email-shaped string']]);
+        $this->assertFalse($this->flags()->enabled($key), 'a flagged-PII reason must not enable the flag');
+        $this->assertNull(
+            FlagRampAudit::where('flag_key', $key)->where('action', 'enable')->first(),
+            'an email-shaped reason must never reach the append-only, unpurgeable audit row without an explicit acknowledgement',
+        );
+    }
+
+    /** The same PII warning, explicitly acknowledged, proceeds exactly like `reveal_identity`'s. */
+    public function test_a_pii_warning_is_overridable_with_explicit_acknowledgement(): void
+    {
+        $this->admin();
+        $key = 'experiments.scheduler_v2';
+        $reason = 'approved after a call with ahmad.zaki@example.com about the rollout';
+
+        $response = $this->postJson("/api/admin/flags/{$key}/enable", [
+            'reason' => $reason,
+            'typed_flag_name' => $key,
+            'acknowledges_retention_risk' => true,
+            'acknowledges_no_dark_pattern' => true,
+            'version' => 0,
+            'acknowledge_pii_warning' => true,
+        ]);
+
+        $response->assertOk();
+        $this->assertTrue($this->flags()->enabled($key));
+        $audit = FlagRampAudit::where('flag_key', $key)->where('action', 'enable')->first();
+        $this->assertNotNull($audit);
+        $this->assertSame($reason, $audit->reason);
+    }
+
+    /** A clean reason (no PII pattern) needs no acknowledgement at all — never new friction on the common case. */
+    public function test_a_clean_reason_needs_no_acknowledgement(): void
+    {
+        $this->admin();
+        $key = 'experiments.scheduler_v2';
+
+        $response = $this->postJson("/api/admin/flags/{$key}/enable", [
+            'reason' => 'ramping to 5% to measure retention effect over 28 days',
+            'typed_flag_name' => $key,
+            'acknowledges_retention_risk' => true,
+            'acknowledges_no_dark_pattern' => true,
+            'version' => 0,
+        ]);
+
+        $response->assertOk();
+        $this->assertTrue($this->flags()->enabled($key));
+    }
 }

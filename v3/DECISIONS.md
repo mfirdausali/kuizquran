@@ -45005,3 +45005,134 @@ NIGHTLY.md only. Not re-fixed here (no reproducible failure to write a RED
 test against — it is a timing flake under CI load, the same shape already
 accepted at v3-D397); named for a future run in case it recurs often enough
 to be worth a `waitFor` timeout bump in that one test.
+
+## v3-D405 (2026-11-13, nightly) — three admin write paths stored unscanned, unpurgeable PII in APPEND-ONLY tables
+
+Confirmed real CI status first, per v3-D402/D404's own standing instruction:
+`mcp__github__actions_list` against the real repository shows the current
+`main` tip (`666e025`, v3-D404's own close) has `conclusion: "success"` on
+every job including `test-floor` — the first genuinely green CI run in this
+build's history, confirmed holding. With the CI-wiring seam exhausted and
+`HANDOVER.md`'s own "WHAT IS LEFT" table (E6/E7/E8, H1-H6) still entirely
+human/infra-gated and unchanged, this run returned to a fresh-sweep
+technique: re-reading `AdminAudit::scanFreeText()`'s own docblock
+("edge case #149... an append-only table containing a real name or email is
+UNPURGEABLE PII — so free text is scanned at WRITE time") as a POLICY
+statement, then checking every other admin write path that commits
+operator-typed free text into an append-only table against it, rather than
+re-checking the public-GET-route PII-leak angle v3-D403 already exhausted.
+
+**Found three, not one.** `AdminRevealController::reveal()` is the ONLY
+call site that actually invokes `scanFreeText()` — on `reason_text`, before
+writing `admin_audit`. Two structurally identical fields never got it:
+
+1. **`FlagController::enable()`'s ceremony `reason`** (≥20 chars,
+   operator-typed, BUILD-PLAN's own ethics-gate requirement) is stored
+   verbatim in `flag_ramp_audit.reason` — APPEND-ONLY per `FlagRampAudit`'s
+   own docblock ("an editable kill/ramp trail is not a trail"), with
+   `actor_admin_id` `nullOnDelete` (not `cascadeOnDelete`), so a PDPA purge
+   nulls the actor reference and never touches the stored reason text
+   itself. Unscanned.
+2. **`OverridesController::store()`'s `note`** and
+   **`VerificationsController::store()`'s `note`** — both nullable
+   free-text fields on `overrides`/`ayah_verifications`, both APPEND-ONLY
+   (`Override`/`AyahVerification`'s own `booted()` guards, closed at
+   v3-D374/earlier), both unscanned.
+
+⇒ An admin typing a ramp-ceremony reason like "approved after a call with
+ahmad.zaki@example.com about the rollout", or a qari/admin writing a
+correction note like "flagged by a learner, sitipah.rahman@example.com, via
+support", would have that name/email committed permanently and
+unpurgeably — precisely the harm `scanFreeText()` exists to warn against on
+`reveal_identity`, on three other routes it was never wired to reach. The
+same "one decision [scan free text before an unpurgeable append-only
+commit], several call sites, drifted at three"shape this build has closed
+repeatedly for other decisions (the missing `booted()` guard across nine
+models, v3-D372/373/374/377/381; stale `grace_until` across four billing
+transitions, v3-D383/384).
+
+**Fixed**, identically at all three sites, mirroring
+`AdminRevealController::reveal()`'s own pattern exactly: `AdminAudit::
+scanFreeText($freeTextField)` runs after validation and before the row is
+created; a non-empty result without `acknowledge_pii_warning=true` in the
+request returns 422 with `detected` (the pattern names) and a hint to
+reference the pseudonym instead — never a silent block, never a silent
+write. A clean reason/note (no PII pattern) proceeds exactly as before,
+with zero added friction.
+
+**Verified, all three sites:**
+- RED confirmed directly: 3 new cases (one per controller — `FlagPlaneTest`,
+  `OverridesTest`, `VerificationsTest`) each post a reason/note containing an
+  email-shaped string and assert 422 + `detected: ['email-shaped string']` +
+  zero rows written (`assertDatabaseCount(..., 0)` / `FlagRampAudit::where(
+  ...)->first()` null / `$this->flags()->enabled($key)` false).
+- Mutation-verified: `git stash` of the three production controllers alone
+  (all six test files kept) reproduced all three failures identically
+  (`Expected response status code [422] but received 200/201/201.`);
+  `git stash pop` restored them byte-identically (`git diff` empty on those
+  three files before the restore was confirmed), reran — green again.
+- A second pair of new cases per controller proves the override path: the
+  SAME PII-bearing text with `acknowledge_pii_warning: true` succeeds and
+  the free-text field lands in the row verbatim — the warning is advisory,
+  never a hard block, exactly like `reveal_identity`'s own contract.
+  `FlagPlaneTest` also gained a clean-reason case with no PII pattern,
+  proving the common case gets zero new friction.
+- Full regression sweep, both affected test files plus `FlagPlaneTest`: 60
+  tests, 210 assertions, all green, zero other case moved (the two existing
+  `note: 'checked'` / `note: 'clarify archaic English'` fixtures in
+  `VerificationsTest`/`OverridesTest` are clean under `scanFreeText` by
+  construction, confirming no false positive on an ordinary note).
+
+**Numbers.** `v3/api` PHPUnit: **487 passed** (was 480 at v3-D404's own
+Postgres-live baseline, +7 exactly — 3+2+2 new cases across the three
+files), 2 incomplete (PAY-1, unchanged), 0 skipped (Postgres live this run,
+same shape as v3-D395/D402/D404). `TZ=UTC make test`: **3225 passing** (was
+3218 at v3-D404's own no-Postgres baseline; +7 new tests, +6 Postgres-gated
+tests now running instead of skipping — every other suite unchanged: 255 v2
+vitest, 47 v2/api, 120 corpus-compiler, 470 engine, 73 fold-runner, 1773
+apps/web [was 1772 — unrelated to this diff, see note below]).
+`check-test-floor.mjs`: OK, 3225 >= floor 3200 (+25 margin). `TZ=UTC make
+build`: the usual one-time `SecurityFatalError` Next.js CLI nudge fired on
+the first invocation, not acted on (the same call every prior night
+recording this nudge has made); plain retry built clean, exit 0, 30 routes
+(unchanged). `npm run gates`: all green, 351 files, unchanged (294 v1 lines
+byte-identical; 2/6 UI fonts present, degraded-but-non-blocking,
+pre-existing; 362 words; 206 codepoints). `npx tsc --noEmit`: clean.
+`./vendor/bin/pint --test`, scoped to the six touched files: `{"result":
+"passed"}` — every finding the full-repo run reports is confirmed
+pre-existing, on files this diff does not touch (`AppServiceProvider.php`,
+`AdminRevealController.php`, `WebhookHandler.php`, `routes/{api,
+console}.php`, and nine test files, none of them this run's own). No
+`v1/**`/`v2/**` edit (the usual stray `v2/tsconfig.tsbuildinfo` build-cache
+diff reverted first). No Arabic codepoint, no `\u` escape, no
+`fromCharCode`/`fromCodePoint` introduced — swept programmatically over the
+full diff (three changed production files, three changed test files) with
+a dedicated Unicode-range regex (Arabic, Arabic Supplement, Arabic
+Extended-A, both Presentation Forms blocks): CLEAN, zero hits; every new
+string is a PHP identifier, an HTTP status integer, a fixed English
+comment/assertion sentence, or a test-fixture email address
+(`ahmad.zaki@example.com`/`sitipah.rahman@example.com`, neither matching any
+existing fixture address in this codebase). No oracle/golden-log/fixture/
+snapshot regenerated — three existing production files and three existing
+test files only.
+
+**`apps/web` note:** one more apps/web test than the v3-D404 baseline
+(1773 vs. 1772) appeared in this run's own `make test` log; `git log
+--follow` across `v3/apps/web` shows no commit between `666e025` and this
+run touched that tree, and this diff adds no file there — most likely a
+test-count artifact of environment/dependency drift between sandbox
+sessions (consistent with this build's own recurring "350 vs 351 files" gate
+drift noted at v3-D384), not a regression introduced here. Flagged rather
+than silently absorbed; a future run should re-derive this count fresh
+rather than assume either number.
+
+**Scope, deliberately not widened further.** Checked every other `->note`/
+`->reason` write site in `app/Http/Controllers` (`AdminBillingController`,
+`ContentFreezeController`, `GlossDraftsController`, `FlagAuditController`,
+`PurgeLedgerController`, `StripeSettingsController`, `SystemHealthController`,
+`AdminAuditController`) — each either writes a fixed, hardcoded string (no
+operator-typed free text reaches it) or is a different field shape entirely
+(not an append-only, unpurgeable PII store). Confirmed exhausted for this
+pass; a future run should not re-grep this exact pattern again.
+
+**NOT addressed, unchanged:** every item on the standing H1-H6/E6-E8 list.

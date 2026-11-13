@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AdminAudit;
 use App\Models\AdminRole;
 use App\Models\AyahVerification;
 use App\Models\CorpusAyahHash;
@@ -86,6 +87,20 @@ class VerificationsController extends Controller
             'reviewerKind' => ['required', Rule::in(self::REVIEWER_KINDS)],
             'note' => ['nullable', 'string'],
         ]);
+
+        // v3-D405: `ayah_verifications` is APPEND-ONLY with no PDPA purge
+        // relief on `note` — the identical unpurgeable-PII shape
+        // `AdminRevealController::reveal()`'s own free-text `reason_text`
+        // already guards with `AdminAudit::scanFreeText()`, never wired on
+        // this write path's own free-text `note` until now.
+        $piiWarnings = AdminAudit::scanFreeText($validated['note'] ?? null);
+        if ($piiWarnings !== [] && ! $request->boolean('acknowledge_pii_warning')) {
+            return response()->json([
+                'error' => 'note appears to contain identifying information',
+                'detected' => $piiWarnings,
+                'hint' => 'Reference the pseudonym, not the person. Re-submit with acknowledge_pii_warning=true if this is intentional.',
+            ], 422);
+        }
 
         if ($validated['tier'] === 'qari' && ! $request->user()->hasAdminRole(AdminRole::QARI)) {
             return response()->json([

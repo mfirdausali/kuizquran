@@ -106,6 +106,45 @@ class OverridesTest extends TestCase
         ], $this->adminHeaders())->assertStatus(422);
     }
 
+    // ═══════ v3-D405 — `note` is unscanned, unpurgeable PII in an append-only row ═══════
+
+    /**
+     * `overrides` is APPEND-ONLY (`Override`'s own `booted()` guard) with no
+     * PDPA purge relief on `note` — the identical unpurgeable-PII shape
+     * `AdminRevealController::reveal()`'s own free-text `reason_text` already
+     * guards with `AdminAudit::scanFreeText()`, never wired on this write
+     * path's own free-text `note`.
+     *
+     * MUTATION: remove the `scanFreeText` check from `OverridesController::store()`.
+     */
+    public function test_a_note_containing_an_email_is_rejected_unless_acknowledged(): void
+    {
+        $response = $this->postJson('/api/overrides', [
+            'surah' => 12, 'ayah' => 4, 'position' => 1, 'questionType' => 'S1',
+            'field' => 'gloss', 'payload' => ['lang' => 'en', 'text' => 'when'],
+            'note' => 'flagged by a learner, sitipah.rahman@example.com, via support',
+        ], $this->adminHeaders());
+
+        $response->assertStatus(422);
+        $response->assertJsonFragment(['detected' => ['email-shaped string']]);
+        $this->assertDatabaseCount('overrides', 0);
+    }
+
+    public function test_a_note_pii_warning_is_overridable_with_explicit_acknowledgement(): void
+    {
+        $note = 'flagged by a learner, sitipah.rahman@example.com, via support';
+
+        $response = $this->postJson('/api/overrides', [
+            'surah' => 12, 'ayah' => 4, 'position' => 1, 'questionType' => 'S1',
+            'field' => 'gloss', 'payload' => ['lang' => 'en', 'text' => 'when'],
+            'note' => $note,
+            'acknowledge_pii_warning' => true,
+        ], $this->adminHeaders());
+
+        $response->assertCreated();
+        $this->assertDatabaseHas('overrides', ['note' => $note]);
+    }
+
     public function test_editor_id_is_always_the_authenticated_admin_never_the_body(): void
     {
         $admin = User::factory()->create(['email' => 'admin@example.com']);

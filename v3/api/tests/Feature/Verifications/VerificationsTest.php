@@ -87,6 +87,48 @@ class VerificationsTest extends TestCase
         $this->assertSame('verified', $response->json('frontier.4.qari'));
     }
 
+    // ═══════ v3-D405 — `note` is unscanned, unpurgeable PII in an append-only row ═══════
+
+    /**
+     * `ayah_verifications` is APPEND-ONLY (`AyahVerification`'s own
+     * `booted()` guard) with no PDPA purge relief on `note` — the identical
+     * unpurgeable-PII shape `AdminRevealController::reveal()`'s own
+     * free-text `reason_text` already guards with
+     * `AdminAudit::scanFreeText()`, never wired on this write path's own
+     * free-text `note`.
+     *
+     * MUTATION: remove the `scanFreeText` check from
+     * `VerificationsController::store()`.
+     */
+    public function test_a_note_containing_an_email_is_rejected_unless_acknowledged(): void
+    {
+        $this->seedHash(12, 4, 'hash-a');
+
+        $response = $this->postJson('/api/verifications', [
+            'surah' => 12, 'ayah' => 4, 'tier' => 'qari', 'reviewerKind' => 'human',
+            'note' => 'flagged by sitipah.rahman@example.com during review',
+        ], $this->qariAdminHeaders());
+
+        $response->assertStatus(422);
+        $response->assertJsonFragment(['detected' => ['email-shaped string']]);
+        $this->assertDatabaseCount('ayah_verifications', 0);
+    }
+
+    public function test_a_note_pii_warning_is_overridable_with_explicit_acknowledgement(): void
+    {
+        $this->seedHash(12, 4, 'hash-a');
+        $note = 'flagged by sitipah.rahman@example.com during review';
+
+        $response = $this->postJson('/api/verifications', [
+            'surah' => 12, 'ayah' => 4, 'tier' => 'qari', 'reviewerKind' => 'human',
+            'note' => $note,
+            'acknowledge_pii_warning' => true,
+        ], $this->qariAdminHeaders());
+
+        $response->assertCreated();
+        $this->assertDatabaseHas('ayah_verifications', ['note' => $note]);
+    }
+
     /** DEFECTS.md#B3's own closing language, made concrete: re-ingesting a
      *  NEW current hash for an already-verified ayah — the exact effect an
      *  override-aware recompute (proven in TS) would have — flips the

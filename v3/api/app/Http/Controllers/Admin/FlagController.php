@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Flags\FlagRegistry;
 use App\Flags\FlagService;
 use App\Http\Controllers\Controller;
+use App\Models\AdminAudit;
 use App\Models\Flag;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -127,6 +128,21 @@ class FlagController extends Controller
 
         if ($errors !== []) {
             return response()->json(['error' => 'ceremony incomplete', 'errors' => $errors], 422);
+        }
+
+        // v3-D405: `flag_ramp_audit.reason` is stored verbatim in an APPEND-ONLY
+        // table with no PDPA purge-cascade relief (`FlagRampAudit`'s own
+        // docblock) — the identical unpurgeable-PII shape
+        // `AdminRevealController::reveal()`'s own `reason_text` already guards
+        // with `AdminAudit::scanFreeText()`, never wired on this ceremony's
+        // free-text reason until now.
+        $piiWarnings = AdminAudit::scanFreeText($reason);
+        if ($piiWarnings !== [] && ! $request->boolean('acknowledge_pii_warning')) {
+            return response()->json([
+                'error' => 'reason appears to contain identifying information',
+                'detected' => $piiWarnings,
+                'hint' => 'Reference the pseudonym, not the person. Re-submit with acknowledge_pii_warning=true if this is intentional.',
+            ], 422);
         }
 
         // ══════════════════════════════════════════════════════════════════════

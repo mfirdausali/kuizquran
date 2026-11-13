@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AdminAudit;
 use App\Models\Override;
 use App\Support\CorpusHashRecomputer;
 use Illuminate\Http\JsonResponse;
@@ -66,6 +67,20 @@ class OverridesController extends Controller
             'payload' => ['required', 'array'],
             'note' => ['nullable', 'string'],
         ]);
+
+        // v3-D405: `overrides` is APPEND-ONLY with no PDPA purge relief on
+        // `note` — the identical unpurgeable-PII shape
+        // `AdminRevealController::reveal()`'s own free-text `reason_text`
+        // already guards with `AdminAudit::scanFreeText()`, never wired on
+        // this write path's own free-text `note` until now.
+        $piiWarnings = AdminAudit::scanFreeText($validated['note'] ?? null);
+        if ($piiWarnings !== [] && ! $request->boolean('acknowledge_pii_warning')) {
+            return response()->json([
+                'error' => 'note appears to contain identifying information',
+                'detected' => $piiWarnings,
+                'hint' => 'Reference the pseudonym, not the person. Re-submit with acknowledge_pii_warning=true if this is intentional.',
+            ], 422);
+        }
 
         $row = Override::create([
             'surah' => $validated['surah'],
