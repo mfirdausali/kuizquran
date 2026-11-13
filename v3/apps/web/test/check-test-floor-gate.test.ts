@@ -371,6 +371,63 @@ describe("check-test-floor.mjs — the gate", () => {
     expect(out).toMatch(/OK/);
   });
 
+  it("v3-D404 — passes when v2/api prints laravel/pao's HUMAN-readable Pest summary instead of its JSON line — the real shape a genuine GitHub Actions runner produces, byte-for-byte captured from run 43291913304 (job \"test-floor\", commit 87cc347, v3-D403's own push): `AgentDetector::detect()` only flags THIS kind of agent shell (CLAUDECODE/AI_AGENT env vars) as `isAgent`, which every prior local/sandbox run of this gate has always been — but a bare GitHub Actions runner is not, so laravel/pao falls through to Pest's ordinary colored `Tests:    N passed (M assertions)` line instead of the one-line JSON this gate's own `phpunit-json` kind assumed was the ONLY shape v2/api could ever print. The real CI log (run 43291913304) read this as `MISSING — v2/api PHPUnit (marker found, no summary line matched)` on every push since the test-floor job was wired, independent of — and never fixed by — v3-D402's ANSI-strip.", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "test-floor-v2api-human-"));
+    temps.push(dir);
+    const logPath = path.join(dir, "make-test.log");
+    const v2apiHumanCount = 47;
+    const parts = [
+      "cd v2 && npm test",
+      "",
+      " Test Files  38 passed (38)",
+      "      Tests  255 passed (255)",
+      "",
+      "cd v2/api && php artisan test",
+      "",
+      // Byte-for-byte (post ANSI-strip) from the real CI log captured via the
+      // GitHub API for run 43291913304 — laravel/pao's Pest-style human
+      // summary, never the JSON line, because a bare `ubuntu-latest` runner
+      // is not an agent shell by AgentDetector's own test.
+      `  Tests:    ${v2apiHumanCount} passed (144 assertions)`,
+      "  Duration: 2.24s",
+      "",
+      "cd v3/api && php artisan test",
+      "  ✓ an admin granted the qari role may sign the qari tier                0.02s",
+      "",
+      "  Tests:    2 incomplete, 272 passed (901 assertions)",
+      "  Duration: 14.09s",
+      "",
+      "cd v3/packages/corpus-compiler && npm test",
+      "",
+      " Test Files  11 passed (11)",
+      "      Tests  111 passed (111)",
+      "",
+      "cd v3/packages/engine && npm test",
+      "",
+      " Test Files  43 passed (43)",
+      "      Tests  417 passed (417)",
+      "",
+      "cd v3/worker/fold-runner && npm test",
+      "",
+      " Test Files  7 passed (7)",
+      "      Tests  61 passed (61)",
+      "",
+      "cd v3/apps/web && npm test",
+      "",
+      " Test Files  42 passed (42)",
+      "      Tests  727 passed (727)",
+      "",
+    ];
+    writeFileSync(logPath, parts.join("\n"));
+    const floorFile = path.join(dir, "TEST-FLOOR");
+    writeFileSync(floorFile, `${REAL_TOTAL}\n`);
+    const { out, code } = run([logPath, "--floor-file", floorFile]);
+    expect(out).not.toContain("MISSING");
+    expect(out).toContain(String(v2apiHumanCount));
+    expect(code).toBe(0);
+    expect(out).toMatch(/OK/);
+  });
+
   it("the real reason v2/api and v3/api get different `kind`s still holds: v2/api depends on laravel/pao (PHPUnit 12-13 only, compacts `php artisan test` to one JSON line for an AI-agent shell), v3/api does not (PHPUnit 11, below pao's floor)", () => {
     // v2/api and v3/api run the IDENTICAL `php artisan test` command — the
     // script's own `kind` split (phpunit-json vs phpunit-human) is real only

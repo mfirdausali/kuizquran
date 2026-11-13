@@ -110,16 +110,26 @@ if (!Number.isInteger(floor) || floor <= 0) {
 // implementations of one decision (the shape this file's own history keeps
 // finding elsewhere), but a real difference in what each actually prints.
 // `v2/api/composer.json` requires `laravel/pao` (PHPUnit 12-13 only; v2/api
-// runs PHPUnit ^12.5); it silently compacts `php artisan test`'s output to
-// one line of real JSON (`{"tool":"phpunit","result":"passed","tests":N,...}`)
-// whenever it detects an AI-agent shell — true in this project's own case,
-// since every run is this kind of agent. `v3/api` runs PHPUnit ^11.0, below
-// `laravel/pao`'s supported floor, and does not depend on it at all — so its
-// `php artisan test` keeps Collision's ordinary human-readable "Tests: N
-// passed (...)" summary, the same shape every vitest suite prints. Confirmed
-// directly against each real `vendor/`: `grep laravel/pao v2/api/composer.json`
-// hits, `grep laravel/pao v3/api/composer.json` does not, and running each
-// command live reproduces exactly the shape its own `kind` expects.
+// runs PHPUnit ^12.5), which compacts `php artisan test`'s output to one line
+// of real JSON (`{"tool":"phpunit","result":"passed","tests":N,...}`) — but
+// ONLY when its own `AgentDetector::detect()` flags the invoking shell as an
+// agent (the `CLAUDECODE`/`AI_AGENT` env vars every local/sandbox run of this
+// repo happens to carry). A real GitHub Actions runner is not flagged as an
+// agent shell at all, so `laravel/pao` falls through to Pest's ordinary
+// colored human-readable `Tests:    N passed (M assertions)` summary instead
+// — the same line shape v3/api always prints (below, PHPUnit ^11.0, under
+// `laravel/pao`'s supported floor, no dependency on it regardless of shell).
+// v3-D404: this was found the hard way — every local/sandbox run of this gate
+// (including every one that "confirmed" v3-D402's ANSI fix) is itself the
+// kind of agent shell that makes v2/api print JSON, so the fallback below had
+// never once been exercised before a real CI log (run 43291913304) was read
+// directly and showed `MISSING — v2/api PHPUnit (marker found, no summary
+// line matched)` on every push since the test-floor job was wired at
+// v3-D396, independent of v3-D402's ANSI-strip. `extractCount` below now
+// tries the JSON shape first and falls back to the human shape, so it is
+// correct regardless of whether THIS run's own shell happens to be flagged
+// as an agent — never again assuming the shape this sandbox produces is the
+// only one any environment can produce.
 const SUITES = [
   { name: "v2 vitest", marker: "cd v2 && npm test", kind: "vitest" },
   { name: "v2/api PHPUnit", marker: "cd v2/api && php artisan test", kind: "phpunit-json" },
@@ -137,18 +147,25 @@ function extractCount(section, kind) {
     const m = section.match(/^\s*Tests\s+(\d+) passed \(\d+\)\s*$/m);
     return m ? parseInt(m[1], 10) : null;
   }
+  // e.g. "Tests:    2 incomplete, 272 passed (901 assertions)", or with no
+  // incomplete clause at all: "Tests:    272 passed (...)" / "Tests:    47
+  // passed (144 assertions)". Captures the PASSED count only — v3/api's 2
+  // deliberately-incomplete PAY-1 tests (DEFECTS.md's PAY-1, red-by-
+  // construction) must never inflate the total, or a real regression could
+  // hide behind a growing incomplete count.
+  const HUMAN_PHPUNIT = /Tests:\s*(?:\d+\s+\w+,\s*)*?(\d+)\s+passed/;
   if (kind === "phpunit-json") {
-    const m = section.match(/"tool":"phpunit"[^}]*"tests":(\d+)/);
-    return m ? parseInt(m[1], 10) : null;
+    // Tried first: this is the shape an agent-detected shell (this sandbox,
+    // always) produces. Falls back to the human shape below for any shell
+    // `laravel/pao` does not flag as an agent — a real GitHub Actions
+    // runner, in particular (v3-D404).
+    const jsonMatch = section.match(/"tool":"phpunit"[^}]*"tests":(\d+)/);
+    if (jsonMatch) return parseInt(jsonMatch[1], 10);
+    const humanMatch = section.match(HUMAN_PHPUNIT);
+    return humanMatch ? parseInt(humanMatch[1], 10) : null;
   }
   if (kind === "phpunit-human") {
-    // e.g. "Tests:    2 incomplete, 272 passed (901 assertions)", or with no
-    // incomplete clause at all: "Tests:    272 passed (...)". Captures the
-    // PASSED count only — v3/api's 2 deliberately-incomplete PAY-1 tests
-    // (DEFECTS.md's PAY-1, red-by-construction) must never inflate the
-    // total, or a real regression could hide behind a growing incomplete
-    // count.
-    const m = section.match(/Tests:\s*(?:\d+\s+\w+,\s*)*?(\d+)\s+passed/);
+    const m = section.match(HUMAN_PHPUNIT);
     return m ? parseInt(m[1], 10) : null;
   }
   return null;
